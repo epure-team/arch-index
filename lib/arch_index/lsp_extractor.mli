@@ -13,6 +13,7 @@ type fn_row = {
   file_path : string;  (** relative to project root *)
   line_start : int;
   line_end : int;
+  name_char : int;  (** character offset of the name token on line_start *)
   exported : bool;
   signature : string option;
   summary : string option;

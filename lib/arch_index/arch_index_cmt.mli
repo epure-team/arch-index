@@ -120,6 +120,15 @@ type pending_call = {
   call_site : string;
 }
 
+(** [collect_calls_from_expr ~src_path ~caller_module ~caller_name expr]
+    walks [expr] and returns all function-application call edges. *)
+val collect_calls_from_expr :
+  src_path:string ->
+  caller_module:string ->
+  caller_name:string ->
+  Typedtree.expression ->
+  pending_call list
+
 (** Collected type usage information. *)
 type pending_type_usage = {
   function_id : int;

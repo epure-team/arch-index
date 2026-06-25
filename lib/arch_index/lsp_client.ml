@@ -159,6 +159,7 @@ let start ~sw ~env ~command ~args ~project_dir ?(init_options = `Null) () =
                     ( "documentSymbol",
                       `Assoc [("hierarchicalDocumentSymbolSupport", `Bool true)]
                     );
+                    ("callHierarchy", `Assoc []);
                   ] );
               ("workspace", `Assoc [("symbol", `Assoc [])]);
             ] );
