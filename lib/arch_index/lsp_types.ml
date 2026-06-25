@@ -127,19 +127,19 @@ let location_of_yojson json =
   | _ -> Error "location_of_yojson: expected object"
 
 let symbol_kind_of_int = function
-  | 1 -> File
-  | 2 -> Module
-  | 3 -> Namespace
-  | 4 -> Package
-  | 5 -> Class
-  | 6 -> Function
-  | 7 -> Variable
-  | 8 -> Field
-  | 9 -> Constructor
+  | 1  -> File
+  | 2  -> Module
+  | 3  -> Namespace
+  | 4  -> Package
+  | 5  -> Class
+  | 6  -> Method        (* LSP 3.x spec: 6 = Method *)
+  | 7  -> Property      (* LSP 3.x spec: 7 = Property *)
+  | 8  -> Field
+  | 9  -> Constructor
   | 10 -> Enum
   | 11 -> Interface
-  | 12 -> Method
-  | 13 -> Property
+  | 12 -> Function      (* LSP 3.x spec: 12 = Function *)
+  | 13 -> Variable      (* LSP 3.x spec: 13 = Variable; ocamllsp uses this for let-bindings *)
   | 14 -> Constant
   | 15 -> String
   | 16 -> Number
@@ -153,7 +153,7 @@ let symbol_kind_of_int = function
   | 24 -> Event
   | 25 -> Operator
   | 26 -> TypeParameter
-  | _ -> Unknown
+  | _  -> Unknown
 
 let symbol_kind_of_yojson json =
   match json with

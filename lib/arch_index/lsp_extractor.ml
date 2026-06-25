@@ -17,9 +17,12 @@ type fn_row = {
   summary : string option;
 }
 
-(** [is_function_kind k] returns true for function/method/constructor kinds. *)
+(** [is_function_kind k] returns true for callable/binding symbol kinds.
+    Includes Variable because ocamllsp reports OCaml let-bindings as kind 13
+    (Variable in LSP spec) rather than kind 12 (Function). *)
 let is_function_kind = function
-  | Lsp_types.Function | Lsp_types.Method | Lsp_types.Constructor -> true
+  | Lsp_types.Function | Lsp_types.Method | Lsp_types.Constructor
+  | Lsp_types.Variable -> true
   | _ -> false
 
 (** [strip_file_uri uri] removes the "file://" prefix from a URI. *)
@@ -120,7 +123,10 @@ let read_file_text uri =
 let language_id_of_uri uri =
   let path = strip_file_uri uri in
   let ext = Filename.extension path in
-  match ext with ".tsx" -> "typescriptreact" | _ -> "typescript"
+  match ext with
+  | ".tsx" -> "typescriptreact"
+  | ".ml" | ".mli" -> "ocaml"
+  | _ -> "typescript"
 
 (** [extract_from_document_symbols client ~project_dir ~file_uri] opens the
     file via [textDocument/didOpen] then fetches document symbols. *)
@@ -231,6 +237,38 @@ let scan_ts_files ~project_dir =
   walk project_dir ;
   !uris
 
+(** [scan_ml_files ~project_dir] walks [project_dir] recursively and returns
+    file:// URIs for all [.ml] files, excluding [_build/], [_opam/] (local
+    opam switches), and hidden directories. [.mli] files are omitted —
+    ocamllsp returns symbol information from [.ml] implementation files. *)
+let scan_ml_files ~project_dir =
+  let uris = ref [] in
+  let excluded_dirs = ["_build"; "_opam"; ".git"; "node_modules"] in
+  let rec walk dir =
+    try
+      let entries = Sys.readdir dir in
+      Array.iter
+        (fun entry ->
+          let path = Filename.concat dir entry in
+          if Sys.is_directory path then begin
+            if (not (List.mem entry excluded_dirs)) && entry.[0] <> '.' then
+              walk path
+          end
+          else if Filename.extension entry = ".ml" then
+            uris := ("file://" ^ path) :: !uris)
+        entries
+    with _ -> ()
+  in
+  walk project_dir ;
+  !uris
+
+(** [scan_source_files ~language ~project_dir] returns file:// URIs for source
+    files matching [language]. Dispatches to the language-specific scanner. *)
+let scan_source_files ~language ~project_dir =
+  match language with
+  | "ocaml" -> scan_ml_files ~project_dir
+  | _       -> scan_ts_files ~project_dir
+
 (** [merge_rows ws_rows doc_rows] merges workspace rows with document-symbol
     rows, preferring document-symbol rows (better line ranges) when available. *)
 let merge_rows ws_rows doc_rows =
@@ -257,16 +295,20 @@ let merge_rows ws_rows doc_rows =
   in
   merged @ extra
 
-let extract_symbols client ~project_dir =
-  (* Step 1: workspace-wide symbol list *)
-  let ws_rows = extract_from_workspace_symbol client ~project_dir in
-  (* Step 2: determine which files to query for document symbols.
-     When workspace/symbol returns nothing (e.g. TypeScript monorepos with
-     project references where tsserver doesn't index sub-packages), fall back
-     to scanning the filesystem for source files directly. *)
+let extract_symbols client ~project_dir ~language =
+  (* ocamllsp does not index symbols until a file is opened, so workspace/symbol
+     on a cold start times out and corrupts the connection for subsequent
+     documentSymbol calls (stale response remains unread in the buffer).
+     Skip workspace/symbol for OCaml and go directly to per-file extraction.
+     For other languages (TypeScript), workspace/symbol works reliably. *)
+  let ws_rows =
+    if language = "ocaml" then []
+    else extract_from_workspace_symbol client ~project_dir
+  in
+  (* Step 2: determine which files to query for document symbols. *)
   let file_uris =
     if ws_rows <> [] then collect_file_uris ~project_dir ws_rows
-    else scan_ts_files ~project_dir
+    else scan_source_files ~language ~project_dir
   in
   let doc_rows =
     List.concat_map

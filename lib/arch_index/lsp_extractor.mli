@@ -18,7 +18,10 @@ type fn_row = {
   summary : string option;
 }
 
-(** [extract_symbols client ~project_dir] uses workspace/symbol and
+(** [extract_symbols client ~project_dir ~language] uses workspace/symbol and
     textDocument/documentSymbol to enumerate functions/methods/constructors.
+    [language] selects the file-scanner fallback when workspace/symbol returns
+    nothing: ["ocaml"] scans [.ml] files; other values scan [.ts]/[.tsx].
     Returns a list of fn_rows. *)
-val extract_symbols : Lsp_client.t -> project_dir:string -> fn_row list
+val extract_symbols :
+  Lsp_client.t -> project_dir:string -> language:string -> fn_row list
