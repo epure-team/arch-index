@@ -1,0 +1,116 @@
+#!/usr/bin/env bash
+# arch-query — canned call-graph queries over an arch-index comment_db (SQLite).
+# Usage: arch-query <db> <subcommand> [args]
+#
+# EDGE-KIND CONTRACT (PR-A). When the index is built by a ⊤-marking backend it carries a
+# `calls.kind` ∈ {MUST, MAY_ENUMERATED, MAY_TOP} and a meta flag `callgraph_contract` in
+# comment_db_meta. Semantics:
+#   MUST           a uniquely-resolved static call            → trust a POSITIVE (reachability)
+#   MAY_ENUMERATED a dynamic call bounded to a candidate set  → over-approx (used for unreachability)
+#   MAY_TOP        an unresolvable/dynamic/reflective/FFI call → "could call anything"; never dropped
+# `reaches` is an UNDER-approximation (MUST edges only): a positive path is must-reach ground truth.
+# `unreachable` is the DUAL (over-approx): sound ONLY when the graph is ⊤-marked, so it REFUSES on a
+# legacy/un-⊤-marked DB (where "no path" may merely hide a silently-dropped dynamic edge).
+#
+# Subcommands:
+#   callers-of   <name>          who calls NAME (1 hop)
+#   callees-of   <name>          what NAME calls (1 hop)
+#   reachable-from <name>        transitive closure of callees from NAME
+#   reaches      <from> <to>     MUST-only: does a definite call path exist? (positive = ground truth)
+#   unreachable  <from> <to>     SOUND dual (requires ⊤-marking): REACHABLE | UNREACHABLE | UNKNOWN.
+#                                UNREACHABLE iff TO is outside the (MUST∪MAY_ENUMERATED) closure of FROM
+#                                AND no MAY_TOP edge is reachable from FROM (closed universe) → fails G2
+#                                by construction. UNKNOWN if FROM can reach a MAY_TOP edge.
+#   escapes      <from>          the MAY_TOP (⊤) edges reachable from FROM — the boundary forcing UNKNOWN
+#   fan-in       [N]             top-N most-called functions (shared sinks / high-value targets)
+#   exported                     all exported functions (external attack surface)
+#   unresolved                   callees with no matching function row (legacy heuristic; superseded by
+#                                MAY_TOP once the index is ⊤-marked)
+#   find         <substr>        functions whose name matches substr
+#   stats                        row counts (+ contract status)
+set -euo pipefail
+DB="${1:?usage: arch-query <db> <subcommand> [args]}"; shift
+CMD="${1:?subcommand required}"; shift || true
+[ -f "$DB" ] || { echo "arch-query: no such db: $DB" >&2; exit 2; }
+q()    { sqlite3 -box "$DB" "$1"; }
+qraw() { sqlite3 "$DB" "$1" 2>/dev/null || true; }
+
+# --- edge-kind contract detection -----------------------------------------------------------------
+kind_col=$(qraw "SELECT 1 FROM pragma_table_info('calls') WHERE name='kind' LIMIT 1;")
+contract=$(qraw "SELECT value FROM comment_db_meta WHERE key='callgraph_contract' LIMIT 1;")
+# `reaches` must-filter: MUST edges when the column exists, else treat every edge as MUST (legacy).
+must_filter=""; [ -n "$kind_col" ] && must_filter="AND c.kind='MUST'"
+
+A="${1-}"; A="${A//\'/}"       # sanitize (strip single quotes); null-safe under set -u
+B="${2-}"; B="${B//\'/}"
+
+require_contract() {
+  if [ -z "$contract" ]; then
+    echo "arch-query: REFUSED — this index is NOT ⊤-marked (no 'callgraph_contract' meta flag)." >&2
+    echo "arch-query: '$CMD' would be UNSOUND: a 'no path' result may merely hide a silently-dropped" >&2
+    echo "arch-query: dynamic/interface edge. Rebuild with a Tier-0+ backend that emits MAY_TOP edges." >&2
+    exit 3
+  fi
+  # Contract flag ⇒ `kind` MUST be fully populated. A NULL/invalid kind is invisible to both the
+  # closure filter and the ⊤ check (SQL 3-valued logic), which would let a real dropped edge read as a
+  # false-sound UNREACHABLE. So refuse a malformed ⊤-marked index loudly — never trust the flag alone.
+  if [ -z "$kind_col" ]; then
+    echo "arch-query: REFUSED — 'callgraph_contract' is set but there is no 'kind' column: malformed ⊤-marked index." >&2
+    exit 3
+  fi
+  local bad; bad=$(qraw "SELECT count(*) FROM calls WHERE kind IS NULL OR kind NOT IN ('MUST','MAY_ENUMERATED','MAY_TOP');")
+  if [ "${bad:-0}" != "0" ]; then
+    echo "arch-query: REFUSED — $bad call edge(s) have NULL/invalid kind, violating the ⊤-marking contract (every edge must be MUST | MAY_ENUMERATED | MAY_TOP). Rebuild the index." >&2
+    exit 3
+  fi
+  return 0
+}
+
+case "$CMD" in
+  callers-of)   q "SELECT DISTINCT caller_name, caller_file FROM calls WHERE callee_name='$A' ORDER BY 1;" ;;
+  callees-of)   q "SELECT DISTINCT callee_name, callee_file FROM calls WHERE caller_name='$A' ORDER BY 1;" ;;
+  reachable-from)
+    q "WITH RECURSIVE reach(n) AS (SELECT '$A' UNION SELECT c.callee_name FROM calls c JOIN reach r ON c.caller_name=r.n) SELECT n AS reachable FROM reach WHERE n<>'$A' ORDER BY 1;" ;;
+
+  reaches)   # under-approximation: MUST edges only. A POSITIVE is must-reach ground truth.
+    q "WITH RECURSIVE reach(n) AS (
+         SELECT '$A'
+         UNION SELECT c.callee_name FROM calls c JOIN reach r ON c.caller_name=r.n WHERE 1=1 $must_filter)
+       SELECT CASE
+         WHEN EXISTS(SELECT 1 FROM reach WHERE n='$B') THEN 'PATH EXISTS (must-reach): $A -> $B'
+         ELSE 'no MUST path: $A -> $B  (NOT proof of unreachability — use \`unreachable\`)'
+       END AS result;" ;;
+
+  unreachable)   # over-approximation dual; SOUND only on a ⊤-marked index.
+    require_contract
+    q "WITH RECURSIVE reach_res(n) AS (
+         SELECT '$A'
+         UNION SELECT c.callee_name FROM calls c JOIN reach_res r ON c.caller_name=r.n
+               WHERE c.kind IN ('MUST','MAY_ENUMERATED'))
+       SELECT CASE
+         WHEN EXISTS(SELECT 1 FROM reach_res WHERE n='$B')
+           THEN 'REACHABLE (may-reach): $A -> $B'
+         WHEN EXISTS(SELECT 1 FROM calls c WHERE c.caller_name IN (SELECT n FROM reach_res) AND (c.kind IS NULL OR c.kind NOT IN ('MUST','MAY_ENUMERATED')))
+           THEN 'UNKNOWN: no resolved path $A -> $B, but $A reaches a non-resolved (MAY_TOP / NULL / unknown-kind) edge — could-call-anything; cannot rule out a path. Do NOT kill G2.'
+         ELSE 'UNREACHABLE: no resolved path $A -> $B and no reachable MAY_TOP — sound; G2 fails by construction.'
+       END AS verdict;" ;;
+
+  escapes)   # the ⊤ frontier reachable from FROM (why unreachability is UNKNOWN past here).
+    require_contract
+    q "WITH RECURSIVE reach_res(n) AS (
+         SELECT '$A'
+         UNION SELECT c.callee_name FROM calls c JOIN reach_res r ON c.caller_name=r.n
+               WHERE c.kind IN ('MUST','MAY_ENUMERATED'))
+       SELECT DISTINCT c.caller_name AS escaping_fn, c.call_site, COALESCE(c.kind,'NULL') AS kind
+       FROM calls c WHERE c.caller_name IN (SELECT n FROM reach_res) AND (c.kind IS NULL OR c.kind NOT IN ('MUST','MAY_ENUMERATED')) ORDER BY 1;" ;;
+
+  fan-in)       q "SELECT callee_name, count(DISTINCT caller_name) AS callers FROM calls GROUP BY callee_name ORDER BY callers DESC LIMIT ${1:-25};" ;;
+  exported)     q "SELECT name, file_path FROM functions WHERE exported=1 ORDER BY file_path, name;" ;;
+  unresolved)   q "SELECT DISTINCT callee_name FROM calls WHERE callee_name NOT IN (SELECT name FROM functions) ORDER BY 1;" ;;
+  find)         q "SELECT name, file_path, exported FROM functions WHERE name LIKE '%$A%' ORDER BY name;" ;;
+  stats)
+    echo "contract: ${contract:-<none — not ⊤-marked; 'unreachable' will refuse>}"
+    q "SELECT (SELECT count(*) FROM functions) AS functions, (SELECT count(*) FROM functions WHERE exported=1) AS exported, (SELECT count(*) FROM calls) AS call_edges;"
+    if [ -n "$kind_col" ]; then q "SELECT kind, count(*) AS edges FROM calls GROUP BY kind ORDER BY 2 DESC;"; fi ;;
+  *) echo "arch-query: unknown subcommand '$CMD'" >&2; exit 2 ;;
+esac

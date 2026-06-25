@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# arch-callgraph-ocaml — OCaml Tier-1 CMT call-graph producer.
+# Walks .cmt files from a build directory and emits NDJSON function+call records.
+# Pipe to arch-load to build a ⊤-marked DB.
+#
+# Usage:  arch-callgraph-ocaml <_build/default|cmt-dir> [...]
+#         arch-callgraph-ocaml _build/default | arch-load out.db
+#         arch-query out.db unreachable Mod.entry Mod.suspect
+#
+# Build the binary first: cd arch-index && ./build.sh ocaml-callgraph
+# Then build your OCaml project so .cmt files exist (opam exec -- dune build).
+HERE="$(cd "$(dirname "$0")" && pwd)"
+BIN="$HERE/bin/arch-callgraph-ocaml"
+if [ ! -x "$BIN" ]; then
+  echo "arch-callgraph-ocaml: binary not found at $BIN" >&2
+  echo "  run: cd arch-index && ./build.sh ocaml-callgraph" >&2
+  exit 2
+fi
+exec "$BIN" "$@"

@@ -1,0 +1,122 @@
+#!/usr/bin/env python3
+# arch-load — build a ⊤-MARKED arch-index DB from a generic NDJSON call-edge stream (PR-B).
+#
+# This is the WRITE-SIDE of the edge-kind contract (arch-query is the read-side). Any Tier-0 producer
+# (a tree-sitter call-site shim) or Tier-1 producer (Go go/ssa+CHA, OCaml typedtree) emits NDJSON of
+# function + call records; this loader builds a SQLite DB that arch-query can soundly query, and —
+# crucially — GUARANTEES the contract: every call edge has a valid `kind`, and only then is the
+# `callgraph_contract` flag set. An invalid/missing kind ABORTS (the loader is the enforcement point,
+# so a ⊤-marked DB is never a lie). stdlib only (json + sqlite3); no third-party deps.
+#
+# Usage:  arch-load <out.db> [input.ndjson]      (input defaults to stdin)
+#
+# NDJSON records (one JSON object per line; order-independent):
+#   function: {"type":"function","name":"f","file_path":"x.go","exported":true|false}
+#   call:     {"type":"call","caller_name":"f","caller_file":"x.go",
+#              "callee_name":"g","callee_file":"x.go"|null,"call_site":"x.go:12","kind":"MUST"}
+#   `type` may be omitted: a record with "callee_name" is a call, else a function.
+#   kind ∈ {MUST, MAY_ENUMERATED, MAY_TOP}. A MAY_TOP edge's callee_name is conventionally "*TOP*".
+import json, sqlite3, sys
+
+KINDS = {"MUST", "MAY_ENUMERATED", "MAY_TOP"}
+SCHEMA = """
+DROP TABLE IF EXISTS comment_db_meta;
+DROP TABLE IF EXISTS functions;
+DROP TABLE IF EXISTS calls;
+CREATE TABLE comment_db_meta(key TEXT PRIMARY KEY, value TEXT);
+CREATE TABLE functions(name TEXT, file_path TEXT, exported INTEGER DEFAULT 0);
+CREATE TABLE calls(caller_name TEXT, caller_file TEXT, callee_name TEXT, callee_file TEXT,
+                   call_site TEXT, kind TEXT);
+CREATE INDEX idx_calls_caller ON calls(caller_name);
+CREATE INDEX idx_calls_callee ON calls(callee_name);
+"""
+
+def die(msg, line=None):
+    where = f" (line {line})" if line else ""
+    sys.stderr.write(f"arch-load: {msg}{where}\n")
+    sys.exit(2)
+
+def main():
+    args = sys.argv[1:]
+    allow_empty = "--allow-empty" in args
+    args = [a for a in args if a != "--allow-empty"]
+    if not args:
+        die("usage: arch-load [--allow-empty] <out.db> [input.ndjson]")
+    out = args[0]
+    if len(args) > 1 and args[1] != "-":
+        try:
+            src = open(args[1])
+        except OSError as e:
+            die(f"cannot open input: {e}")
+    else:
+        src = sys.stdin
+
+    funcs = {}            # name -> (file_path, exported)
+    calls = []            # (caller_name, caller_file, callee_name, callee_file, call_site, kind)
+    seen_names = set()
+    for i, raw in enumerate(src, 1):
+        raw = raw.strip()
+        if not raw:
+            continue
+        try:
+            rec = json.loads(raw)
+        except json.JSONDecodeError as e:
+            die(f"invalid JSON: {e}", i)
+        if not isinstance(rec, dict):
+            die("record is not a JSON object", i)
+        is_call = rec.get("type") == "call" or ("callee_name" in rec and rec.get("type") != "function")
+        if is_call:
+            kind = rec.get("kind")
+            if kind not in KINDS:
+                # ENFORCEMENT: the loader guarantees ⊤-marking. An un-kinded edge would be invisible to
+                # the sound queries (a silent drop), so refuse rather than emit a lie.
+                die(f"call edge has missing/invalid kind {kind!r}; must be one of {sorted(KINDS)}", i)
+            caller = rec.get("caller_name")
+            callee = rec.get("callee_name")
+            if not caller or not callee:
+                die("call edge missing caller_name/callee_name", i)
+            calls.append((caller, rec.get("caller_file"), callee, rec.get("callee_file"),
+                          rec.get("call_site"), kind))
+            seen_names.update([caller, callee])
+        else:
+            name = rec.get("name")
+            if not name:
+                die("function record missing name", i)
+            if name == "*TOP*":
+                continue  # the ⊤ sentinel is not a real function, even if a producer emits a row for it
+            funcs[name] = (rec.get("file_path"), 1 if rec.get("exported") else 0)
+            seen_names.add(name)
+
+    # Derive a minimal functions row for any name seen only in edges (so find/stats/exported work).
+    for n in seen_names:
+        if n not in funcs and n != "*TOP*":
+            funcs.setdefault(n, (None, 0))
+
+    # FALSE-CONFIDENCE GUARD: a producer that silently failed emits nothing, yet the resulting
+    # ⊤-marked DB would declare EVERYTHING UNREACHABLE. Abort unless --allow-empty is set.
+    if not calls:
+        sys.stderr.write("arch-load: 0 call edges loaded — aborting to prevent a trust-stamped empty DB "
+                         "that would report EVERYTHING as UNREACHABLE. Pass --allow-empty for a genuinely "
+                         "call-free module (rare).\n")
+        if not allow_empty:
+            sys.exit(2)
+
+    db = sqlite3.connect(out)
+    db.executescript(SCHEMA)
+    db.execute("INSERT INTO comment_db_meta(key,value) VALUES('callgraph_contract','v1')")
+    db.execute("INSERT INTO comment_db_meta(key,value) VALUES('built_by','arch-load')")
+    db.executemany("INSERT INTO functions(name,file_path,exported) VALUES(?,?,?)",
+                   [(n, fp, ex) for n, (fp, ex) in funcs.items()])
+    db.executemany("INSERT INTO calls(caller_name,caller_file,callee_name,callee_file,call_site,kind) "
+                   "VALUES(?,?,?,?,?,?)", calls)
+    db.commit()
+    kc = {k: 0 for k in KINDS}
+    for c in calls:
+        kc[c[5]] += 1
+    db.close()
+    sys.stderr.write(f"arch-load: wrote {out} — {len(funcs)} functions, {len(calls)} calls "
+                     f"(MUST={kc['MUST']} MAY_ENUMERATED={kc['MAY_ENUMERATED']} MAY_TOP={kc['MAY_TOP']}); "
+                     f"callgraph_contract=v1\n")
+
+if __name__ == "__main__":
+    main()

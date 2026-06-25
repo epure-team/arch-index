@@ -1,0 +1,5 @@
+# Build output (produced by build.sh)
+bin/
+callgraph-go/arch-callgraph-go
+# Per-target call-graph artifacts — never committed (target-specific)
+*.db

@@ -1,0 +1,477 @@
+-- Architecture Index Schema
+-- This database provides a queryable index of the codebase for gardening purposes.
+-- Location: docs/architecture.db
+
+PRAGMA foreign_keys = ON;
+
+-- Modules (source files)
+CREATE TABLE IF NOT EXISTS modules (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    path TEXT UNIQUE NOT NULL,              -- 'src/installer.ml'
+    lines INTEGER NOT NULL DEFAULT 0,       -- line count
+    intent TEXT,                            -- human-written purpose description
+    last_analyzed TEXT,                     -- ISO 8601 timestamp
+    has_mli BOOLEAN DEFAULT 0,              -- whether .mli exists
+    quint_module_raw TEXT DEFAULT NULL,     -- body of {quint-module} comment section (Quint preamble)
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_modules_lines ON modules(lines DESC);
+CREATE INDEX IF NOT EXISTS idx_modules_no_intent ON modules(intent) WHERE intent IS NULL;
+
+-- Functions
+CREATE TABLE IF NOT EXISTS functions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    module_id INTEGER NOT NULL REFERENCES modules(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,                     -- 'install_node'
+    signature TEXT,                         -- '?quiet:bool -> node_request -> (unit, R.msg) result'
+    line_start INTEGER,
+    line_end INTEGER,
+    line_count INTEGER GENERATED ALWAYS AS (line_end - line_start + 1) STORED,
+    exposed BOOLEAN DEFAULT 0,              -- appears in .mli
+    intent TEXT,                            -- human-written purpose description
+    -- Comment quality fields (Epic A)
+    comment_quality_score INTEGER DEFAULT NULL,  -- 0-100 composite score
+    has_pre BOOLEAN DEFAULT 0,             -- {pre} section present
+    has_post BOOLEAN DEFAULT 0,            -- {post} section present
+    has_violators BOOLEAN DEFAULT 0,       -- {violators} section present
+    has_violates BOOLEAN DEFAULT 0,        -- {violates} section present
+    violators_raw TEXT DEFAULT NULL,       -- JSON: [{"name":"...","reason":"..."}]
+    violates_raw TEXT DEFAULT NULL,        -- JSON: [{"name":"...","reason":"..."}]
+    tests_raw TEXT DEFAULT NULL,           -- JSON: [{"file":"test/...","case":"..."}]
+    quint_raw TEXT DEFAULT NULL,           -- body of {quint} comment section (raw Quint action fragment)
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(module_id, name)
+);
+
+-- Violation graph view: surfaces broken violator cross-references (Epic A)
+CREATE VIEW IF NOT EXISTS v_violation_graph AS
+SELECT
+    f.id AS function_id,
+    f.name AS function_name,
+    m.path AS module_path,
+    json_extract(v.value, '$.name') AS referenced_name,
+    json_extract(v.value, '$.reason') AS reason,
+    CASE WHEN EXISTS (
+        SELECT 1 FROM functions f2
+        WHERE f2.name = json_extract(v.value, '$.name')
+    ) THEN 'resolved' ELSE 'broken' END AS link_status
+FROM functions f
+JOIN modules m ON f.module_id = m.id
+JOIN json_each(f.violators_raw) v
+WHERE f.violators_raw IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_functions_module ON functions(module_id);
+CREATE INDEX IF NOT EXISTS idx_functions_exposed ON functions(exposed);
+CREATE INDEX IF NOT EXISTS idx_functions_no_intent ON functions(intent) WHERE intent IS NULL;
+CREATE INDEX IF NOT EXISTS idx_functions_large ON functions(line_count DESC);
+
+-- Call relationships (which functions call which)
+-- callee_id is NULL for external/unresolved calls (stdlib, dependencies)
+-- callee_name is always populated for searchability
+--
+-- EDGE-KIND CONTRACT (PR-A): a ⊤-marking backend MUST also populate `kind` and set
+-- comment_db_meta('callgraph_contract','v1'). kind ∈ {MUST (uniquely-resolved static call),
+-- MAY_ENUMERATED (dynamic call bounded to a candidate set), MAY_TOP (unresolvable/dynamic/reflective/
+-- FFI — could-call-anything, NEVER dropped)}. `reaches` uses MUST only (under-approx); `unreachable`
+-- uses the full graph + ⊤ rule (over-approx) and REFUSES if the contract flag is absent. Legacy DBs
+-- without `kind` are treated as all-MUST for `reaches` and refused for `unreachable`.
+CREATE TABLE IF NOT EXISTS calls (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    caller_id INTEGER NOT NULL REFERENCES functions(id) ON DELETE CASCADE,
+    callee_id INTEGER REFERENCES functions(id) ON DELETE CASCADE,
+    callee_name TEXT NOT NULL,              -- function name (for unresolved: Module.func)
+    call_site TEXT,                         -- file:line location
+    kind TEXT,                              -- edge-kind contract: MUST | MAY_ENUMERATED | MAY_TOP (NULL on legacy = MUST)
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_calls_caller ON calls(caller_id);
+CREATE INDEX IF NOT EXISTS idx_calls_callee ON calls(callee_id);
+CREATE INDEX IF NOT EXISTS idx_calls_callee_name ON calls(callee_name);
+
+-- Module dependencies (open, include, alias, local_open)
+CREATE TABLE IF NOT EXISTS module_deps (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_module INTEGER NOT NULL REFERENCES modules(id) ON DELETE CASCADE,
+    target_module INTEGER REFERENCES modules(id) ON DELETE CASCADE,  -- NULL if external
+    target_path TEXT NOT NULL,               -- Module path string (e.g., "Stdlib.List")
+    dep_kind TEXT NOT NULL CHECK(dep_kind IN ('open', 'include', 'alias', 'local_open')),
+    alias_name TEXT,                         -- For alias: the local name (e.g., "L" for "module L = List")
+    line_number INTEGER,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_module_deps_source ON module_deps(source_module);
+CREATE INDEX IF NOT EXISTS idx_module_deps_target ON module_deps(target_module);
+CREATE INDEX IF NOT EXISTS idx_module_deps_kind ON module_deps(dep_kind);
+
+-- Type usage (which functions use which types)
+CREATE TABLE IF NOT EXISTS type_usage (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    function_id INTEGER NOT NULL REFERENCES functions(id) ON DELETE CASCADE,
+    type_id INTEGER REFERENCES types(id) ON DELETE CASCADE,  -- NULL if external type
+    type_name TEXT NOT NULL,                 -- For external types or display
+    usage_role TEXT NOT NULL CHECK(usage_role IN ('param', 'return', 'local', 'field_access', 'constructor')),
+    position INTEGER,                        -- Parameter position (for params)
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_type_usage_function ON type_usage(function_id);
+CREATE INDEX IF NOT EXISTS idx_type_usage_type ON type_usage(type_id);
+CREATE INDEX IF NOT EXISTS idx_type_usage_role ON type_usage(usage_role);
+
+-- Unsafe parameters (type safety tracking)
+CREATE TABLE IF NOT EXISTS unsafe_params (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    function_id INTEGER NOT NULL REFERENCES functions(id) ON DELETE CASCADE,
+    param_name TEXT NOT NULL,               -- 'instance'
+    current_type TEXT NOT NULL,             -- 'string'
+    target_type TEXT,                       -- 'Instance_name.t'
+    fixed BOOLEAN DEFAULT 0,
+    fixed_at TEXT,
+    github_issue INTEGER,                   -- tracking issue number
+    UNIQUE(function_id, param_name)
+);
+
+CREATE INDEX IF NOT EXISTS idx_unsafe_unfixed ON unsafe_params(fixed) WHERE fixed = 0;
+
+-- Test coverage tracking
+CREATE TABLE IF NOT EXISTS coverage (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    function_id INTEGER NOT NULL REFERENCES functions(id) ON DELETE CASCADE,
+    covered_lines INTEGER NOT NULL DEFAULT 0,
+    total_lines INTEGER NOT NULL DEFAULT 0,
+    percentage REAL GENERATED ALWAYS AS (
+        CASE WHEN total_lines > 0 THEN (covered_lines * 100.0 / total_lines) ELSE 0 END
+    ) STORED,
+    recorded_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(function_id, recorded_at)
+);
+
+CREATE INDEX IF NOT EXISTS idx_coverage_low ON coverage(percentage) WHERE percentage < 50;
+
+-- Gardening tasks (links to GitHub issues)
+CREATE TABLE IF NOT EXISTS gardening_tasks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    github_issue INTEGER UNIQUE,            -- GitHub issue number
+    category TEXT NOT NULL,                 -- 'split-file', 'type-safety', 'coverage', etc.
+    title TEXT,
+    target_module_id INTEGER REFERENCES modules(id) ON DELETE SET NULL,
+    target_function_id INTEGER REFERENCES functions(id) ON DELETE SET NULL,
+    status TEXT DEFAULT 'open',             -- 'open', 'in_progress', 'done'
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    completed_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_tasks_status ON gardening_tasks(status);
+CREATE INDEX IF NOT EXISTS idx_tasks_category ON gardening_tasks(category);
+
+-- Gardening log (history of completed work)
+CREATE TABLE IF NOT EXISTS gardening_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    date TEXT NOT NULL,
+    contributor TEXT,
+    category TEXT NOT NULL,
+    description TEXT NOT NULL,
+    pr_number INTEGER,
+    issue_number INTEGER,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Types (record, variant, abstract, alias)
+CREATE TABLE IF NOT EXISTS types (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    module_id INTEGER NOT NULL REFERENCES modules(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,                     -- 'node_request'
+    kind TEXT NOT NULL,                     -- 'record', 'variant', 'abstract', 'alias', 'open'
+    line_start INTEGER,
+    line_end INTEGER,
+    exposed BOOLEAN DEFAULT 0,              -- appears in .mli
+    manifest TEXT,                          -- for aliases: the type it aliases
+    intent TEXT,                            -- human-written purpose description
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(module_id, name)
+);
+
+CREATE INDEX IF NOT EXISTS idx_types_module ON types(module_id);
+CREATE INDEX IF NOT EXISTS idx_types_kind ON types(kind);
+CREATE INDEX IF NOT EXISTS idx_types_exposed ON types(exposed);
+
+-- Record fields
+CREATE TABLE IF NOT EXISTS type_fields (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    type_id INTEGER NOT NULL REFERENCES types(id) ON DELETE CASCADE,
+    field_name TEXT NOT NULL,               -- 'instance'
+    field_type TEXT NOT NULL,               -- 'string'
+    position INTEGER NOT NULL DEFAULT 0,    -- order within the record
+    UNIQUE(type_id, field_name)
+);
+
+CREATE INDEX IF NOT EXISTS idx_type_fields_type ON type_fields(type_id);
+CREATE INDEX IF NOT EXISTS idx_type_fields_name ON type_fields(field_name);
+CREATE INDEX IF NOT EXISTS idx_type_fields_ftype ON type_fields(field_type);
+
+-- Variant constructors
+CREATE TABLE IF NOT EXISTS type_constructors (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    type_id INTEGER NOT NULL REFERENCES types(id) ON DELETE CASCADE,
+    constructor_name TEXT NOT NULL,          -- 'Genesis'
+    position INTEGER NOT NULL DEFAULT 0,    -- order within the variant
+    arg_types TEXT,                         -- comma-separated: 'string, int' or NULL for constant
+    UNIQUE(type_id, constructor_name)
+);
+
+CREATE INDEX IF NOT EXISTS idx_type_constructors_type ON type_constructors(type_id);
+CREATE INDEX IF NOT EXISTS idx_type_constructors_name ON type_constructors(constructor_name);
+
+-- =============================================================================
+-- Useful Views
+-- =============================================================================
+
+-- Large files needing attention
+CREATE VIEW IF NOT EXISTS v_large_files AS
+SELECT path, lines, intent, has_mli
+FROM modules
+WHERE lines > 500
+ORDER BY lines DESC;
+
+-- Large functions needing attention
+CREATE VIEW IF NOT EXISTS v_large_functions AS
+SELECT m.path, f.name, f.line_count, f.intent, f.exposed
+FROM functions f
+JOIN modules m ON f.module_id = m.id
+WHERE f.line_count > 50
+ORDER BY f.line_count DESC;
+
+-- Functions without documentation
+CREATE VIEW IF NOT EXISTS v_undocumented AS
+SELECT m.path, f.name, f.signature, f.exposed
+FROM functions f
+JOIN modules m ON f.module_id = m.id
+WHERE f.intent IS NULL AND f.exposed = 1
+ORDER BY m.path, f.name;
+
+-- Unsafe parameters to fix
+CREATE VIEW IF NOT EXISTS v_unsafe_params AS
+SELECT m.path, f.name, u.param_name, u.current_type, u.target_type, u.github_issue
+FROM unsafe_params u
+JOIN functions f ON u.function_id = f.id
+JOIN modules m ON f.module_id = m.id
+WHERE u.fixed = 0
+ORDER BY m.path, f.name;
+
+-- Low coverage functions
+CREATE VIEW IF NOT EXISTS v_low_coverage AS
+SELECT m.path, f.name, c.percentage, c.covered_lines, c.total_lines
+FROM coverage c
+JOIN functions f ON c.function_id = f.id
+JOIN modules m ON f.module_id = m.id
+WHERE c.percentage < 50
+ORDER BY c.percentage ASC;
+
+-- Most called functions (potential refactoring targets)
+CREATE VIEW IF NOT EXISTS v_most_called AS
+SELECT m.path, f.name, COUNT(c.id) as caller_count
+FROM functions f
+JOIN modules m ON f.module_id = m.id
+LEFT JOIN calls c ON f.id = c.callee_id
+GROUP BY f.id
+HAVING caller_count > 5
+ORDER BY caller_count DESC;
+
+-- Functions that call a given function (callers)
+CREATE VIEW IF NOT EXISTS v_callers AS
+SELECT
+    c.callee_name,
+    cf.name as caller_name,
+    cm.path as caller_path,
+    c.call_site
+FROM calls c
+JOIN functions cf ON c.caller_id = cf.id
+JOIN modules cm ON cf.module_id = cm.id
+ORDER BY c.callee_name, cm.path;
+
+-- Functions called by a given function (callees)
+CREATE VIEW IF NOT EXISTS v_callees AS
+SELECT
+    cf.name as caller_name,
+    cm.path as caller_path,
+    c.callee_name,
+    COALESCE(tm.path, 'external') as callee_path,
+    c.call_site
+FROM calls c
+JOIN functions cf ON c.caller_id = cf.id
+JOIN modules cm ON cf.module_id = cm.id
+LEFT JOIN functions tf ON c.callee_id = tf.id
+LEFT JOIN modules tm ON tf.module_id = tm.id
+ORDER BY cm.path, cf.name;
+
+-- Open gardening tasks by category
+CREATE VIEW IF NOT EXISTS v_open_tasks AS
+SELECT category, COUNT(*) as count, GROUP_CONCAT(github_issue) as issues
+FROM gardening_tasks
+WHERE status = 'open'
+GROUP BY category
+ORDER BY count DESC;
+
+-- Types by field: find types containing a specific field name
+CREATE VIEW IF NOT EXISTS v_type_fields AS
+SELECT m.path, t.name as type_name, t.kind, tf.field_name, tf.field_type
+FROM type_fields tf
+JOIN types t ON tf.type_id = t.id
+JOIN modules m ON t.module_id = m.id
+ORDER BY m.path, t.name, tf.position;
+
+-- Types by field type: find all types that contain a field of a given type
+CREATE VIEW IF NOT EXISTS v_types_with_field_type AS
+SELECT m.path, t.name as type_name, tf.field_name, tf.field_type
+FROM type_fields tf
+JOIN types t ON tf.type_id = t.id
+JOIN modules m ON t.module_id = m.id
+ORDER BY tf.field_type, m.path, t.name;
+
+-- Variant constructors overview
+CREATE VIEW IF NOT EXISTS v_variant_constructors AS
+SELECT m.path, t.name as type_name, tc.constructor_name, tc.arg_types
+FROM type_constructors tc
+JOIN types t ON tc.type_id = t.id
+JOIN modules m ON t.module_id = m.id
+ORDER BY m.path, t.name, tc.position;
+
+-- Module dependencies overview
+CREATE VIEW IF NOT EXISTS v_module_deps AS
+SELECT
+    sm.path as source_path,
+    d.target_path,
+    d.dep_kind,
+    d.alias_name,
+    d.line_number,
+    CASE WHEN d.target_module IS NOT NULL THEN 'resolved' ELSE 'external' END as status
+FROM module_deps d
+JOIN modules sm ON d.source_module = sm.id
+ORDER BY sm.path, d.line_number;
+
+-- Modules with most dependencies (potential refactoring targets)
+CREATE VIEW IF NOT EXISTS v_high_deps AS
+SELECT m.path, COUNT(*) as dep_count
+FROM modules m
+JOIN module_deps d ON m.id = d.source_module
+GROUP BY m.id
+HAVING dep_count > 10
+ORDER BY dep_count DESC;
+
+-- Types used by a function (param and return types)
+CREATE VIEW IF NOT EXISTS v_types_used_by AS
+SELECT
+    fm.path as function_path,
+    f.name as function_name,
+    tu.type_name,
+    tu.usage_role,
+    tu.position,
+    CASE WHEN tu.type_id IS NOT NULL THEN 'resolved' ELSE 'external' END as status,
+    COALESCE(tm.path, 'external') as type_module_path
+FROM type_usage tu
+JOIN functions f ON tu.function_id = f.id
+JOIN modules fm ON f.module_id = fm.id
+LEFT JOIN types t ON tu.type_id = t.id
+LEFT JOIN modules tm ON t.module_id = tm.id
+ORDER BY fm.path, f.name, tu.usage_role, tu.position;
+
+-- Functions using a type (which functions accept/return a given type)
+CREATE VIEW IF NOT EXISTS v_functions_using AS
+SELECT
+    tu.type_name,
+    tu.usage_role,
+    fm.path as function_path,
+    f.name as function_name,
+    f.signature,
+    CASE WHEN tu.type_id IS NOT NULL THEN 'resolved' ELSE 'external' END as status
+FROM type_usage tu
+JOIN functions f ON tu.function_id = f.id
+JOIN modules fm ON f.module_id = fm.id
+ORDER BY tu.type_name, tu.usage_role, fm.path, f.name;
+
+-- Types most commonly used as parameters (API surface analysis)
+CREATE VIEW IF NOT EXISTS v_common_param_types AS
+SELECT
+    type_name,
+    COUNT(*) as usage_count,
+    COUNT(DISTINCT function_id) as function_count
+FROM type_usage
+WHERE usage_role = 'param'
+GROUP BY type_name
+HAVING usage_count > 3
+ORDER BY usage_count DESC;
+
+-- Types most commonly returned (output type analysis)
+CREATE VIEW IF NOT EXISTS v_common_return_types AS
+SELECT
+    type_name,
+    COUNT(*) as usage_count,
+    COUNT(DISTINCT function_id) as function_count
+FROM type_usage
+WHERE usage_role = 'return'
+GROUP BY type_name
+HAVING usage_count > 3
+ORDER BY usage_count DESC;
+
+-- =============================================================================
+-- Sample Queries (for reference)
+-- =============================================================================
+
+-- Find all functions that take a raw string 'instance' parameter:
+-- SELECT * FROM v_unsafe_params WHERE param_name = 'instance';
+
+-- Find functions called by many others (coupling hotspots):
+-- SELECT * FROM v_most_called LIMIT 10;
+
+-- Get gardening progress stats:
+-- SELECT category,
+--        SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END) as done,
+--        SUM(CASE WHEN status = 'open' THEN 1 ELSE 0 END) as open
+-- FROM gardening_tasks GROUP BY category;
+
+-- Find modules without any function documentation:
+-- SELECT m.path, COUNT(f.id) as func_count, SUM(CASE WHEN f.intent IS NULL THEN 1 ELSE 0 END) as undoc
+-- FROM modules m
+-- JOIN functions f ON f.module_id = m.id
+-- GROUP BY m.id
+-- HAVING undoc = func_count;
+
+-- Find types that have both a string field and an int field:
+-- SELECT DISTINCT t.name, m.path FROM types t
+-- JOIN type_fields tf1 ON t.id = tf1.type_id AND tf1.field_type = 'string'
+-- JOIN type_fields tf2 ON t.id = tf2.type_id AND tf2.field_type = 'int'
+-- JOIN modules m ON t.module_id = m.id;
+
+-- Find all types containing a field named 'instance':
+-- SELECT * FROM v_type_fields WHERE field_name = 'instance';
+
+-- Find all record types with a field of type 'baker_node_mode':
+-- SELECT * FROM v_types_with_field_type WHERE field_type LIKE '%baker_node_mode%';
+
+-- Find types that aggregate string, int, and some page type:
+-- SELECT t.name, m.path, GROUP_CONCAT(tf.field_name || ':' || tf.field_type, ', ') as fields
+-- FROM types t
+-- JOIN modules m ON t.module_id = m.id
+-- JOIN type_fields tf ON t.id = tf.type_id
+-- WHERE t.id IN (SELECT type_id FROM type_fields WHERE field_type = 'string')
+--   AND t.id IN (SELECT type_id FROM type_fields WHERE field_type = 'int')
+--   AND t.id IN (SELECT type_id FROM type_fields WHERE field_type LIKE '%page%')
+-- GROUP BY t.id;
+
+-- Find all functions that accept a 'story' type as parameter:
+-- SELECT * FROM v_functions_using WHERE type_name LIKE '%story%' AND usage_role = 'param';
+
+-- Find all functions that return a Result type:
+-- SELECT * FROM v_functions_using WHERE type_name LIKE '%result%' AND usage_role = 'return';
+
+-- Find what types a specific function uses:
+-- SELECT * FROM v_types_used_by WHERE function_name = 'my_function';
+
+-- Find functions that use both 'story' and 'epic' types:
+-- SELECT f.name, m.path FROM functions f
+-- JOIN modules m ON f.module_id = m.id
+-- WHERE f.id IN (SELECT function_id FROM type_usage WHERE type_name LIKE '%story%')
+--   AND f.id IN (SELECT function_id FROM type_usage WHERE type_name LIKE '%epic%');

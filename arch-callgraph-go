@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# arch-callgraph-go — Go Tier-1 CHA call-graph producer.
+# Emits NDJSON function+call records; pipe to arch-load to build a ⊤-marked DB.
+#
+# Usage:  arch-callgraph-go [-tests] <module-root|./pattern> [pattern...]
+#         arch-callgraph-go /path/to/repo | arch-load out.db
+#         arch-callgraph-go ./... | arch-load out.db      (from module root)
+#
+# Build the binary first: cd arch-index && ./build.sh go
+HERE="$(cd "$(dirname "$0")" && pwd)"
+BIN="$HERE/bin/arch-callgraph-go"
+if [ ! -x "$BIN" ]; then
+  echo "arch-callgraph-go: binary not found at $BIN — run: cd arch-index && ./build.sh go" >&2
+  exit 2
+fi
+exec "$BIN" "$@"

@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# arch-index — build an architecture/call-graph index for a codebase via LSP.
+# Wraps the vendored arch_index_cli (extracted from epure) with the runtime env it needs.
+# Usage: arch-index <project-dir> <output.db> [language]
+#   language: auto (default) | go | rust | typescript | python | ocaml
+#
+# Requires the matching LSP server on PATH:
+#   go         -> gopls            (go install golang.org/x/tools/gopls@latest)
+#   rust       -> rust-analyzer    (rustup component add rust-analyzer)
+#   typescript -> typescript-language-server
+#   python     -> pyright / pylsp
+#   ocaml      -> ocamllsp
+#
+# NOTE (Go, large modules): point <project-dir> at the MODULE ROOT (the dir with go.mod).
+# gopls needs warm-up before workspace/symbol returns; if you get 0 functions on a big module,
+# see README "Known integration item" — the LSP warm-up/timeout may need tuning in the binary.
+set -euo pipefail
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJ="${1:?usage: arch-index <project-dir> <output.db> [language]}"
+OUT="${2:?output db path required}"
+LANG="${3:-auto}"
+# Keep go build/test scratch off a possibly-full /tmp (see campaign harness gotchas).
+export TMPDIR="${TMPDIR:-$HOME/.cache/go-tmp}"; mkdir -p "$TMPDIR"
+# Make language servers installed via `go install` / cargo reachable.
+command -v go >/dev/null 2>&1 && export PATH="$PATH:$(go env GOPATH 2>/dev/null)/bin"
+export PATH="$PATH:$HOME/.cargo/bin"
+exec "$HERE/bin/arch_index_cli" --language "$LANG" --project "$PROJ" --output "$OUT" --verbose
