@@ -229,72 +229,63 @@ let run ~sw ~env ~project_dir ~language ~output ?(no_enrich = false)
   (* Temporary output path *)
   let tmp_output = output ^ ".tmp" in
   (* Step 3-7: Run pipeline with timeout *)
-  let result =
-    match cfg_opt with
-    | None -> ([], [])
-    | Some cfg -> (
-        try
-          Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) timeout_s (fun () ->
-              (* Start LSP client *)
-              match
-                Lsp_client.start
-                  ~sw
-                  ~env
-                  ~command:cfg.command
-                  ~args:cfg.args
-                  ~project_dir
-                  ?init_options:cfg.init_options
-                  ()
-              with
-              | Error msg ->
-                  if verbose then
-                    Arch_io.eprintf
-                      "arch_index_lsp: LSP start failed: %s\n%!"
-                      msg ;
-                  (* Return empty result set rather than error *)
-                  ([], [])
-              | Ok client ->
-                  (* Step 4: Extract symbols *)
-                  if verbose then
-                    Arch_io.printf
-                      "arch_index_lsp: extracting symbols...\n%!" ;
-                  let fn_rows =
-                    Lsp_extractor.extract_symbols client ~project_dir
-                  in
-                  if verbose then
-                    Arch_io.printf
-                      "arch_index_lsp: found %d functions\n%!"
-                      (List.length fn_rows) ;
-                  (* Step 5: Extract call graph *)
-                  let call_rows =
-                    Call_graph_extractor.extract_calls
-                      client
-                      ~project_dir
-                      fn_rows
-                  in
-                  if verbose then
-                    Arch_io.printf
-                      "arch_index_lsp: found %d calls\n%!"
-                      (List.length call_rows) ;
-                  (* Step 6: Shutdown LSP *)
-                  Lsp_client.shutdown client ;
-                  (fn_rows, call_rows))
-        with
-        | Eio.Time.Timeout ->
-            if verbose then
-              Arch_io.eprintf
-                "arch_index_lsp: timeout after %.0fs — returning partial results\n\
-                 %!"
-                timeout_s ;
-            ([], [])
-        | exn ->
-            if verbose then
-              Arch_io.eprintf
-                "arch_index_lsp: unexpected error: %s\n%!"
-                (Printexc.to_string exn) ;
-            ([], []))
-  in
-  let fn_rows, call_rows = result in
+  (* Mutable refs capture partial results so a timeout during call extraction
+     still preserves the already-collected function rows. *)
+  let fn_rows_ref   = ref [] in
+  let call_rows_ref = ref [] in
+  (match cfg_opt with
+   | None -> ()
+   | Some cfg ->
+     (try
+        Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) timeout_s (fun () ->
+            match
+              Lsp_client.start
+                ~sw
+                ~env
+                ~command:cfg.command
+                ~args:cfg.args
+                ~project_dir
+                ?init_options:cfg.init_options
+                ()
+            with
+            | Error msg ->
+                if verbose then
+                  Arch_io.eprintf "arch_index_lsp: LSP start failed: %s\n%!" msg
+            | Ok client ->
+                if verbose then
+                  Arch_io.printf "arch_index_lsp: extracting symbols...\n%!" ;
+                let fn_rows =
+                  Lsp_extractor.extract_symbols client ~project_dir ~language
+                in
+                fn_rows_ref := fn_rows ;
+                if verbose then
+                  Arch_io.printf
+                    "arch_index_lsp: found %d functions\n%!"
+                    (List.length fn_rows) ;
+                let call_rows =
+                  Call_graph_extractor.extract_calls client ~project_dir fn_rows
+                in
+                call_rows_ref := call_rows ;
+                if verbose then
+                  Arch_io.printf
+                    "arch_index_lsp: found %d calls\n%!"
+                    (List.length call_rows) ;
+                Lsp_client.shutdown client)
+      with
+      | Eio.Time.Timeout ->
+          if verbose then
+            Arch_io.eprintf
+              "arch_index_lsp: timeout after %.0fs — using partial results \
+               (%d functions, %d calls)\n%!"
+              timeout_s
+              (List.length !fn_rows_ref)
+              (List.length !call_rows_ref)
+      | exn ->
+          if verbose then
+            Arch_io.eprintf
+              "arch_index_lsp: unexpected error: %s\n%!"
+              (Printexc.to_string exn))) ;
+  let fn_rows, call_rows = !fn_rows_ref, !call_rows_ref in
   (* Step 8: Write SQLite DB atomically *)
   (try Sys.remove tmp_output with _ -> ()) ;
   let db = Sqlite3.db_open tmp_output in
