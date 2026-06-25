@@ -268,3 +268,103 @@ let parse_violators_json raw =
     | [] -> None
     | lst -> Some (Yojson.Safe.to_string (`List lst))
   end
+
+(* -------------------------------------------------------------------------- *)
+(* Inline tests — internal helpers                                            *)
+(* -------------------------------------------------------------------------- *)
+
+let%test "make_body: empty string → Absent" = make_body "" = Absent
+
+let%test "make_body: whitespace only → Absent" = make_body "   " = Absent
+
+let%test "make_body: none → Present_none" = make_body "none" = Present_none
+
+let%test "make_body: (none) → Present_none" = make_body "(none)" = Present_none
+
+let%test "make_body: None → Present_none" = make_body "None" = Present_none
+
+let%test "make_body: real text → Present" =
+  make_body "some content" = Present "some content"
+
+let%test "make_body: trims whitespace" =
+  make_body "  hello  " = Present "hello"
+
+let%test "make_body_simple: empty → Absent" = make_body_simple "" = Absent
+
+let%test "make_body_simple: 'none' is Present (not Present_none)" =
+  make_body_simple "none" = Present "none"
+
+let%test "make_body_simple: real text → Present" =
+  make_body_simple "guard" = Present "guard"
+
+let%test "score: all absent → None" =
+  score
+    {
+      summary = None;
+      pre = Absent;
+      post = Absent;
+      violators = Absent;
+      violates = Absent;
+      tests = Absent;
+      quint = Absent;
+      score = None;
+    }
+  = None
+
+let%test "score: summary only → Some 15" =
+  score
+    {
+      summary = Some "desc";
+      pre = Absent;
+      post = Absent;
+      violators = Absent;
+      violates = Absent;
+      tests = Absent;
+      quint = Absent;
+      score = None;
+    }
+  = Some 15
+
+let%test "score: Present_none violators → 12 pts" =
+  score
+    {
+      summary = None;
+      pre = Absent;
+      post = Absent;
+      violators = Present_none;
+      violates = Absent;
+      tests = Absent;
+      quint = Absent;
+      score = None;
+    }
+  = Some 12
+
+let%test "find_jsdoc_tags: finds @pre and @post" =
+  let positions = find_jsdoc_tags "@pre guards\n@post result" in
+  List.length positions = 2
+  && (let _, _, tag0 = List.nth positions 0 in
+      tag0 = "pre")
+  && (let _, _, tag1 = List.nth positions 1 in
+      tag1 = "post")
+
+let%test "find_jsdoc_tags: ignores unknown tags" =
+  let positions = find_jsdoc_tags "@unknown something @pre ok" in
+  List.length positions = 1
+  && (let _, _, tag = List.nth positions 0 in
+      tag = "pre")
+
+let%test "find_ocaml_tags: finds {pre} and {post}" =
+  let positions = find_ocaml_tags "{pre}\nguards\n{post}\nresult" in
+  List.length positions = 2
+  && (let _, _, tag0 = List.nth positions 0 in
+      tag0 = "pre")
+  && (let _, _, tag1 = List.nth positions 1 in
+      tag1 = "post")
+
+let%test "parse_violators_json: none → None" =
+  parse_violators_json "none" = None
+
+let%test "parse_violators_json: real entry → Some json" =
+  let em = "\xe2\x80\x94" in
+  let result = parse_violators_json ("Foo" ^ em ^ " reason") in
+  result <> None
