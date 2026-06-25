@@ -22,4 +22,7 @@
   ppx_blob
   ppx_deriving_yojson
   sqlite3
-  ocaml-compiler-libs))
+  ocaml-compiler-libs
+  (ppx_inline_test (>= v0.16))
+  (ppx_assert (>= v0.16))
+  (alcotest (>= 1.7))))
