@@ -1,0 +1,60 @@
+{
+  "task": "arch-serve",
+  "mode": "full",
+  "schema_version": "1.0",
+  "steps": [
+    {
+      "id": "step-1",
+      "skill": "roster-implement",
+      "label": "OCaml server scaffold",
+      "inputs": ["briefs/arch-serve-implementer.md"],
+      "outputs": ["bin/arch_serve/arch_serve.ml", "bin/arch_serve/dune", "bin/arch_serve/static/index.html"],
+      "hook": false
+    },
+    {
+      "id": "step-2",
+      "skill": "roster-implement",
+      "label": "Data API layer",
+      "inputs": ["briefs/arch-serve-implementer.md"],
+      "outputs": ["bin/arch_serve/arch_serve.ml"],
+      "hook": false
+    },
+    {
+      "id": "step-3",
+      "skill": "roster-implement",
+      "label": "SPA foundation: shell + function table",
+      "inputs": ["briefs/arch-serve-implementer.md"],
+      "outputs": ["bin/arch_serve/static/index.html", "bin/arch_serve/static/style.css", "bin/arch_serve/static/app.js", "bin/arch_serve/static/d3.min.js"],
+      "hook": false
+    },
+    {
+      "id": "step-4",
+      "skill": "roster-implement",
+      "label": "Neighborhood graph (D3 force sim)",
+      "inputs": ["briefs/arch-serve-implementer.md"],
+      "outputs": ["bin/arch_serve/static/app.js"],
+      "hook": false
+    },
+    {
+      "id": "step-5",
+      "skill": "roster-implement",
+      "label": "Path queries + module view",
+      "inputs": ["briefs/arch-serve-implementer.md"],
+      "outputs": ["bin/arch_serve/static/app.js"],
+      "hook": false
+    },
+    {
+      "id": "step-6",
+      "skill": "roster-implement",
+      "label": "Polish + shell wrapper",
+      "inputs": ["briefs/arch-serve-implementer.md"],
+      "outputs": ["bin/arch_serve/static/app.js", "bin/arch_serve/static/style.css", "arch-serve"],
+      "hook": false
+    }
+  ],
+  "quality_gates": {
+    "build": "opam exec -- dune build",
+    "test": "opam exec -- dune test",
+    "lint": ""
+  }
+}

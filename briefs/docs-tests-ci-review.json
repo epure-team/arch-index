@@ -1,0 +1,73 @@
+{
+  "task": "docs-tests-ci",
+  "date": "2026-06-25",
+  "status": "GO",
+  "auto_fixes_applied": [
+    {
+      "path": "dune-project",
+      "line": 26,
+      "category": "correctness",
+      "description": "Jane Street package version constraint: (>= 0.16) → (>= v0.16). All ppx_inline_test/ppx_assert opam versions use the v prefix; without it, opam version comparison treats v0.17.1 < 0.16 and CI would fail at opam install --deps-only."
+    },
+    {
+      "path": "arch-index.opam",
+      "line": 25,
+      "category": "correctness",
+      "description": "Same fix: >= \"0.16\" → >= \"v0.16\" for ppx_inline_test and ppx_assert."
+    },
+    {
+      "path": "lib/arch_index/arch_index_comment_parser.ml",
+      "line": 357,
+      "category": "style",
+      "description": "Renamed misleading test 'find_tag_positions: ignores {unknown}' — the test actually verifies the tag IS found (find_tag_positions does not filter; filtering happens in parse). New name: 'find_tag_positions: returns all {tag} patterns including unknown ones'."
+    },
+    {
+      "path": "README.md",
+      "line": 50,
+      "category": "correctness",
+      "description": "CMT quick-start showed `./arch-query /tmp/self.db exported` on an architecture-schema DB. arch-query's exported subcommand queries `WHERE exported=1` but the architecture DB has column `exposed` (not `exported`). Replaced with `sqlite3 /tmp/self.db \"SELECT count(*) FROM functions;\"` which works with the actual schema."
+    },
+    {
+      "path": "docs/install.md",
+      "line": 14,
+      "category": "correctness",
+      "description": "Corrected false claim that arch-query and arch-load call bin/arch_index_cli. arch-query is a self-contained bash script calling sqlite3 directly; arch-load is a self-contained Python 3 script. Only arch-index delegates to bin/arch_index_cli."
+    },
+    {
+      "path": ".github/workflows/ci.yml",
+      "line": 41,
+      "category": "style",
+      "description": "Added actionable error message on golden file diff failure: 'Golden file mismatch — update: see docs/adr/001-self-index-golden.md'. Without this, CI showed only 'files differ' with no guidance on how to fix."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "MEDIUM",
+      "confidence": 4,
+      "path": "docs/edge-kind-contract.md",
+      "line": 46,
+      "category": "correctness",
+      "summary": "Schema column naming inconsistency: architecture DB uses `exposed`, arch-query subcommand is named `exported` and queries `exported=1`",
+      "evidence": "architecture-schema.sql defines `exposed BOOLEAN`. arch-query line 108: `WHERE exported=1`. The two are incompatible — arch-query was designed for the comment_db LSP schema, not the full architecture schema. This is a pre-existing issue surfaced by the new documentation that shows both tools together.",
+      "fix": "Out of scope for this PR (pre-existing architectural debt). Track separately. The README and docs/install.md now avoid showing arch-query commands against architecture-schema DBs.",
+      "fingerprint": "docs/edge-kind-contract.md:46:correctness",
+      "specialist": "reviewer",
+      "status": "ACCEPTED"
+    }
+  ],
+  "cross_runtime_findings": [],
+  "summary": {
+    "critical": 0,
+    "high": 0,
+    "medium": 1,
+    "low": 0,
+    "auto_fixed": 6
+  },
+  "no_go_reason": {
+    "type": null,
+    "failed_acs": []
+  },
+  "mode": "full",
+  "escalation_needed": false,
+  "escalation_reason": null
+}

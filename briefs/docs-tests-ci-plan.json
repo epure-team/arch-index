@@ -1,0 +1,40 @@
+{
+  "task": "docs-tests-ci",
+  "mode": "full",
+  "schema_version": "1.0",
+  "steps": [
+    {
+      "id": "step-1",
+      "skill": "roster-implement",
+      "inputs": ["briefs/docs-tests-ci-implementer.md"],
+      "outputs": ["lib/arch_index/dune", "dune-project", "arch-index.opam"],
+      "hook": false
+    },
+    {
+      "id": "step-2",
+      "skill": "roster-review",
+      "inputs": ["briefs/docs-tests-ci-reviewer.md"],
+      "outputs": ["briefs/docs-tests-ci-review.json"],
+      "hook": false
+    },
+    {
+      "id": "step-3",
+      "skill": "roster-qa",
+      "inputs": ["briefs/docs-tests-ci-qa-scope.md"],
+      "outputs": ["briefs/docs-tests-ci-qa.md"],
+      "hook": false
+    },
+    {
+      "id": "step-4",
+      "skill": "roster-ship",
+      "inputs": ["briefs/docs-tests-ci-review.json", "briefs/docs-tests-ci-qa.md"],
+      "outputs": [],
+      "hook": false
+    }
+  ],
+  "quality_gates": {
+    "build": "opam exec -- dune build",
+    "test": "opam exec -- dune test",
+    "lint": ""
+  }
+}

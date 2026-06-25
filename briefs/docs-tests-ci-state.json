@@ -1,0 +1,13 @@
+{
+  "task": "docs-tests-ci",
+  "mode": "full",
+  "current_phase": "ship",
+  "events": [
+    { "phase": "intake", "outcome": "VALIDATED", "at": "2026-06-25T00:00:00Z", "by": "roster-intake" },
+    { "phase": "plan", "outcome": "COMPLETED", "at": "2026-06-25T00:00:00Z", "by": "roster-plan" },
+    { "phase": "implement", "outcome": "COMPLETED", "at": "2026-06-25T00:00:00Z", "by": "roster-implement" },
+    { "phase": "review", "outcome": "GO", "at": "2026-06-25T06:00:00Z", "by": "roster-review" },
+    { "phase": "qa", "outcome": "GO", "at": "2026-06-25T07:00:00Z", "by": "roster-qa" },
+    { "phase": "ship", "outcome": "COMPLETED", "at": "2026-06-25T09:30:00Z", "by": "roster-ship" }
+  ]
+}
