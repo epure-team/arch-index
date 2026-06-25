@@ -50,7 +50,7 @@ jobs:
           - os: ubuntu-latest
             suffix: linux-x86_64
             profile: static
-            extra_setup: sudo apt-get install -y libsqlite3-dev
+            extra_setup: sudo apt-get install -y libsqlite3-dev libgmp-dev zlib1g-dev
           - os: macos-latest
             suffix: macos-arm64
             profile: release
