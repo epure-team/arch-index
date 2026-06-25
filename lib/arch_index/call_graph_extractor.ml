@@ -48,11 +48,11 @@ let prepare_call_hierarchy client ~project_dir (row : Lsp_extractor.fn_row) =
       [
         ("textDocument", `Assoc [("uri", `String uri)]);
         ( "position",
-          `Assoc [("line", `Int row.line_start); ("character", `Int 0)] );
+          `Assoc [("line", `Int row.line_start); ("character", `Int row.name_char)] );
       ]
   in
   match
-    Lsp_client.request client ~method_:"callHierarchy/prepare" ~params ()
+    Lsp_client.request client ~method_:"textDocument/prepareCallHierarchy" ~params ()
   with
   | Error _ -> []
   | Ok `Null -> []
@@ -146,15 +146,95 @@ let outgoing_calls client ~project_dir (item : Lsp_types.call_hierarchy_item) =
         lst
   | Ok _ -> []
 
+(* -------------------------------------------------------------------------- *)
+(* CMT-based call extraction (fallback when LSP call hierarchy unavailable)  *)
+(* -------------------------------------------------------------------------- *)
+
+(** [extract_calls_from_cmts ~project_dir fn_rows] reads OCaml CMT files from
+    [_build/default/] and extracts call edges by walking the typed AST.
+    This is the fallback path for LSP servers (like ocamllsp ≤1.23) that do
+    not yet implement callHierarchy. *)
+let extract_calls_from_cmts ~project_dir fn_rows =
+  let build_dir = Filename.concat project_dir "_build/default" in
+  if not (Sys.file_exists build_dir) then []
+  else begin
+    (* name -> file_path index for resolving callee files *)
+    let name_to_file : (string, string) Hashtbl.t = Hashtbl.create 512 in
+    List.iter
+      (fun (r : Lsp_extractor.fn_row) ->
+        Hashtbl.replace name_to_file r.name r.file_path)
+      fn_rows ;
+    let cmt_files = Arch_index_cmt.find_cmt_files build_dir in
+    let cmt_only =
+      List.filter
+        (fun p -> not (Filename.check_suffix p ".cmti"))
+        cmt_files
+    in
+    List.concat_map
+      (fun cmt_path ->
+        match Cmt_format.read cmt_path with
+        | _, None -> []
+        | _, Some info -> (
+            match info.Cmt_format.cmt_annots with
+            | Cmt_format.Implementation structure -> (
+                match
+                  Arch_index_support.source_path_of_cmt ~project_root:project_dir info
+                with
+                | None -> []
+                | Some abs_src ->
+                    let rel_src = relative_path ~project_dir abs_src in
+                    let pending = ref [] in
+                    List.iter
+                      (fun (item : Typedtree.structure_item) ->
+                        match item.str_desc with
+                        | Typedtree.Tstr_value (_, vbs) ->
+                            List.iter
+                              (fun (vb : Typedtree.value_binding) ->
+                                match vb.vb_pat.pat_desc with
+                                | Typedtree.Tpat_var (id, _, _) ->
+                                    let caller_name = Ident.name id in
+                                    let calls =
+                                      Arch_index_cmt.collect_calls_from_expr
+                                        ~src_path:rel_src
+                                        ~caller_module:rel_src
+                                        ~caller_name
+                                        vb.vb_expr
+                                    in
+                                    pending := calls @ !pending
+                                | _ -> ())
+                              vbs
+                        | _ -> ())
+                      structure.Typedtree.str_items ;
+                    List.map
+                      (fun (pc : Arch_index_cmt.pending_call) ->
+                        let callee_file =
+                          Hashtbl.find_opt name_to_file pc.callee_name
+                        in
+                        {
+                          caller_name = pc.caller_name;
+                          caller_file = rel_src;
+                          callee_name = pc.callee_name;
+                          callee_file;
+                          call_site = pc.call_site;
+                        })
+                      !pending)
+            | _ -> []))
+      cmt_only
+  end
+
 let extract_calls client ~project_dir fn_rows =
-  (* Only process exported or documented functions to bound request count *)
+  (* Try LSP call hierarchy first; fall back to CMT if it yields nothing. *)
   let candidates =
     List.filter
       (fun (row : Lsp_extractor.fn_row) -> row.exported || row.summary <> None)
       fn_rows
   in
-  List.concat_map
-    (fun row ->
-      let items = prepare_call_hierarchy client ~project_dir row in
-      List.concat_map (outgoing_calls client ~project_dir) items)
-    candidates
+  let lsp_calls =
+    List.concat_map
+      (fun row ->
+        let items = prepare_call_hierarchy client ~project_dir row in
+        List.concat_map (outgoing_calls client ~project_dir) items)
+      candidates
+  in
+  if lsp_calls <> [] then lsp_calls
+  else extract_calls_from_cmts ~project_dir fn_rows

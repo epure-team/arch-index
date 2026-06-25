@@ -12,6 +12,7 @@ type fn_row = {
   file_path : string;
   line_start : int;
   line_end : int;
+  name_char : int;  (** character offset of the name token on line_start *)
   exported : bool;
   signature : string option;
   summary : string option;
@@ -70,6 +71,7 @@ let extract_from_workspace_symbol client ~project_dir =
                     file_path;
                     line_start;
                     line_end;
+                    name_char = sym.location.range.start.character;
                     exported = is_exported sym.name;
                     signature = None;
                     summary = None;
@@ -93,6 +95,7 @@ let rec flatten_document_symbols ~file_path = function
               file_path;
               line_start = sym.range.start.line;
               line_end = sym.range.end_.line;
+              name_char = sym.selection_range.start.character;
               exported = is_exported sym.name;
               signature = None;
               summary = None;
@@ -183,6 +186,7 @@ let extract_from_document_symbols client ~project_dir ~file_uri =
                       file_path;
                       line_start = sym.location.range.start.line;
                       line_end = sym.location.range.end_.line;
+                      name_char = sym.location.range.start.character;
                       exported = is_exported sym.name;
                       signature = None;
                       summary = None;
