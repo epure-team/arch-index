@@ -1,0 +1,17 @@
+(library
+ (name arch_index)
+ (libraries
+  arch_io
+  jsonrpc_client
+  compiler-libs.common
+  sqlite3
+  unix
+  ppxlib
+  eio
+  eio.unix
+  yojson)
+ (private_modules arch_index_db arch_index_cmt)
+ (preprocessor_deps
+  (file ts_shim.js))
+ (preprocess
+  (pps ppx_blob ppx_deriving_yojson)))

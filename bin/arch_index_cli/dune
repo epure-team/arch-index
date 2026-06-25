@@ -1,0 +1,4 @@
+(executable
+ (name arch_index_cli)
+ (public_name arch_index_cli)
+ (libraries arch_index eio_posix cmdliner))

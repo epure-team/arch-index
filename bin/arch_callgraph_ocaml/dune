@@ -1,0 +1,4 @@
+(executable
+ (name arch_callgraph_ocaml)
+ (public_name arch_callgraph_ocaml)
+ (libraries arch_index eio_posix cmdliner))

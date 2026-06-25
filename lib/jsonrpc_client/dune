@@ -1,0 +1,4 @@
+(library
+ (name jsonrpc_client)
+ (wrapped false)
+ (libraries yojson cohttp-eio eio eio_posix uri tls tls-eio ca-certs mirage-crypto-rng.unix))
