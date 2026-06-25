@@ -182,3 +182,94 @@ let insert_type_usage db stmt_usage ~function_id ~type_id ~type_name ~usage_role
   | Some p -> bind_int stmt_usage 5 p
   | None -> ignore (Sqlite3.bind stmt_usage 5 Sqlite3.Data.NULL)) ;
   exec_stmt db stmt_usage
+
+(* -------------------------------------------------------------------------- *)
+(* Inline tests — happy paths only (exec_exn calls exit 1 on errors;         *)
+(* error paths cannot be tested without process-level isolation)              *)
+(* -------------------------------------------------------------------------- *)
+
+(* Open an in-memory DB with a scratch table and run [f] against it. *)
+let with_mem_db f =
+  let db = Sqlite3.db_open ":memory:" in
+  ignore
+    (Sqlite3.exec db
+       "CREATE TABLE t (a TEXT, b INTEGER, c INTEGER, d TEXT)") ;
+  let result = f db in
+  ignore (Sqlite3.db_close db) ;
+  result
+
+let column_text stmt col =
+  match Sqlite3.column stmt col with
+  | Sqlite3.Data.TEXT v -> Some v
+  | _ -> None
+
+let column_int64 stmt col =
+  match Sqlite3.column stmt col with
+  | Sqlite3.Data.INT v -> Some v
+  | _ -> None
+
+let%test "bind_text: stores and reads back" =
+  with_mem_db (fun db ->
+      let ins = Sqlite3.prepare db "INSERT INTO t (a) VALUES (?)" in
+      bind_text ins 1 "hello" ;
+      ignore (Sqlite3.step ins) ;
+      let sel = Sqlite3.prepare db "SELECT a FROM t" in
+      ignore (Sqlite3.step sel) ;
+      column_text sel 0 = Some "hello")
+
+let%test "bind_int: stores and reads back as INT" =
+  with_mem_db (fun db ->
+      let ins = Sqlite3.prepare db "INSERT INTO t (b) VALUES (?)" in
+      bind_int ins 1 42 ;
+      ignore (Sqlite3.step ins) ;
+      let sel = Sqlite3.prepare db "SELECT b FROM t" in
+      ignore (Sqlite3.step sel) ;
+      column_int64 sel 0 = Some 42L)
+
+let%test "bind_bool: true → 1" =
+  with_mem_db (fun db ->
+      let ins = Sqlite3.prepare db "INSERT INTO t (c) VALUES (?)" in
+      bind_bool ins 1 true ;
+      ignore (Sqlite3.step ins) ;
+      let sel = Sqlite3.prepare db "SELECT c FROM t" in
+      ignore (Sqlite3.step sel) ;
+      column_int64 sel 0 = Some 1L)
+
+let%test "bind_bool: false → 0" =
+  with_mem_db (fun db ->
+      let ins = Sqlite3.prepare db "INSERT INTO t (c) VALUES (?)" in
+      bind_bool ins 1 false ;
+      ignore (Sqlite3.step ins) ;
+      let sel = Sqlite3.prepare db "SELECT c FROM t" in
+      ignore (Sqlite3.step sel) ;
+      column_int64 sel 0 = Some 0L)
+
+let%test "bind_text_opt: Some → text" =
+  with_mem_db (fun db ->
+      let ins = Sqlite3.prepare db "INSERT INTO t (a) VALUES (?)" in
+      bind_text_opt ins 1 (Some "world") ;
+      ignore (Sqlite3.step ins) ;
+      let sel = Sqlite3.prepare db "SELECT a FROM t" in
+      ignore (Sqlite3.step sel) ;
+      column_text sel 0 = Some "world")
+
+let%test "bind_text_opt: None → NULL" =
+  with_mem_db (fun db ->
+      let ins = Sqlite3.prepare db "INSERT INTO t (a) VALUES (?)" in
+      bind_text_opt ins 1 None ;
+      ignore (Sqlite3.step ins) ;
+      let sel = Sqlite3.prepare db "SELECT a FROM t" in
+      ignore (Sqlite3.step sel) ;
+      Sqlite3.column sel 0 = Sqlite3.Data.NULL)
+
+let%test "last_insert_rowid: increments" =
+  with_mem_db (fun db ->
+      let ins = Sqlite3.prepare db "INSERT INTO t (a) VALUES (?)" in
+      bind_text ins 1 "r1" ;
+      ignore (Sqlite3.step ins) ;
+      ignore (Sqlite3.reset ins) ;
+      let r1 = last_insert_rowid db in
+      bind_text ins 1 "r2" ;
+      ignore (Sqlite3.step ins) ;
+      let r2 = last_insert_rowid db in
+      r2 = r1 + 1)

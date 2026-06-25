@@ -305,3 +305,63 @@ let parse doc_string =
   in
 
   {sections; score; warnings = List.rev !warnings}
+
+(* -------------------------------------------------------------------------- *)
+(* Inline tests — internal helpers                                            *)
+(* -------------------------------------------------------------------------- *)
+
+let%test "make_body: empty → Absent" = make_body "" = Absent
+
+let%test "make_body: whitespace → Absent" = make_body "  \n  " = Absent
+
+let%test "make_body: (none) → Present_none" = make_body "(none)" = Present_none
+
+let%test "make_body: real text → Present" =
+  make_body "  input must be valid  " = Present "input must be valid"
+
+let%test "find_substring: found" =
+  find_substring "hello world" "world" 0 = 6
+
+let%test "find_substring: not found → -1" =
+  find_substring "hello" "xyz" 0 = -1
+
+let%test "find_substring: empty needle → start" =
+  find_substring "hello" "" 3 = 3
+
+let%test "split_on_em_dash: splits correctly" =
+  let em = em_dash in
+  match split_on_em_dash ("Foo" ^ em ^ " reason text") with
+  | Some (before, after) ->
+      String.trim before = "Foo" && String.trim after = "reason text"
+  | None -> false
+
+let%test "split_on_em_dash: absent → None" =
+  split_on_em_dash "no em dash here" = None
+
+let%test "parse_violator_entries: single entry" =
+  let em = em_dash in
+  let entries = parse_violator_entries ("Mod.f" ^ em ^ " breaks invariant") in
+  match entries with
+  | [{qualified_name; reason}] ->
+      qualified_name = "Mod.f" && reason = "breaks invariant"
+  | _ -> false
+
+let%test "parse_violator_entries: (none) line → empty" =
+  parse_violator_entries "(none)" = []
+
+let%test "find_tag_positions: finds {pre} and {post}" =
+  let positions = find_tag_positions "{pre}\ninput\n{post}\noutput" in
+  let tags = List.map (fun (_, _, t) -> t) positions in
+  tags = ["pre"; "post"]
+
+let%test "find_tag_positions: returns all {tag} patterns including unknown ones" =
+  let positions = find_tag_positions "{unknown}\nfoo\n{pre}\nbar" in
+  let tags = List.map (fun (_, _, t) -> t) positions in
+  List.mem "pre" tags && List.mem "unknown" tags
+
+let%test "section_present: Absent → false" = not (section_present Absent)
+
+let%test "section_present: Present_none → true" =
+  section_present Present_none
+
+let%test "section_present: Present → true" = section_present (Present "x")
