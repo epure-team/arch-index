@@ -44,7 +44,18 @@ jobs:
   release:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: build
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            suffix: linux-x86_64
+            profile: static
+            extra_setup: sudo apt-get install -y libsqlite3-dev
+          - os: macos-latest
+            suffix: macos-arm64
+            profile: release
+            extra_setup: ""
+    runs-on: ${{ matrix.os }}
     permissions:
       contents: write
     steps:
@@ -52,17 +63,25 @@ jobs:
       - uses: ocaml/setup-ocaml@v3
         with:
           ocaml-compiler: '5.3'
+      - name: Platform setup
+        if: matrix.extra_setup != ''
+        run: ${{ matrix.extra_setup }}
       - name: Install deps and build
         run: |
           opam install --deps-only --yes .
-          opam exec -- dune build
+          opam exec -- dune build --profile=${{ matrix.profile }}
       - name: Package binaries
         run: |
           mkdir -p dist
-          cp _build/default/bin/arch_index_cli/arch_index_cli.exe dist/arch_index_cli 2>/dev/null || \
-          find _build -name 'arch_index_cli.exe' | head -1 | xargs -I{} cp {} dist/arch_index_cli
+          for bin in arch_index_cli arch_serve arch_callgraph_ocaml; do
+            src=$(find _build -name "${bin}.exe" | head -1)
+            if [ -n "$src" ]; then
+              cp "$src" "dist/${bin}-${{ matrix.suffix }}"
+              strip "dist/${bin}-${{ matrix.suffix }}" || true
+            fi
+          done
           ls -la dist/
-      - name: Create release
+      - name: Upload to release
         uses: softprops/action-gh-release@v2
         with:
           files: dist/*
