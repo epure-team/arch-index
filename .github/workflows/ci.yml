@@ -14,13 +14,32 @@ jobs:
       - uses: actions/checkout@v4
       - uses: ocaml/setup-ocaml@v3
         with:
-          ocaml-compiler: '5.2'
+          ocaml-compiler: '5.3'
       - name: Install deps
         run: opam install --deps-only --yes .
       - name: Build
         run: opam exec -- dune build
-      - name: Test
-        run: opam exec -- dune test || true
+      - name: Unit and integration tests
+        run: opam exec -- dune test
+      - name: Shell integration tests
+        run: |
+          chmod +x selftest-contract.sh selftest-load.sh
+          ./selftest-contract.sh
+          ./selftest-load.sh
+      - name: Self-index smoke test
+        run: |
+          BIN="./_build/default/bin/arch_callgraph_ocaml/arch_callgraph_ocaml.exe"
+          opam exec -- "$BIN" \
+            --build-dir=_build/default/lib/arch_index \
+            --db-path=/tmp/self.db \
+            --schema-path=architecture-schema.sql
+          sqlite3 /tmp/self.db \
+            "SELECT 'modules: ' || count(*) FROM modules; \
+             SELECT 'functions: ' || count(*) FROM functions; \
+             SELECT 'calls: ' || count(*) FROM calls;" \
+            > /tmp/self-stats.txt
+          diff test/fixtures/self-index-stats.txt /tmp/self-stats.txt \
+            || { echo "Golden file mismatch — update: see docs/adr/001-self-index-golden.md"; exit 1; }
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
@@ -32,7 +51,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: ocaml/setup-ocaml@v3
         with:
-          ocaml-compiler: '5.2'
+          ocaml-compiler: '5.3'
       - name: Install deps and build
         run: |
           opam install --deps-only --yes .
@@ -40,9 +59,8 @@ jobs:
       - name: Package binaries
         run: |
           mkdir -p dist
-          cp _build/default/bin/arch_index_cli/main.exe dist/arch_index_cli 2>/dev/null || \
-          cp $(find _build -name 'arch_index_cli.exe' -o -name 'main.exe' | head -1) dist/arch_index_cli 2>/dev/null || \
-          find _build -name '*.exe' -exec cp {} dist/ \;
+          cp _build/default/bin/arch_index_cli/arch_index_cli.exe dist/arch_index_cli 2>/dev/null || \
+          find _build -name 'arch_index_cli.exe' | head -1 | xargs -I{} cp {} dist/arch_index_cli
           ls -la dist/
       - name: Create release
         uses: softprops/action-gh-release@v2
