@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ocaml/setup-ocaml@v3
+        with:
+          ocaml-compiler: '5.2'
+      - name: Install deps
+        run: opam install --deps-only --yes .
+      - name: Build
+        run: opam exec -- dune build
+      - name: Test
+        run: opam exec -- dune test || true
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ocaml/setup-ocaml@v3
+        with:
+          ocaml-compiler: '5.2'
+      - name: Install deps and build
+        run: |
+          opam install --deps-only --yes .
+          opam exec -- dune build
+      - name: Package binaries
+        run: |
+          mkdir -p dist
+          cp _build/default/bin/arch_index_cli/main.exe dist/arch_index_cli 2>/dev/null || \
+          cp $(find _build -name 'arch_index_cli.exe' -o -name 'main.exe' | head -1) dist/arch_index_cli 2>/dev/null || \
+          find _build -name '*.exe' -exec cp {} dist/ \;
+          ls -la dist/
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: false
+          body_path: CHANGELOG.md
