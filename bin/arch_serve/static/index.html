@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>arch-serve</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="app">
+  <header class="app__header">
+    <span class="app__logo">arch-serve</span>
+    <input id="search" class="search" type="search" placeholder="⌕ search function…" autocomplete="off">
+    <div id="search-results" class="search-results" hidden></div>
+    <nav class="view-toggle">
+      <button id="btn-neighborhood" class="btn btn--active" title="Neighborhood view (n)">Neighborhood</button>
+      <button id="btn-module" class="btn" title="Module view (m)">Module</button>
+    </nav>
+    <div id="depth-controls" class="depth-controls">
+      <span class="depth-label">depth</span>
+      <button class="depth-btn" data-depth="1" title="Depth 1 (1)">1</button>
+      <button class="depth-btn depth-btn--active" data-depth="2" title="Depth 2 (2)">2</button>
+      <button class="depth-btn" data-depth="3" title="Depth 3 (3)">3</button>
+    </div>
+    <select id="module-view-select" class="filter-select module-view-select" hidden>
+      <option value="">select module…</option>
+    </select>
+    <button id="fit-btn" class="btn" title="Fit to view (f)">⊹ fit</button>
+  </header>
+  <div class="app__body">
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar__filters">
+        <select id="module-filter" class="filter-select"><option value="">all modules</option></select>
+        <label class="filter-check"><input type="checkbox" id="exposed-filter"> exposed only</label>
+        <div class="filter-score">
+          score ≥ <input type="range" id="score-filter" min="0" max="75" value="0">
+          <span id="score-value">0</span>
+        </div>
+      </div>
+      <div class="sidebar__header">FUNCTIONS (<span id="fn-count">…</span>)</div>
+      <div class="ftable" id="ftable"></div>
+    </aside>
+    <main class="stage" id="stage">
+      <svg id="graph-svg" width="100%" height="100%"></svg>
+      <div id="hint-card" class="hint-card">
+        <div class="hint-card__title">arch-serve</div>
+        <div class="hint-card__body">Click a function in the sidebar to explore its call graph.</div>
+        <div id="hint-card-links" class="hint-card__links"></div>
+      </div>
+      <div id="legend" class="legend">
+        <div class="legend__row" data-kind="MUST">━━▶ <strong>MUST</strong> definite call</div>
+        <div class="legend__row" data-kind="MAY_ENUMERATED">┅┅▶ <strong>MAY</strong> possible call</div>
+        <div class="legend__row" data-kind="MAY_TOP">⌁⌁▶ <strong>⊤</strong> unknown target</div>
+      </div>
+    </main>
+    <aside class="panel" id="panel" hidden>
+      <button class="panel__close" id="panel-close" title="Close panel (Esc)">×</button>
+      <div id="panel-content"></div>
+    </aside>
+  </div>
+  <footer class="statusbar" id="statusbar">loading…</footer>
+  <div id="toast-container" class="toast-container"></div>
+  <div id="shortcuts-overlay" class="shortcuts-overlay" hidden>
+    <div class="shortcuts-box">
+      <div class="shortcuts-title">Keyboard shortcuts</div>
+      <div class="shortcuts-grid">
+        <kbd>/</kbd><span>focus search</span>
+        <kbd>j</kbd><kbd>k</kbd><span>navigate table</span>
+        <kbd>Enter</kbd><span>focus selected</span>
+        <kbd>1</kbd><kbd>2</kbd><kbd>3</kbd><span>depth</span>
+        <kbd>f</kbd><span>fit to view</span>
+        <kbd>[</kbd><span>toggle sidebar</span>
+        <kbd>n</kbd><span>neighborhood view</span>
+        <kbd>m</kbd><span>module view</span>
+        <kbd>r</kbd><span>start reaches query</span>
+        <kbd>Esc</kbd><span>close panel / clear path</span>
+        <kbd>?</kbd><span>this overlay</span>
+      </div>
+      <button class="btn" onclick="document.getElementById('shortcuts-overlay').hidden=true">close</button>
+    </div>
+  </div>
+  <script src="/static/d3.min.js"></script>
+  <script src="/static/app.js"></script>
+</body>
+</html>

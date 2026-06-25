@@ -1,0 +1,11 @@
+(executable
+ (name arch_serve)
+ (public_name arch_serve)
+ (libraries cohttp-eio eio_posix cmdliner sqlite3 yojson uri)
+ (preprocessor_deps
+  (file static/index.html)
+  (file static/app.js)
+  (file static/style.css)
+  (file static/d3.min.js))
+ (preprocess
+  (pps ppx_blob)))

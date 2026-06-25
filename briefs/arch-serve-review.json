@@ -1,0 +1,59 @@
+{
+  "task": "arch-serve",
+  "date": "2026-06-25T00:00:00Z",
+  "status": "GO",
+  "mode": "full",
+  "auto_fixes_applied": [
+    {
+      "path": "bin/arch_serve/arch_serve.ml",
+      "line": 247,
+      "category": "correctness",
+      "description": "Wrapped `int_of_string mid` with `try ... with _ -> -1` to prevent unhandled Failure exception on malformed module_id query param (e.g. ?module_id=abc). Pattern matches existing protection at line 303."
+    },
+    {
+      "path": "bin/arch_serve/static/app.js",
+      "line": 802,
+      "category": "style",
+      "description": "Fixed template literal: `${modPath}.replace(/^.*\\//, '')` → `${modPath.replace(/^.*\\//, '')}` so `.replace()` is inside the interpolation and actually strips the path prefix. Previously rendered the method call as literal text."
+    }
+  ],
+  "findings": [
+    {
+      "severity": "MEDIUM",
+      "confidence": 5,
+      "path": "bin/arch_serve/static/app.js",
+      "line": 509,
+      "category": "correctness",
+      "summary": "S.reciprocalSet is never set — reciprocal curved arcs silently broken",
+      "evidence": "app.js:389 — `const reciprocalSet = new Set()` is a local variable in renderNeighborhood. app.js:437 — passed to drawGraph but drawGraph (line 445) declares it as a parameter that the TS LSP flags as 'declared but never read'. app.js:509 — `ticked()` reads `S.reciprocalSet` which is never written to `S`, so it is always `undefined`. Result: `isReciprocal` is always false and all edges render as straight lines regardless of reciprocal pairs.",
+      "fix": "Add `S.reciprocalSet = reciprocalSet;` in renderNeighborhood immediately before the `drawGraph(...)` call (line 437). Remove the unused `reciprocalSet` parameter from `drawGraph` signature and its callers, or keep it for static initial draw (currently no-op). The `ticked()` function already reads `S.reciprocalSet` — storing it to state is the minimal fix.",
+      "fingerprint": "app.js:509:correctness",
+      "specialist": "reviewer",
+      "status": "RESOLVED"
+    }
+  ],
+  "summary": {
+    "critical": 0,
+    "high": 0,
+    "medium": 1,
+    "low": 0,
+    "auto_fixed": 2
+  },
+  "no_go_reason": {
+    "type": null,
+    "failed_acs": []
+  },
+  "escalation_needed": false,
+  "escalation_reason": null,
+  "risks_checked": {
+    "R1_boolean_serialization": "PASS — all boolean fields (exposed, has_mli, has_pre, has_post, has_violators, truncated) use json_bool(col_bool stmt N) → `Bool. arch_serve.ml:28-31 col_bool returns n<>0L; arch_serve.ml:10 json_bool = `Bool b.",
+    "R2_sigint_shutdown": "PASS — DB validated at lines 367-381 before Switch.run (389); signal handler at 383-388 calls Promise.resolve; Server.run at 396 with stop:stop_p. Confirmed exit 0 by smoke test.",
+    "R3_bfs_bidirectionality": "PASS — neighborhood_bfs queries both outgoing (caller_id=?) lines 99-116 and incoming (callee_id=?) lines 118-135. Single edges_seen hashtable deduplicates.",
+    "R4_db_before_port": "PASS — DB open/validate at 367-381 is before Eio.Switch.run (389) which is before Eio.Net.listen (391).",
+    "R5_no_sim_restart": "PASS — app.js:420-431 `if (!S.sim)` creates simulation once; lines 433-435 reuse with .nodes()/.links()/.alpha(0.3).restart().",
+    "R6_kind_null_as_must": "PASS — reaches_bfs at arch_serve.ml:197-200 uses `AND (kind = 'MUST' OR kind IS NULL)`.",
+    "R7_ppx_blob_completeness": "PASS — dune preprocessor_deps lists all 4 files: index.html, app.js, style.css, d3.min.js.",
+    "R8_no_must_path_copy": "PASS — app.js:744 `cannot definitely reach ... through guaranteed calls` — does not say 'no path exists'.",
+    "R9_url_encoding": "PASS — app.js:121 navigate() uses encodeURIComponent; app.js:108 hash router decodes; app.js:361 neighborhood API call encodes; app.js:736 reaches API call encodes both from/to."
+  }
+}
