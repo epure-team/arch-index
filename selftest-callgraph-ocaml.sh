@@ -1,34 +1,35 @@
 #!/usr/bin/env bash
-# selftest-callgraph-ocaml.sh — PR-D end-to-end: OCaml Tier-1 CMT producer → arch-load → arch-query.
+# selftest-callgraph-ocaml.sh — end-to-end: OCaml Tier-1 CMT producer → arch-query.
 # Builds a controlled OCaml module (3 functions, MUST/MAY_TOP/UNREACHABLE patterns),
-# compiles it to .cmt via dune, runs arch_callgraph_ocaml, pipes to arch-load, and
-# asserts all three soundness verdicts (REACHABLE/UNREACHABLE/UNKNOWN).
+# compiles it to .cmt via dune, runs arch_callgraph_ocaml (writes to SQLite directly),
+# and asserts all three soundness verdicts (REACHABLE/UNREACHABLE/UNKNOWN).
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
-LOAD="$HERE/arch-load"; Q="$HERE/arch-query"
-EPURE_SRC="${EPURE_SRC:-$HOME/dev/epure}"
+Q="$HERE/arch-query"
 fails=0
 note()  { echo "FAIL: $*" >&2; fails=$((fails+1)); }
 say()   { "$Q" "$@" 2>&1; }
 command -v opam    >/dev/null 2>&1 || { echo "selftest-callgraph-ocaml: opam required" >&2; exit 2; }
-command -v python3 >/dev/null 2>&1 || { echo "selftest-callgraph-ocaml: python3 required" >&2; exit 2; }
 command -v sqlite3 >/dev/null 2>&1 || { echo "selftest-callgraph-ocaml: sqlite3 required" >&2; exit 2; }
-[ -f "$EPURE_SRC/tools/arch_callgraph_ocaml.ml" ] || \
-  { echo "selftest-callgraph-ocaml: epure source not found at $EPURE_SRC (set EPURE_SRC)" >&2; exit 2; }
+
+# Use locally built binary (standalone — no EPURE_SRC dependency)
+BIN_INSTALL="$HERE/_build/install/default/bin/arch_callgraph_ocaml"
+BIN_DEFAULT="$HERE/_build/default/bin/arch_callgraph_ocaml/arch_callgraph_ocaml.exe"
+if [ -x "$BIN_INSTALL" ]; then
+  BIN="$BIN_INSTALL"
+elif [ -x "$BIN_DEFAULT" ]; then
+  BIN="$BIN_DEFAULT"
+else
+  echo "selftest-callgraph-ocaml: arch_callgraph_ocaml not built — run ./build.sh first" >&2
+  exit 2
+fi
 
 TMPDIR_ROOT="$(mktemp -d)"
 trap 'rm -rf "$TMPDIR_ROOT"' EXIT
 
-# ---------- build the producer binary ----------
-BIN="$TMPDIR_ROOT/arch_callgraph_ocaml"
-( cd "$EPURE_SRC" && opam exec -- dune build tools/arch_callgraph_ocaml.exe 2>/tmp/ocamlbuild-err.txt \
-  && cp _build/default/tools/arch_callgraph_ocaml.exe "$BIN" ) \
-  || { cat /tmp/ocamlbuild-err.txt >&2; echo "selftest-callgraph-ocaml: failed to build producer" >&2; exit 2; }
-[ -x "$BIN" ] || { echo "selftest-callgraph-ocaml: producer binary not found" >&2; exit 2; }
-
 # ---------- controlled OCaml module ----------
 # Functions:
-#   direct / add / mul: pure arithmetic, no higher-order → all calls MUST
+#   add / mul: pure arithmetic, no higher-order → all calls MUST
 #   clean_entry: calls only locally-defined top-level functions → no MAY_TOP in its closure
 #     → island is UNREACHABLE from clean_entry
 #   apply_fn: takes a function PARAMETER f and applies it → f is a Pident not in local_fns → MAY_TOP
@@ -74,20 +75,21 @@ OCAML
 CMT_DIR="$MOD/_build/default"
 [ -d "$CMT_DIR" ] || { cat /tmp/dune-err.txt >&2; note "dune build dir not found"; exit 1; }
 
-# ---------- produce + load ----------
+# ---------- run arch_callgraph_ocaml (writes directly to SQLite DB) ----------
 DB="$TMPDIR_ROOT/test.db"
-"$BIN" "$CMT_DIR" 2>/tmp/ocaml-stderr.txt | "$LOAD" "$DB" 2>/tmp/load-stderr.txt
-load_rc=$?
-[ "$load_rc" -eq 0 ] || {
-  cat /tmp/ocaml-stderr.txt /tmp/load-stderr.txt >&2
-  note "pipeline failed (exit $load_rc)"
+SCHEMA="$HERE/architecture-schema.sql"
+"$BIN" --build-dir "$CMT_DIR" --db-path "$DB" --schema-path "$SCHEMA" 2>/tmp/ocaml-stderr.txt
+bin_rc=$?
+[ "$bin_rc" -eq 0 ] || {
+  cat /tmp/ocaml-stderr.txt >&2
+  note "arch_callgraph_ocaml failed (exit $bin_rc)"
 }
 [ -f "$DB" ] || { note "DB not produced"; exit 1; }
 
-sqlite3 "$DB" "SELECT value FROM comment_db_meta WHERE key='callgraph_contract';" \
-  | grep -q '^v1$' || note "DB missing callgraph_contract=v1"
+nfn=$(sqlite3 "$DB" "SELECT count(*) FROM functions;")
+[ "$nfn" -gt 0 ] || note "DB has 0 functions — producer emitted nothing"
 
-# ---------- discover function names (ModuleName = Testcg, so Testcg.fn) ----------
+# ---------- discover function names (ModuleName = Testcg) ----------
 fn_clean=$(sqlite3 "$DB"  "SELECT name FROM functions WHERE name LIKE '%clean_entry%' LIMIT 1;")
 fn_dirty=$(sqlite3 "$DB"  "SELECT name FROM functions WHERE name LIKE '%dirty_entry%' LIMIT 1;")
 fn_island=$(sqlite3 "$DB" "SELECT name FROM functions WHERE name LIKE '%island%' LIMIT 1;")
@@ -113,14 +115,14 @@ say "$DB" reaches "$fn_clean" "$fn_island" \
 # clean_entry closure: add/mul/direct_calc/clean_entry — no MAY_TOP → island UNREACHABLE
 say "$DB" unreachable "$fn_clean" "$fn_island" \
   | grep -q 'UNREACHABLE:' || note "unreachable $fn_clean $fn_island should be UNREACHABLE"
-# safety: must NOT be REACHABLE (use the exact positive verdict string, distinct from UNREACHABLE:)
+# safety: must NOT be REACHABLE (distinct from UNREACHABLE:)
 say "$DB" unreachable "$fn_clean" "$fn_island" \
   | grep -q 'REACHABLE (may-reach)' && note "unreachable $fn_clean $fn_island must NOT be REACHABLE"
 
 # dirty_entry → apply_fn (MUST) → *TOP* (MAY_TOP) → UNKNOWN for island
 say "$DB" unreachable "$fn_dirty" "$fn_island" \
   | grep -q 'UNKNOWN:' || note "unreachable $fn_dirty $fn_island should be UNKNOWN (apply_fn has MAY_TOP)"
-# safety: must NOT be UNREACHABLE (the exact token, not part of a longer string)
+# safety: must NOT be UNREACHABLE
 say "$DB" unreachable "$fn_dirty" "$fn_island" \
   | grep -q 'UNREACHABLE: no' && note "unreachable $fn_dirty $fn_island must NOT be UNREACHABLE (MAY_TOP reachable)"
 
@@ -142,9 +144,6 @@ echo "$esc_clean" | grep -qE 'no escaping|0 functions|^$' 2>/dev/null || \
 # ---------- edge-kind integrity ----------
 bad=$(sqlite3 "$DB" "SELECT count(*) FROM calls WHERE kind IS NULL OR kind NOT IN ('MUST','MAY_ENUMERATED','MAY_TOP');")
 [ "$bad" -eq 0 ] || note "DB has $bad edges with missing/invalid kind"
-
-nfn=$(sqlite3 "$DB" "SELECT count(*) FROM functions;")
-[ "$nfn" -gt 0 ] || note "DB has 0 functions — producer emitted nothing"
 
 if [ "$fails" -eq 0 ]; then
   echo "arch-index callgraph-ocaml selftest: PASS"
