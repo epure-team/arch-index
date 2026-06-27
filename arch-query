@@ -42,6 +42,19 @@
 #                                Functions unreachable from all roots over MUST∪MAY_ENUMERATED∪MAY_TOP.
 #                                Sound verdict when callgraph_contract is set; candidate-only otherwise.
 #                                Default roots: all exported functions.
+#
+# Capability Layer B — attack-surface attributes (Phase 2):
+# (requires capabilities-schema-migration.sql and arch-sidecar-load)
+#   capabilities-of <component>  list all actions in component with reachability_class, actor_role,
+#                                temporal_class, gating, value_touched, precondition.
+#                                <component> is a path substring match (case-insensitive).
+#   compose         <action>     forward 'sequence' and 'removes_guard' edges from <action>
+#                                (the composition frontier of that action).
+#   removes-guard   <guard>      all actions with gating matching <guard> and their
+#                                incoming 'removes_guard' attack edges.
+#   actor-paths     <value-kind> paths touching <value-kind> across ≥2 distinct actor roles.
+#   prune           <A> <B>      P13 pruning signal: check if component A and component B share
+#                                a 'shares_resource' attack edge.
 set -euo pipefail
 DB="${1:?usage: arch-query <db> <subcommand> [args]}"; shift
 CMD="${1:?subcommand required}"; shift || true
@@ -330,6 +343,126 @@ case "$CMD" in
          AND f.name NOT LIKE '%*TOP*%'
          AND f.name NOT IN (SELECT n FROM roots)
        ORDER BY $fp_expr, f.name;" ;;
+
+  # ── Capability Layer B: attack-surface attribute queries ──────────────────
+
+  capabilities-of)
+    # List all actions in <component> with Phase-2 capability attributes.
+    # Usage: arch-query <db> capabilities-of <component-path-substring>
+    cap_tbl=$(qraw "SELECT 1 FROM sqlite_master WHERE type='table' AND name='function_effects' LIMIT 1;")
+    [ -n "$cap_tbl" ] || {
+      echo "arch-query: capabilities-of requires the effects tables. Run the migration first." >&2; exit 3; }
+    rclass_col=$(qraw "SELECT 1 FROM pragma_table_info('function_effects') WHERE name='reachability_class' LIMIT 1;")
+    [ -n "$rclass_col" ] || {
+      echo "arch-query: capabilities-of requires Phase-2 columns. Run: sqlite3 <db> < capabilities-schema-migration.sql" >&2; exit 3; }
+    q "SELECT DISTINCT
+         fe.function_name,
+         COALESCE(fe.reachability_class,'?')  AS rclass,
+         COALESCE(fe.actor_role,'?')           AS actor_role,
+         COALESCE(fe.temporal_class,'?')       AS temporal_class,
+         COALESCE(fe.gating,'?')               AS gating,
+         COALESCE(fe.value_touched,'[]')       AS value_touched,
+         COALESCE(fe.precondition,'?')         AS precondition,
+         fe.soundness
+       FROM function_effects fe
+       WHERE lower(COALESCE(fe.file_path,'')) LIKE '%$(echo "$A" | tr '[:upper:]' '[:lower:]')%'
+          OR lower(fe.function_name) LIKE '%$(echo "$A" | tr '[:upper:]' '[:lower:]')%'
+       ORDER BY fe.file_path, fe.function_name;" ;;
+
+  compose)
+    # Forward composition frontier of <action>: sequence and removes_guard edges.
+    # Usage: arch-query <db> compose <action>
+    ae_tbl=$(qraw "SELECT 1 FROM sqlite_master WHERE type='table' AND name='attack_edges' LIMIT 1;")
+    [ -n "$ae_tbl" ] || {
+      echo "arch-query: compose requires the attack_edges table. Run: sqlite3 <db> < capabilities-schema-migration.sql" >&2; exit 3; }
+    q "SELECT ae.to_action, ae.edge_type, ae.evidence,
+              COALESCE(fe.reachability_class,'?') AS to_rclass,
+              COALESCE(fe.actor_role,'?') AS to_actor_role
+       FROM attack_edges ae
+       LEFT JOIN (
+         SELECT function_name, reachability_class, actor_role
+         FROM function_effects GROUP BY function_name
+       ) fe ON ae.to_action = fe.function_name
+       WHERE ae.from_action = '$A'
+         AND ae.edge_type IN ('sequence','removes_guard')
+       ORDER BY ae.edge_type, ae.to_action;" ;;
+
+  removes-guard)
+    # Actions with gating matching <guard> and their incoming removes_guard edges.
+    # Usage: arch-query <db> removes-guard <guard-pattern>
+    # <guard-pattern> is matched as a substring of the gating column.
+    ae_tbl2=$(qraw "SELECT 1 FROM sqlite_master WHERE type='table' AND name='attack_edges' LIMIT 1;")
+    rclass_col2=$(qraw "SELECT 1 FROM pragma_table_info('function_effects') WHERE name='gating' LIMIT 1;")
+    ( [ -n "$ae_tbl2" ] && [ -n "$rclass_col2" ] ) || {
+      echo "arch-query: removes-guard requires Phase-2 tables. Run the migration first." >&2; exit 3; }
+    q "SELECT fe.function_name AS gated_action,
+              fe.gating,
+              ae.from_action   AS unlocker,
+              ae.evidence
+       FROM function_effects fe
+       LEFT JOIN attack_edges ae
+         ON ae.to_action = fe.function_name AND ae.edge_type = 'removes_guard'
+       WHERE lower(COALESCE(fe.gating,'')) LIKE '%$(echo "$A" | tr '[:upper:]' '[:lower:]')%'
+       ORDER BY fe.function_name, ae.from_action;" ;;
+
+  actor-paths)
+    # Paths touching <value-kind> across ≥2 distinct actor roles.
+    # Usage: arch-query <db> actor-paths <value-kind>
+    # Returns pairs (fn_a, fn_b) where fn_a and fn_b both touch value-kind
+    # and have different actor_roles, linked by a call path.
+    rclass_col3=$(qraw "SELECT 1 FROM pragma_table_info('function_effects') WHERE name='actor_role' LIMIT 1;")
+    [ -n "$rclass_col3" ] || {
+      echo "arch-query: actor-paths requires Phase-2 columns. Run: sqlite3 <db> < capabilities-schema-migration.sql" >&2; exit 3; }
+    q "SELECT DISTINCT
+         a.function_name  AS action_a,
+         a.actor_role     AS actor_a,
+         b.function_name  AS action_b,
+         b.actor_role     AS actor_b,
+         a.value_touched  AS value_touched_a,
+         b.value_touched  AS value_touched_b
+       FROM function_effects a
+       JOIN function_effects b
+         ON a.actor_role IS NOT NULL
+        AND b.actor_role IS NOT NULL
+        AND a.actor_role != b.actor_role
+        AND a.function_name != b.function_name
+       WHERE (
+         a.value_kind = '$A' OR lower(COALESCE(a.value_touched,'')) LIKE '%\"kind\":\"$A\"%'
+       )
+       AND (
+         b.value_kind = '$A' OR lower(COALESCE(b.value_touched,'')) LIKE '%\"kind\":\"$A\"%'
+       )
+       ORDER BY a.function_name, b.function_name;" ;;
+
+  prune)
+    # P13 pruning signal: check if component A and component B share a resource.
+    # Usage: arch-query <db> prune <component-A> <component-B>
+    # Returns any 'shares_resource' edges between functions in A and functions in B.
+    ae_tbl3=$(qraw "SELECT 1 FROM sqlite_master WHERE type='table' AND name='attack_edges' LIMIT 1;")
+    [ -n "$ae_tbl3" ] || {
+      echo "arch-query: prune requires the attack_edges table. Run the migration first." >&2; exit 3; }
+    result=$(qraw "SELECT count(*) FROM attack_edges ae
+       JOIN function_effects fa ON ae.from_action = fa.function_name
+       JOIN function_effects fb ON ae.to_action = fb.function_name
+       WHERE ae.edge_type = 'shares_resource'
+         AND (lower(COALESCE(fa.file_path,'')) LIKE '%$(echo "$A" | tr '[:upper:]' '[:lower:]')%'
+              OR lower(fa.function_name) LIKE '%$(echo "$A" | tr '[:upper:]' '[:lower:]')%')
+         AND (lower(COALESCE(fb.file_path,'')) LIKE '%$(echo "$B" | tr '[:upper:]' '[:lower:]')%'
+              OR lower(fb.function_name) LIKE '%$(echo "$B" | tr '[:upper:]' '[:lower:]')%');")
+    if [ "${result:-0}" = "0" ]; then
+      echo "PRUNE: no shared resource found between '$A' and '$B' — safe to prune (P13 passes)"
+    else
+      echo "DO NOT PRUNE: $result shared_resource edge(s) between '$A' and '$B' — P13 signal"
+      q "SELECT ae.from_action, ae.to_action, ae.evidence
+         FROM attack_edges ae
+         JOIN function_effects fa ON ae.from_action = fa.function_name
+         JOIN function_effects fb ON ae.to_action = fb.function_name
+         WHERE ae.edge_type = 'shares_resource'
+           AND (lower(COALESCE(fa.file_path,'')) LIKE '%$(echo "$A" | tr '[:upper:]' '[:lower:]')%'
+                OR lower(fa.function_name) LIKE '%$(echo "$A" | tr '[:upper:]' '[:lower:]')%')
+           AND (lower(COALESCE(fb.file_path,'')) LIKE '%$(echo "$B" | tr '[:upper:]' '[:lower:]')%'
+                OR lower(fb.function_name) LIKE '%$(echo "$B" | tr '[:upper:]' '[:lower:]')%');"
+    fi ;;
 
   *) echo "arch-query: unknown subcommand '$CMD'" >&2; exit 2 ;;
 esac

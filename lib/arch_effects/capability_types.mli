@@ -1,0 +1,88 @@
+(** Shared types for Phase-2 capability attributes.
+
+    These types represent the Phase-2 attack-surface layer: each function/action
+    in the index can carry a capability record describing WHO calls it, WHEN it
+    runs, WHAT gates it, and WHAT protocol values it touches.
+
+    Static derivability
+    -------------------
+    Some attributes can be derived from source file paths or call patterns in the
+    CMT data; others require agent or human annotation (sidecar YAML).
+
+    Statically derivable:
+      - [reachability_class] — from file path suffix (validate.ml → Validate, etc.)
+      - [gating]             — from call-site patterns (check_*/assert_manager/Signature.check)
+
+    Require sidecar annotation:
+      - [actor_role]      — requires protocol semantics; not derivable from syntax
+      - [temporal_class]  — requires protocol state machine knowledge
+      - [precondition]    — requires invariant knowledge
+      - [value_touched]   — partially derivable (effects table) but semantic labelling needs sidecar
+
+    The sidecar YAML format is documented in docs/attack-surface-capability.md. *)
+
+(** What phase of block processing (or what subsystem) this function belongs to. *)
+type reachability_class =
+  | Validate       (** src/.../validate.ml — operation validation before apply *)
+  | Apply          (** src/.../apply.ml — state-mutating apply phase *)
+  | InternalOp     (** internal_operation, manager_operation, etc. *)
+  | Rpc            (** RPC handler (src/.../rpc*.ml) — external-facing *)
+  | ExternalOp     (** External operation type handler *)
+  | NodeLocal      (** Node-local infrastructure (mempool, p2p, storage layer) *)
+  | Init           (** Initialization / genesis *)
+  | Unknown        (** Could not be determined from file path *)
+
+val reachability_class_to_string : reachability_class -> string
+val reachability_class_of_string : string -> reachability_class option
+
+(** A single value-flow touch: which protocol value kind and which direction. *)
+type value_touch = {
+  vt_kind      : string;  (** balance | ticket | stake | supply *)
+  vt_direction : string;  (** debit | credit | mint | burn *)
+}
+
+(** Full capability record for one function/action.
+    NULL-tolerant: use [None] for attributes that cannot be statically derived.
+    The sidecar loader merges sidecar facts by overwriting [None] fields. *)
+type capability_record = {
+  cap_function_name   : string;
+      (** Must match the key in [function_effects.function_name]. *)
+  cap_file_path       : string option;
+  cap_reachability    : reachability_class option;
+      (** Statically derivable from file path. *)
+  cap_actor_role      : string option;
+      (** Comma-separated from: any | baker | delegate | staker | sequencer |
+          rollup_operator | denouncer | contract.  Needs sidecar. *)
+  cap_temporal_class  : string option;
+      (** Comma-separated tags: pre_cementation | between_unstake_and_finalize |
+          validate_time | apply_time | level_boundary | cycle_end | window_open.
+          Needs sidecar. *)
+  cap_gating          : string option;
+      (** Pattern: flag(foo) | auth(key) | cost(gas) | none.
+          Statically derivable from call patterns. *)
+  cap_value_touched   : value_touch list;
+      (** Protocol value flows.  Partially derivable (from effects table) but
+          semantic labelling requires sidecar. *)
+  cap_precondition    : string option;
+      (** Typed state predicate.  Needs sidecar. *)
+  cap_source          : string;
+      (** Who produced this record: 'static' | 'sidecar' | 'manual'. *)
+}
+
+(** An attack-graph edge between two actions. *)
+type attack_edge = {
+  ae_from     : string;
+  ae_to       : string;
+  ae_type     : edge_type;
+  ae_evidence : string option;
+  ae_source   : string;   (** 'static' | 'sidecar' | 'manual' *)
+}
+
+and edge_type =
+  | Sequence       (** action A is typically followed by action B *)
+  | RemovesGuard   (** action A removes a gate/lock that B requires *)
+  | SharesResource (** A and B share a mutable resource (P13 pruning) *)
+  | ActorDistinct  (** A and B are meaningful when performed by different actors *)
+
+val edge_type_to_string : edge_type -> string
+val edge_type_of_string : string -> edge_type option
