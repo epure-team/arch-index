@@ -214,6 +214,84 @@ let test_sidecar_missing_file () =
   check int "0 capabilities" 0 (List.length sc.CE.sc_capabilities);
   check bool "has error" true (sc.CE.sc_errors <> [])
 
+(* ── G4: value_touched parsing ───────────────────────────────────────────── *)
+
+(** A capability with inline-JSON value_touched must survive parsing.
+    On the pre-fix loader value_touched was hardcoded to [] and silently
+    dropped — this asserts it is now populated. *)
+let test_sidecar_parse_value_touched () =
+  let yaml = {|
+capabilities:
+  - fn: "Store.cement_commitment"
+    actor_role: ["rollup_operator"]
+    value_touched: [{"kind": "balance", "direction": "credit"}]
+  - fn: "Ops.execute_outbox_message"
+    actor_role: ["contract"]
+    value_touched: [{"kind": "stake", "direction": "burn"}, {"kind": "balance", "direction": "debit"}]
+|} in
+  let tmp = write_sidecar_file yaml in
+  Fun.protect ~finally:(fun () -> Sys.remove tmp) (fun () ->
+    let sc = CE.load_sidecar tmp in
+    let cement = List.find (fun c -> c.CT.cap_function_name = "Store.cement_commitment")
+      sc.CE.sc_capabilities in
+    check int "cement: 1 value_touch" 1 (List.length cement.CT.cap_value_touched);
+    let vt = List.hd cement.CT.cap_value_touched in
+    check string "cement vt kind" "balance" vt.CT.vt_kind;
+    check string "cement vt direction" "credit" vt.CT.vt_direction;
+    let outbox = List.find (fun c -> c.CT.cap_function_name = "Ops.execute_outbox_message")
+      sc.CE.sc_capabilities in
+    check int "outbox: 2 value_touches" 2 (List.length outbox.CT.cap_value_touched);
+    let kinds = List.map (fun v -> v.CT.vt_kind) outbox.CT.cap_value_touched in
+    check bool "outbox touches stake" true (List.mem "stake" kinds);
+    check bool "outbox touches balance" true (List.mem "balance" kinds))
+
+(* ── G3: inline comment stripping ────────────────────────────────────────── *)
+
+(** Inline `# ...` comments on value lines must not pollute the parsed value,
+    but a `#` inside a quoted string must be preserved. *)
+let test_sidecar_strip_inline_comments () =
+  let yaml = {|
+capabilities:
+  - fn: "Store.act"   # the action under test
+    actor_role: ["rollup_operator"]   # only the operator
+    gating: "auth(staker_deposit)"  # requires a deposit
+    precondition: "tag = '#1 candidate'"
+    value_touched: [{"kind": "stake", "direction": "debit"}]  # burns stake
+|} in
+  let tmp = write_sidecar_file yaml in
+  Fun.protect ~finally:(fun () -> Sys.remove tmp) (fun () ->
+    let sc = CE.load_sidecar tmp in
+    check int "1 capability" 1 (List.length sc.CE.sc_capabilities);
+    let c = List.hd sc.CE.sc_capabilities in
+    check string "fn has no comment" "Store.act" c.CT.cap_function_name;
+    check (option string) "actor_role clean" (Some "rollup_operator") c.CT.cap_actor_role;
+    check (option string) "gating clean" (Some "auth(staker_deposit)") c.CT.cap_gating;
+    (* the '#' inside the quoted precondition must survive *)
+    check (option string) "quoted # preserved"
+      (Some "tag = '#1 candidate'") c.CT.cap_precondition;
+    check int "value_touched parsed despite trailing comment"
+      1 (List.length c.CT.cap_value_touched))
+
+(* ── G2: from_path / to_path edge discriminators ─────────────────────────── *)
+
+let test_sidecar_parse_edge_paths () =
+  let yaml = {|
+attack_edges:
+  - from: "timeout"
+    from_path: "kernel/src/delayed_inbox.rs"
+    to: "deposit"
+    to_path: "kernel/src/apply.rs"
+    edge_type: "removes_guard"
+    evidence: "forced inclusion"
+|} in
+  let tmp = write_sidecar_file yaml in
+  Fun.protect ~finally:(fun () -> Sys.remove tmp) (fun () ->
+    let sc = CE.load_sidecar tmp in
+    check int "1 edge" 1 (List.length sc.CE.sc_edges);
+    let e = List.hd sc.CE.sc_edges in
+    check (option string) "from_path" (Some "kernel/src/delayed_inbox.rs") e.CT.ae_from_path;
+    check (option string) "to_path" (Some "kernel/src/apply.rs") e.CT.ae_to_path)
+
 (* ── capability_db: full round-trip ─────────────────────────────────────── *)
 
 let test_write_capabilities_roundtrip () =
@@ -251,17 +329,23 @@ let test_write_attack_edges_roundtrip () =
   Fun.protect ~finally:(fun () -> Sys.remove path) (fun () ->
     let edges = [
       { CT.ae_from     = "Validate.check_op";
+        ae_from_path   = None;
         ae_to          = "Apply.apply_transaction";
+        ae_to_path     = None;
         ae_type        = CT.Sequence;
         ae_evidence    = Some "validate before apply";
         ae_source      = "static"; };
       { CT.ae_from     = "Reset.clear_flag";
+        ae_from_path   = None;
         ae_to          = "Apply.apply_transaction";
+        ae_to_path     = None;
         ae_type        = CT.RemovesGuard;
         ae_evidence    = Some "clear_flag removes the feature gate";
         ae_source      = "sidecar"; };
       { CT.ae_from     = "Rpc.submit";
+        ae_from_path   = None;
         ae_to          = "Apply.apply_transaction";
+        ae_to_path     = None;
         ae_type        = CT.ActorDistinct;
         ae_evidence    = None;
         ae_source      = "sidecar"; };
@@ -276,7 +360,8 @@ let test_write_attack_edges_roundtrip () =
 let test_write_attack_edges_dedup () =
   let path = create_migrated_db () in
   Fun.protect ~finally:(fun () -> Sys.remove path) (fun () ->
-    let edge = { CT.ae_from = "A.foo"; ae_to = "B.bar"; ae_type = CT.Sequence;
+    let edge = { CT.ae_from = "A.foo"; ae_from_path = None;
+                 ae_to = "B.bar"; ae_to_path = None; ae_type = CT.Sequence;
                  ae_evidence = None; ae_source = "static" } in
     (match CD.write_attack_edges ~db_path:path [edge; edge] with
      | Error msg -> fail ("write failed: " ^ msg)
@@ -289,6 +374,106 @@ let test_write_capabilities_missing_db () =
   match CD.write_capabilities ~db_path:"/no/such.db" [] with
   | Error _ -> ()
   | Ok _ -> fail "expected Error on missing db"
+
+(* ── G4 end-to-end regression: load YAML → DB → actor-paths query ────────────
+   This is the blocking-bug proof. It exercises the REAL loader path
+   (CE.load_sidecar → CD.write_capabilities → CD.write_attack_edges — exactly
+   what the arch-sidecar-load binary does), then runs the SAME SQL that
+   `arch-query actor-paths balance` runs, and asserts the cross-role value
+   crossing the pilot validated (stake/balance across rollup_operator vs
+   contract) appears.
+
+   On the PRE-FIX loader value_touched was hardcoded to [] in flush_cap, so
+   inserted rows carried only value_kind='UnknownMut' and the actor-paths query
+   returned ZERO rows. This test therefore FAILS on the old loader and PASSES
+   after the G4 fix. *)
+
+(** Count cross-role pairs both touching [value_kind], mirroring the
+    `actor-paths` SQL in ./arch-query (value_touched JSON match + value_kind
+    fallback, distinct non-NULL actor_roles). *)
+let actor_paths_count db_path value_kind =
+  let db = Sqlite3.db_open db_path in
+  let sql = Printf.sprintf
+    "SELECT COUNT(*) FROM ( \
+       SELECT DISTINCT a.function_name, b.function_name \
+       FROM function_effects a \
+       JOIN function_effects b \
+         ON a.actor_role IS NOT NULL AND b.actor_role IS NOT NULL \
+        AND a.actor_role != b.actor_role \
+        AND a.function_name != b.function_name \
+       WHERE (a.value_kind = '%s' OR lower(COALESCE(a.value_touched,'')) LIKE '%%\"kind\":\"%s\"%%') \
+         AND (b.value_kind = '%s' OR lower(COALESCE(b.value_touched,'')) LIKE '%%\"kind\":\"%s\"%%'))"
+    value_kind value_kind value_kind value_kind in
+  let result = ref 0 in
+  (match Sqlite3.exec_no_headers db ~cb:(fun row ->
+     match row.(0) with Some n -> result := int_of_string n | None -> ()) sql
+   with _ -> ());
+  ignore (Sqlite3.db_close db);
+  !result
+
+let test_actor_paths_end_to_end () =
+  (* A minimal sidecar reproducing the pilot's validated stake→balance crossing:
+       cement_commitment   (rollup_operator) credits balance
+       execute_outbox_message (contract)     debits  balance
+     Distinct roles, both touching `balance` → one actor-paths pair. *)
+  let yaml = {|
+capabilities:
+  - fn: "Store.cement_commitment"
+    file_path: "src/proto/sc_rollup_stake_storage.ml"
+    actor_role: ["rollup_operator"]
+    temporal_class: ["level_boundary"]
+    value_touched: [{"kind": "balance", "direction": "credit"}]
+  - fn: "Ops.execute_outbox_message"
+    file_path: "src/proto/sc_rollup_operations.ml"
+    actor_role: ["contract"]
+    temporal_class: ["level_boundary"]
+    value_touched: [{"kind": "balance", "direction": "debit"}]
+attack_edges:
+  - from: "Store.cement_commitment"
+    from_path: "src/proto/sc_rollup_stake_storage.ml"
+    to: "Ops.execute_outbox_message"
+    to_path: "src/proto/sc_rollup_operations.ml"
+    edge_type: "actor_distinct"
+    evidence: "stake-removal -> balance-extraction crossing"
+|} in
+  let tmp = write_sidecar_file yaml in
+  let path = create_migrated_db () in
+  Fun.protect ~finally:(fun () -> Sys.remove tmp; Sys.remove path) (fun () ->
+    (* Real loader path — identical to bin/arch_sidecar_load/main.ml *)
+    let sc = CE.load_sidecar tmp in
+    check int "no sidecar parse errors" 0 (List.length sc.CE.sc_errors);
+    (match CD.write_capabilities ~db_path:path sc.CE.sc_capabilities with
+     | Error msg -> fail ("write_capabilities failed: " ^ msg)
+     | Ok _ -> ());
+    (match CD.write_attack_edges ~db_path:path sc.CE.sc_edges with
+     | Error msg -> fail ("write_attack_edges failed: " ^ msg)
+     | Ok _ -> ());
+    (* The headline assertion: actor-paths balance is NON-EMPTY end-to-end.
+       This is exactly what was empty on the pre-G4 loader. *)
+    let n = actor_paths_count path "balance" in
+    check bool "actor-paths balance is non-empty (G4 fixed)" true (n >= 1);
+    (* Confirm value_touched actually reached the DB (the precise G4 symptom). *)
+    let db = Sqlite3.db_open path in
+    let vt_rows = ref 0 in
+    (match Sqlite3.exec_no_headers db ~cb:(fun row ->
+       match row.(0) with Some n -> vt_rows := int_of_string n | None -> ())
+       "SELECT COUNT(*) FROM function_effects WHERE value_touched IS NOT NULL"
+     with _ -> ());
+    (* And confirm the G2 file_path discriminator was persisted. *)
+    let fp_rows = ref 0 in
+    (match Sqlite3.exec_no_headers db ~cb:(fun row ->
+       match row.(0) with Some n -> fp_rows := int_of_string n | None -> ())
+       "SELECT COUNT(*) FROM function_effects WHERE file_path IS NOT NULL"
+     with _ -> ());
+    let edge_path_rows = ref 0 in
+    (match Sqlite3.exec_no_headers db ~cb:(fun row ->
+       match row.(0) with Some n -> edge_path_rows := int_of_string n | None -> ())
+       "SELECT COUNT(*) FROM attack_edges WHERE from_path IS NOT NULL AND to_path IS NOT NULL"
+     with _ -> ());
+    ignore (Sqlite3.db_close db);
+    check bool "value_touched persisted to DB" true (!vt_rows >= 2);
+    check bool "file_path persisted to DB (G2)" true (!fp_rows >= 2);
+    check bool "edge from_path/to_path persisted (G2)" true (!edge_path_rows >= 1))
 
 (* ── test suite ──────────────────────────────────────────────────────────── *)
 
@@ -316,11 +501,17 @@ let () =
     "sidecar_yaml", [
       test_case "parse_capabilities"               `Quick test_sidecar_parse_capabilities;
       test_case "missing_file"                     `Quick test_sidecar_missing_file;
+      test_case "parse_value_touched"              `Quick test_sidecar_parse_value_touched;
+      test_case "strip_inline_comments"            `Quick test_sidecar_strip_inline_comments;
+      test_case "parse_edge_paths"                 `Quick test_sidecar_parse_edge_paths;
     ];
     "capability_db", [
       test_case "write_capabilities_roundtrip"     `Quick test_write_capabilities_roundtrip;
       test_case "write_attack_edges_roundtrip"     `Quick test_write_attack_edges_roundtrip;
       test_case "write_attack_edges_dedup"         `Quick test_write_attack_edges_dedup;
       test_case "write_capabilities_missing_db"    `Quick test_write_capabilities_missing_db;
+    ];
+    "regression_g4_end_to_end", [
+      test_case "actor_paths_end_to_end"           `Quick test_actor_paths_end_to_end;
     ];
   ]

@@ -55,11 +55,13 @@ type edge_type =
   | ActorDistinct
 
 type attack_edge = {
-  ae_from     : string;
-  ae_to       : string;
-  ae_type     : edge_type;
-  ae_evidence : string option;
-  ae_source   : string;
+  ae_from      : string;
+  ae_from_path : string option;
+  ae_to        : string;
+  ae_to_path   : string option;
+  ae_type      : edge_type;
+  ae_evidence  : string option;
+  ae_source    : string;
 }
 
 let edge_type_to_string = function

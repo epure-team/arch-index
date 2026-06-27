@@ -69,13 +69,20 @@ type capability_record = {
       (** Who produced this record: 'static' | 'sidecar' | 'manual'. *)
 }
 
-(** An attack-graph edge between two actions. *)
+(** An attack-graph edge between two actions.
+
+    [ae_from_path] / [ae_to_path] are optional source-file / component
+    discriminators for the endpoints (gap G2): when set, they disambiguate
+    cross-component edges whose endpoint names could collide across language
+    extractors (e.g. a bare Rust kernel [timeout] vs a qualified OCaml name). *)
 type attack_edge = {
-  ae_from     : string;
-  ae_to       : string;
-  ae_type     : edge_type;
-  ae_evidence : string option;
-  ae_source   : string;   (** 'static' | 'sidecar' | 'manual' *)
+  ae_from      : string;
+  ae_from_path : string option;
+  ae_to        : string;
+  ae_to_path   : string option;
+  ae_type      : edge_type;
+  ae_evidence  : string option;
+  ae_source    : string;   (** 'static' | 'sidecar' | 'manual' *)
 }
 
 and edge_type =

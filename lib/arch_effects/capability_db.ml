@@ -91,6 +91,24 @@ let migrate ~db_path ~migration_sql_path =
       ignore (Sqlite3.db_close db);
       Error msg)
 
+(** Idempotently add a column to [table] if absent (uses pragma_table_info).
+    Mirrors the inline check in [write_capabilities] but is reusable across
+    tables (used for the attack_edges G2 discriminator columns). *)
+let ensure_table_column db table col_name col_type =
+  let q = Printf.sprintf
+    "SELECT 1 FROM pragma_table_info('%s') WHERE name='%s' LIMIT 1"
+    table col_name in
+  let exists = ref false in
+  (match Sqlite3.exec_no_headers db ~cb:(fun _ -> exists := true) q with _ -> ());
+  if not !exists then begin
+    let stmt = Printf.sprintf
+      "ALTER TABLE %s ADD COLUMN %s %s" table col_name col_type in
+    try exec_exn db stmt with Failure _ -> ()
+  end
+
+let ensure_attack_edge_column db col_name col_type =
+  ensure_table_column db "attack_edges" col_name col_type
+
 (* ── encode capability fields ────────────────────────────────────────────── *)
 
 let encode_value_touched vts =
@@ -126,20 +144,7 @@ let write_capabilities ~db_path records =
     (* Ensure the Phase-2 columns exist (guard against un-migrated DB).
        We try each ALTER TABLE; if it fails (column already exists or IF NOT EXISTS
        is unsupported), we silently continue — the column is already there. *)
-    let ensure_column col_name col_type =
-      (* Check if the column already exists via pragma_table_info *)
-      let q = Printf.sprintf
-        "SELECT 1 FROM pragma_table_info('function_effects') WHERE name='%s' LIMIT 1"
-        col_name in
-      let exists = ref false in
-      (match Sqlite3.exec_no_headers db ~cb:(fun _ -> exists := true) q with
-       | _ -> ());
-      if not !exists then begin
-        let stmt = Printf.sprintf
-          "ALTER TABLE function_effects ADD COLUMN %s %s" col_name col_type in
-        try exec_exn db stmt with Failure _ -> ()
-      end
-    in
+    let ensure_column = ensure_table_column db "function_effects" in
     ensure_column "reachability_class" "TEXT";
     ensure_column "actor_role" "TEXT";
     ensure_column "temporal_class" "TEXT";
@@ -157,6 +162,7 @@ let write_capabilities ~db_path records =
 
     let update_st = Sqlite3.prepare db
       "UPDATE function_effects SET \
+         file_path          = COALESCE(?, file_path), \
          reachability_class = COALESCE(?, reachability_class), \
          actor_role         = COALESCE(?, actor_role), \
          temporal_class     = COALESCE(?, temporal_class), \
@@ -166,10 +172,10 @@ let write_capabilities ~db_path records =
        WHERE function_name = ?" in
     let insert_st = Sqlite3.prepare db
       "INSERT INTO function_effects \
-         (function_name, value_kind, soundness, producer, \
+         (function_name, value_kind, soundness, producer, file_path, \
           reachability_class, actor_role, temporal_class, gating, \
           value_touched, precondition) \
-       VALUES (?, 'UnknownMut', 'manual', ?, ?,?,?,?,?,?)" in
+       VALUES (?, 'UnknownMut', 'manual', ?, ?, ?,?,?,?,?,?)" in
     let n_updated  = ref 0 in
     let n_inserted = ref 0 in
     let n_skipped  = ref 0 in
@@ -184,13 +190,14 @@ let write_capabilities ~db_path records =
           let vt_s = encode_value_touched r.cap_value_touched in
           if fn_exists db r.cap_function_name then begin
             (* UPDATE: COALESCE ensures existing non-NULL values are kept *)
-            bind_opt  update_st 1 rclass_s;
-            bind_opt  update_st 2 r.cap_actor_role;
-            bind_opt  update_st 3 r.cap_temporal_class;
-            bind_opt  update_st 4 r.cap_gating;
-            bind_opt  update_st 5 vt_s;
-            bind_opt  update_st 6 r.cap_precondition;
-            bind_text update_st 7 r.cap_function_name;
+            bind_opt  update_st 1 r.cap_file_path;
+            bind_opt  update_st 2 rclass_s;
+            bind_opt  update_st 3 r.cap_actor_role;
+            bind_opt  update_st 4 r.cap_temporal_class;
+            bind_opt  update_st 5 r.cap_gating;
+            bind_opt  update_st 6 vt_s;
+            bind_opt  update_st 7 r.cap_precondition;
+            bind_text update_st 8 r.cap_function_name;
             (match Sqlite3.step update_st with
              | Sqlite3.Rc.DONE -> incr n_updated
              | _ -> incr n_skipped);
@@ -199,12 +206,13 @@ let write_capabilities ~db_path records =
             (* INSERT new row *)
             bind_text insert_st 1 r.cap_function_name;
             bind_text insert_st 2 r.cap_source;
-            bind_opt  insert_st 3 rclass_s;
-            bind_opt  insert_st 4 r.cap_actor_role;
-            bind_opt  insert_st 5 r.cap_temporal_class;
-            bind_opt  insert_st 6 r.cap_gating;
-            bind_opt  insert_st 7 vt_s;
-            bind_opt  insert_st 8 r.cap_precondition;
+            bind_opt  insert_st 3 r.cap_file_path;
+            bind_opt  insert_st 4 rclass_s;
+            bind_opt  insert_st 5 r.cap_actor_role;
+            bind_opt  insert_st 6 r.cap_temporal_class;
+            bind_opt  insert_st 7 r.cap_gating;
+            bind_opt  insert_st 8 vt_s;
+            bind_opt  insert_st 9 r.cap_precondition;
             (match Sqlite3.step insert_st with
              | Sqlite3.Rc.DONE -> incr n_inserted
              | _ -> incr n_skipped);
@@ -240,10 +248,15 @@ let write_attack_edges ~db_path edges =
           CHECK(edge_type IN ('sequence','removes_guard','shares_resource','actor_distinct')), \
         evidence TEXT, source TEXT, created_at TEXT DEFAULT (datetime('now')))"
     with Failure _ -> ());
+    (* Gap G2: endpoint component/file discriminators.  Added idempotently so
+       cross-component edges (e.g. bare Rust kernel names vs qualified OCaml
+       names) are unambiguous.  Pre-existing tables are upgraded in place. *)
+    ensure_attack_edge_column db "from_path" "TEXT";
+    ensure_attack_edge_column db "to_path" "TEXT";
     let st = Sqlite3.prepare db
       "INSERT OR IGNORE INTO attack_edges \
-         (from_action, to_action, edge_type, evidence, source) \
-       VALUES (?,?,?,?,?)" in
+         (from_action, from_path, to_action, to_path, edge_type, evidence, source) \
+       VALUES (?,?,?,?,?,?,?)" in
     let n_inserted = ref 0 in
     let n_skipped  = ref 0 in
     (try
@@ -251,10 +264,12 @@ let write_attack_edges ~db_path edges =
       List.iter (fun ae ->
         try
           bind_text st 1 ae.ae_from;
-          bind_text st 2 ae.ae_to;
-          bind_text st 3 (edge_type_to_string ae.ae_type);
-          bind_opt  st 4 ae.ae_evidence;
-          bind_text st 5 ae.ae_source;
+          bind_opt  st 2 ae.ae_from_path;
+          bind_text st 3 ae.ae_to;
+          bind_opt  st 4 ae.ae_to_path;
+          bind_text st 5 (edge_type_to_string ae.ae_type);
+          bind_opt  st 6 ae.ae_evidence;
+          bind_text st 7 ae.ae_source;
           (match Sqlite3.step st with
            | Sqlite3.Rc.DONE -> incr n_inserted
            | _ -> incr n_skipped);

@@ -94,6 +94,14 @@ CREATE TABLE IF NOT EXISTS attack_edges (
     created_at  TEXT DEFAULT (datetime('now'))
 );
 
+-- Gap G2: optional endpoint component/file discriminators. These disambiguate
+-- cross-component edges whose endpoint function names could collide across
+-- language extractors (e.g. a bare Rust kernel `timeout` vs a qualified OCaml
+-- name). Added via ALTER TABLE so pre-existing attack_edges tables upgrade in
+-- place; duplicate-column errors on re-run are expected and harmless.
+ALTER TABLE attack_edges ADD COLUMN from_path TEXT;
+ALTER TABLE attack_edges ADD COLUMN to_path   TEXT;
+
 CREATE INDEX IF NOT EXISTS attack_edges_from ON attack_edges(from_action);
 CREATE INDEX IF NOT EXISTS attack_edges_to   ON attack_edges(to_action);
 CREATE INDEX IF NOT EXISTS attack_edges_type ON attack_edges(edge_type);
@@ -106,7 +114,9 @@ CREATE VIEW IF NOT EXISTS v_attack_edges AS
 SELECT
     ae.id,
     ae.from_action,
+    ae.from_path,
     ae.to_action,
+    ae.to_path,
     ae.edge_type,
     ae.evidence,
     ae.source,

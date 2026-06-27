@@ -85,16 +85,29 @@ type sidecar_result = {
     {v
       capabilities:
         - fn: "Module.function_name"
+          file_path: "src/proto/module.ml"      # optional component discriminator (G2)
           actor_role: ["baker", "delegate"]
           temporal_class: ["validate_time", "window_open"]
           precondition: "storage.delegate_registered = true"
           gating: "auth(manager_key)"
+          value_touched: [{"kind": "balance", "direction": "debit"}]
       attack_edges:
         - from: "Module.fn_a"
+          from_path: "src/proto/module.ml"       # optional endpoint discriminator (G2)
           to: "Module.fn_b"
+          to_path: "kernel/src/other.rs"          # optional endpoint discriminator (G2)
           edge_type: "removes_guard"
           evidence: "fn_a sets flag X that fn_b requires"
     v}
+
+    Parsing notes:
+    - [value_touched] is an inline JSON-ish list of [{kind, direction}] objects;
+      [kind] in balance|ticket|stake|supply, [direction] in debit|credit|mint|burn.
+      Objects missing either field are skipped.
+    - Inline ` # ...` comments on value lines are stripped (a [#] inside a
+      single- or double-quoted span is preserved).
+    - [file_path] / [from_path] / [to_path] are optional discriminators that
+      disambiguate cross-component endpoints whose bare names could collide.
 
     Parse errors on individual items are accumulated in [sc_errors] and those
     items are skipped; the call never raises. *)

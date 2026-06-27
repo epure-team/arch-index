@@ -193,6 +193,28 @@ type sidecar_result = {
           evidence: "..."
 *)
 
+(** Strip an unquoted trailing inline comment (` # ...`) from a YAML value.
+    A '#' inside a single- or double-quoted span is preserved; only a '#' that
+    is outside any quoted span (and that we treat as starting a comment) ends
+    the value.  This is gap G3: previously only whole-line comments were
+    skipped, so inline comments leaked into scalar/list values. *)
+let strip_inline_comment s =
+  let n = String.length s in
+  let in_single = ref false in
+  let in_double = ref false in
+  let rec go i =
+    if i >= n then s
+    else
+      let c = s.[i] in
+      if c = '\'' && not !in_double then (in_single := not !in_single; go (i + 1))
+      else if c = '"' && not !in_single then (in_double := not !in_double; go (i + 1))
+      else if c = '#' && not !in_single && not !in_double then
+        (* A comment marker outside quotes ends the value. *)
+        String.sub s 0 i
+      else go (i + 1)
+  in
+  String.trim (go 0)
+
 (** Strip surrounding quotes and whitespace from a YAML scalar value. *)
 let strip_quotes s =
   let s = String.trim s in
@@ -217,6 +239,85 @@ let parse_list_or_scalar s =
     |> List.map String.trim
     |> List.filter (fun x -> x <> "")
   end
+
+(** Index of the first occurrence of [sub] in [hay], or [None]. *)
+let find_substring hay sub =
+  let lh = String.length hay and ls = String.length sub in
+  if ls = 0 || ls > lh then None
+  else
+    let rec go i =
+      if i > lh - ls then None
+      else if String.sub hay i ls = sub then Some i
+      else go (i + 1)
+    in
+    go 0
+
+(** Extract the value of a `"key": "value"` pair from a flat JSON-ish object
+    body.  Returns the (quote-stripped) string value, or [None] if [key] is
+    absent.  Tolerant of single or double quotes and surrounding whitespace. *)
+let extract_json_field key body =
+  let n = String.length body in
+  let key_pos = match find_substring body (Printf.sprintf "\"%s\"" key) with
+    | Some _ as p -> p
+    | None -> find_substring body (Printf.sprintf "'%s'" key)
+  in
+  let rec to_colon i =
+    if i >= n then -1 else if body.[i] = ':' then i + 1 else to_colon (i + 1)
+  in
+  let rec skip_ws i =
+    if i >= 0 && i < n && (body.[i] = ' ' || body.[i] = '\t') then skip_ws (i + 1) else i
+  in
+  let rec find_close q j =
+    if j >= n || body.[j] = q then j else find_close q (j + 1)
+  in
+  match key_pos with
+  | None -> None
+  | Some kp ->
+    let colon = to_colon (kp + 1) in
+    let i = if colon < 0 then -1 else skip_ws colon in
+    if i >= 0 && i < n && (body.[i] = '"' || body.[i] = '\'') then
+      let close = find_close body.[i] (i + 1) in
+      Some (String.sub body (i + 1) (close - i - 1))
+    else None
+
+(** Split the inner body of a `[ {..}, {..} ]` inline list into per-object
+    bodies (the text between matching braces).  Brace-nesting is flat in our
+    sidecar (no nested objects), so a single-level brace scan suffices. *)
+let split_brace_objects inner =
+  let n = String.length inner in
+  let objs = ref [] in
+  let depth = ref 0 in
+  let start = ref (-1) in
+  for i = 0 to n - 1 do
+    match inner.[i] with
+    | '{' -> if !depth = 0 then start := i + 1; incr depth
+    | '}' ->
+      decr depth;
+      if !depth = 0 && !start >= 0 then begin
+        objs := String.sub inner !start (i - !start) :: !objs;
+        start := -1
+      end
+    | _ -> ()
+  done;
+  List.rev !objs
+
+(** Parse a `value_touched` YAML value into a [value_touch list].
+    Expected form (inline JSON-ish list):
+      [{"kind": "stake", "direction": "debit"}, {"kind": "balance", "direction": "credit"}]
+    Objects missing [kind] or [direction] are skipped (gap G4 fix: this whole
+    field was previously dropped and hardcoded to []). *)
+let parse_value_touched s =
+  let s = String.trim s in
+  let n = String.length s in
+  if n >= 2 && s.[0] = '[' && s.[n - 1] = ']' then begin
+    let inner = String.sub s 1 (n - 2) in
+    split_brace_objects inner
+    |> List.filter_map (fun body ->
+      match extract_json_field "kind" body, extract_json_field "direction" body with
+      | Some k, Some d when k <> "" && d <> "" ->
+        Some { vt_kind = k; vt_direction = d }
+      | _ -> None)
+  end else []
 
 (** Parse the YAML sidecar file line by line using a simple state machine.
     This is intentionally minimal: it handles the known shape of the file only. *)
@@ -246,11 +347,15 @@ let load_sidecar path =
     let c_tc   = ref None in
     let c_pre  = ref None in
     let c_gate = ref None in
+    let c_vt   = ref [] in   (* value_touched (gap G4) *)
+    let c_fp   = ref None in (* file_path / component discriminator (gap G2) *)
     (* edge fields accumulator *)
-    let e_from = ref None in
-    let e_to   = ref None in
-    let e_type = ref None in
-    let e_ev   = ref None in
+    let e_from   = ref None in
+    let e_fpath  = ref None in (* from_path discriminator (gap G2) *)
+    let e_to     = ref None in
+    let e_tpath  = ref None in (* to_path discriminator (gap G2) *)
+    let e_type   = ref None in
+    let e_ev     = ref None in
 
     let flush_cap () =
       match !c_fn with
@@ -258,20 +363,24 @@ let load_sidecar path =
       | Some fn ->
         let cap = {
           cap_function_name  = fn;
-          cap_file_path      = None;
+          cap_file_path      = !c_fp;
           cap_reachability   = None;
           cap_actor_role     = !c_ar;
           cap_temporal_class = !c_tc;
           cap_gating         = !c_gate;
-          cap_value_touched  = [];
+          cap_value_touched  = List.rev !c_vt;
           cap_precondition   = !c_pre;
           cap_source         = "sidecar";
         } in
         caps := cap :: !caps;
         c_fn := None; c_ar := None; c_tc := None;
-        c_pre := None; c_gate := None
+        c_pre := None; c_gate := None; c_vt := []; c_fp := None
     in
 
+    let reset_edge () =
+      e_from := None; e_fpath := None; e_to := None; e_tpath := None;
+      e_type := None; e_ev := None
+    in
     let flush_edge () =
       match !e_from, !e_to, !e_type with
       | Some f, Some t, Some et ->
@@ -280,24 +389,57 @@ let load_sidecar path =
            errors := (Printf.sprintf "unknown edge_type '%s'" et) :: !errors
          | Some etype ->
            let edge = {
-             ae_from     = f;
-             ae_to       = t;
-             ae_type     = etype;
-             ae_evidence = !e_ev;
-             ae_source   = "sidecar";
+             ae_from      = f;
+             ae_from_path = !e_fpath;
+             ae_to        = t;
+             ae_to_path   = !e_tpath;
+             ae_type      = etype;
+             ae_evidence  = !e_ev;
+             ae_source    = "sidecar";
            } in
            edges := edge :: !edges);
-        e_from := None; e_to := None; e_type := None; e_ev := None
+        reset_edge ()
       | _ ->
         if !e_from <> None || !e_to <> None || !e_type <> None then
           errors := "incomplete attack_edge entry (missing from/to/edge_type)" :: !errors;
-        e_from := None; e_to := None; e_type := None; e_ev := None
+        reset_edge ()
     in
 
     let indent_of line =
       let n = String.length line in
       let rec go i = if i < n && line.[i] = ' ' then go (i+1) else i in
       go 0
+    in
+
+    (* Apply a parsed "key: value" pair to the current section's accumulator.
+       [value] has already had its inline comment stripped (gap G3). *)
+    let apply_cap_field key value =
+      match key with
+      | "fn"             -> c_fn   := Some (strip_quotes value)
+      | "file_path"      -> c_fp   := Some (strip_quotes value)
+      | "actor_role"     -> c_ar   := Some (String.concat "," (parse_list_or_scalar value))
+      | "temporal_class" -> c_tc   := Some (String.concat "," (parse_list_or_scalar value))
+      | "precondition"   -> c_pre  := Some (strip_quotes value)
+      | "gating"         -> c_gate := Some (strip_quotes value)
+      | "value_touched"  -> c_vt   := List.rev (parse_value_touched value)
+      | _ -> ()
+    in
+    let apply_edge_field key value =
+      match key with
+      | "from"      -> e_from  := Some (strip_quotes value)
+      | "from_path" -> e_fpath := Some (strip_quotes value)
+      | "to"        -> e_to    := Some (strip_quotes value)
+      | "to_path"   -> e_tpath := Some (strip_quotes value)
+      | "edge_type" -> e_type  := Some (strip_quotes value)
+      | "evidence"  -> e_ev    := Some (strip_quotes value)
+      | _ -> ()
+    in
+    let apply_field key value =
+      let value = strip_inline_comment value in
+      match !section with
+      | `Caps  -> apply_cap_field key value
+      | `Edges -> apply_edge_field key value
+      | `None  -> ()
     in
 
     List.iter (fun line ->
@@ -329,23 +471,7 @@ let load_sidecar path =
           if colon > 0 then begin
             let key = String.trim (String.sub rest 0 colon) in
             let value = String.trim (String.sub rest (colon+1) (String.length rest - colon - 1)) in
-            (match !section with
-             | `Caps ->
-               (match key with
-                | "fn"             -> c_fn   := Some (strip_quotes value)
-                | "actor_role"     -> c_ar   := Some (String.concat "," (parse_list_or_scalar value))
-                | "temporal_class" -> c_tc   := Some (String.concat "," (parse_list_or_scalar value))
-                | "precondition"   -> c_pre  := Some (strip_quotes value)
-                | "gating"         -> c_gate := Some (strip_quotes value)
-                | _ -> ())
-             | `Edges ->
-               (match key with
-                | "from"      -> e_from := Some (strip_quotes value)
-                | "to"        -> e_to   := Some (strip_quotes value)
-                | "edge_type" -> e_type := Some (strip_quotes value)
-                | "evidence"  -> e_ev   := Some (strip_quotes value)
-                | _ -> ())
-             | `None -> ())
+            apply_field key value
           end
         end
         (* Continuation field at indent 4 *)
@@ -354,23 +480,7 @@ let load_sidecar path =
           if colon > 0 then begin
             let key = String.trim (String.sub trimmed 0 colon) in
             let value = String.trim (String.sub trimmed (colon+1) (String.length trimmed - colon - 1)) in
-            (match !section with
-             | `Caps ->
-               (match key with
-                | "fn"             -> c_fn   := Some (strip_quotes value)
-                | "actor_role"     -> c_ar   := Some (String.concat "," (parse_list_or_scalar value))
-                | "temporal_class" -> c_tc   := Some (String.concat "," (parse_list_or_scalar value))
-                | "precondition"   -> c_pre  := Some (strip_quotes value)
-                | "gating"         -> c_gate := Some (strip_quotes value)
-                | _ -> ())
-             | `Edges ->
-               (match key with
-                | "from"      -> e_from := Some (strip_quotes value)
-                | "to"        -> e_to   := Some (strip_quotes value)
-                | "edge_type" -> e_type := Some (strip_quotes value)
-                | "evidence"  -> e_ev   := Some (strip_quotes value)
-                | _ -> ())
-             | `None -> ())
+            apply_field key value
           end
         end
       end
