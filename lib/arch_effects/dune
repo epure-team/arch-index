@@ -1,0 +1,9 @@
+(library
+ (name arch_effects)
+ (libraries
+  sqlite3
+  yojson
+  compiler-libs.common)
+ (inline_tests)
+ (preprocess
+  (pps ppx_inline_test ppx_assert)))

@@ -1,3 +1,9 @@
 (test
  (name test_parsers)
+ (modules test_parsers)
  (libraries arch_index alcotest))
+
+(test
+ (name test_effects)
+ (modules test_effects)
+ (libraries arch_effects alcotest sqlite3))
