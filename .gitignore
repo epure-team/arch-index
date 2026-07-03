@@ -4,3 +4,5 @@ _build/
 _opam/
 # Per-target call-graph artifacts — never committed (target-specific)
 *.db
+# MCP / tooling scratch
+.playwright-mcp/

@@ -448,8 +448,8 @@ ORDER BY usage_count DESC;
 -- Find all types containing a field named 'instance':
 -- SELECT * FROM v_type_fields WHERE field_name = 'instance';
 
--- Find all record types with a field of type 'baker_node_mode':
--- SELECT * FROM v_types_with_field_type WHERE field_type LIKE '%baker_node_mode%';
+-- Find all record types with a field of type 'connection_mode':
+-- SELECT * FROM v_types_with_field_type WHERE field_type LIKE '%connection_mode%';
 
 -- Find types that aggregate string, int, and some page type:
 -- SELECT t.name, m.path, GROUP_CONCAT(tf.field_name || ':' || tf.field_type, ', ') as fields

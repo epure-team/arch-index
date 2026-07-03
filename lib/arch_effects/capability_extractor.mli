@@ -86,9 +86,9 @@ type sidecar_result = {
       capabilities:
         - fn: "Module.function_name"
           file_path: "src/proto/module.ml"      # optional component discriminator (G2)
-          actor_role: ["baker", "delegate"]
+          actor_role: ["user", "admin"]
           temporal_class: ["validate_time", "window_open"]
-          precondition: "storage.delegate_registered = true"
+          precondition: "state.account_registered = true"
           gating: "auth(manager_key)"
           value_touched: [{"kind": "balance", "direction": "debit"}]
       attack_edges:

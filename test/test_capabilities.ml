@@ -79,17 +79,17 @@ let test_edge_type_unknown_string () =
 (* ── capability_extractor: static derivation ─────────────────────────────── *)
 
 let test_derive_reachability_validate () =
-  let rc = CE.derive_reachability_class "src/proto_025/validate.ml" in
+  let rc = CE.derive_reachability_class "src/module/validate.ml" in
   check (option string) "validate.ml → Validate"
     (Some "validate") (Option.map CT.reachability_class_to_string rc)
 
 let test_derive_reachability_apply () =
-  let rc = CE.derive_reachability_class "src/proto_025/apply.ml" in
+  let rc = CE.derive_reachability_class "src/module/apply.ml" in
   check (option string) "apply.ml → Apply"
     (Some "apply") (Option.map CT.reachability_class_to_string rc)
 
 let test_derive_reachability_rpc () =
-  let rc = CE.derive_reachability_class "src/proto_025/rpc_services.ml" in
+  let rc = CE.derive_reachability_class "src/module/rpc_services.ml" in
   check (option string) "rpc_services.ml → Rpc"
     (Some "rpc") (Option.map CT.reachability_class_to_string rc)
 
@@ -103,7 +103,7 @@ let test_derive_reachability_none () =
        (CT.reachability_class_to_string other)))
 
 let test_derive_gating_flag () =
-  let g = CE.derive_gating_from_calls ["check_dal_feature_enabled"; "some_other_fn"] in
+  let g = CE.derive_gating_from_calls ["check_feature_x_enabled"; "some_other_fn"] in
   match g with
   | Some s when String.length s > 5 && String.sub s 0 5 = "flag(" -> ()
   | Some s -> fail (Printf.sprintf "expected flag(...), got %s" s)
@@ -133,7 +133,7 @@ let test_derive_gating_none () =
 let test_make_static_record () =
   let r = CE.make_static_record
     ~function_name:"Apply.apply_operation"
-    ~file_path:(Some "src/proto_025/apply.ml")
+    ~file_path:(Some "src/module/apply.ml")
     ~callees:["Gas.check"; "Token.credit"] in
   check string "source" "static" r.CT.cap_source;
   check (option string) "reachability"
@@ -151,7 +151,7 @@ let test_merge_records () =
     CT.cap_function_name  = "Foo.bar";
     cap_file_path         = None;
     cap_reachability      = None;
-    cap_actor_role        = Some "baker,delegate";
+    cap_actor_role        = Some "user,admin";
     cap_temporal_class    = Some "validate_time";
     cap_gating            = None;
     cap_value_touched     = [];
@@ -164,7 +164,7 @@ let test_merge_records () =
     (Some "validate") (Option.map CT.reachability_class_to_string merged.CT.cap_reachability);
   (* override actor_role applied *)
   check (option string) "actor_role from sidecar"
-    (Some "baker,delegate") merged.CT.cap_actor_role;
+    (Some "user,admin") merged.CT.cap_actor_role;
   check string "source = sidecar" "sidecar" merged.CT.cap_source
 
 (* ── capability_extractor: sidecar YAML parsing ──────────────────────────── *)
@@ -180,7 +180,7 @@ let test_sidecar_parse_capabilities () =
   let yaml = {|
 capabilities:
   - fn: "Apply.apply_transaction"
-    actor_role: ["baker", "delegate"]
+    actor_role: ["user", "admin"]
     temporal_class: ["apply_time"]
     gating: "auth(manager_key)"
     precondition: "storage.balance >= amount"
@@ -201,7 +201,7 @@ attack_edges:
     check int "0 errors" 0 (List.length sc.CE.sc_errors);
     let cap = List.find (fun c -> c.CT.cap_function_name = "Apply.apply_transaction")
       sc.CE.sc_capabilities in
-    check (option string) "actor_role" (Some "baker,delegate") cap.CT.cap_actor_role;
+    check (option string) "actor_role" (Some "user,admin") cap.CT.cap_actor_role;
     check (option string) "gating" (Some "auth(manager_key)") cap.CT.cap_gating;
     let edge = List.hd sc.CE.sc_edges in
     check string "edge from" "Apply.apply_transaction" edge.CT.ae_from;
@@ -214,6 +214,38 @@ let test_sidecar_missing_file () =
   check int "0 capabilities" 0 (List.length sc.CE.sc_capabilities);
   check bool "has error" true (sc.CE.sc_errors <> [])
 
+(* Empty-yield guard: a non-empty file in a foreign dialect (unrecognised
+   sections / keys) parses to 0 caps + 0 edges — this must surface an error
+   rather than silently loading nothing. *)
+let test_sidecar_empty_yield_is_error () =
+  let yaml = {|
+component: widget
+actions:
+  - id: handler.entry
+    where: src/module.ml:240
+attack_edges:
+  - id: EDGE-1
+    target: T-2
+    hypothesis: two entries in one batch.
+|} in
+  let tmp = write_sidecar_file yaml in
+  Fun.protect ~finally:(fun () -> Sys.remove tmp) (fun () ->
+    let sc = CE.load_sidecar tmp in
+    check int "0 capabilities" 0 (List.length sc.CE.sc_capabilities);
+    check int "0 edges" 0 (List.length sc.CE.sc_edges);
+    check bool "has empty-yield error" true (sc.CE.sc_errors <> []))
+
+(* A genuinely empty (comment/blank-only) file yields 0/0 but is not flagged:
+   the guard fires only when actual content was present. *)
+let test_sidecar_blank_no_error () =
+  let yaml = "# just a comment\n\n   \n" in
+  let tmp = write_sidecar_file yaml in
+  Fun.protect ~finally:(fun () -> Sys.remove tmp) (fun () ->
+    let sc = CE.load_sidecar tmp in
+    check int "0 capabilities" 0 (List.length sc.CE.sc_capabilities);
+    check int "0 edges" 0 (List.length sc.CE.sc_edges);
+    check int "no error" 0 (List.length sc.CE.sc_errors))
+
 (* ── G4: value_touched parsing ───────────────────────────────────────────── *)
 
 (** A capability with inline-JSON value_touched must survive parsing.
@@ -222,28 +254,28 @@ let test_sidecar_missing_file () =
 let test_sidecar_parse_value_touched () =
   let yaml = {|
 capabilities:
-  - fn: "Store.cement_commitment"
-    actor_role: ["rollup_operator"]
+  - fn: "Store.commit"
+    actor_role: ["operator"]
     value_touched: [{"kind": "balance", "direction": "credit"}]
-  - fn: "Ops.execute_outbox_message"
-    actor_role: ["contract"]
-    value_touched: [{"kind": "stake", "direction": "burn"}, {"kind": "balance", "direction": "debit"}]
+  - fn: "Ops.execute_message"
+    actor_role: ["external"]
+    value_touched: [{"kind": "resource", "direction": "burn"}, {"kind": "balance", "direction": "debit"}]
 |} in
   let tmp = write_sidecar_file yaml in
   Fun.protect ~finally:(fun () -> Sys.remove tmp) (fun () ->
     let sc = CE.load_sidecar tmp in
-    let cement = List.find (fun c -> c.CT.cap_function_name = "Store.cement_commitment")
+    let row_commit = List.find (fun c -> c.CT.cap_function_name = "Store.commit")
       sc.CE.sc_capabilities in
-    check int "cement: 1 value_touch" 1 (List.length cement.CT.cap_value_touched);
-    let vt = List.hd cement.CT.cap_value_touched in
-    check string "cement vt kind" "balance" vt.CT.vt_kind;
-    check string "cement vt direction" "credit" vt.CT.vt_direction;
-    let outbox = List.find (fun c -> c.CT.cap_function_name = "Ops.execute_outbox_message")
+    check int "row_commit: 1 value_touch" 1 (List.length row_commit.CT.cap_value_touched);
+    let vt = List.hd row_commit.CT.cap_value_touched in
+    check string "row_commit vt kind" "balance" vt.CT.vt_kind;
+    check string "row_commit vt direction" "credit" vt.CT.vt_direction;
+    let row_exec = List.find (fun c -> c.CT.cap_function_name = "Ops.execute_message")
       sc.CE.sc_capabilities in
-    check int "outbox: 2 value_touches" 2 (List.length outbox.CT.cap_value_touched);
-    let kinds = List.map (fun v -> v.CT.vt_kind) outbox.CT.cap_value_touched in
-    check bool "outbox touches stake" true (List.mem "stake" kinds);
-    check bool "outbox touches balance" true (List.mem "balance" kinds))
+    check int "row_exec: 2 value_touches" 2 (List.length row_exec.CT.cap_value_touched);
+    let kinds = List.map (fun v -> v.CT.vt_kind) row_exec.CT.cap_value_touched in
+    check bool "row_exec touches resource" true (List.mem "resource" kinds);
+    check bool "row_exec touches balance" true (List.mem "balance" kinds))
 
 (* ── G3: inline comment stripping ────────────────────────────────────────── *)
 
@@ -253,10 +285,10 @@ let test_sidecar_strip_inline_comments () =
   let yaml = {|
 capabilities:
   - fn: "Store.act"   # the action under test
-    actor_role: ["rollup_operator"]   # only the operator
-    gating: "auth(staker_deposit)"  # requires a deposit
+    actor_role: ["operator"]   # only the operator
+    gating: "auth(deposit)"  # requires a deposit
     precondition: "tag = '#1 candidate'"
-    value_touched: [{"kind": "stake", "direction": "debit"}]  # burns stake
+    value_touched: [{"kind": "resource", "direction": "debit"}]  # burns resource
 |} in
   let tmp = write_sidecar_file yaml in
   Fun.protect ~finally:(fun () -> Sys.remove tmp) (fun () ->
@@ -264,8 +296,8 @@ capabilities:
     check int "1 capability" 1 (List.length sc.CE.sc_capabilities);
     let c = List.hd sc.CE.sc_capabilities in
     check string "fn has no comment" "Store.act" c.CT.cap_function_name;
-    check (option string) "actor_role clean" (Some "rollup_operator") c.CT.cap_actor_role;
-    check (option string) "gating clean" (Some "auth(staker_deposit)") c.CT.cap_gating;
+    check (option string) "actor_role clean" (Some "operator") c.CT.cap_actor_role;
+    check (option string) "gating clean" (Some "auth(deposit)") c.CT.cap_gating;
     (* the '#' inside the quoted precondition must survive *)
     check (option string) "quoted # preserved"
       (Some "tag = '#1 candidate'") c.CT.cap_precondition;
@@ -278,9 +310,9 @@ let test_sidecar_parse_edge_paths () =
   let yaml = {|
 attack_edges:
   - from: "timeout"
-    from_path: "kernel/src/delayed_inbox.rs"
+    from_path: "kernel/src/module_a.rs"
     to: "deposit"
-    to_path: "kernel/src/apply.rs"
+    to_path: "kernel/src/module_b.rs"
     edge_type: "removes_guard"
     evidence: "forced inclusion"
 |} in
@@ -289,8 +321,8 @@ attack_edges:
     let sc = CE.load_sidecar tmp in
     check int "1 edge" 1 (List.length sc.CE.sc_edges);
     let e = List.hd sc.CE.sc_edges in
-    check (option string) "from_path" (Some "kernel/src/delayed_inbox.rs") e.CT.ae_from_path;
-    check (option string) "to_path" (Some "kernel/src/apply.rs") e.CT.ae_to_path)
+    check (option string) "from_path" (Some "kernel/src/module_a.rs") e.CT.ae_from_path;
+    check (option string) "to_path" (Some "kernel/src/module_b.rs") e.CT.ae_to_path)
 
 (* ── capability_db: full round-trip ─────────────────────────────────────── *)
 
@@ -301,11 +333,11 @@ let test_write_capabilities_roundtrip () =
       { CT.cap_function_name  = "Apply.apply_transaction";
         cap_file_path         = Some "src/proto/apply.ml";
         cap_reachability      = Some CT.Apply;
-        cap_actor_role        = Some "baker";
+        cap_actor_role        = Some "user";
         cap_temporal_class    = Some "apply_time";
         cap_gating            = Some "cost(gas)";
         cap_value_touched     = [{ CT.vt_kind = "balance"; vt_direction = "debit" }];
-        cap_precondition      = Some "balance >= fee";
+        cap_precondition      = Some "balance >= amount";
         cap_source            = "static"; };
       { CT.cap_function_name  = "Validate.check_op";
         cap_file_path         = Some "src/proto/validate.ml";
@@ -379,9 +411,8 @@ let test_write_capabilities_missing_db () =
    This is the blocking-bug proof. It exercises the REAL loader path
    (CE.load_sidecar → CD.write_capabilities → CD.write_attack_edges — exactly
    what the arch-sidecar-load binary does), then runs the SAME SQL that
-   `arch-query actor-paths balance` runs, and asserts the cross-role value
-   crossing the pilot validated (stake/balance across rollup_operator vs
-   contract) appears.
+   `arch-query actor-paths balance` runs, and asserts a cross-role value
+   crossing (two roles both touching `balance`) appears.
 
    On the PRE-FIX loader value_touched was hardcoded to [] in flush_cap, so
    inserted rows carried only value_kind='UnknownMut' and the actor-paths query
@@ -412,29 +443,29 @@ let actor_paths_count db_path value_kind =
   !result
 
 let test_actor_paths_end_to_end () =
-  (* A minimal sidecar reproducing the pilot's validated stake→balance crossing:
-       cement_commitment   (rollup_operator) credits balance
-       execute_outbox_message (contract)     debits  balance
+  (* A minimal sidecar with a cross-role balance crossing:
+       commit          (operator) credits balance
+       execute_message (external) debits  balance
      Distinct roles, both touching `balance` → one actor-paths pair. *)
   let yaml = {|
 capabilities:
-  - fn: "Store.cement_commitment"
-    file_path: "src/proto/sc_rollup_stake_storage.ml"
-    actor_role: ["rollup_operator"]
-    temporal_class: ["level_boundary"]
+  - fn: "Store.commit"
+    file_path: "src/module/store.ml"
+    actor_role: ["operator"]
+    temporal_class: ["boundary"]
     value_touched: [{"kind": "balance", "direction": "credit"}]
-  - fn: "Ops.execute_outbox_message"
-    file_path: "src/proto/sc_rollup_operations.ml"
-    actor_role: ["contract"]
-    temporal_class: ["level_boundary"]
+  - fn: "Ops.execute_message"
+    file_path: "src/module/ops.ml"
+    actor_role: ["external"]
+    temporal_class: ["boundary"]
     value_touched: [{"kind": "balance", "direction": "debit"}]
 attack_edges:
-  - from: "Store.cement_commitment"
-    from_path: "src/proto/sc_rollup_stake_storage.ml"
-    to: "Ops.execute_outbox_message"
-    to_path: "src/proto/sc_rollup_operations.ml"
+  - from: "Store.commit"
+    from_path: "src/module/store.ml"
+    to: "Ops.execute_message"
+    to_path: "src/module/ops.ml"
     edge_type: "actor_distinct"
-    evidence: "stake-removal -> balance-extraction crossing"
+    evidence: "guard-removal -> balance-extraction crossing"
 |} in
   let tmp = write_sidecar_file yaml in
   let path = create_migrated_db () in
@@ -501,6 +532,8 @@ let () =
     "sidecar_yaml", [
       test_case "parse_capabilities"               `Quick test_sidecar_parse_capabilities;
       test_case "missing_file"                     `Quick test_sidecar_missing_file;
+      test_case "empty_yield_is_error"             `Quick test_sidecar_empty_yield_is_error;
+      test_case "blank_no_error"                   `Quick test_sidecar_blank_no_error;
       test_case "parse_value_touched"              `Quick test_sidecar_parse_value_touched;
       test_case "strip_inline_comments"            `Quick test_sidecar_strip_inline_comments;
       test_case "parse_edge_paths"                 `Quick test_sidecar_parse_edge_paths;

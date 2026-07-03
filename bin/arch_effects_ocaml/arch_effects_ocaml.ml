@@ -52,7 +52,7 @@ let run build_dir source_root =
 
 let build_dir_arg =
   let doc = "Path to the dune build directory containing .cmt files \
-             (e.g., _build/default/src/proto_025_PsUshuai/lib_protocol)." in
+             (e.g., _build/default/lib/mylib)." in
   Arg.(required & opt (some dir) None & info ["build-dir"; "b"] ~docv:"DIR" ~doc)
 
 let source_root_arg =

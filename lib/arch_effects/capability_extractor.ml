@@ -338,6 +338,10 @@ let load_sidecar path =
     let errors = ref [] in
     let caps   = ref [] in
     let edges  = ref [] in
+    (* Did we see any non-blank, non-comment line?  Used to distinguish a
+       genuinely empty sidecar from one whose content we failed to extract
+       (a schema/dialect mismatch — see the empty-yield guard below). *)
+    let saw_content = ref false in
 
     (* State: which top-level section we're in, and current item fields *)
     let section = ref `None in
@@ -446,6 +450,7 @@ let load_sidecar path =
       let trimmed = String.trim line in
       if trimmed = "" || trimmed.[0] = '#' then ()
       else begin
+        saw_content := true;
         let ind = indent_of line in
         (* Detect section headers at indent 0 *)
         if ind = 0 then begin
@@ -487,6 +492,21 @@ let load_sidecar path =
     ) lines;
     flush_cap ();
     flush_edge ();
+    (* Empty-yield guard: a file with content that produced neither a
+       capability nor an attack edge is almost always a schema/dialect
+       mismatch (e.g. a sidecar authored with `actions:` instead of
+       `capabilities:`, or edges keyed on `id`/`target` instead of
+       `from`/`to`/`edge_type`).  The line-by-line parser silently skips
+       unrecognised sections and keys, so without this the mismatch is
+       invisible.  We record it as an error; the loader binary treats a
+       zero-yield parse as fatal. *)
+    if !saw_content && !caps = [] && !edges = [] then
+      errors := (Printf.sprintf
+        "sidecar %s: parsed 0 capabilities and 0 attack_edges from a \
+         non-empty file — likely a schema/dialect mismatch (expected \
+         top-level `capabilities:` and/or `attack_edges:` with fn / from / \
+         to / edge_type keys; see docs/attack-surface-capability.md)" path)
+        :: !errors;
     { sc_capabilities = List.rev !caps;
       sc_edges        = List.rev !edges;
       sc_errors       = List.rev !errors; }

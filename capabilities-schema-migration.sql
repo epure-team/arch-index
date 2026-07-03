@@ -27,24 +27,24 @@ ALTER TABLE function_effects ADD COLUMN reachability_class TEXT;
 -- Allowed values: validate | apply | internal_op | rpc | external_op | node_local | init
 
 ALTER TABLE function_effects ADD COLUMN actor_role TEXT;
--- Comma-separated from: any | baker | delegate | staker | sequencer |
---   rollup_operator | denouncer | contract
+-- Comma-separated, free-form. Example vocabulary: any | user | admin |
+--   operator | service | external. Pick tokens that fit the analyzed system.
 
 ALTER TABLE function_effects ADD COLUMN temporal_class TEXT;
--- Comma-separated tags from: pre_cementation | between_unstake_and_finalize |
---   validate_time | apply_time | level_boundary | cycle_end | window_open
+-- Comma-separated tags, free-form. Example vocabulary: init_time |
+--   validate_time | apply_time | window_open | boundary.
 
 ALTER TABLE function_effects ADD COLUMN gating TEXT;
--- Pattern: flag(foo) | auth(key) | cost(gas) | none | NULL (unknown)
+-- Pattern: flag(foo) | auth(key) | cost(resource) | none | NULL (unknown)
 
 ALTER TABLE function_effects ADD COLUMN value_touched TEXT;
 -- JSON array of {"kind": ..., "direction": ...}
--- kind in: balance | ticket | stake | supply
+-- kind: free-form, e.g. balance | resource | quota | supply
 -- direction in: debit | credit | mint | burn
 
 ALTER TABLE function_effects ADD COLUMN precondition TEXT;
 -- Typed state predicate (coarse): the state vars/flags an action requires.
--- E.g. "storage.delegate_registered = true"
+-- E.g. "state.account_registered = true"
 
 -- Indexes for the new columns (capability query hot-paths)
 CREATE INDEX IF NOT EXISTS idx_fn_effects_rclass  ON function_effects(reachability_class);

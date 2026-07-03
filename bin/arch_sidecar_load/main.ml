@@ -44,6 +44,16 @@ let run db_path sidecar_path migration_path =
   List.iter (fun e ->
     Printf.eprintf "arch-sidecar-load: parse warning: %s\n%!" e
   ) sc.CE.sc_errors;
+  (* Empty-yield guard: a sidecar that parsed neither a capability nor an
+     attack edge is a no-op load and almost always a schema/dialect mismatch
+     (see load_sidecar).  Fail loudly rather than silently writing nothing. *)
+  if sc.CE.sc_capabilities = [] && sc.CE.sc_edges = [] then begin
+    Printf.eprintf
+      "arch-sidecar-load: %s yielded no capabilities and no attack edges — \
+       nothing to load (see warnings above)\n%!"
+      sidecar_path;
+    exit 2
+  end;
   (* Write capabilities *)
   (match CD.write_capabilities ~db_path sc.CE.sc_capabilities with
    | Error msg ->

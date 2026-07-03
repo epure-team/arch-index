@@ -3,14 +3,16 @@
 Phase 2 adds a **multi-dimensional attack-surface map** on top of the Phase-1
 call graph and effects index.  It answers questions like:
 
-- Which functions are reachable by a baker vs. a staker?
+- Which functions are reachable by one actor role vs. another?
 - Which operations are gated behind a feature flag, and what unsets that flag?
-- Which pairs of operations touch the same protocol value (balance/ticket/stake)
-  from distinct actor roles — the classical confused-deputy / race condition
-  surface?
+- Which pairs of operations touch the same mutable value (e.g. `balance`,
+  `resource`, `quota`) from distinct actor roles — the classic confused-deputy
+  / race-condition surface?
 
-The layer is built as a T1 static-analysis fact store.  A Quint model generator
-(T2) will consume these facts to produce falsifiable protocol properties.
+The layer is a static-analysis fact store.  A downstream model generator can
+consume these facts to produce falsifiable system properties (e.g. a Quint or
+TLA+ model), but the fact store itself is agnostic to any particular consumer
+or codebase.
 
 ---
 
@@ -24,15 +26,19 @@ the existing `function_effects` table:
 | Column              | Type   | Values / format                                                   | Source       |
 |---------------------|--------|-------------------------------------------------------------------|--------------|
 | `reachability_class`| TEXT   | `validate\|apply\|internal_op\|rpc\|external_op\|node_local\|init` | **Static**   |
-| `actor_role`        | TEXT   | comma-separated: `any\|baker\|delegate\|staker\|sequencer\|rollup_operator\|denouncer\|contract` | Sidecar |
-| `temporal_class`    | TEXT   | comma-separated: `pre_cementation\|between_unstake_and_finalize\|validate_time\|apply_time\|level_boundary\|cycle_end\|window_open` | Sidecar |
-| `gating`            | TEXT   | `flag(X)\|auth(Y)\|cost(gas)\|none`                                | **Static**   |
+| `actor_role`        | TEXT   | comma-separated, free-form: e.g. `any\|user\|admin\|operator\|service\|external` | Sidecar |
+| `temporal_class`    | TEXT   | comma-separated, free-form: e.g. `init_time\|validate_time\|apply_time\|window_open\|boundary` | Sidecar |
+| `gating`            | TEXT   | `flag(X)\|auth(Y)\|cost(Z)\|none`                                  | **Static**   |
 | `value_touched`     | TEXT   | JSON array: `[{"kind":"balance","direction":"debit"}, ...]`       | Sidecar      |
-| `precondition`      | TEXT   | free-form state predicate: `"storage.delegate_registered = true"` | Sidecar      |
+| `precondition`      | TEXT   | free-form state predicate: `"state.flag_enabled = true"`          | Sidecar      |
 
-**Statically derivable** means the OCaml extractor populates these from source
-file paths or call-site patterns.  **Sidecar** means an agent or human must
-supply the value via a `.capabilities.yaml` file.
+**Statically derivable** means the extractor populates these from source file
+paths or call-site patterns.  **Sidecar** means an agent or human must supply
+the value via a `.capabilities.yaml` file.
+
+The `actor_role` and `temporal_class` vocabularies are **not fixed** — the
+columns are free text.  The example tokens above are just conventions; pick a
+vocabulary that fits the system under analysis.
 
 `NULL` = not yet determined.  Downstream tools treat `NULL` as "any" (safe
 over-approximation).
@@ -56,9 +62,9 @@ Edge semantics:
 
 | `edge_type`        | Meaning |
 |--------------------|---------|
-| `sequence`         | `from_action` is typically followed by `to_action` in a single transaction or block |
+| `sequence`         | `from_action` is typically followed by `to_action` in a single transaction or unit of work |
 | `removes_guard`    | `from_action` unsets a gate/flag that `to_action` requires (creates a temporal ordering constraint) |
-| `shares_resource`  | Both actions touch the same mutable resource — P13 pruning signal |
+| `shares_resource`  | Both actions touch the same mutable resource — pruning signal |
 | `actor_distinct`   | The composition is interesting when performed by two *different* actors |
 
 ---
@@ -69,7 +75,8 @@ Edge semantics:
 
 `Capability_extractor.make_static_record` derives:
 
-1. **`reachability_class`** — from the source file path:
+1. **`reachability_class`** — from the source file path (heuristic keyword
+   match; returns `NULL` when no keyword is present):
    - path contains `validate` → `validate`
    - path contains `apply` → `apply`
    - path contains `rpc` → `rpc`
@@ -84,12 +91,16 @@ Edge semantics:
    - callee contains `assert_manager` / `check_manager` / `check_source` → `auth(manager_key)`
    - callee matches `check_*_enabled` / `assert_feature_*` / `*_feature_enabled` → `flag(X)`
 
+These keyword lists are **heuristic defaults**, not a fixed contract.  On a
+codebase that uses different conventions they simply yield `NULL`, and the
+sidecar supplies the value instead.
+
 ### What requires a sidecar
 
-- `actor_role` — which protocol actors can trigger this action
-- `temporal_class` — which protocol window/phase applies
+- `actor_role` — which actors can trigger this action
+- `temporal_class` — which window/phase applies
 - `precondition` — required state invariant
-- `value_touched` — which balance/ticket/stake/supply flows occur
+- `value_touched` — which value flows occur
 - `attack_edges` — composition edges between actions
 
 ---
@@ -102,15 +113,15 @@ the source component.  Load with `arch-sidecar-load <db> <sidecar.yaml>`.
 ```yaml
 capabilities:
   - fn: "Module.function_name"
-    actor_role: ["baker", "delegate"]
+    actor_role: ["user", "admin"]
     temporal_class: ["validate_time", "window_open"]
-    precondition: "storage.delegate_registered = true"
+    precondition: "state.account_registered = true"
     gating: "auth(manager_key)"
 
   - fn: "Another.function"
-    actor_role: "staker"
-    temporal_class: "between_unstake_and_finalize"
-    value_touched: [{"kind": "stake", "direction": "debit"}]
+    actor_role: "operator"
+    temporal_class: "window_open"
+    value_touched: [{"kind": "resource", "direction": "debit"}]
 
 attack_edges:
   - from: "Module.fn_a"
@@ -118,10 +129,10 @@ attack_edges:
     edge_type: "removes_guard"
     evidence: "fn_a sets flag X that fn_b requires"
 
-  - from: "Staker.unstake"
-    to: "Staker.finalize_unstake"
+  - from: "Store.open"
+    to: "Store.finalize"
     edge_type: "sequence"
-    evidence: "unstake must precede finalize_unstake"
+    evidence: "open must precede finalize"
 ```
 
 **Notes:**
@@ -131,6 +142,9 @@ attack_edges:
   (only non-`None` fields from the sidecar win).
 - Parse errors on individual items are skipped with a warning; the file load
   never aborts entirely.
+- A non-empty sidecar that yields **zero** capabilities and **zero** attack
+  edges is rejected (`arch-sidecar-load` exits non-zero) — this is almost
+  always a schema/dialect mismatch rather than an intentional empty file.
 
 ---
 
@@ -174,7 +188,7 @@ Find all actions whose `gating` matches `<guard>` (substring), together with
 any `removes_guard` edges pointing at them.
 
 ```
-arch-query arch.db removes-guard "flag(dal"
+arch-query arch.db removes-guard "flag(feature_x"
 ```
 
 Output columns: `gated_action`, `gating`, `unlocker`, `evidence`.
@@ -184,7 +198,7 @@ Use case: find all paths that can remove a safety gate.
 ### 4. `actor-paths <value-kind>`
 
 Find pairs of actions that both touch `<value-kind>` (e.g. `balance`,
-`ticket`, `stake`, `supply`) but are attributed to **different actor roles**.
+`resource`, `quota`, `supply`) but are attributed to **different actor roles**.
 These are the classic cross-role value-flow opportunities.
 
 ```
@@ -194,13 +208,13 @@ arch-query arch.db actor-paths balance
 Output columns: `action_a`, `actor_a`, `action_b`, `actor_b`,
 `value_touched_a`, `value_touched_b`.
 
-Use case: identify T1 cross-actor value interaction candidates for T2 Quint
-properties.
+Use case: identify cross-actor value-interaction candidates for downstream
+property generation.
 
 ### 5. `prune <component-A> <component-B>`
 
-P13 pruning signal: check whether component A and component B share a
-`shares_resource` edge.  If they do, the attack-surface slice that covers A
+Pruning signal: check whether component A and component B share a
+`shares_resource` edge.  If they do, an attack-surface slice that covers A
 must also cover B — they cannot be pruned independently.
 
 ```
@@ -212,23 +226,24 @@ Output: either `PRUNE: no shared resource found` (safe to prune) or
 
 ---
 
-## How Phase 2 feeds Phase 3 (Quint model generation)
+## How Phase 2 feeds a downstream model generator
 
-The capability fact store is the **contract** for the Quint T2 generator:
+The capability fact store is the **contract** for a downstream model/property
+generator (e.g. Quint, TLA+):
 
-1. Each `function_effects` row with `reachability_class` becomes a Quint
-   **action** in the appropriate phase machine.
-2. `actor_role` determines which Quint **principal** can invoke the action.
-3. `temporal_class` places the action in the correct Quint **temporal guard**.
-4. `gating` becomes a Quint **precondition** on the action's enablement.
-5. `value_touched` generates Quint **state-variable update** templates.
-6. `attack_edges` of type `removes_guard` generate Quint **action-ordering
+1. Each `function_effects` row with `reachability_class` becomes an **action**
+   in the appropriate phase machine.
+2. `actor_role` determines which **principal** can invoke the action.
+3. `temporal_class` places the action in the correct **temporal guard**.
+4. `gating` becomes a **precondition** on the action's enablement.
+5. `value_touched` generates **state-variable update** templates.
+6. `attack_edges` of type `removes_guard` generate **action-ordering
    invariants** to falsify.
-7. `attack_edges` of type `actor_distinct` seed Quint **multi-principal
-   interaction properties**.
+7. `attack_edges` of type `actor_distinct` seed **multi-principal interaction
+   properties**.
 
 `NULL` attributes are treated as universally quantified (any value, any actor,
-any window) — conservative but sound for the T2 layer.
+any window) — conservative but sound for the downstream layer.
 
 ---
 
@@ -246,9 +261,9 @@ sqlite3 arch.db < capabilities-schema-migration.sql
 arch-sidecar-load arch.db target.capabilities.yaml
 
 # 4. Query
-arch-query arch.db capabilities-of staking
-arch-query arch.db compose "Staking.apply_stake"
-arch-query arch.db removes-guard "flag(adaptive_issuance"
-arch-query arch.db actor-paths stake
-arch-query arch.db prune staking unstaking
+arch-query arch.db capabilities-of <component>
+arch-query arch.db compose "Module.action"
+arch-query arch.db removes-guard "flag(feature_x"
+arch-query arch.db actor-paths balance
+arch-query arch.db prune <component-A> <component-B>
 ```

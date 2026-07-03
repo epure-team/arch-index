@@ -21,23 +21,25 @@
 
     The sidecar YAML format is documented in docs/attack-surface-capability.md. *)
 
-(** What phase of block processing (or what subsystem) this function belongs to. *)
+(** Which processing phase (or subsystem) a function belongs to.  The classes
+    are heuristic labels inferred from the source file path; on a codebase that
+    does not use these conventions the class is simply [Unknown]. *)
 type reachability_class =
-  | Validate       (** src/.../validate.ml — operation validation before apply *)
-  | Apply          (** src/.../apply.ml — state-mutating apply phase *)
-  | InternalOp     (** internal_operation, manager_operation, etc. *)
-  | Rpc            (** RPC handler (src/.../rpc*.ml) — external-facing *)
-  | ExternalOp     (** External operation type handler *)
-  | NodeLocal      (** Node-local infrastructure (mempool, p2p, storage layer) *)
-  | Init           (** Initialization / genesis *)
-  | Unknown        (** Could not be determined from file path *)
+  | Validate       (** validation phase — checks before state-mutating work *)
+  | Apply          (** state-mutating apply phase *)
+  | InternalOp     (** internally-triggered operation handler *)
+  | Rpc            (** RPC / request handler — external-facing *)
+  | ExternalOp     (** externally-triggered operation handler *)
+  | NodeLocal      (** node-local infrastructure (networking, storage layer) *)
+  | Init           (** initialization / bootstrap *)
+  | Unknown        (** could not be determined from file path *)
 
 val reachability_class_to_string : reachability_class -> string
 val reachability_class_of_string : string -> reachability_class option
 
-(** A single value-flow touch: which protocol value kind and which direction. *)
+(** A single value-flow touch: which value kind and which direction. *)
 type value_touch = {
-  vt_kind      : string;  (** balance | ticket | stake | supply *)
+  vt_kind      : string;  (** free-form, e.g. balance | resource | quota | supply *)
   vt_direction : string;  (** debit | credit | mint | burn *)
 }
 
@@ -51,18 +53,17 @@ type capability_record = {
   cap_reachability    : reachability_class option;
       (** Statically derivable from file path. *)
   cap_actor_role      : string option;
-      (** Comma-separated from: any | baker | delegate | staker | sequencer |
-          rollup_operator | denouncer | contract.  Needs sidecar. *)
+      (** Comma-separated, free-form. Example vocabulary: any | user | admin |
+          operator | service | external.  Needs sidecar. *)
   cap_temporal_class  : string option;
-      (** Comma-separated tags: pre_cementation | between_unstake_and_finalize |
-          validate_time | apply_time | level_boundary | cycle_end | window_open.
-          Needs sidecar. *)
+      (** Comma-separated tags, free-form. Example vocabulary: init_time |
+          validate_time | apply_time | window_open | boundary.  Needs sidecar. *)
   cap_gating          : string option;
-      (** Pattern: flag(foo) | auth(key) | cost(gas) | none.
+      (** Pattern: flag(foo) | auth(key) | cost(resource) | none.
           Statically derivable from call patterns. *)
   cap_value_touched   : value_touch list;
-      (** Protocol value flows.  Partially derivable (from effects table) but
-          semantic labelling requires sidecar. *)
+      (** Value flows.  Partially derivable (from effects table) but semantic
+          labelling requires sidecar. *)
   cap_precondition    : string option;
       (** Typed state predicate.  Needs sidecar. *)
   cap_source          : string;
