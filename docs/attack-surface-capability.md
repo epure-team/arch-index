@@ -23,22 +23,24 @@ or codebase.
 The migration (`capabilities-schema-migration.sql`) adds six nullable columns to
 the existing `function_effects` table:
 
-| Column              | Type   | Values / format                                                   | Source       |
-|---------------------|--------|-------------------------------------------------------------------|--------------|
-| `reachability_class`| TEXT   | `validate\|apply\|internal_op\|rpc\|external_op\|node_local\|init` | **Static**   |
+| Column              | Type   | Values / format                                                   | Source  |
+|---------------------|--------|-------------------------------------------------------------------|---------|
+| `reachability_class`| TEXT   | `validate\|apply\|internal_op\|rpc\|external_op\|node_local\|init` | Sidecar |
 | `actor_role`        | TEXT   | comma-separated, free-form: e.g. `any\|user\|admin\|operator\|service\|external` | Sidecar |
 | `temporal_class`    | TEXT   | comma-separated, free-form: e.g. `init_time\|validate_time\|apply_time\|window_open\|boundary` | Sidecar |
-| `gating`            | TEXT   | `flag(X)\|auth(Y)\|cost(Z)\|none`                                  | **Static**   |
-| `value_touched`     | TEXT   | JSON array: `[{"kind":"balance","direction":"debit"}, ...]`       | Sidecar      |
-| `precondition`      | TEXT   | free-form state predicate: `"state.flag_enabled = true"`          | Sidecar      |
+| `gating`            | TEXT   | `flag(X)\|auth(Y)\|cost(Z)\|none`                                  | Sidecar |
+| `value_touched`     | TEXT   | JSON array: `[{"kind":"balance","direction":"debit"}, ...]`       | Sidecar |
+| `precondition`      | TEXT   | free-form state predicate: `"state.flag_enabled = true"`          | Sidecar |
 
-**Statically derivable** means the extractor populates these from source file
-paths or call-site patterns.  **Sidecar** means an agent or human must supply
-the value via a `.capabilities.yaml` file.
+All Phase-2 attributes are supplied by a `.capabilities.yaml` **sidecar** — an
+agent or human annotation file (see below).  The tool derives none of them
+automatically: it is agnostic to any project's naming conventions, so it makes
+no guesses about which file is a "validate" phase or which callee is an auth
+check.  Those judgements live in the project's sidecar.
 
-The `actor_role` and `temporal_class` vocabularies are **not fixed** — the
-columns are free text.  The example tokens above are just conventions; pick a
-vocabulary that fits the system under analysis.
+None of these vocabularies are fixed — every column is free text.  The example
+tokens above are just conventions; pick whatever fits the system under
+analysis.
 
 `NULL` = not yet determined.  Downstream tools treat `NULL` as "any" (safe
 over-approximation).
@@ -66,42 +68,6 @@ Edge semantics:
 | `removes_guard`    | `from_action` unsets a gate/flag that `to_action` requires (creates a temporal ordering constraint) |
 | `shares_resource`  | Both actions touch the same mutable resource — pruning signal |
 | `actor_distinct`   | The composition is interesting when performed by two *different* actors |
-
----
-
-## Static vs sidecar derivation
-
-### What the static extractor fills
-
-`Capability_extractor.make_static_record` derives:
-
-1. **`reachability_class`** — from the source file path (heuristic keyword
-   match; returns `NULL` when no keyword is present):
-   - path contains `validate` → `validate`
-   - path contains `apply` → `apply`
-   - path contains `rpc` → `rpc`
-   - path contains `internal` + `operation`/`op` → `internal_op`
-   - path contains `init` or `genesis` → `init`
-   - path contains `mempool`, `p2p`, `node`, or `shell` → `node_local`
-   - path contains `operation`/`op` → `external_op`
-
-2. **`gating`** — from direct callee names (priority order):
-   - callee contains `gas.check` / `check_gas` / `fees.check` / `assert_gas` → `cost(gas)`
-   - callee contains `signature.check` / `bls.check` / `check_signature` → `auth(signature)`
-   - callee contains `assert_manager` / `check_manager` / `check_source` → `auth(manager_key)`
-   - callee matches `check_*_enabled` / `assert_feature_*` / `*_feature_enabled` → `flag(X)`
-
-These keyword lists are **heuristic defaults**, not a fixed contract.  On a
-codebase that uses different conventions they simply yield `NULL`, and the
-sidecar supplies the value instead.
-
-### What requires a sidecar
-
-- `actor_role` — which actors can trigger this action
-- `temporal_class` — which window/phase applies
-- `precondition` — required state invariant
-- `value_touched` — which value flows occur
-- `attack_edges` — composition edges between actions
 
 ---
 
@@ -138,8 +104,8 @@ attack_edges:
 **Notes:**
 - `actor_role` and `temporal_class` accept either a YAML list or a
   comma-separated string scalar.
-- Sidecar values **override** statically-derived values field-by-field on merge
-  (only non-`None` fields from the sidecar win).
+- On load, a sidecar value fills its column; a field the sidecar omits leaves
+  any existing value in place (per-field `COALESCE`).
 - Parse errors on individual items are skipped with a warning; the file load
   never aborts entirely.
 - A non-empty sidecar that yields **zero** capabilities and **zero** attack

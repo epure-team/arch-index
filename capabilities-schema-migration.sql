@@ -14,8 +14,8 @@
 --
 -- These columns extend the existing function_effects table (Phase 1).
 -- Each ADD COLUMN is guarded against re-run failures by using IF NOT EXISTS.
--- Absent values are NULL: the static extractor populates what it can; the
--- agent sidecar YAML fills the rest.
+-- Absent values are NULL: the agent sidecar YAML (.capabilities.yaml) fills
+-- these columns; unset attributes stay NULL and are treated as "any".
 -- =============================================================================
 
 -- Phase-2 columns are added via ALTER TABLE.

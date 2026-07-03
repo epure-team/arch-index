@@ -2,10 +2,9 @@
 
     Tests:
     1. capability_types: reachability_class and edge_type serialisation roundtrips
-    2. capability_extractor: derive_reachability_class, derive_gating_from_calls
-    3. capability_extractor: sidecar YAML parsing
-    4. capability_db: write_capabilities + write_attack_edges with an in-memory DB
-    5. Selftest: full round-trip (migration → insert capabilities → insert edges → queries) *)
+    2. capability_extractor: sidecar YAML parsing
+    3. capability_db: write_capabilities + write_attack_edges with an in-memory DB
+    4. Selftest: full round-trip (migration → insert capabilities → insert edges → queries) *)
 
 open Alcotest
 
@@ -75,97 +74,6 @@ let test_edge_type_roundtrip () =
 let test_edge_type_unknown_string () =
   check (option (testable (fun _ _ -> ()) (=)))
     "unknown string" None (CT.edge_type_of_string "bogus")
-
-(* ── capability_extractor: static derivation ─────────────────────────────── *)
-
-let test_derive_reachability_validate () =
-  let rc = CE.derive_reachability_class "src/module/validate.ml" in
-  check (option string) "validate.ml → Validate"
-    (Some "validate") (Option.map CT.reachability_class_to_string rc)
-
-let test_derive_reachability_apply () =
-  let rc = CE.derive_reachability_class "src/module/apply.ml" in
-  check (option string) "apply.ml → Apply"
-    (Some "apply") (Option.map CT.reachability_class_to_string rc)
-
-let test_derive_reachability_rpc () =
-  let rc = CE.derive_reachability_class "src/module/rpc_services.ml" in
-  check (option string) "rpc_services.ml → Rpc"
-    (Some "rpc") (Option.map CT.reachability_class_to_string rc)
-
-let test_derive_reachability_none () =
-  let rc = CE.derive_reachability_class "src/lib_some_helper/utils.ml" in
-  (* utils.ml doesn't match any pattern — Unknown or None *)
-  (match rc with
-   | None | Some CT.Unknown -> ()
-   | Some other ->
-     fail (Printf.sprintf "expected None/Unknown, got %s"
-       (CT.reachability_class_to_string other)))
-
-let test_derive_gating_flag () =
-  let g = CE.derive_gating_from_calls ["check_feature_x_enabled"; "some_other_fn"] in
-  match g with
-  | Some s when String.length s > 5 && String.sub s 0 5 = "flag(" -> ()
-  | Some s -> fail (Printf.sprintf "expected flag(...), got %s" s)
-  | None   -> fail "expected Some flag(...)"
-
-let test_derive_gating_signature () =
-  let g = CE.derive_gating_from_calls ["Bls.check"; "Token.transfer"] in
-  check (option string) "Bls.check → auth(signature)"
-    (Some "auth(signature)") g
-
-let test_derive_gating_manager () =
-  let g = CE.derive_gating_from_calls ["assert_manager"; "something"] in
-  check (option string) "assert_manager → auth(manager_key)"
-    (Some "auth(manager_key)") g
-
-let test_derive_gating_gas () =
-  let g = CE.derive_gating_from_calls ["Gas.check"; "run_contract"] in
-  check (option string) "Gas.check → cost(gas)"
-    (Some "cost(gas)") g
-
-let test_derive_gating_none () =
-  let g = CE.derive_gating_from_calls ["helper_fn"; "pure_computation"] in
-  check (option string) "no gate" None g
-
-(* ── capability_extractor: make_static_record ────────────────────────────── *)
-
-let test_make_static_record () =
-  let r = CE.make_static_record
-    ~function_name:"Apply.apply_operation"
-    ~file_path:(Some "src/module/apply.ml")
-    ~callees:["Gas.check"; "Token.credit"] in
-  check string "source" "static" r.CT.cap_source;
-  check (option string) "reachability"
-    (Some "apply") (Option.map CT.reachability_class_to_string r.CT.cap_reachability);
-  check (option string) "gating" (Some "cost(gas)") r.CT.cap_gating
-
-(* ── capability_extractor: merge_records ─────────────────────────────────── *)
-
-let test_merge_records () =
-  let base = CE.make_static_record
-    ~function_name:"Foo.bar"
-    ~file_path:(Some "src/validate.ml")
-    ~callees:[] in
-  let override = {
-    CT.cap_function_name  = "Foo.bar";
-    cap_file_path         = None;
-    cap_reachability      = None;
-    cap_actor_role        = Some "user,admin";
-    cap_temporal_class    = Some "validate_time";
-    cap_gating            = None;
-    cap_value_touched     = [];
-    cap_precondition      = Some "storage.registered = true";
-    cap_source            = "sidecar";
-  } in
-  let merged = CE.merge_records ~base ~override in
-  (* base reachability preserved *)
-  check (option string) "reachability preserved"
-    (Some "validate") (Option.map CT.reachability_class_to_string merged.CT.cap_reachability);
-  (* override actor_role applied *)
-  check (option string) "actor_role from sidecar"
-    (Some "user,admin") merged.CT.cap_actor_role;
-  check string "source = sidecar" "sidecar" merged.CT.cap_source
 
 (* ── capability_extractor: sidecar YAML parsing ──────────────────────────── *)
 
@@ -515,19 +423,6 @@ let () =
       test_case "reachability_class_unknown"       `Quick test_reachability_class_unknown_string;
       test_case "edge_type_roundtrip"              `Quick test_edge_type_roundtrip;
       test_case "edge_type_unknown"                `Quick test_edge_type_unknown_string;
-    ];
-    "static_derivation", [
-      test_case "reachability_validate"            `Quick test_derive_reachability_validate;
-      test_case "reachability_apply"               `Quick test_derive_reachability_apply;
-      test_case "reachability_rpc"                 `Quick test_derive_reachability_rpc;
-      test_case "reachability_none"                `Quick test_derive_reachability_none;
-      test_case "gating_flag"                      `Quick test_derive_gating_flag;
-      test_case "gating_signature"                 `Quick test_derive_gating_signature;
-      test_case "gating_manager"                   `Quick test_derive_gating_manager;
-      test_case "gating_gas"                       `Quick test_derive_gating_gas;
-      test_case "gating_none"                      `Quick test_derive_gating_none;
-      test_case "make_static_record"               `Quick test_make_static_record;
-      test_case "merge_records"                    `Quick test_merge_records;
     ];
     "sidecar_yaml", [
       test_case "parse_capabilities"               `Quick test_sidecar_parse_capabilities;

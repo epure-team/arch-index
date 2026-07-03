@@ -2,22 +2,12 @@
 
     These types represent the Phase-2 attack-surface layer: each function/action
     in the index can carry a capability record describing WHO calls it, WHEN it
-    runs, WHAT gates it, and WHAT protocol values it touches.
+    runs, WHAT gates it, and WHAT values it touches.
 
-    Static derivability
-    -------------------
-    Some attributes can be derived from source file paths or call patterns in the
-    CMT data; others require agent or human annotation (sidecar YAML).
-
-    Statically derivable:
-      - [reachability_class] — from file path suffix (validate.ml → Validate, etc.)
-      - [gating]             — from call-site patterns (check_*/assert_manager/Signature.check)
-
-    Require sidecar annotation:
-      - [actor_role]      — requires protocol semantics; not derivable from syntax
-      - [temporal_class]  — requires protocol state machine knowledge
-      - [precondition]    — requires invariant knowledge
-      - [value_touched]   — partially derivable (effects table) but semantic labelling needs sidecar
+    Every attribute is supplied by a `.capabilities.yaml` sidecar (agent or
+    human annotation).  The tool derives none of them automatically — it is
+    agnostic to any project's naming conventions.  Attributes left unset are
+    [None] / [[]] and treated downstream as "any" (over-approximation).
 
     The sidecar YAML format is documented in docs/attack-surface-capability.md. *)
 
@@ -44,14 +34,13 @@ type value_touch = {
 }
 
 (** Full capability record for one function/action.
-    NULL-tolerant: use [None] for attributes that cannot be statically derived.
-    The sidecar loader merges sidecar facts by overwriting [None] fields. *)
+    NULL-tolerant: use [None] for attributes the sidecar does not supply. *)
 type capability_record = {
   cap_function_name   : string;
       (** Must match the key in [function_effects.function_name]. *)
   cap_file_path       : string option;
   cap_reachability    : reachability_class option;
-      (** Statically derivable from file path. *)
+      (** Which processing phase/subsystem.  Needs sidecar. *)
   cap_actor_role      : string option;
       (** Comma-separated, free-form. Example vocabulary: any | user | admin |
           operator | service | external.  Needs sidecar. *)
@@ -59,8 +48,7 @@ type capability_record = {
       (** Comma-separated tags, free-form. Example vocabulary: init_time |
           validate_time | apply_time | window_open | boundary.  Needs sidecar. *)
   cap_gating          : string option;
-      (** Pattern: flag(foo) | auth(key) | cost(resource) | none.
-          Statically derivable from call patterns. *)
+      (** Pattern: flag(foo) | auth(key) | cost(resource) | none.  Needs sidecar. *)
   cap_value_touched   : value_touch list;
       (** Value flows.  Partially derivable (from effects table) but semantic
           labelling requires sidecar. *)
