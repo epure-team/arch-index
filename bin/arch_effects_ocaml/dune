@@ -1,0 +1,4 @@
+(executable
+ (name arch_effects_ocaml)
+ (public_name arch_effects_ocaml)
+ (libraries arch_effects cmdliner yojson))

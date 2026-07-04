@@ -1,0 +1,4 @@
+(executable
+ (name main)
+ (public_name arch-sidecar-load)
+ (libraries arch_effects sqlite3 cmdliner))

@@ -28,6 +28,33 @@
 #                                MAY_TOP once the index is ⊤-marked)
 #   find         <substr>        functions whose name matches substr
 #   stats                        row counts (+ contract status)
+#
+# Capability A — effects/mutation queries (requires effects tables from effects-schema-migration.sql):
+#   mutators-of  <value-kind>    all functions that DIRECTLY mutate <value-kind>
+#                                (e.g. GlobalVar, FieldAccess, HashTbl — see value_kinds table).
+#                                Adds transitive mutators via the call graph (MUST∪MAY_ENUMERATED edges).
+#   effects-of   <fn>            all mutations (direct + transitive) reachable from <fn>.
+#                                Soundness label = weakest label in the closure.
+#   pure-fns                     functions with no effects (direct or transitive, per the effects tables).
+#
+# Capability C — dead-code (requires ⊤-marked index for sound verdict):
+#   dead-code    [--roots exported|<fn1,fn2,...>]
+#                                Functions unreachable from all roots over MUST∪MAY_ENUMERATED∪MAY_TOP.
+#                                Sound verdict when callgraph_contract is set; candidate-only otherwise.
+#                                Default roots: all exported functions.
+#
+# Capability Layer B — attack-surface attributes (Phase 2):
+# (requires capabilities-schema-migration.sql and arch-sidecar-load)
+#   capabilities-of <component>  list all actions in component with reachability_class, actor_role,
+#                                temporal_class, gating, value_touched, precondition.
+#                                <component> is a path substring match (case-insensitive).
+#   compose         <action>     forward 'sequence' and 'removes_guard' edges from <action>
+#                                (the composition frontier of that action).
+#   removes-guard   <guard>      all actions with gating matching <guard> and their
+#                                incoming 'removes_guard' attack edges.
+#   actor-paths     <value-kind> paths touching <value-kind> across ≥2 distinct actor roles.
+#   prune           <A> <B>      P13 pruning signal: check if component A and component B share
+#                                a 'shares_resource' attack edge.
 set -euo pipefail
 DB="${1:?usage: arch-query <db> <subcommand> [args]}"; shift
 CMD="${1:?subcommand required}"; shift || true
@@ -111,6 +138,357 @@ case "$CMD" in
   stats)
     echo "contract: ${contract:-<none — not ⊤-marked; 'unreachable' will refuse>}"
     q "SELECT (SELECT count(*) FROM functions) AS functions, (SELECT count(*) FROM functions WHERE exported=1) AS exported, (SELECT count(*) FROM calls) AS call_edges;"
-    if [ -n "$kind_col" ]; then q "SELECT kind, count(*) AS edges FROM calls GROUP BY kind ORDER BY 2 DESC;"; fi ;;
+    if [ -n "$kind_col" ]; then q "SELECT kind, count(*) AS edges FROM calls GROUP BY kind ORDER BY 2 DESC;"; fi
+    # Show effects stats if the table exists
+    eff_tbl=$(qraw "SELECT 1 FROM sqlite_master WHERE type='table' AND name='function_effects' LIMIT 1;")
+    if [ -n "$eff_tbl" ]; then
+      q "SELECT (SELECT count(*) FROM function_effects) AS effect_rows, (SELECT count(DISTINCT function_name) FROM function_effects) AS fns_with_effects, (SELECT count(DISTINCT value_kind) FROM function_effects) AS value_kinds_seen;"
+    fi ;;
+
+  # ── Capability A: effects/mutation queries ──────────────────────────────────
+
+  mutators-of)
+    # All functions that mutate value_kind A (direct), plus transitive mutators
+    # via MUST∪MAY_ENUMERATED call edges.
+    # Usage: arch-query <db> mutators-of <value-kind>
+    eff_tbl=$(qraw "SELECT 1 FROM sqlite_master WHERE type='table' AND name='function_effects' LIMIT 1;")
+    [ -n "$eff_tbl" ] || {
+      echo "arch-query: mutators-of requires the effects tables. Run: sqlite3 <db> < effects-schema-migration.sql && arch-effects-load <db>" >&2
+      exit 3
+    }
+    # Detect schema: flat (caller_name TEXT) vs main (caller_id INTEGER FK).
+    caller_name_col=$(qraw "SELECT 1 FROM pragma_table_info('calls') WHERE name='caller_name' LIMIT 1;")
+    if [ -n "$caller_name_col" ]; then
+      # Flat callgraph DB schema (arch-load): caller_name + callee_name are TEXT columns.
+      q "WITH RECURSIVE
+           direct_mutators(fn) AS (
+             SELECT DISTINCT function_name FROM function_effects WHERE value_kind='$A'
+           ),
+           transitive(fn) AS (
+             SELECT fn FROM direct_mutators
+             UNION
+             SELECT c.caller_name
+             FROM calls c
+             JOIN transitive t ON c.callee_name = t.fn
+             WHERE c.kind IN ('MUST','MAY_ENUMERATED')
+           )
+         SELECT DISTINCT
+           t.fn AS function_name,
+           COALESCE(fe.file_path, f.file_path) AS file_path,
+           CASE WHEN dm.fn IS NOT NULL THEN 'direct' ELSE 'transitive' END AS how,
+           COALESCE(fe.soundness, 'candidate') AS soundness
+         FROM transitive t
+         LEFT JOIN direct_mutators dm ON dm.fn = t.fn
+         LEFT JOIN function_effects fe ON fe.function_name = t.fn AND fe.value_kind='$A'
+         LEFT JOIN functions f ON f.name = t.fn
+         ORDER BY how DESC, t.fn;"
+    else
+      # Main arch-index DB schema: caller_id FK, callee_name TEXT.
+      q "WITH RECURSIVE
+           direct_mutators(fn) AS (
+             SELECT DISTINCT function_name FROM function_effects WHERE value_kind='$A'
+           ),
+           transitive(fn) AS (
+             SELECT fn FROM direct_mutators
+             UNION
+             SELECT cf.name
+             FROM calls c
+             JOIN functions cf ON c.caller_id = cf.id
+             JOIN transitive t ON c.callee_name = t.fn
+             WHERE c.kind IS NULL OR c.kind IN ('MUST','MAY_ENUMERATED')
+           )
+         SELECT DISTINCT
+           t.fn AS function_name,
+           COALESCE(fe.file_path, m.path) AS file_path,
+           CASE WHEN dm.fn IS NOT NULL THEN 'direct' ELSE 'transitive' END AS how,
+           COALESCE(fe.soundness, 'candidate') AS soundness
+         FROM transitive t
+         LEFT JOIN direct_mutators dm ON dm.fn = t.fn
+         LEFT JOIN function_effects fe ON fe.function_name = t.fn AND fe.value_kind='$A'
+         LEFT JOIN functions f ON f.name = t.fn
+         LEFT JOIN modules m ON f.module_id = m.id
+         ORDER BY how DESC, t.fn;"
+    fi ;;
+
+  effects-of)
+    # All mutations (direct + transitive) reachable from function A.
+    # Usage: arch-query <db> effects-of <fn>
+    eff_tbl=$(qraw "SELECT 1 FROM sqlite_master WHERE type='table' AND name='function_effects' LIMIT 1;")
+    [ -n "$eff_tbl" ] || {
+      echo "arch-query: effects-of requires the effects tables." >&2
+      exit 3
+    }
+    caller_name_col2=$(qraw "SELECT 1 FROM pragma_table_info('calls') WHERE name='caller_name' LIMIT 1;")
+    if [ -n "$caller_name_col2" ]; then
+      # Flat schema
+      q "WITH RECURSIVE
+           reach(n) AS (
+             SELECT '$A'
+             UNION SELECT c.callee_name
+             FROM calls c JOIN reach r ON c.caller_name=r.n
+             WHERE c.kind IN ('MUST','MAY_ENUMERATED')
+           )
+         SELECT DISTINCT fe.value_kind, fe.function_name AS mutating_fn,
+                         fe.file_path, fe.target, fe.soundness
+         FROM function_effects fe
+         WHERE fe.function_name IN (SELECT n FROM reach) AND fe.is_direct=1
+         ORDER BY fe.value_kind, fe.function_name;"
+    else
+      # Main schema: caller_id FK
+      q "WITH RECURSIVE
+           reach(n) AS (
+             SELECT '$A'
+             UNION SELECT c.callee_name
+             FROM calls c
+             JOIN functions cf ON c.caller_id = cf.id
+             JOIN reach r ON cf.name = r.n
+             WHERE c.kind IS NULL OR c.kind IN ('MUST','MAY_ENUMERATED')
+           )
+         SELECT DISTINCT fe.value_kind, fe.function_name AS mutating_fn,
+                         fe.file_path, fe.target, fe.soundness
+         FROM function_effects fe
+         WHERE fe.function_name IN (SELECT n FROM reach) AND fe.is_direct=1
+         ORDER BY fe.value_kind, fe.function_name;"
+    fi ;;
+
+  pure-fns)
+    # Functions provably free of effects, transitively.
+    # SOUND definition (matches effects-schema-migration.sql v_pure_functions):
+    # a function is pure iff its forward call closure reaches NO direct effect
+    # AND no MAY_TOP (⊤) edge — i.e. it is NOT in the "impure" set, computed as
+    # the backward closure over MUST∪MAY_ENUMERATED seeded by (a) functions with
+    # a direct effect row and (b) functions with an outgoing MAY_TOP edge (which
+    # could call anything, so purity cannot be certified). Fixes the earlier
+    # unsound version that excluded only direct-effect functions.
+    eff_tbl=$(qraw "SELECT 1 FROM sqlite_master WHERE type='table' AND name='function_effects' LIMIT 1;")
+    [ -n "$eff_tbl" ] || {
+      echo "arch-query: pure-fns requires the effects tables." >&2
+      exit 3
+    }
+    mod_tbl=$(qraw "SELECT 1 FROM sqlite_master WHERE type='table' AND name='modules' LIMIT 1;")
+    caller_name_col4=$(qraw "SELECT 1 FROM pragma_table_info('calls') WHERE name='caller_name' LIMIT 1;")
+    if [ -n "$caller_name_col4" ]; then
+      # Flat callgraph schema: caller_name TEXT in calls; file_path on functions.
+      q "WITH RECURSIVE impure(fn) AS (
+             SELECT DISTINCT function_name FROM function_effects WHERE is_direct=1
+             UNION
+             SELECT DISTINCT caller_name FROM calls WHERE kind='MAY_TOP'
+             UNION
+             SELECT c.caller_name
+             FROM calls c JOIN impure i ON c.callee_name = i.fn
+             WHERE c.kind IN ('MUST','MAY_ENUMERATED')
+           )
+         SELECT f.name, f.file_path
+         FROM functions f
+         WHERE f.name NOT IN (SELECT fn FROM impure)
+           AND f.name NOT LIKE '%*TOP*%'
+         ORDER BY f.file_path, f.name;"
+    else
+      # Main schema: caller_id FK, callee_name TEXT; path via modules table.
+      q "WITH RECURSIVE impure(fn) AS (
+             SELECT DISTINCT function_name FROM function_effects WHERE is_direct=1
+             UNION
+             SELECT DISTINCT cf.name
+             FROM calls c JOIN functions cf ON c.caller_id = cf.id
+             WHERE c.kind='MAY_TOP'
+             UNION
+             SELECT cf.name
+             FROM calls c
+             JOIN functions cf ON c.caller_id = cf.id
+             JOIN impure i ON c.callee_name = i.fn
+             WHERE c.kind IS NULL OR c.kind IN ('MUST','MAY_ENUMERATED')
+           )
+         SELECT f.name, m.path AS file_path
+         FROM functions f
+         LEFT JOIN modules m ON f.module_id = m.id
+         WHERE f.name NOT IN (SELECT fn FROM impure)
+           AND f.name NOT LIKE '%*TOP*%'
+         ORDER BY m.path, f.name;"
+    fi ;;
+
+  # ── Capability C: dead-code / unreachable-from-roots ───────────────────────
+
+  dead-code)
+    # Usage: arch-query <db> dead-code [--roots exported|fn1,fn2,...]
+    # Computes functions unreachable from all roots over MUST∪MAY_ENUMERATED∪MAY_TOP.
+    # Sound verdict when callgraph_contract is set; candidate-only otherwise.
+    roots_arg="${A:-exported}"
+    soundness_label="candidate"
+    [ -n "$contract" ] && soundness_label="sound"
+
+    # Detect exported vs exposed column (flat DB uses 'exported'; main DB uses 'exposed').
+    exported_col=$(qraw "SELECT 1 FROM pragma_table_info('functions') WHERE name='exported' LIMIT 1;")
+    exposed_col=$(qraw "SELECT 1 FROM pragma_table_info('functions') WHERE name='exposed' LIMIT 1;")
+    if [ -n "$exported_col" ]; then
+      visibility_col="exported"
+    elif [ -n "$exposed_col" ]; then
+      visibility_col="exposed"
+    else
+      visibility_col="exported"  # fallback, will return empty
+    fi
+
+    if [ "$roots_arg" = "exported" ]; then
+      # roots = all exported/exposed functions
+      roots_clause="SELECT name FROM functions WHERE ${visibility_col}=1"
+    else
+      # roots = comma-separated list of function names
+      # Convert fn1,fn2,... to SQL 'fn1','fn2',...
+      roots_quoted=$(echo "$roots_arg" | sed "s/,/','/g; s/^/'/; s/$/'/")
+      roots_clause="SELECT name FROM functions WHERE name IN ($roots_quoted)"
+    fi
+
+    mod_tbl2=$(qraw "SELECT 1 FROM sqlite_master WHERE type='table' AND name='modules' LIMIT 1;")
+    caller_name_col3=$(qraw "SELECT 1 FROM pragma_table_info('calls') WHERE name='caller_name' LIMIT 1;")
+    if [ -n "$mod_tbl2" ]; then
+      fp_expr="m.path"
+      join_clause="LEFT JOIN modules m ON f.module_id = m.id"
+    else
+      fp_expr="f.file_path"
+      join_clause=""
+    fi
+    if [ -n "$caller_name_col3" ]; then
+      # Flat schema: caller_name TEXT in calls
+      edge_join="FROM calls c JOIN reach r ON c.caller_name=r.n"
+    else
+      # Main schema: join via caller_id FK
+      edge_join="FROM calls c JOIN functions cf ON c.caller_id=cf.id JOIN reach r ON cf.name=r.n"
+    fi
+    q "WITH RECURSIVE
+         roots(n) AS ($roots_clause),
+         reach(n) AS (
+           SELECT n FROM roots
+           UNION SELECT c.callee_name $edge_join
+         )
+       SELECT
+         f.name AS function_name,
+         $fp_expr AS file_path,
+         '$soundness_label' AS verdict_soundness
+       FROM functions f
+       $join_clause
+       WHERE f.name NOT IN (SELECT n FROM reach)
+         AND f.name NOT LIKE '%*TOP*%'
+         AND f.name NOT IN (SELECT n FROM roots)
+       ORDER BY $fp_expr, f.name;" ;;
+
+  # ── Capability Layer B: attack-surface attribute queries ──────────────────
+
+  capabilities-of)
+    # List all actions in <component> with Phase-2 capability attributes.
+    # Usage: arch-query <db> capabilities-of <component-path-substring>
+    cap_tbl=$(qraw "SELECT 1 FROM sqlite_master WHERE type='table' AND name='function_effects' LIMIT 1;")
+    [ -n "$cap_tbl" ] || {
+      echo "arch-query: capabilities-of requires the effects tables. Run the migration first." >&2; exit 3; }
+    rclass_col=$(qraw "SELECT 1 FROM pragma_table_info('function_effects') WHERE name='reachability_class' LIMIT 1;")
+    [ -n "$rclass_col" ] || {
+      echo "arch-query: capabilities-of requires Phase-2 columns. Run: sqlite3 <db> < capabilities-schema-migration.sql" >&2; exit 3; }
+    q "SELECT DISTINCT
+         fe.function_name,
+         COALESCE(fe.reachability_class,'?')  AS rclass,
+         COALESCE(fe.actor_role,'?')           AS actor_role,
+         COALESCE(fe.temporal_class,'?')       AS temporal_class,
+         COALESCE(fe.gating,'?')               AS gating,
+         COALESCE(fe.value_touched,'[]')       AS value_touched,
+         COALESCE(fe.precondition,'?')         AS precondition,
+         fe.soundness
+       FROM function_effects fe
+       WHERE lower(COALESCE(fe.file_path,'')) LIKE '%$(echo "$A" | tr '[:upper:]' '[:lower:]')%'
+          OR lower(fe.function_name) LIKE '%$(echo "$A" | tr '[:upper:]' '[:lower:]')%'
+       ORDER BY fe.file_path, fe.function_name;" ;;
+
+  compose)
+    # Forward composition frontier of <action>: sequence and removes_guard edges.
+    # Usage: arch-query <db> compose <action>
+    ae_tbl=$(qraw "SELECT 1 FROM sqlite_master WHERE type='table' AND name='attack_edges' LIMIT 1;")
+    [ -n "$ae_tbl" ] || {
+      echo "arch-query: compose requires the attack_edges table. Run: sqlite3 <db> < capabilities-schema-migration.sql" >&2; exit 3; }
+    q "SELECT ae.to_action, ae.edge_type, ae.evidence,
+              COALESCE(fe.reachability_class,'?') AS to_rclass,
+              COALESCE(fe.actor_role,'?') AS to_actor_role
+       FROM attack_edges ae
+       LEFT JOIN (
+         SELECT function_name, reachability_class, actor_role
+         FROM function_effects GROUP BY function_name
+       ) fe ON ae.to_action = fe.function_name
+       WHERE ae.from_action = '$A'
+         AND ae.edge_type IN ('sequence','removes_guard')
+       ORDER BY ae.edge_type, ae.to_action;" ;;
+
+  removes-guard)
+    # Actions with gating matching <guard> and their incoming removes_guard edges.
+    # Usage: arch-query <db> removes-guard <guard-pattern>
+    # <guard-pattern> is matched as a substring of the gating column.
+    ae_tbl2=$(qraw "SELECT 1 FROM sqlite_master WHERE type='table' AND name='attack_edges' LIMIT 1;")
+    rclass_col2=$(qraw "SELECT 1 FROM pragma_table_info('function_effects') WHERE name='gating' LIMIT 1;")
+    ( [ -n "$ae_tbl2" ] && [ -n "$rclass_col2" ] ) || {
+      echo "arch-query: removes-guard requires Phase-2 tables. Run the migration first." >&2; exit 3; }
+    q "SELECT fe.function_name AS gated_action,
+              fe.gating,
+              ae.from_action   AS unlocker,
+              ae.evidence
+       FROM function_effects fe
+       LEFT JOIN attack_edges ae
+         ON ae.to_action = fe.function_name AND ae.edge_type = 'removes_guard'
+       WHERE lower(COALESCE(fe.gating,'')) LIKE '%$(echo "$A" | tr '[:upper:]' '[:lower:]')%'
+       ORDER BY fe.function_name, ae.from_action;" ;;
+
+  actor-paths)
+    # Paths touching <value-kind> across ≥2 distinct actor roles.
+    # Usage: arch-query <db> actor-paths <value-kind>
+    # Returns pairs (fn_a, fn_b) where fn_a and fn_b both touch value-kind
+    # and have different actor_roles, linked by a call path.
+    rclass_col3=$(qraw "SELECT 1 FROM pragma_table_info('function_effects') WHERE name='actor_role' LIMIT 1;")
+    [ -n "$rclass_col3" ] || {
+      echo "arch-query: actor-paths requires Phase-2 columns. Run: sqlite3 <db> < capabilities-schema-migration.sql" >&2; exit 3; }
+    q "SELECT DISTINCT
+         a.function_name  AS action_a,
+         a.actor_role     AS actor_a,
+         b.function_name  AS action_b,
+         b.actor_role     AS actor_b,
+         a.value_touched  AS value_touched_a,
+         b.value_touched  AS value_touched_b
+       FROM function_effects a
+       JOIN function_effects b
+         ON a.actor_role IS NOT NULL
+        AND b.actor_role IS NOT NULL
+        AND a.actor_role != b.actor_role
+        AND a.function_name != b.function_name
+       WHERE (
+         a.value_kind = '$A' OR lower(COALESCE(a.value_touched,'')) LIKE '%\"kind\":\"$A\"%'
+       )
+       AND (
+         b.value_kind = '$A' OR lower(COALESCE(b.value_touched,'')) LIKE '%\"kind\":\"$A\"%'
+       )
+       ORDER BY a.function_name, b.function_name;" ;;
+
+  prune)
+    # P13 pruning signal: check if component A and component B share a resource.
+    # Usage: arch-query <db> prune <component-A> <component-B>
+    # Returns any 'shares_resource' edges between functions in A and functions in B.
+    ae_tbl3=$(qraw "SELECT 1 FROM sqlite_master WHERE type='table' AND name='attack_edges' LIMIT 1;")
+    [ -n "$ae_tbl3" ] || {
+      echo "arch-query: prune requires the attack_edges table. Run the migration first." >&2; exit 3; }
+    result=$(qraw "SELECT count(*) FROM attack_edges ae
+       JOIN function_effects fa ON ae.from_action = fa.function_name
+       JOIN function_effects fb ON ae.to_action = fb.function_name
+       WHERE ae.edge_type = 'shares_resource'
+         AND (lower(COALESCE(fa.file_path,'')) LIKE '%$(echo "$A" | tr '[:upper:]' '[:lower:]')%'
+              OR lower(fa.function_name) LIKE '%$(echo "$A" | tr '[:upper:]' '[:lower:]')%')
+         AND (lower(COALESCE(fb.file_path,'')) LIKE '%$(echo "$B" | tr '[:upper:]' '[:lower:]')%'
+              OR lower(fb.function_name) LIKE '%$(echo "$B" | tr '[:upper:]' '[:lower:]')%');")
+    if [ "${result:-0}" = "0" ]; then
+      echo "PRUNE: no shared resource found between '$A' and '$B' — safe to prune (P13 passes)"
+    else
+      echo "DO NOT PRUNE: $result shared_resource edge(s) between '$A' and '$B' — P13 signal"
+      q "SELECT ae.from_action, ae.to_action, ae.evidence
+         FROM attack_edges ae
+         JOIN function_effects fa ON ae.from_action = fa.function_name
+         JOIN function_effects fb ON ae.to_action = fb.function_name
+         WHERE ae.edge_type = 'shares_resource'
+           AND (lower(COALESCE(fa.file_path,'')) LIKE '%$(echo "$A" | tr '[:upper:]' '[:lower:]')%'
+                OR lower(fa.function_name) LIKE '%$(echo "$A" | tr '[:upper:]' '[:lower:]')%')
+           AND (lower(COALESCE(fb.file_path,'')) LIKE '%$(echo "$B" | tr '[:upper:]' '[:lower:]')%'
+                OR lower(fb.function_name) LIKE '%$(echo "$B" | tr '[:upper:]' '[:lower:]')%');"
+    fi ;;
+
   *) echo "arch-query: unknown subcommand '$CMD'" >&2; exit 2 ;;
 esac

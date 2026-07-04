@@ -1,0 +1,17 @@
+(library
+ (name arch_effects)
+ (libraries
+  sqlite3
+  yojson
+  compiler-libs.common)
+ (modules
+  extractor_intf
+  effects_db
+  effects_load
+  ocaml_effects_extractor
+  capability_types
+  capability_extractor
+  capability_db)
+ (inline_tests)
+ (preprocess
+  (pps ppx_inline_test ppx_assert)))

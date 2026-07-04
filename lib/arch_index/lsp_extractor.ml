@@ -129,6 +129,9 @@ let language_id_of_uri uri =
   match ext with
   | ".tsx" -> "typescriptreact"
   | ".ml" | ".mli" -> "ocaml"
+  | ".rs" -> "rust"
+  | ".go" -> "go"
+  | ".py" -> "python"
   | _ -> "typescript"
 
 (** [extract_from_document_symbols client ~project_dir ~file_uri] opens the
@@ -266,12 +269,42 @@ let scan_ml_files ~project_dir =
   walk project_dir ;
   !uris
 
+(** [scan_files_with_ext ~ext ~project_dir] walks [project_dir] recursively and
+    returns file:// URIs for all files with extension [ext] (e.g. ".rs"),
+    excluding build/VCS/dependency directories and hidden directories. Generic
+    fallback used by languages that have no bespoke scanner. *)
+let scan_files_with_ext ~ext ~project_dir =
+  let uris = ref [] in
+  let excluded_dirs =
+    ["target"; "_build"; "_opam"; ".git"; "node_modules"; "vendor"]
+  in
+  let rec walk dir =
+    try
+      let entries = Sys.readdir dir in
+      Array.iter
+        (fun entry ->
+          let path = Filename.concat dir entry in
+          if Sys.is_directory path then begin
+            if (not (List.mem entry excluded_dirs)) && entry.[0] <> '.' then
+              walk path
+          end
+          else if Filename.extension entry = ext then
+            uris := ("file://" ^ path) :: !uris)
+        entries
+    with _ -> ()
+  in
+  walk project_dir ;
+  !uris
+
 (** [scan_source_files ~language ~project_dir] returns file:// URIs for source
     files matching [language]. Dispatches to the language-specific scanner. *)
 let scan_source_files ~language ~project_dir =
   match language with
   | "ocaml" -> scan_ml_files ~project_dir
-  | _       -> scan_ts_files ~project_dir
+  | "rust" -> scan_files_with_ext ~ext:".rs" ~project_dir
+  | "go" -> scan_files_with_ext ~ext:".go" ~project_dir
+  | "python" -> scan_files_with_ext ~ext:".py" ~project_dir
+  | _ -> scan_ts_files ~project_dir
 
 (** [merge_rows ws_rows doc_rows] merges workspace rows with document-symbol
     rows, preferring document-symbol rows (better line ranges) when available. *)

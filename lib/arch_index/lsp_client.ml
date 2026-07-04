@@ -159,7 +159,13 @@ let start ~sw ~env ~command ~args ~project_dir ?(init_options = `Null) () =
                     ( "documentSymbol",
                       `Assoc [("hierarchicalDocumentSymbolSupport", `Bool true)]
                     );
-                    ("callHierarchy", `Assoc []);
+                    (* rust-analyzer (and other servers) only register the
+                       call-hierarchy provider when the client advertises the
+                       capability with [dynamicRegistration]; an empty object
+                       is not enough.  Without this, prepareCallHierarchy and
+                       incoming/outgoingCalls are silently dropped → 0 edges. *)
+                    ( "callHierarchy",
+                      `Assoc [("dynamicRegistration", `Bool true)] );
                   ] );
               ("workspace", `Assoc [("symbol", `Assoc [])]);
             ] );

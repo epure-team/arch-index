@@ -11,7 +11,7 @@
 | Tests | `opam exec -- dune test` | ✅ PASS | 0.2s |
 | Format | `opam exec -- dune fmt --preview` | ⚠️ PRE-EXISTING (ocamlformat absent from project switch) | n/a |
 
-**Format gate note:** `ocamlformat` is installed in `octez-setup` switch but not in the project's local switch. `dune fmt` fails identically on unmodified main — not caused by arch_serve. Not counted as a regression.
+**Format gate note:** `ocamlformat` is installed in another opam switch but not in the project's local switch. `dune fmt` fails identically on unmodified main — not caused by arch_serve. Not counted as a regression.
 
 ## Tests: detail
 
