@@ -1,5 +1,6 @@
 # Build output
 callgraph-go/arch-callgraph-go
+callgraph-go/effects/arch-effects-go
 _build/
 _opam/
 # Per-target call-graph artifacts — never committed (target-specific)

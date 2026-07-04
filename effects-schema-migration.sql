@@ -75,6 +75,14 @@ CREATE INDEX IF NOT EXISTS idx_fn_effects_kind   ON function_effects(value_kind)
 CREATE INDEX IF NOT EXISTS idx_fn_effects_fnid   ON function_effects(function_id);
 CREATE INDEX IF NOT EXISTS idx_fn_effects_direct ON function_effects(is_direct);
 
+-- Idempotency: identity of an effect row is (function, file, kind, target,
+-- producer, direct/transitive). NULL file_path/target/producer fold to '' so
+-- re-loading the same NDJSON stream is a no-op (writers use INSERT OR IGNORE,
+-- which conflicts on this index instead of duplicating every row).
+CREATE UNIQUE INDEX IF NOT EXISTS fn_effects_identity
+  ON function_effects(function_name, COALESCE(file_path, ''), value_kind,
+                      COALESCE(target, ''), COALESCE(producer, ''), is_direct);
+
 -- =============================================================================
 -- Purity / pure flag (per-function summary; derived from function_effects)
 -- A function is "pure" iff it has no own or transitive mutations AND no

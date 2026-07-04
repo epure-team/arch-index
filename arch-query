@@ -252,32 +252,58 @@ case "$CMD" in
     fi ;;
 
   pure-fns)
-    # Functions with no effects (direct or transitive via call graph).
-    # A function is pure iff it does not appear in effects-of any caller that
-    # reaches it, and has no direct effect row.
+    # Functions provably free of effects, transitively.
+    # SOUND definition (matches effects-schema-migration.sql v_pure_functions):
+    # a function is pure iff its forward call closure reaches NO direct effect
+    # AND no MAY_TOP (⊤) edge — i.e. it is NOT in the "impure" set, computed as
+    # the backward closure over MUST∪MAY_ENUMERATED seeded by (a) functions with
+    # a direct effect row and (b) functions with an outgoing MAY_TOP edge (which
+    # could call anything, so purity cannot be certified). Fixes the earlier
+    # unsound version that excluded only direct-effect functions.
     eff_tbl=$(qraw "SELECT 1 FROM sqlite_master WHERE type='table' AND name='function_effects' LIMIT 1;")
     [ -n "$eff_tbl" ] || {
       echo "arch-query: pure-fns requires the effects tables." >&2
       exit 3
     }
     mod_tbl=$(qraw "SELECT 1 FROM sqlite_master WHERE type='table' AND name='modules' LIMIT 1;")
-    if [ -n "$mod_tbl" ]; then
-      # Main schema: path via modules table
-      q "SELECT f.name, m.path AS file_path
+    caller_name_col4=$(qraw "SELECT 1 FROM pragma_table_info('calls') WHERE name='caller_name' LIMIT 1;")
+    if [ -n "$caller_name_col4" ]; then
+      # Flat callgraph schema: caller_name TEXT in calls; file_path on functions.
+      q "WITH RECURSIVE impure(fn) AS (
+             SELECT DISTINCT function_name FROM function_effects WHERE is_direct=1
+             UNION
+             SELECT DISTINCT caller_name FROM calls WHERE kind='MAY_TOP'
+             UNION
+             SELECT c.caller_name
+             FROM calls c JOIN impure i ON c.callee_name = i.fn
+             WHERE c.kind IN ('MUST','MAY_ENUMERATED')
+           )
+         SELECT f.name, f.file_path
+         FROM functions f
+         WHERE f.name NOT IN (SELECT fn FROM impure)
+           AND f.name NOT LIKE '%*TOP*%'
+         ORDER BY f.file_path, f.name;"
+    else
+      # Main schema: caller_id FK, callee_name TEXT; path via modules table.
+      q "WITH RECURSIVE impure(fn) AS (
+             SELECT DISTINCT function_name FROM function_effects WHERE is_direct=1
+             UNION
+             SELECT DISTINCT cf.name
+             FROM calls c JOIN functions cf ON c.caller_id = cf.id
+             WHERE c.kind='MAY_TOP'
+             UNION
+             SELECT cf.name
+             FROM calls c
+             JOIN functions cf ON c.caller_id = cf.id
+             JOIN impure i ON c.callee_name = i.fn
+             WHERE c.kind IS NULL OR c.kind IN ('MUST','MAY_ENUMERATED')
+           )
+         SELECT f.name, m.path AS file_path
          FROM functions f
          LEFT JOIN modules m ON f.module_id = m.id
-         WHERE f.name NOT IN (
-           SELECT DISTINCT function_name FROM function_effects WHERE is_direct=1
-         ) AND f.name NOT LIKE '%*TOP*%'
+         WHERE f.name NOT IN (SELECT fn FROM impure)
+           AND f.name NOT LIKE '%*TOP*%'
          ORDER BY m.path, f.name;"
-    else
-      # Flat callgraph schema: file_path directly on functions
-      q "SELECT f.name, f.file_path
-         FROM functions f
-         WHERE f.name NOT IN (
-           SELECT DISTINCT function_name FROM function_effects WHERE is_direct=1
-         ) AND f.name NOT LIKE '%*TOP*%'
-         ORDER BY f.file_path, f.name;"
     fi ;;
 
   # ── Capability C: dead-code / unreachable-from-roots ───────────────────────

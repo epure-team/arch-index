@@ -18,7 +18,15 @@ type load_result = {
   n_skipped   : int;
 }
 
-(** [load ~db_path ic] reads NDJSON from [ic], writes effect records to
-    [db_path] (which must already have the effects tables from the migration).
-    Returns [Ok result] or [Error msg]. *)
-val load : db_path:string -> in_channel -> (load_result, string) result
+(** [load ?allow_skip ~db_path ic] reads NDJSON from [ic] and writes effect
+    records to [db_path] (which must already have the effects tables from the
+    migration).  Returns [Ok result] or [Error msg].
+
+    Malformed records are a hard error by default: without [~allow_skip:true],
+    encountering any unparseable line returns [Error] and writes nothing, so a
+    partial/garbled stream cannot masquerade as a successful load.  With
+    [~allow_skip:true] the parseable records are loaded and the malformed ones
+    are counted in [n_skipped].  DB-level skips (idempotent-reload duplicates)
+    are always tolerated and counted in [n_skipped] regardless. *)
+val load :
+  ?allow_skip:bool -> db_path:string -> in_channel -> (load_result, string) result

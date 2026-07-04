@@ -12,19 +12,22 @@
 
 open Cmdliner
 
-let run db_path migration_path =
+let run db_path migration_path allow_skip =
   (* Apply migration if requested (or if the table is missing) *)
   let needs_migration =
     match migration_path with
     | Some _ -> true
     | None ->
-      (* Probe: if function_effects table absent, look for the default migration *)
+      (* Probe: if function_effects table absent, look for the default migration.
+         NB: Sqlite3.exec returns OK on a zero-row result, so we must detect an
+         actual row via the callback rather than the return code. *)
       let probe = Sqlite3.db_open db_path in
-      let has = match Sqlite3.exec probe
+      let has = ref false in
+      (match Sqlite3.exec_no_headers probe ~cb:(fun _ -> has := true)
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name='function_effects' LIMIT 1"
-        with Sqlite3.Rc.OK -> true | _ -> false in
+       with _ -> ());
       ignore (Sqlite3.db_close probe);
-      not has
+      not !has
   in
   if needs_migration then begin
     let sql_path = match migration_path with
@@ -40,7 +43,7 @@ let run db_path migration_path =
       exit 1
     | Ok () -> ()
   end;
-  match Arch_effects.Effects_load.load ~db_path stdin with
+  match Arch_effects.Effects_load.load ~allow_skip ~db_path stdin with
   | Error msg ->
     Printf.eprintf "arch-effects-load: %s\n%!" msg;
     exit 1
@@ -58,9 +61,14 @@ let migration_arg =
              Auto-applied if the function_effects table is absent." in
   Arg.(value & opt (some string) None & info ["migration"; "m"] ~docv:"SQL" ~doc)
 
+let allow_skip_arg =
+  let doc = "Load the parseable records even if some NDJSON lines are malformed. \
+             By default a malformed line aborts the load with a non-zero exit." in
+  Arg.(value & flag & info ["allow-skip"] ~doc)
+
 let cmd =
   let doc = "Load NDJSON effect records into an arch-index SQLite database." in
   let info = Cmd.info "arch_effects_load" ~doc in
-  Cmd.v info Term.(const run $ db_arg $ migration_arg)
+  Cmd.v info Term.(const run $ db_arg $ migration_arg $ allow_skip_arg)
 
 let () = exit (Cmd.eval cmd)

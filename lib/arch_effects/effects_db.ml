@@ -117,10 +117,15 @@ let write_effects ~db_path records =
         created_at TEXT DEFAULT CURRENT_TIMESTAMP)";
       "CREATE INDEX IF NOT EXISTS idx_fn_effects_fname ON function_effects(function_name)";
       "CREATE INDEX IF NOT EXISTS idx_fn_effects_kind  ON function_effects(value_kind)";
+      (* Idempotency key (mirrors effects-schema-migration.sql): INSERT OR IGNORE
+         conflicts on this instead of duplicating rows on re-load. *)
+      "CREATE UNIQUE INDEX IF NOT EXISTS fn_effects_identity \
+        ON function_effects(function_name, COALESCE(file_path,''), value_kind, \
+                            COALESCE(target,''), COALESCE(producer,''), is_direct)";
     ] in
     List.iter (fun s -> try exec_exn db s with Failure _ -> ()) guard_stmts;
     let st = Sqlite3.prepare db
-      "INSERT INTO function_effects\
+      "INSERT OR IGNORE INTO function_effects\
         (function_id, function_name, file_path, value_kind, target,\
          is_direct, soundness, producer)\
        VALUES (?,?,?,?,?,1,?,?)" in
@@ -141,7 +146,10 @@ let write_effects ~db_path records =
           bind_text st 6 (soundness_to_string er.er_soundness);
           bind_text st 7 er.er_producer;
           (match Sqlite3.step st with
-           | Sqlite3.Rc.DONE -> incr n_inserted
+           (* INSERT OR IGNORE returns DONE even on conflict; changes()=0 means
+              the row already existed (idempotent re-load), so count it skipped. *)
+           | Sqlite3.Rc.DONE ->
+             if Sqlite3.changes db > 0 then incr n_inserted else incr n_skipped
            | _ -> incr n_skipped);
           ignore (Sqlite3.reset st)
         with Failure _ -> incr n_skipped

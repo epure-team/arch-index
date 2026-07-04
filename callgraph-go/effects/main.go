@@ -279,13 +279,23 @@ func main() {
 	if err != nil {
 		die("packages.Load: %v", err)
 	}
+	// Track whether any package reported load/type errors. Incomplete type or
+	// SSA information yields an UNDER-approximated mutation set, so we must not
+	// label such output "sound" (see soundnessLabel below).
+	anyPkgErrors := false
 	packages.Visit(pkgs, nil, func(p *packages.Package) {
 		for _, e := range p.Errors {
+			anyPkgErrors = true
 			fmt.Fprintf(os.Stderr, "arch-effects-go: load warning: %s\n", e)
 		}
 	})
 	if len(pkgs) == 0 {
 		die("no packages loaded from %v", expanded)
+	}
+	soundnessLabel := "sound"
+	if anyPkgErrors {
+		soundnessLabel = "candidate"
+		fmt.Fprintln(os.Stderr, "arch-effects-go: package errors present — emitting soundness=candidate (not sound)")
 	}
 
 	prog, _ := ssautil.AllPackages(pkgs, ssa.InstantiateGenerics)
@@ -300,14 +310,26 @@ func main() {
 		}
 	}
 
+	// ssautil.AllFunctions can panic on incomplete programs. Recovering into an
+	// empty set would make the extractor exit 0 with zero effects — a silent
+	// false-confidence failure. Record the panic and abort non-zero below.
+	ssaPanicked := false
 	allFns := func() (m map[*ssa.Function]bool) {
 		defer func() {
 			if r := recover(); r != nil {
+				ssaPanicked = true
+				fmt.Fprintf(os.Stderr, "arch-effects-go: ssautil.AllFunctions panicked: %v\n", r)
 				m = make(map[*ssa.Function]bool)
 			}
 		}()
 		return ssautil.AllFunctions(prog)
 	}()
+
+	// A panic that yielded no functions means we analyzed nothing; failing loud
+	// beats emitting an empty (but successful-looking) effect stream.
+	if ssaPanicked && len(allFns) == 0 {
+		die("SSA analysis panicked and produced no functions; refusing to emit an empty effect set")
+	}
 
 	n_effects := 0
 	dedup := make(map[string]bool)
@@ -335,7 +357,7 @@ func main() {
 				FilePath:     callerFile,
 				ValueKind:    kind,
 				Target:       target,
-				Soundness:    "sound",
+				Soundness:    soundnessLabel,
 				Producer:     "arch-effects-go",
 			})
 		}

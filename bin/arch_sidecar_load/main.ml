@@ -18,12 +18,15 @@ let run db_path sidecar_path migration_path =
     | Some _ -> true
     | None ->
       let probe = Sqlite3.db_open db_path in
-      let has = match Sqlite3.exec probe
+      (* Sqlite3.exec returns OK on a zero-row result, so the column's presence
+         must be detected via the callback firing, not the return code. *)
+      let has = ref false in
+      (match Sqlite3.exec_no_headers probe ~cb:(fun _ -> has := true)
         "SELECT 1 FROM pragma_table_info('function_effects') \
          WHERE name='reachability_class' LIMIT 1"
-        with Sqlite3.Rc.OK -> true | _ -> false in
+       with _ -> ());
       ignore (Sqlite3.db_close probe);
-      not has
+      not !has
   in
   if needs_migration then begin
     let sql_path = match migration_path with

@@ -52,7 +52,19 @@ let net_names =
 
 (* ── name classification ─────────────────────────────────────────────────── *)
 
-let member_of lst name = List.mem name lst
+(** The last two dotted segments of a qualified name, e.g.
+    "Stdlib.Hashtbl.replace" → "Hashtbl.replace". CMT paths carry the full
+    prefix (stdlib modules resolve to [Stdlib.Hashtbl.…]), but the pattern
+    tables are keyed on the conventional short "Module.func" form. *)
+let last_two_segments name =
+  match List.rev (String.split_on_char '.' name) with
+  | fn :: modn :: _ -> modn ^ "." ^ fn
+  | _ -> name
+
+(** Match a qualified callee name against a short-name table, tolerating any
+    module prefix (so [Stdlib.Hashtbl.replace] matches ["Hashtbl.replace"]). *)
+let member_of lst name =
+  List.mem name lst || List.mem (last_two_segments name) lst
 
 (** Classify a callee fully-qualified name to an optional [value_kind].
     Returns [None] if the call is not a recognized mutation. *)

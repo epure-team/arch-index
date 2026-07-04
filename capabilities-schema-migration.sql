@@ -2,9 +2,13 @@
 -- Capability layer: reachability_class, actor_role, temporal_class, gating,
 --   value_touched, precondition, and the attack_edges graph.
 --
--- Apply with: sqlite3 <db> < capabilities-schema-migration.sql
--- Safe to re-run: uses ADD COLUMN IF NOT EXISTS and CREATE TABLE/INDEX IF NOT EXISTS.
+-- Apply with: sqlite3 <db> < capabilities-schema-migration.sql   (apply once)
 -- This migration is ADDITIVE — it never drops or modifies existing tables/columns.
+-- Idempotency: CREATE TABLE/INDEX/VIEW use IF NOT EXISTS, but SQLite has no
+-- `ALTER TABLE ADD COLUMN IF NOT EXISTS`, so re-running this file raw errors on
+-- the already-present columns (harmless — no data is touched). For a
+-- guaranteed-idempotent apply, run it through `arch-sidecar-load`, whose
+-- migrator checks pragma_table_info and skips columns that already exist.
 --
 -- Depends on: the base architecture schema (functions table must exist).
 -- May be applied after effects-schema-migration.sql, or independently.
@@ -13,15 +17,13 @@
 -- Phase 2 columns on function_effects
 --
 -- These columns extend the existing function_effects table (Phase 1).
--- Each ADD COLUMN is guarded against re-run failures by using IF NOT EXISTS.
 -- Absent values are NULL: the agent sidecar YAML (.capabilities.yaml) fills
 -- these columns; unset attributes stay NULL and are treated as "any".
 -- =============================================================================
 
--- Phase-2 columns are added via ALTER TABLE.
--- Note: ALTER TABLE ... ADD COLUMN IF NOT EXISTS requires SQLite >= 3.37.0.
--- For older SQLite, errors on duplicate columns are expected and harmless.
--- The capability_db.ml runtime writer uses pragma_table_info to check first.
+-- Phase-2 columns are added via ALTER TABLE ADD COLUMN (bare — SQLite has no
+-- IF NOT EXISTS for ADD COLUMN). Re-running raw errors on existing columns;
+-- the capability_db.ml runtime writer uses pragma_table_info to check first.
 
 ALTER TABLE function_effects ADD COLUMN reachability_class TEXT;
 -- Allowed values: validate | apply | internal_op | rpc | external_op | node_local | init
@@ -105,6 +107,13 @@ ALTER TABLE attack_edges ADD COLUMN to_path   TEXT;
 CREATE INDEX IF NOT EXISTS attack_edges_from ON attack_edges(from_action);
 CREATE INDEX IF NOT EXISTS attack_edges_to   ON attack_edges(to_action);
 CREATE INDEX IF NOT EXISTS attack_edges_type ON attack_edges(edge_type);
+
+-- Idempotency: identity of an edge is the (endpoints, discriminators, kind)
+-- tuple. NULL from_path/to_path are folded to '' so re-loading a sidecar is a
+-- no-op (INSERT OR IGNORE conflicts on this index instead of duplicating).
+CREATE UNIQUE INDEX IF NOT EXISTS attack_edges_identity
+  ON attack_edges(from_action, to_action, edge_type,
+                  COALESCE(from_path, ''), COALESCE(to_path, ''));
 
 -- =============================================================================
 -- attack_edges view: full resolved edge list with actor info for both endpoints

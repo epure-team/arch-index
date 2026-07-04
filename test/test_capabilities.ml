@@ -264,6 +264,34 @@ let test_write_capabilities_roundtrip () =
       check int "0 skipped" 0 n_skip
   )
 
+(* Cross-component non-collision: two functions sharing a bare name but living
+   in different files must produce two distinct rows — a sidecar for one must
+   not overwrite the other (regression for the file_path-scoped upsert). *)
+let test_write_capabilities_distinct_file_paths () =
+  let path = create_migrated_db () in
+  Fun.protect ~finally:(fun () -> Sys.remove path) (fun () ->
+    let mk fp role = { CT.cap_function_name = "finalize";
+      cap_file_path = Some fp; cap_reachability = None;
+      cap_actor_role = Some role; cap_temporal_class = None;
+      cap_gating = None; cap_value_touched = []; cap_precondition = None;
+      cap_source = "sidecar" } in
+    (match CD.write_capabilities ~db_path:path
+             [mk "src/component_a/x.ml" "operator"; mk "src/component_b/y.ml" "user"] with
+     | Error msg -> fail ("write failed: " ^ msg)
+     | Ok (_upd, ins, _skip) -> check int "2 distinct rows inserted" 2 ins);
+    (* Both rows persist with their own actor_role — neither clobbered the other. *)
+    let db = Sqlite3.db_open path in
+    let roles = ref [] in
+    (match Sqlite3.exec_no_headers db
+       ~cb:(fun row -> match row.(0), row.(1) with
+         | Some fp, Some role -> roles := (fp, role) :: !roles | _ -> ())
+       "SELECT file_path, actor_role FROM function_effects WHERE function_name='finalize' ORDER BY file_path"
+     with _ -> ());
+    ignore (Sqlite3.db_close db);
+    check (list (pair string string)) "each component keeps its own actor_role"
+      [("src/component_a/x.ml","operator"); ("src/component_b/y.ml","user")]
+      (List.rev !roles))
+
 let test_write_attack_edges_roundtrip () =
   let path = create_migrated_db () in
   Fun.protect ~finally:(fun () -> Sys.remove path) (fun () ->
@@ -303,12 +331,27 @@ let test_write_attack_edges_dedup () =
     let edge = { CT.ae_from = "A.foo"; ae_from_path = None;
                  ae_to = "B.bar"; ae_to_path = None; ae_type = CT.Sequence;
                  ae_evidence = None; ae_source = "static" } in
+    (* The attack_edges_identity unique index makes INSERT OR IGNORE dedup: the
+       duplicate is a no-op, so exactly 1 inserted + 1 skipped, 1 row in the DB. *)
     (match CD.write_attack_edges ~db_path:path [edge; edge] with
      | Error msg -> fail ("write failed: " ^ msg)
-     | Ok (n_ins, _n_skip) ->
-       (* INSERT OR IGNORE: second insert is a no-op; 1 or 2 depending on SQLite *)
-       check bool "at least 1 inserted" true (n_ins >= 1))
-  )
+     | Ok (n_ins, n_skip) ->
+       check int "1 inserted" 1 n_ins;
+       check int "1 skipped (duplicate)" 1 n_skip);
+    (* Re-loading the same edge again is still a no-op (idempotent). *)
+    (match CD.write_attack_edges ~db_path:path [edge] with
+     | Error msg -> fail ("reload failed: " ^ msg)
+     | Ok (n_ins, n_skip) ->
+       check int "reload: 0 inserted" 0 n_ins;
+       check int "reload: 1 skipped" 1 n_skip);
+    let db = Sqlite3.db_open path in
+    let count = ref 0 in
+    (match Sqlite3.exec_no_headers db
+       ~cb:(fun row -> match row.(0) with
+         | Some n -> count := int_of_string n | None -> ())
+       "SELECT count(*) FROM attack_edges" with _ -> ());
+    ignore (Sqlite3.db_close db);
+    check int "exactly 1 row persisted" 1 !count)
 
 let test_write_capabilities_missing_db () =
   match CD.write_capabilities ~db_path:"/no/such.db" [] with
@@ -435,6 +478,7 @@ let () =
     ];
     "capability_db", [
       test_case "write_capabilities_roundtrip"     `Quick test_write_capabilities_roundtrip;
+      test_case "write_capabilities_distinct_paths" `Quick test_write_capabilities_distinct_file_paths;
       test_case "write_attack_edges_roundtrip"     `Quick test_write_attack_edges_roundtrip;
       test_case "write_attack_edges_dedup"         `Quick test_write_attack_edges_dedup;
       test_case "write_capabilities_missing_db"    `Quick test_write_capabilities_missing_db;

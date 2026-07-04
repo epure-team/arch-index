@@ -130,8 +130,11 @@ if [ -n "$BIN_OCaml" ] && [ -d "$CMT_DIR" ]; then
   done
 
   if [ -n "$EFXBIN_OCAML" ]; then
-    "$EFXBIN_OCAML" --build-dir "$CMT_DIR" --db-path "$DB_OCaml" 2>/tmp/efx-ocaml2-err.txt \
-      || note "arch_effects_ocaml failed"
+    # arch_effects_ocaml emits NDJSON on stdout; pipe it into arch_effects_load
+    # (the DB was already migrated above, so no --migration needed).
+    "$EFXBIN_OCAML" --build-dir "$CMT_DIR" 2>/tmp/efx-ocaml2-err.txt \
+      | "$EFF_LOAD" "$DB_OCaml" 2>/tmp/efx-ocaml-load-err.txt \
+      || { cat /tmp/efx-ocaml2-err.txt /tmp/efx-ocaml-load-err.txt >&2; note "arch_effects_ocaml failed"; }
   else
     # Fallback: emit hand-crafted NDJSON representing what the CMT extractor would produce.
     # Look up actual function names from the DB to avoid module-prefix mismatches.

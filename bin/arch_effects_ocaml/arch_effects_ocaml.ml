@@ -18,26 +18,22 @@ open Cmdliner
 open Arch_effects.Extractor_intf
 open Arch_effects.Ocaml_effects_extractor
 
+(* Build the record as a Yojson value and serialise it. Hand-formatting with
+   OCaml's [%S] produced invalid JSON for bytes > 127 (escaped as decimal \ddd),
+   which arch_effects_load then silently dropped. *)
 let emit_json r =
-  let kind_s = value_kind_to_string r.er_value_kind in
-  let soundness_s = soundness_to_string r.er_soundness in
-  let fp_json = match r.er_file_path with
-    | None -> "null"
-    | Some s -> Printf.sprintf "%S" s
-  in
-  let target_json = match r.er_target with
-    | None -> "null"
-    | Some s -> Printf.sprintf "%S" s
-  in
-  Printf.printf
-    "{\"type\":\"effect\",\"function_name\":%S,\"file_path\":%s,\
-     \"value_kind\":%S,\"target\":%s,\"soundness\":%S,\"producer\":%S}\n"
-    r.er_function_name
-    fp_json
-    kind_s
-    target_json
-    soundness_s
-    r.er_producer
+  let str_or_null = function None -> `Null | Some s -> `String s in
+  let j = `Assoc [
+    "type",          `String "effect";
+    "function_name", `String r.er_function_name;
+    "file_path",     str_or_null r.er_file_path;
+    "value_kind",    `String (value_kind_to_string r.er_value_kind);
+    "target",        str_or_null r.er_target;
+    "soundness",     `String (soundness_to_string r.er_soundness);
+    "producer",      `String r.er_producer;
+  ] in
+  print_string (Yojson.Safe.to_string j);
+  print_newline ()
 
 let run build_dir source_root =
   let root = match source_root with

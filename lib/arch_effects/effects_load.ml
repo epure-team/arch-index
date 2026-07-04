@@ -53,9 +53,13 @@ let parse_effect_line line_num line =
 
 (* ── main entry ─────────────────────────────────────────────────────────── *)
 
-let load ~db_path ic =
+let load ?(allow_skip = false) ~db_path ic =
   let records = ref [] in
-  let n_skipped = ref 0 in
+  (* Parse failures are malformed input, distinct from DB-level skips (which are
+     idempotent-reload no-ops). By default a malformed record is a hard error:
+     silently dropping input then reporting Ok would let a partial/garbled load
+     look successful. Pass [~allow_skip:true] for deliberately lossy imports. *)
+  let n_parse_skipped = ref 0 in
   let line_num = ref 0 in
   (try
     while true do
@@ -64,13 +68,19 @@ let load ~db_path ic =
       let line = String.trim raw in
       if line <> "" then
         match parse_effect_line !line_num line with
-        | exception Failure _ -> incr n_skipped
+        | exception Failure _ -> incr n_parse_skipped
         | None -> ()
         | Some r -> records := r :: !records
     done
   with End_of_file -> ());
   let recs = List.rev !records in
-  match Effects_db.write_effects ~db_path recs with
-  | Ok (n_inserted, n_db_skipped) ->
-    Ok { n_effects = n_inserted; n_skipped = !n_skipped + n_db_skipped }
-  | Error msg -> Error msg
+  if (not allow_skip) && !n_parse_skipped > 0 then
+    Error (Printf.sprintf
+      "%d malformed NDJSON record(s) skipped — refusing a lossy load; \
+       pass --allow-skip to import the parseable records anyway"
+      !n_parse_skipped)
+  else
+    match Effects_db.write_effects ~db_path recs with
+    | Ok (n_inserted, n_db_skipped) ->
+      Ok { n_effects = n_inserted; n_skipped = !n_parse_skipped + n_db_skipped }
+    | Error msg -> Error msg
