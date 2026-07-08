@@ -23,10 +23,11 @@ jobs:
         run: opam exec -- dune test
       - name: Shell integration tests
         run: |
-          chmod +x selftest-contract.sh selftest-load.sh selftest-mcp.sh arch-load arch-mcp
+          chmod +x selftest-contract.sh selftest-load.sh selftest-mcp.sh selftest-health.sh arch-load arch-mcp arch-query arch-body-compare
           ./selftest-contract.sh
           ./selftest-load.sh
           ./selftest-mcp.sh
+          ./selftest-health.sh
       - name: Self-index smoke test
         run: |
           BIN="./_build/default/bin/arch_callgraph_ocaml/arch_callgraph_ocaml.exe"
@@ -89,7 +90,7 @@ jobs:
       - name: Package binaries
         run: |
           mkdir -p dist
-          for bin in arch_index_cli arch_serve arch_callgraph_ocaml arch_mcp_main arch_compare_cli; do
+          for bin in arch_index_cli arch_serve arch_callgraph_ocaml arch_mcp_main arch_compare_cli arch_body_compare; do
             src=$(find _build -name "${bin}.exe" | head -1)
             if [ -n "$src" ]; then
               cp "$src" "dist/${bin}-${{ matrix.suffix }}"

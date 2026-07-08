@@ -60,6 +60,7 @@ arch-index makes call-graph reachability answerable as a SQL query:
 - **Panic / exit reachability** — "is `os.Exit` reachable from `ServeHTTP`?" Useful for detecting accidental shutdown paths in request handlers.
 - **Documentation quality** — every function row carries a `comment_quality_score` (0–100). Query `SELECT name FROM functions WHERE comment_quality_score < 50 AND exposed = 1` to surface underdocumented public API.
 - **Metrics regression gate** — `arch-query <db> metrics` emits a flat JSON metrics object; `arch-compare baseline.json current.json` fails (exit 1) on any tracked-metric regression not covered by a reviewed `.metrics-accept` waiver (`<metric> <op> <bound>  # reason`). See [docs/adr/002-metrics-gate.md](docs/adr/002-metrics-gate.md).
+- **Code-health queries** — `large-files [N]`, `large-functions [N]`, `god-modules [N]`, `missing-docs`, `missing-mli`, `unsafe-strings [N]` (string fields repeated ≥N times → newtype candidates), `duplicates` (same name+signature across modules), `type-search <field|-> [type]`. Plus `arch-body-compare --db DB --project-root DIR <name>` for body-hash duplicate verdicts (needs sources on disk). Main-schema oriented; commands refuse (exit 3) on indexes lacking their columns.
 
 ## MCP server (AI-agent access)
 
