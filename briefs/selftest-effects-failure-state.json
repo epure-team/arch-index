@@ -3,9 +3,36 @@
   "mode": "fast",
   "current_phase": "ship",
   "events": [
-    { "phase": "investigate", "outcome": "ROOT_CAUSE_IDENTIFIED", "at": "2026-07-08T00:00:00Z", "by": "roster-investigate" },
-    { "phase": "implement", "outcome": "COMPLETED", "at": "2026-07-08T00:00:00Z", "by": "roster-implement" },
-    { "phase": "review", "outcome": "GO", "at": "2026-07-08T00:00:00Z", "by": "roster-review" },
-    { "phase": "qa", "outcome": "GO", "at": "2026-07-09T00:00:00Z", "by": "roster-qa" }
+    {
+      "phase": "investigate",
+      "outcome": "ROOT_CAUSE_IDENTIFIED",
+      "at": "2026-07-08T00:00:00Z",
+      "by": "roster-investigate"
+    },
+    {
+      "phase": "implement",
+      "outcome": "COMPLETED",
+      "at": "2026-07-08T00:00:00Z",
+      "by": "roster-implement"
+    },
+    {
+      "phase": "review",
+      "outcome": "GO",
+      "at": "2026-07-08T00:00:00Z",
+      "by": "roster-review"
+    },
+    {
+      "phase": "qa",
+      "outcome": "GO",
+      "at": "2026-07-09T00:00:00Z",
+      "by": "roster-qa"
+    },
+    {
+      "phase": "ship",
+      "outcome": "COMPLETED",
+      "at": "2026-07-09T00:00:00Z",
+      "by": "roster-ship",
+      "pr": 7
+    }
   ]
 }
