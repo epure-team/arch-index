@@ -84,4 +84,51 @@ rc=0; ./arch-body-compare --db "$BODYDB" --project-root "$PROJ" nope >/dev/null 
 rc=0; ./arch-body-compare --db "$FLAT" --project-root "$PROJ" f >/dev/null 2>&1 || rc=$?; [ "$rc" -eq 3 ] || note "body-compare flat: expected exit 3"
 rc=0; ./arch-body-compare --db "$BODYDB" dup >/dev/null 2>&1 || rc=$?; [ "$rc" -eq 2 ] || note "body-compare missing root: expected exit 2"
 
+
+# ── Curation layer (specs/arch-gardening-queries.md) ────────────────────────
+# Execute the documented ledger SQL VERBATIM (extracted from docs) — doc drift breaks CI.
+DOC_SQL=$(awk '/<!-- selftest:begin -->/,/<!-- selftest:end -->/' docs/curation-workflow.md | sed '/^```/d;/selftest:/d')
+[ -n "$DOC_SQL" ] || note "curation: extracted zero SQL statements from docs/curation-workflow.md"
+printf '%s\n' "$DOC_SQL" | sqlite3 "$MAIN" || note "curation: documented SQL failed to execute"
+
+# unsafe-params ledger queries
+./arch-query "$MAIN" unsafe-params | grep -q 'instance' || note "unsafe-params: expected unfixed 'instance' row"
+sqlite3 "$MAIN" "UPDATE unsafe_params SET fixed=1 WHERE github_issue=42;"
+if ./arch-query "$MAIN" unsafe-params | grep -q 'instance'; then note "unsafe-params: fixed row must leave default view"; fi
+./arch-query "$MAIN" unsafe-params fixed | grep -q 'instance' || note "unsafe-params fixed: expected row"
+./arch-query "$MAIN" unsafe-params all | grep -q 'instance' || note "unsafe-params all: expected row"
+rc=0; ./arch-query "$MAIN" unsafe-params bogus >/dev/null 2>&1 || rc=$?; [ "$rc" -eq 2 ] || note "unsafe-params bogus: expected exit 2"
+
+# gardening
+sqlite3 "$MAIN" "INSERT INTO gardening_tasks(category,title,status) VALUES('coverage','wip task','in_progress'),('coverage','done task','done');"
+./arch-query "$MAIN" gardening | grep -q 'split src/big.ml' || note "gardening open: expected open task"
+./arch-query "$MAIN" gardening | grep -q 'wip task' || note "gardening open: in_progress must be included"
+if ./arch-query "$MAIN" gardening | grep -q 'done task'; then note "gardening open: done must be excluded"; fi
+./arch-query "$MAIN" gardening log | grep -q 'Instance_name.t' || note "gardening log: expected log row"
+rc=0; ./arch-query "$MAIN" gardening bogus >/dev/null 2>&1 || rc=$?; [ "$rc" -eq 2 ] || note "gardening bogus: expected exit 2"
+
+# coverage loader + low-coverage latest-record semantics
+printf '%s\n' \
+  '{"type":"coverage","function":"tiny_fn","module":"src/big.ml","covered_lines":3,"total_lines":10}' \
+  '{"type":"coverage","function":"helper","module":"src/small.ml","covered_lines":2,"total_lines":10}' \
+  | ./arch-coverage-load --db "$MAIN" --stamp 2026-07-08T00:00:00Z | grep -q '2 written' || note "coverage-load: expected 2 written"
+# second snapshot: tiny_fn improves to 80%
+printf '%s\n' '{"type":"coverage","function":"tiny_fn","module":"src/big.ml","covered_lines":8,"total_lines":10}' \
+  | ./arch-coverage-load --db "$MAIN" --stamp 2026-07-09T00:00:00Z >/dev/null
+if ./arch-query "$MAIN" low-coverage 50 | grep -q 'tiny_fn'; then note "low-coverage: latest snapshot (80%) must exclude tiny_fn"; fi
+./arch-query "$MAIN" low-coverage 50 | grep -q 'helper' || note "low-coverage: helper (20%) expected"
+# idempotent rerun with same stamp
+printf '%s\n' '{"type":"coverage","function":"tiny_fn","module":"src/big.ml","covered_lines":8,"total_lines":10}' \
+  | ./arch-coverage-load --db "$MAIN" --stamp 2026-07-09T00:00:00Z | grep -q '0 written, 0 skipped, 1 ignored' || note "coverage-load: rerun must be ignored"
+# malformed → rollback, count unchanged
+BEFORE=$(sqlite3 "$MAIN" "SELECT count(*) FROM coverage;")
+rc=0; printf '%s\n' '{"type":"coverage","function":"helper","module":"src/small.ml","covered_lines":9,"total_lines":3}' \
+  | ./arch-coverage-load --db "$MAIN" >/dev/null 2>&1 || rc=$?
+[ "$rc" -eq 2 ] || note "coverage-load malformed: expected exit 2"
+AFTER=$(sqlite3 "$MAIN" "SELECT count(*) FROM coverage;")
+[ "$BEFORE" = "$AFTER" ] || note "coverage-load malformed: rollback failed"
+# bad stamp / flat refusal
+rc=0; ./arch-coverage-load --db "$MAIN" --stamp '2026-7-8' </dev/null >/dev/null 2>&1 || rc=$?; [ "$rc" -eq 2 ] || note "coverage-load bad stamp: expected exit 2"
+rc=0; ./arch-coverage-load --db "$FLAT" </dev/null >/dev/null 2>&1 || rc=$?; [ "$rc" -eq 3 ] || note "coverage-load flat: expected exit 3"
+rc=0; ./arch-query "$FLAT" low-coverage >/dev/null 2>&1 || rc=$?; [ "$rc" -eq 3 ] || note "flat low-coverage: expected exit 3"
 if [ "$FAILS" -eq 0 ]; then echo "arch-index health selftest: OK"; else echo "arch-index health selftest: FAIL ($FAILS)"; exit 1; fi
