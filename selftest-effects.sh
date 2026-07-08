@@ -124,7 +124,7 @@ if [ -n "$BIN_OCaml" ] && [ -d "$CMT_DIR" ]; then
   EFXBIN_OCAML=""
   for cand in \
     "$HERE/_build/install/default/bin/arch_effects_ocaml" \
-    "$HERE/_build/default/bin/arch_effects_ocaml/main.exe"
+    "$HERE/_build/default/bin/arch_effects_ocaml/arch_effects_ocaml.exe"
   do
     [ -x "$cand" ] && { EFXBIN_OCAML="$cand"; break; }
   done
