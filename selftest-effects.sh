@@ -43,6 +43,13 @@ command -v opam    >/dev/null 2>&1 || { echo "selftest-effects: opam required" >
 command -v sqlite3 >/dev/null 2>&1 || { echo "selftest-effects: sqlite3 required" >&2; exit 2; }
 command -v go      >/dev/null 2>&1 || { echo "selftest-effects: go required for Go fixture" >&2; exit 2; }
 
+# Pin the opam switch env resolved from the repo root NOW, before we cd into a
+# mktemp fixture dir below. opam auto-detects local switches (_opam, and CI's
+# setup-ocaml default) from CWD, so a later `opam exec -- dune build` run from
+# /tmp fails with "No switch is currently set". Loading the env here makes the
+# bare `dune build` at the fixture site work regardless of CWD.
+eval "$(cd "$HERE" && opam env 2>/dev/null)" || true
+
 TMPDIR_ROOT="$(mktemp -d)"
 trap 'rm -rf "$TMPDIR_ROOT"' EXIT
 
@@ -96,7 +103,7 @@ let exported_entry (b : box) (a : int array) (h : (string, int) Hashtbl.t) =
   hashtbl_mutator h
 OCAML
 
-( cd "$OCaml_MOD" && opam exec -- dune build 2>/tmp/efx-dune-err.txt ) \
+( cd "$OCaml_MOD" && dune build 2>/tmp/efx-dune-err.txt ) \
   || { cat /tmp/efx-dune-err.txt >&2; note "OCaml dune build failed"; }
 
 CMT_DIR="$OCaml_MOD/_build/default"
