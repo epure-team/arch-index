@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# arch-body-compare — per-name body-hash duplicate comparison (specs/arch-health-queries.md).
+# Reads function line ranges from a main-schema index DB and the SOURCE FILES on
+# disk under --project-root; groups occurrences by normalized-body MD5.
+#
+# Usage:  arch-body-compare --db DB --project-root DIR <function-name>
+# Exit:   0 verdict; 1 name not found; 2 usage; 3 DB lacks line-range data.
+#
+# Build the binary first: opam exec -- dune build
+HERE="$(cd "$(dirname "$0")" && pwd)"
+for BIN in "$HERE/_build/install/default/bin/arch_body_compare" \
+           "$HERE/_build/default/bin/arch_body_compare/arch_body_compare.exe"; do
+  [ -x "$BIN" ] && exec "$BIN" "$@"
+done
+echo "arch-body-compare: binary not found — run: opam exec -- dune build" >&2
+exit 2
