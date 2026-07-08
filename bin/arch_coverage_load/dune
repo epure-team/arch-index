@@ -1,0 +1,4 @@
+(executable
+ (name arch_coverage_load)
+ (public_name arch_coverage_load)
+ (libraries arch_coverage sqlite3))

@@ -27,3 +27,8 @@
  (name test_arch_index_compare)
  (modules test_arch_index_compare)
  (libraries arch_index alcotest sqlite3 unix))
+
+(test
+ (name test_arch_coverage)
+ (modules test_arch_coverage)
+ (libraries arch_coverage alcotest sqlite3))

@@ -1,0 +1,3 @@
+(library
+ (name arch_coverage)
+ (libraries yojson sqlite3 unix))

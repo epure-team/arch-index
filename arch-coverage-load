@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# arch-coverage-load — pipe NDJSON coverage records into an existing main-schema
+# index DB (specs/arch-gardening-queries.md; contract: docs/curation-workflow.md).
+#   {"type":"coverage","function":"f","module":"src/x.ml","covered_lines":8,"total_lines":10}
+# Usage:  arch-coverage-load --db DB [--stamp YYYY-MM-DDTHH:MM:SSZ] < records.ndjson
+# Exit:   0 loaded; 2 usage/malformed (rolled back); 3 DB lacks required tables.
+# Build the binary first: opam exec -- dune build
+HERE="$(cd "$(dirname "$0")" && pwd)"
+for BIN in "$HERE/_build/install/default/bin/arch_coverage_load" \
+           "$HERE/_build/default/bin/arch_coverage_load/arch_coverage_load.exe"; do
+  [ -x "$BIN" ] && exec "$BIN" "$@"
+done
+echo "arch-coverage-load: binary not found — run: opam exec -- dune build" >&2
+exit 2

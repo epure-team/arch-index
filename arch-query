@@ -40,6 +40,12 @@
 #   type-search <field|-> [type] types matching field-name and/or field-type substrings
 #   (see also: arch-body-compare — per-name body-hash comparison CLI)
 #
+# Curation layer (docs/curation-workflow.md; ledgers are human-curated via documented SQL):
+#   low-coverage  [N=50]         functions whose LATEST coverage snapshot is < N%
+#                                (populate via arch-coverage-load)
+#   gardening     [open|log]     open (default): tasks with status != 'done'; log: work history
+#   unsafe-params [unfixed|fixed|all]  curated newtype-debt ledger (default: unfixed)
+#
 #   metrics      [-o FILE]       flat JSON metrics object for the regression gate
 #                                (pipe to arch-compare; see docs/adr/002-metrics-gate.md).
 #                                Metrics whose source table/column is absent are omitted.
@@ -86,6 +92,20 @@ must_filter=""; [ -n "$kind_col" ] && must_filter="AND c.kind='MUST'"
 RAW_A="${1-}"; RAW_B="${2-}"   # pre-sanitization values (numeric validation must see them)
 A="${1-}"; A="${A//\'/}"       # sanitize (strip single quotes); null-safe under set -u
 B="${2-}"; B="${B//\'/}"
+
+# --- shared feature-detection helpers (health + curation query packs) ------------------------------
+hq_has() { qraw "SELECT 1 FROM pragma_table_xinfo('$1') WHERE name='$2' LIMIT 1;"; }
+hq_tbl() { qraw "SELECT 1 FROM sqlite_master WHERE type='table' AND name='$1' LIMIT 1;"; }
+hq_refuse() { echo "arch-query: REFUSED — $CMD needs $1 (absent in this DB; flat NDJSON indexes lack it)." >&2; exit 3; }
+hq_num() {  # validate threshold: default when empty, digits only.
+  # Validates the RAW arg — quote-stripping could otherwise turn 5'0 into 50.
+  local v="${1:-$2}"
+  [[ "$v" =~ ^[0-9]+$ ]] || { echo "arch-query: $CMD threshold must be a non-negative integer" >&2; exit 2; }
+  printf '%s' "$v"
+}
+hq_like() {  # escape LIKE wildcards; use with ESCAPE '\' (quotes already stripped)
+  printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/%/\\%/g' -e 's/_/\\_/g'
+}
 
 require_contract() {
   if [ -z "$contract" ]; then
@@ -506,23 +526,60 @@ case "$CMD" in
                 OR lower(fb.function_name) LIKE '%$(echo "$B" | tr '[:upper:]' '[:lower:]')%');"
     fi ;;
 
+  # ── Curation layer (specs/arch-gardening-queries.md) ───────────────────────
+  # Read-only queries over the human-curated ledgers + coverage snapshots.
+  # Ledger rows are inserted via documented SQL (docs/curation-workflow.md);
+  # coverage rows via arch-coverage-load.
+
+  low-coverage)   # functions whose LATEST coverage snapshot is below N% (default 50)
+    N=$(hq_num "$RAW_A" 50)
+    { [ -n "$(hq_has coverage recorded_at)" ] && [ -n "$(hq_has coverage percentage)" ] \
+      && [ -n "$(hq_has functions module_id)" ] && [ -n "$(hq_has modules path)" ]; } \
+      || hq_refuse "coverage columns + functions/modules join"
+    q "SELECT m.path, f.name, c.percentage, c.covered_lines, c.total_lines
+       FROM coverage c JOIN functions f ON c.function_id=f.id JOIN modules m ON f.module_id=m.id
+       WHERE c.recorded_at = (SELECT MAX(recorded_at) FROM coverage c2 WHERE c2.function_id = c.function_id)
+         AND c.percentage < $N
+       ORDER BY c.percentage ASC, f.name, m.path;" ;;
+
+  gardening)   # open (default): tasks not done; log: completed-work history
+    sub="${A:-open}"
+    { [ -n "$(hq_has gardening_tasks status)" ] && [ -n "$(hq_has gardening_tasks target_module_id)" ] \
+      && [ -n "$(hq_has gardening_log date)" ]; } \
+      || hq_refuse "gardening_tasks/gardening_log columns"
+    case "$sub" in
+      open)
+        q "SELECT t.id, t.category, COALESCE(t.title,'') AS title, t.status,
+                  t.github_issue, COALESCE(m.path,'') AS target
+           FROM gardening_tasks t LEFT JOIN modules m ON t.target_module_id = m.id
+           WHERE t.status != 'done' ORDER BY t.category, t.id;" ;;
+      log)
+        q "SELECT date, COALESCE(contributor,'') AS contributor, category, description,
+                  pr_number, issue_number
+           FROM gardening_log ORDER BY date DESC, id DESC;" ;;
+      *) echo "usage: arch-query <db> gardening [open|log]" >&2; exit 2 ;;
+    esac ;;
+
+  unsafe-params)   # curated newtype-debt ledger (default: unfixed rows only)
+    sub="${A:-unfixed}"
+    { [ -n "$(hq_has unsafe_params fixed)" ] && [ -n "$(hq_has unsafe_params function_id)" ] \
+      && [ -n "$(hq_has functions module_id)" ] && [ -n "$(hq_has modules path)" ]; } \
+      || hq_refuse "unsafe_params columns + functions/modules join"
+    base="SELECT m.path, f.name, u.param_name, u.current_type, COALESCE(u.target_type,'') AS target_type, u.github_issue%s
+       FROM unsafe_params u JOIN functions f ON u.function_id=f.id JOIN modules m ON f.module_id=m.id%s
+       ORDER BY m.path, f.name, u.param_name;"
+    case "$sub" in
+      unfixed) q "$(printf "$base" ""            " WHERE u.fixed = 0")" ;;
+      fixed)   q "$(printf "$base" ""            " WHERE u.fixed = 1")" ;;
+      all)     q "$(printf "$base" ", u.fixed"   "")" ;;
+      *) echo "usage: arch-query <db> unsafe-params [unfixed|fixed|all]" >&2; exit 2 ;;
+    esac ;;
+
   # ── Code-health query pack (specs/arch-health-queries.md) ──────────────────
   # Column-level feature detection: each command refuses (exit 3) when its
   # source columns are absent (flat NDJSON DBs lack most of them).
 
   large-files|large-functions|god-modules|missing-docs|missing-mli|unsafe-strings|duplicates|type-search)
-    hq_has() { qraw "SELECT 1 FROM pragma_table_xinfo('$1') WHERE name='$2' LIMIT 1;"; }
-    hq_tbl() { qraw "SELECT 1 FROM sqlite_master WHERE type='table' AND name='$1' LIMIT 1;"; }
-    hq_refuse() { echo "arch-query: REFUSED — $CMD needs $1 (absent in this DB; flat NDJSON indexes lack it)." >&2; exit 3; }
-    hq_num() {  # validate threshold: default when empty, digits only (FR-003).
-      # Validates the RAW arg — quote-stripping could otherwise turn 5'0 into 50.
-      local v="${1:-$2}"
-      [[ "$v" =~ ^[0-9]+$ ]] || { echo "arch-query: $CMD threshold must be a non-negative integer" >&2; exit 2; }
-      printf '%s' "$v"
-    }
-    hq_like() {  # escape LIKE wildcards; use with ESCAPE '\' (quotes already stripped)
-      printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/%/\\%/g' -e 's/_/\\_/g'
-    }
     exp2=""  # exposed (main) | exported (flat)
     [ -n "$(hq_has functions exposed)" ] && exp2="exposed"
     [ -z "$exp2" ] && [ -n "$(hq_has functions exported)" ] && exp2="exported"
