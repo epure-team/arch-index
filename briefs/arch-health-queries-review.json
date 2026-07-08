@@ -1,0 +1,69 @@
+{
+  "task": "arch-health-queries",
+  "date": "2026-07-08",
+  "status": "GO",
+  "auto_fixes_applied": [
+    {"path": "bin/arch_body_compare/arch_body_compare.ml", "line": 78, "category": "correctness", "description": "Added NOTADB startup probe (clean exit 2 instead of backtrace on non-SQLite files) — primary reviewer finding, fixed pre-codex"}
+  ],
+  "findings": [],
+  "cross_runtime_findings": [
+    {
+      "severity": "MEDIUM",
+      "confidence": 4,
+      "path": "arch-query",
+      "line": 517,
+      "category": "correctness",
+      "summary": "Numeric threshold validation ran on quote-stripped args, silently turning 5'0 into 50.",
+      "evidence": "hq_num received $A post-sanitization",
+      "fix": "APPLIED: RAW_A/RAW_B captured pre-sanitization; all hq_num call sites use RAW_A; behavioral check: god-modules \"5'0\" → exit 2.",
+      "fingerprint": "arch-query:517:correctness",
+      "specialist": "codex-xruntime",
+      "status": "RESOLVED"
+    },
+    {
+      "severity": "MEDIUM",
+      "confidence": 4,
+      "path": "arch-query",
+      "line": 564,
+      "category": "spec",
+      "summary": "unsafe-strings/type-search feature-detected tables only, not columns (FR-002) — partial schemas would emit raw sqlite errors instead of exit 3.",
+      "evidence": "hq_tbl checks only",
+      "fix": "APPLIED: column-level probes (type_fields.field_name/field_type, types.module_id, modules.path).",
+      "fingerprint": "arch-query:564:spec",
+      "specialist": "codex-xruntime",
+      "status": "RESOLVED"
+    },
+    {
+      "severity": "MEDIUM",
+      "confidence": 4,
+      "path": "bin/arch_body_compare/arch_body_compare.ml",
+      "line": 77,
+      "category": "correctness",
+      "summary": "Flat-schema preflight incomplete (missed line_end/module_id/name/path); almost-main schemas could crash outside the exit-3 path.",
+      "evidence": "preflight checked only modules table + line_start",
+      "fix": "APPLIED: full column preflight + Sqlite3.Error around compare_bodies mapped to exit-3 refusal.",
+      "fingerprint": "bin/arch_body_compare/arch_body_compare.ml:77:correctness",
+      "specialist": "codex-xruntime",
+      "status": "RESOLVED"
+    },
+    {
+      "severity": "LOW",
+      "confidence": 4,
+      "path": "arch-query",
+      "line": 577,
+      "category": "correctness",
+      "summary": "GROUP_CONCAT list fields lacked inner ordering (FR-007 determinism across sqlite versions).",
+      "evidence": "aggregates without ORDER BY",
+      "fix": "APPLIED: ORDER BY inside aggregates (sqlite ≥3.44; dev 3.53, CI 3.45).",
+      "fingerprint": "arch-query:577:correctness",
+      "specialist": "codex-xruntime",
+      "status": "RESOLVED"
+    }
+  ],
+  "summary": {"critical": 0, "high": 0, "medium": 3, "low": 1, "auto_fixed": 5},
+  "no_go_reason": {"type": null, "failed_acs": []},
+  "mode": "full",
+  "escalation_needed": false,
+  "escalation_reason": null,
+  "notes": "Primary + spec-compliance inline (FR-001..015 swept post-fix); codex cross-runtime pass: 4 findings, all fixed and behaviorally re-verified (junk-db exit 2, quoted-threshold exit 2, selftest-health OK, 6 test suites green)."
+}
