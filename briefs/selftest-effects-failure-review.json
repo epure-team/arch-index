@@ -1,0 +1,41 @@
+{
+  "task": "selftest-effects-failure",
+  "date": "2026-07-08",
+  "status": "GO",
+  "auto_fixes_applied": [],
+  "findings": [],
+  "cross_runtime_findings": [
+    {
+      "severity": "HIGH",
+      "confidence": 4,
+      "path": "lib/arch_effects/ocaml_effects_extractor.ml",
+      "line": 158,
+      "category": "correctness",
+      "summary": "Bare names can collide across modules in effect queries (A.f vs B.f).",
+      "evidence": "UNIQUE(module_id,name) permits duplicates; effects_db resolves by name LIMIT 1",
+      "fix": "ACCEPTED (documented): name-based identity is the system-wide convention (callee_name is already unqualified; specs/arch-mcp-server.md documents the limitation). The previous qualified form broke ALL transitive joins and corrupted pure-fns; unqualified trades that for rare duplicate-name collisions. Follow-up logged: id-keyed effects (function_id + file_path joins).",
+      "fingerprint": "lib/arch_effects/ocaml_effects_extractor.ml:158:correctness",
+      "specialist": "codex-xruntime",
+      "status": "ACCEPTED"
+    },
+    {
+      "severity": "MEDIUM",
+      "confidence": 5,
+      "path": "lib/arch_effects/capability_db.ml",
+      "line": 129,
+      "category": "correctness",
+      "summary": "Sidecar contract (fn: \"Module.function_name\") would no longer match extractor rows, creating spurious NoEffect rows.",
+      "evidence": "capability_db fn_exists exact-match; docs/attack-surface-capability.md:81 documents qualified form",
+      "fix": "APPLIED: fn_exists accepts exact OR unqualified-suffix match; doc updated to state both forms match.",
+      "fingerprint": "lib/arch_effects/capability_db.ml:129:correctness",
+      "specialist": "codex-xruntime",
+      "status": "RESOLVED"
+    }
+  ],
+  "summary": {"critical": 0, "high": 1, "medium": 1, "low": 0, "auto_fixed": 1},
+  "no_go_reason": {"type": null, "failed_acs": []},
+  "mode": "fast",
+  "escalation_needed": false,
+  "escalation_reason": null,
+  "notes": "Root cause: producer name-qualification mismatch (investigation brief). Fix aligns arch_effects_ocaml with arch_index_cmt naming; selftest-effects added to CI as ratchet; stale fallback exe path fixed. HIGH finding accepted-with-documentation (pre-existing system convention), MEDIUM fixed with backward-compatible suffix matching."
+}
