@@ -78,7 +78,8 @@ the source component.  Load with `arch-sidecar-load <db> <sidecar.yaml>`.
 
 ```yaml
 capabilities:
-  - fn: "Module.function_name"
+  - fn: "Module.function_name"   # or unqualified "function_name" — both match
+                                   # (the OCaml effects extractor stores unqualified names)
     actor_role: ["user", "admin"]
     temporal_class: ["validate_time", "window_open"]
     precondition: "state.account_registered = true"
