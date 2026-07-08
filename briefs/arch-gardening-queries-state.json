@@ -1,7 +1,7 @@
 {
   "task": "arch-gardening-queries",
   "mode": "full",
-  "current_phase": "qa",
+  "current_phase": "ship",
   "events": [
     {
       "phase": "question",
@@ -50,6 +50,12 @@
       "outcome": "GO",
       "at": "2026-07-08T00:00:00Z",
       "by": "roster-qa"
+    },
+    {
+      "phase": "ship",
+      "outcome": "COMPLETED",
+      "at": "2026-07-08T00:00:00Z",
+      "by": "roster-ship"
     }
   ]
 }
