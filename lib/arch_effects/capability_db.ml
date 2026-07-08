@@ -128,12 +128,23 @@ let encode_value_touched vts =
     another component/language; when [None], it matches on the name alone. *)
 let fn_exists db ~file_path name =
   match Sqlite3.prepare db
+    (* Sidecars may use the historical qualified form ("Module.f") while the
+       OCaml effects extractor now emits unqualified names matching the
+       callgraph convention — accept either: exact, or the sidecar name's
+       unqualified suffix (?3). *)
     "SELECT 1 FROM function_effects \
-     WHERE function_name=?1 AND (?2 IS NULL OR file_path=?2) LIMIT 1" with
+     WHERE (function_name=?1 OR function_name=?3) \
+       AND (?2 IS NULL OR file_path=?2) LIMIT 1" with
   | exception Sqlite3.Error _ -> false
   | st ->
+    let unqualified =
+      match String.rindex_opt name '.' with
+      | Some i -> String.sub name (i + 1) (String.length name - i - 1)
+      | None -> name
+    in
     bind_text st 1 name;
     bind_opt  st 2 file_path;
+    bind_text st 3 unqualified;
     let found = match Sqlite3.step st with
       | Sqlite3.Rc.ROW -> true
       | _ -> false

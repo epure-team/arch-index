@@ -127,7 +127,6 @@ let extract_from_cmt ~source_root cmt_path =
   | _, Some info -> (
     match info.cmt_annots with
     | Implementation structure ->
-      let modname = info.cmt_modname in
       (* Resolve source path relative to source_root *)
       let src_path =
         match info.cmt_sourcefile with
@@ -151,9 +150,13 @@ let extract_from_cmt ~source_root cmt_path =
 
       (* Process a top-level value binding *)
       let process_vb (vb : Typedtree.value_binding) =
+        (* UNQUALIFIED, matching arch_index_cmt's functions.name / callee_name
+           convention — effects-of/pure-fns join these names exactly, and a
+           qualified "Efxtest.f" never matches the callgraph's "f"
+           (briefs/selftest-effects-failure-investigation.md). *)
         let fn_name = match vb.vb_pat.pat_desc with
-          | Tpat_var (id, _, _) -> modname ^ "." ^ Ident.name id
-          | _ -> modname ^ ".<anon>"
+          | Tpat_var (id, _, _) -> Ident.name id
+          | _ -> "<anon>"
         in
         (* Walk the expression for mutations *)
         let iter = {
@@ -203,8 +206,7 @@ let extract_from_cmt ~source_root cmt_path =
             (* Detect module-level mutable bindings *)
             (match vb.vb_pat.pat_desc with
              | Tpat_var (id, _, _) when is_ref_init vb.vb_expr ->
-               let name = modname ^ "." ^ Ident.name id in
-               add name fp GlobalVar (Some (Ident.name id))
+               add (Ident.name id) fp GlobalVar (Some (Ident.name id))
              | _ -> ());
             process_vb vb
           ) vbs
