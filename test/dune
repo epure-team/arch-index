@@ -17,3 +17,8 @@
  (name test_arch_compare)
  (modules test_arch_compare)
  (libraries arch_compare alcotest))
+
+(test
+ (name test_arch_mcp)
+ (modules test_arch_mcp)
+ (libraries arch_mcp alcotest sqlite3 yojson))

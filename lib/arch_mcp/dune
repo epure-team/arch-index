@@ -1,0 +1,3 @@
+(library
+ (name arch_mcp)
+ (libraries yojson sqlite3 unix))
