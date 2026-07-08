@@ -28,6 +28,18 @@
 #                                MAY_TOP once the index is ⊤-marked)
 #   find         <substr>        functions whose name matches substr
 #   stats                        row counts (+ contract status)
+#
+# Code-health query pack (main-schema oriented; each cmd refuses on DBs lacking its columns):
+#   large-files     [N=500]      modules with lines > N
+#   large-functions [N=50]       functions with line_count > N
+#   god-modules     [N=30]       modules (or files) with > N functions
+#   missing-docs                 exposed functions with no intent
+#   missing-mli                  modules without an .mli interface
+#   unsafe-strings  [N=3]        string-typed fields repeated >= N times (newtype candidates)
+#   duplicates                   same (name, signature) in > 1 module
+#   type-search <field|-> [type] types matching field-name and/or field-type substrings
+#   (see also: arch-body-compare — per-name body-hash comparison CLI)
+#
 #   metrics      [-o FILE]       flat JSON metrics object for the regression gate
 #                                (pipe to arch-compare; see docs/adr/002-metrics-gate.md).
 #                                Metrics whose source table/column is absent are omitted.
@@ -71,6 +83,7 @@ contract=$(qraw "SELECT value FROM comment_db_meta WHERE key='callgraph_contract
 # `reaches` must-filter: MUST edges when the column exists, else treat every edge as MUST (legacy).
 must_filter=""; [ -n "$kind_col" ] && must_filter="AND c.kind='MUST'"
 
+RAW_A="${1-}"; RAW_B="${2-}"   # pre-sanitization values (numeric validation must see them)
 A="${1-}"; A="${A//\'/}"       # sanitize (strip single quotes); null-safe under set -u
 B="${2-}"; B="${B//\'/}"
 
@@ -492,6 +505,98 @@ case "$CMD" in
            AND (lower(COALESCE(fb.file_path,'')) LIKE '%$(echo "$B" | tr '[:upper:]' '[:lower:]')%'
                 OR lower(fb.function_name) LIKE '%$(echo "$B" | tr '[:upper:]' '[:lower:]')%');"
     fi ;;
+
+  # ── Code-health query pack (specs/arch-health-queries.md) ──────────────────
+  # Column-level feature detection: each command refuses (exit 3) when its
+  # source columns are absent (flat NDJSON DBs lack most of them).
+
+  large-files|large-functions|god-modules|missing-docs|missing-mli|unsafe-strings|duplicates|type-search)
+    hq_has() { qraw "SELECT 1 FROM pragma_table_xinfo('$1') WHERE name='$2' LIMIT 1;"; }
+    hq_tbl() { qraw "SELECT 1 FROM sqlite_master WHERE type='table' AND name='$1' LIMIT 1;"; }
+    hq_refuse() { echo "arch-query: REFUSED — $CMD needs $1 (absent in this DB; flat NDJSON indexes lack it)." >&2; exit 3; }
+    hq_num() {  # validate threshold: default when empty, digits only (FR-003).
+      # Validates the RAW arg — quote-stripping could otherwise turn 5'0 into 50.
+      local v="${1:-$2}"
+      [[ "$v" =~ ^[0-9]+$ ]] || { echo "arch-query: $CMD threshold must be a non-negative integer" >&2; exit 2; }
+      printf '%s' "$v"
+    }
+    hq_like() {  # escape LIKE wildcards; use with ESCAPE '\' (quotes already stripped)
+      printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/%/\\%/g' -e 's/_/\\_/g'
+    }
+    exp2=""  # exposed (main) | exported (flat)
+    [ -n "$(hq_has functions exposed)" ] && exp2="exposed"
+    [ -z "$exp2" ] && [ -n "$(hq_has functions exported)" ] && exp2="exported"
+    case "$CMD" in
+      large-files)
+        N=$(hq_num "$RAW_A" 500)
+        [ -n "$(hq_has modules lines)" ] || hq_refuse "modules.lines"
+        q "SELECT path, lines FROM modules WHERE lines > $N ORDER BY lines DESC, path;" ;;
+      large-functions)
+        N=$(hq_num "$RAW_A" 50)
+        [ -n "$(hq_has functions line_count)" ] || hq_refuse "functions.line_count"
+        if [ -n "$(hq_has functions module_id)" ] && [ -n "$(hq_tbl modules)" ]; then
+          q "SELECT f.name, m.path, f.line_count FROM functions f JOIN modules m ON f.module_id=m.id
+             WHERE f.line_count > $N ORDER BY f.line_count DESC, f.name;"
+        else
+          q "SELECT name, line_count FROM functions WHERE line_count > $N ORDER BY line_count DESC, name;"
+        fi ;;
+      god-modules)
+        N=$(hq_num "$RAW_A" 30)
+        if [ -n "$(hq_has functions module_id)" ] && [ -n "$(hq_tbl modules)" ]; then
+          q "SELECT m.path, count(*) AS functions FROM functions f JOIN modules m ON f.module_id=m.id
+             GROUP BY m.id HAVING functions > $N ORDER BY functions DESC, m.path;"
+        elif [ -n "$(hq_has functions file_path)" ]; then
+          q "SELECT file_path, count(*) AS functions FROM functions GROUP BY file_path
+             HAVING functions > $N ORDER BY functions DESC, file_path;"
+        else hq_refuse "modules join or functions.file_path"; fi ;;
+      missing-docs)
+        [ -n "$exp2" ] || hq_refuse "an exposed/exported column"
+        [ -n "$(hq_has functions intent)" ] || hq_refuse "functions.intent"
+        if [ -n "$(hq_has functions module_id)" ] && [ -n "$(hq_tbl modules)" ]; then
+          q "SELECT f.name, m.path FROM functions f JOIN modules m ON f.module_id=m.id
+             WHERE f.$exp2=1 AND (f.intent IS NULL OR f.intent='') ORDER BY m.path, f.name;"
+        else
+          q "SELECT name FROM functions WHERE $exp2=1 AND (intent IS NULL OR intent='') ORDER BY name;"
+        fi ;;
+      missing-mli)
+        [ -n "$(hq_has modules has_mli)" ] || hq_refuse "modules.has_mli"
+        q "SELECT path FROM modules WHERE COALESCE(has_mli,0)=0 ORDER BY path;" ;;
+      unsafe-strings)
+        N=$(hq_num "$RAW_A" 3)
+        { [ -n "$(hq_has type_fields field_name)" ] && [ -n "$(hq_has type_fields field_type)" ] \
+          && [ -n "$(hq_has types module_id)" ] && [ -n "$(hq_has modules path)" ]; } \
+          || hq_refuse "type_fields/types/modules columns"
+        q "SELECT tf.field_name, count(*) AS occurrences,
+                  GROUP_CONCAT(DISTINCT m.path || '.' || t.name ORDER BY m.path || '.' || t.name) AS in_types
+           FROM type_fields tf JOIN types t ON tf.type_id=t.id JOIN modules m ON t.module_id=m.id
+           WHERE tf.field_type='string'
+           GROUP BY tf.field_name HAVING occurrences >= $N
+           ORDER BY occurrences DESC, tf.field_name;" ;;
+      duplicates)
+        [ -n "$(hq_has functions signature)" ] || hq_refuse "functions.signature"
+        { [ -n "$(hq_has functions module_id)" ] && [ -n "$(hq_tbl modules)" ]; } || hq_refuse "modules join"
+        q "SELECT f.name, substr(f.signature,1,70) AS signature,
+                  count(DISTINCT f.module_id) AS module_count,
+                  GROUP_CONCAT(DISTINCT m.path ORDER BY m.path) AS modules
+           FROM functions f JOIN modules m ON f.module_id=m.id
+           WHERE f.signature IS NOT NULL AND f.signature <> ''
+           GROUP BY f.name, f.signature HAVING module_count > 1
+           ORDER BY module_count DESC, f.name;" ;;
+      type-search)
+        [ -n "$A" ] || { echo "usage: arch-query <db> type-search <field-substr|-> [type-substr]" >&2; exit 2; }
+        if [ "$A" = "-" ] && [ -z "$B" ]; then
+          echo "arch-query: type-search needs at least one real value" >&2; exit 2
+        fi
+        { [ -n "$(hq_has type_fields field_name)" ] && [ -n "$(hq_has type_fields field_type)" ] \
+          && [ -n "$(hq_has types module_id)" ] && [ -n "$(hq_has modules path)" ]; } \
+          || hq_refuse "type_fields/types/modules columns"
+        where="1=1"
+        [ "$A" != "-" ] && where="$where AND t.id IN (SELECT type_id FROM type_fields WHERE field_name LIKE '%$(hq_like "$A")%' ESCAPE '\\')"
+        [ -n "$B" ] && where="$where AND t.id IN (SELECT type_id FROM type_fields WHERE field_type LIKE '%$(hq_like "$B")%' ESCAPE '\\')"
+        q "SELECT m.path, t.name, GROUP_CONCAT(tf.field_name || ': ' || tf.field_type, ', ' ORDER BY tf.position, tf.field_name) AS fields
+           FROM types t JOIN modules m ON t.module_id=m.id JOIN type_fields tf ON tf.type_id=t.id
+           WHERE $where GROUP BY t.id ORDER BY m.path, t.name;" ;;
+    esac ;;
 
   metrics)   # flat JSON metrics for the regression gate (specs/arch-metrics-gate.md).
     # FR-003: a metric whose source table/column is absent is OMITTED, never emitted as 0.

@@ -1,0 +1,4 @@
+(executable
+ (name arch_body_compare)
+ (public_name arch_body_compare)
+ (libraries arch_index sqlite3))
