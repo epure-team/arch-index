@@ -61,6 +61,21 @@ arch-index makes call-graph reachability answerable as a SQL query:
 - **Documentation quality** — every function row carries a `comment_quality_score` (0–100). Query `SELECT name FROM functions WHERE comment_quality_score < 50 AND exposed = 1` to surface underdocumented public API.
 - **Metrics regression gate** — `arch-query <db> metrics` emits a flat JSON metrics object; `arch-compare baseline.json current.json` fails (exit 1) on any tracked-metric regression not covered by a reviewed `.metrics-accept` waiver (`<metric> <op> <bound>  # reason`). See [docs/adr/002-metrics-gate.md](docs/adr/002-metrics-gate.md).
 
+## MCP server (AI-agent access)
+
+`arch-mcp` exposes the query surface as MCP tools over stdio — no bash required on the agent side:
+
+```sh
+opam exec -- dune build
+claude mcp add arch-index -- "$PWD/arch-mcp" --db /abs/path/to/index.db
+```
+
+Tools: `arch_stats`, `arch_find`, `arch_exported`, `arch_fan_in`, `arch_callers_of`, `arch_callees_of`, `arch_reachable_from`, `arch_reaches`, `arch_unreachable`, `arch_escapes`, `arch_metrics`. The soundness contract is preserved: `arch_unreachable`/`arch_escapes` refuse (isError) on a non-⊤-marked index, exactly like the CLI's exit 3. Smoke test:
+
+```sh
+printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize"}' | ./arch-mcp --db /tmp/self.db
+```
+
 ## Documentation
 
 - [Install & LSP backends](docs/install.md)

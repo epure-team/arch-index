@@ -1,0 +1,40 @@
+{
+  "task": "arch-mcp-server",
+  "mode": "full",
+  "schema_version": "1.0",
+  "steps": [
+    {
+      "id": "step-1",
+      "skill": "roster-implement",
+      "inputs": ["briefs/arch-mcp-server-implementer.md", "specs/arch-mcp-server.md"],
+      "outputs": ["briefs/arch-mcp-server-impl.md"],
+      "hook": false
+    },
+    {
+      "id": "step-2",
+      "skill": "roster-review",
+      "inputs": ["briefs/arch-mcp-server-reviewer.md", "specs/arch-mcp-server.md"],
+      "outputs": ["briefs/arch-mcp-server-review.json"],
+      "hook": false
+    },
+    {
+      "id": "step-3",
+      "skill": "roster-qa",
+      "inputs": ["briefs/arch-mcp-server-qa-scope.md"],
+      "outputs": ["briefs/arch-mcp-server-qa.md"],
+      "hook": false
+    },
+    {
+      "id": "step-4",
+      "skill": "roster-ship",
+      "inputs": ["briefs/arch-mcp-server-review.json", "briefs/arch-mcp-server-qa.md"],
+      "outputs": [],
+      "hook": false
+    }
+  ],
+  "quality_gates": {
+    "build": "opam exec -- dune build",
+    "test": "opam exec -- dune test && ./selftest-contract.sh && ./selftest-load.sh && ./selftest-mcp.sh",
+    "lint": ""
+  }
+}

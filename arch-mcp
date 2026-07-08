@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# arch-mcp — MCP stdio server over an arch-index SQLite DB (specs/arch-mcp-server.md).
+# Read-only. Register in Claude Code with:
+#   claude mcp add arch-index -- /abs/path/to/arch-mcp --db /abs/path/to/index.db
+#
+# Usage:  arch-mcp --db PATH
+# Exit:   0 clean shutdown (stdin EOF); 2 usage / DB not openable.
+#
+# Build the binary first: opam exec -- dune build
+HERE="$(cd "$(dirname "$0")" && pwd)"
+for BIN in "$HERE/_build/install/default/bin/arch_mcp" \
+           "$HERE/_build/default/bin/arch_mcp/arch_mcp_main.exe"; do
+  [ -x "$BIN" ] && exec "$BIN" "$@"
+done
+echo "arch-mcp: binary not found — run: opam exec -- dune build" >&2
+exit 2

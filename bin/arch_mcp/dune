@@ -1,0 +1,4 @@
+(executable
+ (name arch_mcp_main)
+ (public_name arch_mcp)
+ (libraries arch_mcp yojson))
