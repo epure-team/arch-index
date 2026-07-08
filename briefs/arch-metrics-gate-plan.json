@@ -1,0 +1,40 @@
+{
+  "task": "arch-metrics-gate",
+  "mode": "full",
+  "schema_version": "1.0",
+  "steps": [
+    {
+      "id": "step-1",
+      "skill": "roster-implement",
+      "inputs": ["briefs/arch-metrics-gate-implementer.md", "specs/arch-metrics-gate.md"],
+      "outputs": ["briefs/arch-metrics-gate-impl.md"],
+      "hook": false
+    },
+    {
+      "id": "step-2",
+      "skill": "roster-review",
+      "inputs": ["briefs/arch-metrics-gate-reviewer.md", "specs/arch-metrics-gate.md"],
+      "outputs": ["briefs/arch-metrics-gate-review.json"],
+      "hook": false
+    },
+    {
+      "id": "step-3",
+      "skill": "roster-qa",
+      "inputs": ["briefs/arch-metrics-gate-qa-scope.md"],
+      "outputs": ["briefs/arch-metrics-gate-qa.md"],
+      "hook": false
+    },
+    {
+      "id": "step-4",
+      "skill": "roster-ship",
+      "inputs": ["briefs/arch-metrics-gate-review.json", "briefs/arch-metrics-gate-qa.md"],
+      "outputs": [],
+      "hook": false
+    }
+  ],
+  "quality_gates": {
+    "build": "opam exec -- dune build",
+    "test": "opam exec -- dune test && ./selftest-contract.sh && ./selftest-load.sh && ./selftest-effects.sh",
+    "lint": ""
+  }
+}

@@ -28,6 +28,9 @@
 #                                MAY_TOP once the index is ⊤-marked)
 #   find         <substr>        functions whose name matches substr
 #   stats                        row counts (+ contract status)
+#   metrics      [-o FILE]       flat JSON metrics object for the regression gate
+#                                (pipe to arch-compare; see docs/adr/002-metrics-gate.md).
+#                                Metrics whose source table/column is absent are omitted.
 #
 # Capability A — effects/mutation queries (requires effects tables from effects-schema-migration.sql):
 #   mutators-of  <value-kind>    all functions that DIRECTLY mutate <value-kind>
@@ -488,6 +491,83 @@ case "$CMD" in
                 OR lower(fa.function_name) LIKE '%$(echo "$A" | tr '[:upper:]' '[:lower:]')%')
            AND (lower(COALESCE(fb.file_path,'')) LIKE '%$(echo "$B" | tr '[:upper:]' '[:lower:]')%'
                 OR lower(fb.function_name) LIKE '%$(echo "$B" | tr '[:upper:]' '[:lower:]')%');"
+    fi ;;
+
+  metrics)   # flat JSON metrics for the regression gate (specs/arch-metrics-gate.md).
+    # FR-003: a metric whose source table/column is absent is OMITTED, never emitted as 0.
+    fn_tbl=$(qraw "SELECT 1 FROM sqlite_master WHERE type='table' AND name='functions' LIMIT 1;")
+    if [ -z "$fn_tbl" ]; then
+      echo "arch-query: REFUSED — no 'functions' table in this DB; not an arch-index index." >&2
+      exit 3
+    fi
+    out_file=""
+    if [ "$A" = "-o" ]; then
+      [ -n "$B" ] || { echo "usage: arch-query <db> metrics [-o FILE]" >&2; exit 2; }
+      [ -z "${3-}" ] || { echo "usage: arch-query <db> metrics [-o FILE]" >&2; exit 2; }
+      out_file="$B"
+    elif [ -n "$A" ]; then
+      echo "arch-query: metrics takes no argument except -o FILE" >&2; exit 2
+    fi
+    # feature detection (FR-002/FR-005). pragma_table_xinfo, NOT table_info:
+    # generated columns (functions.line_count) are hidden from table_info.
+    exp_col=""   # main schema: exposed; flat schema: exported
+    [ -n "$(qraw "SELECT 1 FROM pragma_table_xinfo('functions') WHERE name='exposed' LIMIT 1;")" ] && exp_col="exposed"
+    [ -z "$exp_col" ] && [ -n "$(qraw "SELECT 1 FROM pragma_table_xinfo('functions') WHERE name='exported' LIMIT 1;")" ] && exp_col="exported"
+    cq_col=$(qraw "SELECT 1 FROM pragma_table_xinfo('functions') WHERE name='comment_quality_score' LIMIT 1;")
+    lc_col=$(qraw "SELECT 1 FROM pragma_table_xinfo('functions') WHERE name='line_count' LIMIT 1;")
+    mod_tbl=$(qraw "SELECT 1 FROM sqlite_master WHERE type='table' AND name='modules' LIMIT 1;")
+    ml_col=""; [ -n "$mod_tbl" ] && ml_col=$(qraw "SELECT 1 FROM pragma_table_xinfo('modules') WHERE name='lines' LIMIT 1;")
+    calls_tbl=$(qraw "SELECT 1 FROM sqlite_master WHERE type='table' AND name='calls' LIMIT 1;")
+    # assemble json_object() args in lexicographic key order (FR-001)
+    pairs=""
+    addpair() { pairs="${pairs:+$pairs, }'$1', ($2)"; }
+    [ -n "$calls_tbl" ] && addpair "call_edges" "SELECT count(*) FROM calls"
+    if [ -n "$cq_col" ] && [ -n "$exp_col" ]; then
+      addpair "doc_coverage_pct" "SELECT CASE WHEN (SELECT count(*) FROM functions WHERE $exp_col=1)=0 THEN 100.0
+        ELSE ROUND(100.0 * (1.0 - CAST((SELECT count(*) FROM functions WHERE $exp_col=1 AND (comment_quality_score IS NULL OR comment_quality_score=0)) AS REAL)
+                                  / (SELECT count(*) FROM functions WHERE $exp_col=1)), 1) END"
+    fi
+    [ -n "$exp_col" ] && addpair "exported_functions" "SELECT count(*) FROM functions WHERE $exp_col=1"
+    [ -n "$ml_col" ] && addpair "large_files" "SELECT count(*) FROM modules WHERE lines > 500"
+    [ -n "$lc_col" ] && addpair "large_functions" "SELECT count(*) FROM functions WHERE line_count > 50"
+    [ -n "$calls_tbl" ] && [ -n "$kind_col" ] && addpair "may_top_edges" "SELECT count(*) FROM calls WHERE kind='MAY_TOP'"
+    [ -n "$mod_tbl" ] && addpair "modules" "SELECT count(*) FROM modules"
+    addpair "total_functions" "SELECT count(*) FROM functions"
+    if [ -n "$cq_col" ] && [ -n "$exp_col" ]; then
+      addpair "undocumented_exposed" "SELECT count(*) FROM functions WHERE $exp_col=1 AND (comment_quality_score IS NULL OR comment_quality_score=0)"
+    fi
+    if [ -n "$(qraw "SELECT json_object('probe', 1);")" ]; then
+      json=$(sqlite3 "$DB" "SELECT json_object($pairs);")
+    else
+      # fallback for sqlite3 builds without JSON functions: hand-assemble
+      json="{"; first=1
+      # re-walk the same pairs string is fragile — recompute per metric
+      emit() { v=$(qraw "$2"); [ -z "$v" ] && v=0
+               [ $first -eq 1 ] && first=0 || json="$json, "
+               json="$json\"$1\": $v"; }
+      [ -n "$calls_tbl" ] && emit "call_edges" "SELECT count(*) FROM calls;"
+      if [ -n "$cq_col" ] && [ -n "$exp_col" ]; then
+        emit "doc_coverage_pct" "SELECT CASE WHEN (SELECT count(*) FROM functions WHERE $exp_col=1)=0 THEN 100.0
+          ELSE ROUND(100.0 * (1.0 - CAST((SELECT count(*) FROM functions WHERE $exp_col=1 AND (comment_quality_score IS NULL OR comment_quality_score=0)) AS REAL)
+                                    / (SELECT count(*) FROM functions WHERE $exp_col=1)), 1) END;"
+      fi
+      [ -n "$exp_col" ] && emit "exported_functions" "SELECT count(*) FROM functions WHERE $exp_col=1;"
+      [ -n "$ml_col" ] && emit "large_files" "SELECT count(*) FROM modules WHERE lines > 500;"
+      [ -n "$lc_col" ] && emit "large_functions" "SELECT count(*) FROM functions WHERE line_count > 50;"
+      [ -n "$calls_tbl" ] && [ -n "$kind_col" ] && emit "may_top_edges" "SELECT count(*) FROM calls WHERE kind='MAY_TOP';"
+      [ -n "$mod_tbl" ] && emit "modules" "SELECT count(*) FROM modules;"
+      emit "total_functions" "SELECT count(*) FROM functions;"
+      if [ -n "$cq_col" ] && [ -n "$exp_col" ]; then
+        emit "undocumented_exposed" "SELECT count(*) FROM functions WHERE $exp_col=1 AND (comment_quality_score IS NULL OR comment_quality_score=0);"
+      fi
+      json="$json}"
+    fi
+    if [ -n "$out_file" ]; then
+      if ! printf '%s\n' "$json" > "$out_file" 2>/dev/null; then
+        echo "arch-query: cannot write to '$out_file'" >&2; exit 2
+      fi
+    else
+      printf '%s\n' "$json"
     fi ;;
 
   *) echo "arch-query: unknown subcommand '$CMD'" >&2; exit 2 ;;

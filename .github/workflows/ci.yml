@@ -40,6 +40,21 @@ jobs:
             > /tmp/self-stats.txt
           diff test/fixtures/self-index-stats.txt /tmp/self-stats.txt \
             || { echo "Golden file mismatch — update: see docs/adr/001-self-index-golden.md"; exit 1; }
+      - name: Metrics regression gate
+        run: |
+          chmod +x arch-query arch-compare
+          ./arch-query /tmp/self.db metrics -o /tmp/self-metrics.json
+          # On PRs, pin the baseline to the base ref so the same change cannot
+          # loosen metrics-baseline.json to hide a regression (ADR 002).
+          BASELINE=metrics-baseline.json
+          if [ -n "${GITHUB_BASE_REF:-}" ]; then
+            git fetch --depth=1 origin "$GITHUB_BASE_REF"
+            if git show "origin/$GITHUB_BASE_REF:metrics-baseline.json" > /tmp/base-metrics.json 2>/dev/null; then
+              BASELINE=/tmp/base-metrics.json
+            fi
+          fi
+          ./arch-compare "$BASELINE" /tmp/self-metrics.json \
+            || { echo "Metrics gate failed — see docs/adr/002-metrics-gate.md (waivers: .metrics-accept)"; exit 1; }
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')

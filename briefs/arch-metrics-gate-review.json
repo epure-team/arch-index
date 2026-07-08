@@ -1,0 +1,81 @@
+{
+  "task": "arch-metrics-gate",
+  "date": "2026-07-08",
+  "status": "GO",
+  "auto_fixes_applied": [],
+  "findings": [
+    {
+      "severity": "INFO",
+      "confidence": 5,
+      "path": "selftest-effects.sh",
+      "line": 1,
+      "category": "correctness",
+      "summary": "Pre-existing failure at baseline (verified via git stash on clean tree); unrelated to this change, not in CI.",
+      "evidence": "FAIL: OCaml: effects-of exported_entry missing FieldAccess/HashTbl — identical on clean tree",
+      "fix": "Separate fix task; recorded in impl brief out-of-scope list.",
+      "fingerprint": "selftest-effects.sh:1:correctness",
+      "specialist": "reviewer",
+      "status": "ACCEPTED"
+    }
+  ],
+  "cross_runtime_findings": [
+    {
+      "severity": "HIGH",
+      "confidence": 5,
+      "path": "arch-query",
+      "line": 515,
+      "category": "spec",
+      "summary": "Generated column functions.line_count hidden from pragma_table_info, so large_functions was silently omitted (FR-002 violation on main-schema DBs).",
+      "evidence": "pragma_table_info: 0 rows for line_count; pragma_table_xinfo: 1 row; count(line_count>50)=14 on self-index",
+      "fix": "APPLIED: all metrics-branch column probes switched to pragma_table_xinfo; baseline regenerated (now includes large_functions:14); explanatory comment added.",
+      "fingerprint": "arch-query:515:spec",
+      "specialist": "codex-xruntime",
+      "status": "RESOLVED"
+    },
+    {
+      "severity": "MEDIUM",
+      "confidence": 5,
+      "path": ".github/workflows/ci.yml",
+      "line": 47,
+      "category": "security",
+      "summary": "CI compared against the PR's own baseline copy — a PR could loosen metrics-baseline.json to hide a regression without a waiver.",
+      "evidence": "step ran ./arch-compare metrics-baseline.json (worktree copy)",
+      "fix": "APPLIED: on PRs the baseline is pinned to origin/$GITHUB_BASE_REF via git show, with fallback when absent (ADR 002 pattern).",
+      "fingerprint": ".github/workflows/ci.yml:47:security",
+      "specialist": "codex-xruntime",
+      "status": "RESOLVED"
+    },
+    {
+      "severity": "MEDIUM",
+      "confidence": 5,
+      "path": ".metrics-accept",
+      "line": 16,
+      "category": "correctness",
+      "summary": "Template ended in a comment block; a bare waiver appended at EOF inherited the header as its 'reason', defeating the mandatory-reason rule.",
+      "evidence": "repro: template + 'large_functions <= 12' appended → accepted with header text as Reason",
+      "fix": "APPLIED: template now ends with a blank line (parser clears pending comments); regression test test_template_bare_append_rejected added; end-to-end repro now exits 1.",
+      "fingerprint": ".metrics-accept:16:correctness",
+      "specialist": "codex-xruntime",
+      "status": "RESOLVED"
+    },
+    {
+      "severity": "LOW",
+      "confidence": 5,
+      "path": "arch-query",
+      "line": 504,
+      "category": "correctness",
+      "summary": "metrics -o FILE silently ignored extra trailing arguments instead of exit 2.",
+      "evidence": "repro: metrics -o /tmp/m.json extra → exit 0",
+      "fix": "APPLIED: third positional rejected with usage message, exit 2; verified.",
+      "fingerprint": "arch-query:504:correctness",
+      "specialist": "codex-xruntime",
+      "status": "RESOLVED"
+    }
+  ],
+  "summary": {"critical": 0, "high": 1, "medium": 2, "low": 1, "auto_fixed": 4},
+  "no_go_reason": {"type": null, "failed_acs": []},
+  "mode": "full",
+  "escalation_needed": false,
+  "escalation_reason": null,
+  "notes": "Primary reviewer + spec-compliance run inline (subagent budget exhausted); FR-001..020 swept — all satisfied post-fix. Cross-runtime pass: codex exec (read-only sandbox), 4 findings, all fixed and re-verified. 26 Alcotest cases green, selftest-contract/load green, AC-7 dogfood re-verified with the regenerated baseline (5 tracked metrics unchanged)."
+}

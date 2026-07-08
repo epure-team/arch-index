@@ -59,6 +59,7 @@ arch-index makes call-graph reachability answerable as a SQL query:
 - **Variant analysis** — find all callers of a fixed function to check for unfixed siblings: `callers-of vulnerableHelper`.
 - **Panic / exit reachability** — "is `os.Exit` reachable from `ServeHTTP`?" Useful for detecting accidental shutdown paths in request handlers.
 - **Documentation quality** — every function row carries a `comment_quality_score` (0–100). Query `SELECT name FROM functions WHERE comment_quality_score < 50 AND exposed = 1` to surface underdocumented public API.
+- **Metrics regression gate** — `arch-query <db> metrics` emits a flat JSON metrics object; `arch-compare baseline.json current.json` fails (exit 1) on any tracked-metric regression not covered by a reviewed `.metrics-accept` waiver (`<metric> <op> <bound>  # reason`). See [docs/adr/002-metrics-gate.md](docs/adr/002-metrics-gate.md).
 
 ## Documentation
 

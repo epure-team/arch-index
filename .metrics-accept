@@ -1,0 +1,21 @@
+# .metrics-accept — reviewed waivers for the metrics regression gate.
+# See docs/adr/002-metrics-gate.md.
+#
+# Entry format (one per metric, duplicates are invalid):
+#   <metric> <op> <bound>   # <mandatory reason — why this regression is accepted>
+#
+# <op> is fixed by the metric's direction:
+#   <=  for worse-when-higher metrics: large_files, large_functions,
+#       may_top_edges, undocumented_exposed
+#   >=  for worse-when-lower metrics: doc_coverage_pct
+#
+# A regression is accepted only while the current value stays within the bound.
+# An entry without a reason, with the wrong operator, naming an untracked
+# metric, or duplicating an earlier entry FAILS the gate (exit 1).
+#
+# Default policy: EMPTY — no accepted regressions.
+# NOTE: keep the blank line below — it separates this header from any future
+# entry, so a bare entry appended at EOF cannot inherit this header as its
+# "reason" (the parser treats an immediately-preceding comment block as the
+# reason; a blank line clears it).
+

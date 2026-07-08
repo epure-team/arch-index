@@ -1,0 +1,4 @@
+(executable
+ (name arch_compare_cli)
+ (public_name arch_compare_cli)
+ (libraries arch_compare))

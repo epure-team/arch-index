@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# arch-compare — metrics regression gate (specs/arch-metrics-gate.md).
+# Compares a current metrics JSON (from `arch-query <db> metrics`) against a
+# committed baseline, applying the .metrics-accept reviewed-waiver policy.
+#
+# Usage:  arch-compare [--accept FILE] <baseline.json> <current.json>
+# Exit:   0 gate passes; 1 gate failure (blocking regression, missing tracked
+#         metric, invalid .metrics-accept entry); 2 usage / malformed input.
+#
+# Build the binary first: opam exec -- dune build
+HERE="$(cd "$(dirname "$0")" && pwd)"
+for BIN in "$HERE/_build/install/default/bin/arch_compare_cli" \
+           "$HERE/_build/default/bin/arch_compare_cli/arch_compare_cli.exe"; do
+  [ -x "$BIN" ] && exec "$BIN" "$@"
+done
+echo "arch-compare: binary not found — run: opam exec -- dune build" >&2
+exit 2
