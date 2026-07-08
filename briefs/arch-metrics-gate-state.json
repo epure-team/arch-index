@@ -1,7 +1,7 @@
 {
   "task": "arch-metrics-gate",
   "mode": "full",
-  "current_phase": "qa",
+  "current_phase": "ship",
   "events": [
     { "phase": "question", "outcome": "COMPLETED", "at": "2026-07-08T00:00:00Z", "by": "roster-question" },
     { "phase": "research", "outcome": "COMPLETED", "at": "2026-07-08T00:00:00Z", "by": "roster-research" },
@@ -10,6 +10,7 @@
     { "phase": "plan", "outcome": "COMPLETED", "at": "2026-07-08T00:00:00Z", "by": "roster-plan" },
     { "phase": "implement", "outcome": "COMPLETED", "at": "2026-07-08T00:00:00Z", "by": "roster-implement" },
     { "phase": "review", "outcome": "GO", "at": "2026-07-08T00:00:00Z", "by": "roster-review" },
-    { "phase": "qa", "outcome": "GO", "at": "2026-07-08T00:00:00Z", "by": "roster-qa" }
+    { "phase": "qa", "outcome": "GO", "at": "2026-07-08T00:00:00Z", "by": "roster-qa" },
+    { "phase": "ship", "outcome": "COMPLETED", "at": "2026-07-08T00:00:00Z", "by": "roster-ship" }
   ]
 }
