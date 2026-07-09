@@ -1,0 +1,12 @@
+{
+  "task": "cfg-postdom-dominance",
+  "mode": "full",
+  "current_phase": "plan",
+  "events": [
+    { "phase": "question", "outcome": "COMPLETED", "at": "2026-07-09T00:00:00Z", "by": "roster-question" },
+    { "phase": "research", "outcome": "COMPLETED", "at": "2026-07-09T00:00:00Z", "by": "roster-research" },
+    { "phase": "intake", "outcome": "VALIDATED", "at": "2026-07-09T00:00:00Z", "by": "roster-intake" },
+    { "phase": "spec", "outcome": "VALIDATED", "at": "2026-07-09T00:00:00Z", "by": "roster-spec" },
+    { "phase": "plan", "outcome": "COMPLETED", "at": "2026-07-09T00:00:00Z", "by": "roster-plan" }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "task": "cfg-postdom-dominance",
+  "mode": "full",
+  "schema_version": "1.0",
+  "steps": [
+    { "id": "step-1", "skill": "roster-implement", "inputs": ["briefs/cfg-postdom-dominance-implementer.md", "specs/cfg-postdom-dominance.md"], "outputs": ["briefs/cfg-postdom-dominance-impl.md"], "hook": false },
+    { "id": "step-2", "skill": "roster-review", "inputs": ["briefs/cfg-postdom-dominance-reviewer.md", "briefs/cfg-postdom-dominance-impl.md"], "outputs": ["briefs/cfg-postdom-dominance-review.json"], "hook": false },
+    { "id": "step-3", "skill": "roster-qa", "inputs": ["briefs/cfg-postdom-dominance-qa-scope.md", "briefs/cfg-postdom-dominance-review.json"], "outputs": ["briefs/cfg-postdom-dominance-qa.md"], "hook": false },
+    { "id": "step-4", "skill": "roster-ship", "inputs": ["briefs/cfg-postdom-dominance-review.json", "briefs/cfg-postdom-dominance-qa.md"], "outputs": [], "hook": false }
+  ],
+  "quality_gates": {
+    "build": "eval $(opam env --switch=/home/mathias/dev/arch-index --set-switch) && dune build",
+    "test": "eval $(opam env --switch=/home/mathias/dev/arch-index --set-switch) && dune test && ./selftest-contract.sh && ./selftest-load.sh && ./selftest-effects.sh && ./selftest-callgraph-ocaml.sh && STRICT=1 ./selftest-callgraph-soundness.sh && ./selftest-callgraph-go.sh",
+    "lint": ""
+  }
+}
