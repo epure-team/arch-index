@@ -15,6 +15,9 @@ jobs:
       - uses: ocaml/setup-ocaml@v3
         with:
           ocaml-compiler: '5.3'
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
       - name: Install deps
         run: opam install --deps-only --yes .
       - name: Build
@@ -23,12 +26,13 @@ jobs:
         run: opam exec -- dune test
       - name: Shell integration tests
         run: |
-          chmod +x selftest-contract.sh selftest-load.sh selftest-effects.sh selftest-callgraph-ocaml.sh selftest-callgraph-soundness.sh
+          chmod +x selftest-contract.sh selftest-load.sh selftest-effects.sh selftest-callgraph-ocaml.sh selftest-callgraph-soundness.sh selftest-callgraph-go.sh
           ./selftest-contract.sh
           ./selftest-load.sh
           ./selftest-effects.sh
           ./selftest-callgraph-ocaml.sh
-          ./selftest-callgraph-soundness.sh
+          STRICT=1 ./selftest-callgraph-soundness.sh
+          ./selftest-callgraph-go.sh
       - name: Self-index smoke test
         run: |
           BIN="./_build/default/bin/arch_callgraph_ocaml/arch_callgraph_ocaml.exe"
