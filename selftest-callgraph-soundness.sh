@@ -333,6 +333,9 @@ chk P1 "stored_bind lambda not orphaned (has an incoming enumerated edge)" "$(sq
 chk P1 "letop_diverge let* edge is not MUST (operand diverges before the bind)" "$(sqlite3 "$DB" "SELECT COALESCE(MAX(kind),'MISSING') FROM calls c JOIN functions f ON c.caller_id=f.id WHERE f.name='letop_diverge' AND c.callee_name='let*';")" "MAY_ENUMERATED"
 chk P1 "reaches beta_redex island = must (beta-redex head is the lambda node)" "$(verdict reaches beta_redex island)" "PATH EXISTS"
 chk P1 "beta_redex has no ⊤ edge (literal head resolved, not *TOP*)" "$(sqlite3 "$DB" "SELECT count(*) FROM calls c JOIN functions f ON c.caller_id=f.id WHERE f.name='beta_redex' AND c.kind='MAY_TOP';")" "0"
+# FR-020: query surface over synthetic rows on the main schema.
+chk P1 "find locates lambda nodes on the main schema" "$(test "$("$Q" "$DB" find '<fun:' 2>/dev/null | grep -cF '<fun:')" -gt 0 && echo yes || echo no)" "yes"
+chk P1 "exported never lists lambda nodes" "$("$Q" "$DB" exported 2>/dev/null | grep -cF '<fun:')" "0"
 
 echo "── P2: cfg-postdom-dominance targets (computed dominance / lambda nodes / enumerated demotion) ──"
 # R1 — divergence residual closed: code after an unconditional raise is demoted.
