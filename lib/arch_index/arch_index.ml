@@ -566,6 +566,7 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
 
 module Arch_index_compare = Arch_index_compare
 module Arch_index_git = Arch_index_git
+module Arch_index_cfg = Arch_index_cfg
 module Comment_parser = Comment_parser
 module Language_registry = Language_registry
 module Lsp_client = Lsp_client

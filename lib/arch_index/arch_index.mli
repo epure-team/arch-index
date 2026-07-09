@@ -107,3 +107,6 @@ module Arch_index_compare = Arch_index_compare
 (** Cross-commit OCaml function body extraction and move verification.
     See {!Arch_index_git} for the full API. *)
 module Arch_index_git = Arch_index_git
+
+(** Pure per-function CFG with post-dominance (dominance-MUST engine). *)
+module Arch_index_cfg = Arch_index_cfg
