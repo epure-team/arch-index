@@ -361,7 +361,7 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
             ~kind ;
           incr n_calls)
     !all_pending_calls ;
-  (* Every emitted edge now carries a valid kind (MUST | MAY_TOP), so this
+  (* Every emitted edge now carries a valid kind (MUST | MAY_ENUMERATED | MAY_TOP), so this
      backend satisfies the ⊤-marking contract — but ONLY stamp the flag when a
      non-empty universe was actually indexed. Stamping on an empty/failed scan
      (0 functions) would let `unreachable` answer with false confidence for

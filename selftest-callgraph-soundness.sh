@@ -237,6 +237,15 @@ let stored_bind (x : int) : int =
   let h () = island x in
   let t = (h, 0) in
   ignore t ; x
+
+(* diverging let* operand: the bind operator is applied AFTER its operand, so
+   [let* y = raise Exit in …] must NOT record a MUST edge to the operator *)
+let letop_diverge () : int option =
+  let* y = raise Exit in
+  Some y
+(* beta-redex: an immediately-applied literal head resolves to the lambda node
+   (MUST — always-exec + saturated), never to a ⊤ marker *)
+let beta_redex (x : int) : int = (fun y -> island y) x
 ML
 
 ( cd "$MOD" && dune build 2>/tmp/soundness-dune.txt ) \
@@ -321,6 +330,9 @@ chk P1 "reaches shadow_bind island = no must (rebound name is a fresh stamp)" "$
 chk P1 "reaches partial_bind island = no must (partial application of bound lambda)" "$(verdict reaches partial_bind island)" "no MUST path"
 chk P1 "unreachable stored_bind island = REACHABLE (tuple-stored lambda escapes)" "$(verdict unreachable stored_bind island)" "REACHABLE (may-reach)"
 chk P1 "stored_bind lambda not orphaned (has an incoming enumerated edge)" "$(sqlite3 "$DB" "SELECT COALESCE(MAX(c.kind),'ORPHAN') FROM calls c WHERE c.callee_name LIKE 'stored_bind.<fun:%';")" "MAY_ENUMERATED"
+chk P1 "letop_diverge let* edge is not MUST (operand diverges before the bind)" "$(sqlite3 "$DB" "SELECT COALESCE(MAX(kind),'MISSING') FROM calls c JOIN functions f ON c.caller_id=f.id WHERE f.name='letop_diverge' AND c.callee_name='let*';")" "MAY_ENUMERATED"
+chk P1 "reaches beta_redex island = must (beta-redex head is the lambda node)" "$(verdict reaches beta_redex island)" "PATH EXISTS"
+chk P1 "beta_redex has no ⊤ edge (literal head resolved, not *TOP*)" "$(sqlite3 "$DB" "SELECT count(*) FROM calls c JOIN functions f ON c.caller_id=f.id WHERE f.name='beta_redex' AND c.kind='MAY_TOP';")" "0"
 
 echo "── P2: cfg-postdom-dominance targets (computed dominance / lambda nodes / enumerated demotion) ──"
 # R1 — divergence residual closed: code after an unconditional raise is demoted.
