@@ -357,6 +357,18 @@ let is_function_rhs (e : Typedtree.expression) =
      enough. *)
   match e.exp_desc with Texp_function _ -> true | _ -> false
 
+(** Syntactic arity of a function binding's RHS: the number of parameters across
+    its leading [fun]/[function] chain. A `function <cases>` matches one extra
+    argument, so it contributes 1. Used to detect partial (under-saturated)
+    applications of same-module functions without relying on type expansion,
+    which is unreliable on .cmt-restored environments (arrow type aliases like
+    [type unary = int -> int] do not expand there). *)
+let rec fn_arity (e : Typedtree.expression) =
+  match e.exp_desc with
+  | Texp_function (params, Tfunction_body b) -> List.length params + fn_arity b
+  | Texp_function (params, Tfunction_cases _) -> List.length params + 1
+  | _ -> 0
+
 (** Walk a value binding expression to collect all function calls.
     [local_fn_stamps] is the set of [Ident.stamp]s of same-module top-level
     function-body bindings; an applied unqualified identifier counts as a
@@ -377,72 +389,308 @@ let collect_calls_from_expr ~src_path ~caller_module ~caller_name
      same-module top-level function body; otherwise it is a parameter / local
      closure with an unknowable target → MAY_TOP. *)
   let ident_is_local_fn id = Hashtbl.mem local_fn_stamps (Ident.unique_name id) in
-  (* A function-typed argument passed to a call may be invoked by the callee.
-     If it is a named local function, record a MAY_ENUMERATED escape to it
-     (precise, bounded candidate); if it is a parameter / external / computed
-     function value, record a MAY_TOP escape (unknowable target). Lambdas need
-     no escape — their bodies are walked and their calls attributed here. *)
-  let is_arrow ty = match Types.get_desc ty with Tarrow _ -> true | _ -> false in
+  let local_fn_arity id = Hashtbl.find_opt local_fn_stamps (Ident.unique_name id) in
+  (* True iff [ty] is a function type. Expands type aliases first (via the
+     expression's own env) so an arrow hidden behind [type unary = int -> int]
+     is still recognised — otherwise a partial application returning [unary]
+     would evade the under-saturation check and forge a MUST edge. *)
+  let is_arrow ty =
+    match Types.get_desc ty with Tarrow _ -> true | _ -> false
+  in
+  (* Number of leading arrows in a function type = its (maximal) arity. Uses
+     the raw type — no env-based expansion, which is unreliable on .cmt-restored
+     environments (they do not carry manifest type declarations, so an alias
+     like [type unary = int -> int] will not expand). A callee's own type is a
+     concrete arrow chain, so counting arrows there is reliable. *)
+  let rec arrow_arity ty =
+    match Types.get_desc ty with
+    | Tarrow (_, _, res, _) -> 1 + arrow_arity res
+    | _ -> 0
+  in
+  (* A qualified call whose module-path ROOT is a non-persistent ident is
+     resolved through a first-class-module / functor parameter or local module —
+     the target is caller-supplied / dynamic, so it MUST be MAY_TOP, not a
+     closed MUST leaf (persistent roots = real compilation units: List, Stdlib,
+     in-repo modules — those stay resolvable). *)
+  let rec path_root = function
+    | Path.Pident id -> Some id
+    | Path.Pdot (p, _) | Path.Papply (p, _) | Path.Pextra_ty (p, _) -> path_root p
+  in
+  let qualified_is_dynamic path =
+    match path_root path with Some id -> not (Ident.persistent id) | None -> false
+  in
+  (* Conditional-or-deferred depth. A MUST edge is *execution-sound* (dominance):
+     the call runs on EVERY execution of the enclosing function. So [nested] is
+     raised whenever we descend into a position that is NOT guaranteed to run:
+       - deferred bodies: function literals, [lazy] thunks, object methods,
+         un-applied functor bodies (only run if invoked/forced/applied);
+       - conditional bodies: [if]/[match] arms, [try] handlers, loop bodies,
+         [assert] conditions (elided under -noassert), the right operand of a
+         short-circuit [&&]/[||].
+     Any call recorded while [nested]>0 becomes MAY_TOP — never a false MUST
+     (keeps [reaches] an honest under-approximation) and never dropped (keeps
+     [unreachable] a sound over-approximation, the call is still recorded as ⊤).
+     Genuinely-unconditional positions (a sequence, a let-binding RHS, the
+     scrutinee of a match, an [if] condition, a [try] body, call arguments) stay
+     at depth 0 so a straight-line call remains MUST. *)
+  let nested = ref 0 in
+  (* A function-typed argument may be invoked by the callee. A named local
+     function → MAY_ENUMERATED (bounded candidate); a parameter / external /
+     computed function value → MAY_TOP. Under a closure, force MAY_TOP. *)
   let add_arg_escapes (args : (_ * Typedtree.expression option) list) loc =
     List.iter
       (fun (_, arg_opt) ->
         match arg_opt with
-        | Some ae when is_arrow ae.Typedtree.exp_type -> (
-            match ae.exp_desc with
-            | Texp_ident (Path.Pident id, _, _) when ident_is_local_fn id ->
-                add_call ~kind_hint:May_enumerated (Ident.name id) None loc
-            | Texp_ident (Path.Pident id, _, _) ->
-                add_call ~kind_hint:May_top (Ident.name id) None loc
-            | Texp_ident ((Path.Pdot _ as p), _, _) ->
-                (* An external/qualified function passed as a callback: we do
-                   not model its body, so its invocation escapes → MAY_TOP. *)
-                let _, n = path_to_module_name p in
-                add_call ~kind_hint:May_top n None loc
-            | _ -> ())
+        | Some ae when is_arrow ae.Typedtree.exp_type ->
+            let hint, name =
+              match ae.exp_desc with
+              | Texp_ident (Path.Pident id, _, _) when ident_is_local_fn id ->
+                  (May_enumerated, Ident.name id)
+              | Texp_ident (Path.Pident id, _, _) -> (May_top, Ident.name id)
+              | Texp_ident ((Path.Pdot _ as p), _, _) ->
+                  let _, n = path_to_module_name p in
+                  (May_top, n)
+              | _ -> (May_top, "*TOP*") (* computed function value → unknowable *)
+            in
+            let hint =
+              if !nested > 0 && hint = May_enumerated then May_top else hint
+            in
+            add_call ~kind_hint:hint name None loc
         | _ -> ())
       args
   in
-  (* Use Tast_iterator to walk all subexpressions *)
+  (* Emit a call to a function named by a resolved [Path.t] — e.g. a let*/and*
+     bind operator, which is applied but is not a [Texp_apply] node. Classified
+     like an applied head: a same-module local fn or a qualified target is MUST
+     at depth 0, forced to MAY_TOP inside a nested/conditional/deferred position. *)
+  let add_path_call (path : Path.t) loc =
+    match path with
+    | Path.Pident id when ident_is_local_fn id ->
+        if !nested > 0 then add_call ~kind_hint:May_top (Ident.name id) None loc
+        else add_call (Ident.name id) None loc
+    | Path.Pident id -> add_call ~kind_hint:May_top (Ident.name id) None loc
+    | _ ->
+        let callee_module, callee_name = path_to_module_name path in
+        if !nested > 0 || qualified_is_dynamic path then
+          let disp =
+            match callee_module with
+            | Some m -> m ^ "." ^ callee_name
+            | None -> callee_name
+          in
+          add_call ~kind_hint:May_top disp None loc
+        else add_call callee_name callee_module loc
+  in
+  (* [&&] and [||] short-circuit: the right operand runs only conditionally. *)
+  let short_circuit_arity (fn : Typedtree.expression) =
+    match fn.exp_desc with
+    | Texp_ident (path, _, _) -> (
+        let _, name = path_to_module_name path in
+        match name with "&&" | "||" -> Some () | _ -> None)
+    | _ -> None
+  in
   let open Tast_iterator in
   let iter =
     {
       default_iterator with
       expr =
         (fun self expr ->
-          (match expr.exp_desc with
+          (* Walk [e] as conditional/deferred: any call inside becomes MAY_TOP. *)
+          let walk_deferred e =
+            incr nested ;
+            self.expr self e ;
+            decr nested
+          in
+          (* A match/try case: both the guard and the RHS run only when the
+             pattern matches → conditional. Polymorphic over value/computation. *)
+          let walk_case : type k. k Typedtree.case -> unit =
+           fun c ->
+            (match c.c_guard with Some g -> walk_deferred g | None -> ()) ;
+            walk_deferred c.c_rhs
+          in
+          match expr.exp_desc with
+          | Texp_function _ | Texp_lazy _ | Texp_object _ ->
+              (* Deferred-execution boundaries: a closure body, a [lazy] thunk,
+                 or an object's method bodies run only if invoked/forced. Descend
+                 with the nesting flag raised so their calls are recorded as
+                 MAY_TOP — never a false MUST, never dropped. *)
+              incr nested ;
+              default_iterator.expr self expr ;
+              decr nested
+          | Texp_ifthenelse (cond, e_then, e_else) ->
+              (* Condition runs unconditionally; each branch is conditional. *)
+              self.expr self cond ;
+              walk_deferred e_then ;
+              (match e_else with Some e -> walk_deferred e | None -> ())
+          | Texp_match (scrut, comp_cases, val_cases, _) ->
+              (* Scrutinee runs unconditionally; every arm is conditional. *)
+              self.expr self scrut ;
+              List.iter walk_case comp_cases ;
+              List.iter walk_case val_cases
+          | Texp_try (body, val_cases, eff_cases) ->
+              (* The try body runs unconditionally; handlers are conditional. *)
+              self.expr self body ;
+              List.iter walk_case val_cases ;
+              List.iter walk_case eff_cases
+          | Texp_while (cond, body) ->
+              (* Condition is evaluated at least once; body may run zero times. *)
+              self.expr self cond ;
+              walk_deferred body
+          | Texp_for (_, _, lo, hi, _, body) ->
+              (* Bounds run unconditionally; body may run zero times. *)
+              self.expr self lo ;
+              self.expr self hi ;
+              walk_deferred body
+          | Texp_assert (e, _) ->
+              (* Assertion condition is elided under -noassert → conditional. *)
+              walk_deferred e
+          | Texp_letop {let_; ands; body; _} ->
+              (* [let* y = e and* z = e' in body]: the bind operators are applied
+                 unconditionally (MUST), and their operands run eagerly (MUST),
+                 but [body] is the continuation the bind operator may or may not
+                 invoke (e.g. [let*] on [None] short-circuits) → conditional. *)
+              add_path_call let_.bop_op_path let_.bop_loc ;
+              List.iter
+                (fun (b : Typedtree.binding_op) ->
+                  add_path_call b.bop_op_path b.bop_loc)
+                ands ;
+              self.expr self let_.bop_exp ;
+              List.iter
+                (fun (b : Typedtree.binding_op) -> self.expr self b.bop_exp)
+                ands ;
+              walk_case body
           | Texp_apply (fn_expr, args) ->
-              (* This is a function application - extract the callee.
-                 Use the application node's location for better accuracy
-                 with multiline calls. *)
+              (* A partial application supplies fewer arguments than the callee's
+                 arity: it builds a closure and does NOT run the callee's body,
+                 so it must never be a MUST edge. We cannot read a callee's
+                 syntactic arity at the call site, but the application's own
+                 result type tells us: if it is still a function (arrow), the
+                 call is under-saturated (or returns a function whose body runs
+                 later) → treat as deferred (MAY_TOP), never MUST. *)
+              (* Callee arity: for a same-module function use its *syntactic*
+                 arity (pre-pass), reliable even when a type-alias-hidden arrow
+                 defeats type inspection on a .cmt-restored env; otherwise use
+                 the callee's type arrow arity. *)
+              let nargs = List.length args in
+              let head_arity =
+                match fn_expr.exp_desc with
+                | Texp_ident (Path.Pident id, _, _) when ident_is_local_fn id ->
+                    (match local_fn_arity id with
+                     | Some a -> a
+                     | None -> arrow_arity fn_expr.exp_type)
+                | _ -> arrow_arity fn_expr.exp_type
+              in
+              (* Under-saturated (partial) application → builds a closure, the
+                 callee body does not run → never MUST. A result that is itself
+                 a function (arrow) is also under-saturated / returns-a-function. *)
+              let partial = is_arrow expr.exp_type || nargs < head_arity in
               (match fn_expr.exp_desc with
-              | Texp_ident (Path.Pident id, _longident, _vd)
-                when not (ident_is_local_fn id) ->
-                  (* Unqualified identifier that is NOT a same-module top-level
-                     function: a parameter, let-bound local, or nested closure.
-                     Its target is not statically known → MAY_TOP. Keeping the
-                     real name (not "*TOP*") is informative; May_top forces the
-                     MAY_TOP kind and prevents name-based (mis)resolution to a
-                     shadowed top-level of the same name. *)
+              | Texp_ident (Path.Pident id, _, _) when ident_is_local_fn id ->
+                  (* Same-module top-level function: MUST in the direct body,
+                     MAY_TOP if the call sits inside a nested closure or is a
+                     partial application (fewer args than the callee's arity). *)
+                  if !nested > 0 || partial then
+                    add_call ~kind_hint:May_top (Ident.name id) None expr.exp_loc
+                  else add_call (Ident.name id) None expr.exp_loc
+              | Texp_ident (Path.Pident id, _, _) ->
+                  (* Parameter / local / shadowing binding → unknowable target. *)
                   add_call ~kind_hint:May_top (Ident.name id) None expr.exp_loc
-              | Texp_ident (path, _longident, _vd) ->
+              | Texp_ident (path, _, _) ->
                   let callee_module, callee_name = path_to_module_name path in
-                  add_call callee_name callee_module expr.exp_loc
+                  if !nested > 0 || partial || qualified_is_dynamic path then
+                    let disp =
+                      match callee_module with
+                      | Some m -> m ^ "." ^ callee_name
+                      | None -> callee_name
+                    in
+                    add_call ~kind_hint:May_top disp None expr.exp_loc
+                  else add_call callee_name callee_module expr.exp_loc
               | _ ->
-                  (* Computed function head (higher-order application whose
-                     callee is not a syntactic identifier): unresolvable →
-                     MAY_TOP. Emit a synthetic edge to the ⊤ sentinel rather
-                     than dropping it, so [unreachable] stays sound. *)
+                  (* Computed function head → unresolvable → MAY_TOP. *)
                   add_call ~kind_hint:May_top "*TOP*" None expr.exp_loc) ;
-              (* A function passed as an argument may be invoked by the callee
-                 (e.g. [List.map island]) — record a callback escape so the
-                 callback does not read as UNREACHABLE. *)
-              add_arg_escapes args expr.exp_loc
-          | _ -> ()) ;
-          (* Continue walking into subexpressions *)
-          default_iterator.expr self expr);
+              (* Over-application [f a b c] where [f] has arity 2: the head call
+                 is saturated (handled above), but the extra args are applied to
+                 the (unknown) returned function value — a residual call to an
+                 unknowable target. Record it as a MAY_TOP ⊤ so [unreachable]
+                 stays sound (the residual could reach anything). *)
+              if head_arity > 0 && nargs > head_arity then
+                add_call ~kind_hint:May_top "*TOP*" None expr.exp_loc ;
+              add_arg_escapes args expr.exp_loc ;
+              (* Short-circuit [&&]/[||]: the operator itself runs, but its right
+                 operand only runs conditionally, so descend into it deferred. *)
+              (match short_circuit_arity fn_expr with
+              | Some () -> (
+                  self.expr self fn_expr ;
+                  match args with
+                  | (_, first) :: rest ->
+                      Option.iter (self.expr self) first ;
+                      incr nested ;
+                      List.iter (fun (_, a) -> Option.iter (self.expr self) a) rest ;
+                      decr nested
+                  | [] -> ())
+              | None ->
+                  (* Descend into fn + args (nested lambdas handled via counter). *)
+                  default_iterator.expr self expr)
+          | _ -> default_iterator.expr self expr);
+      module_expr =
+        (fun self me ->
+          match me.mod_desc with
+          | Tmod_functor (_, _) ->
+              (* A functor body only runs when the functor is applied → its
+                 calls are deferred, never a MUST of the enclosing function. *)
+              incr nested ;
+              default_iterator.module_expr self me ;
+              decr nested
+          | _ -> default_iterator.module_expr self me);
     }
   in
-  iter.expr iter expr ;
+  (* The binding value is `fun <params> -> BODY` (or `function <cases>`); those
+     params are THIS function's own, so BODY / the case RHSs are its direct body
+     (depth 0). Peel the leading parameter lambdas before walking, otherwise the
+     function's own arms would be mistaken for nested closures and every call
+     would be demoted to MAY_TOP. Genuinely-nested function literals inside BODY
+     still raise [nested]. *)
+  (* Optional-argument default expressions (`?(x = e)`) run only when the caller
+     omits the argument — conditional, like a nested-closure body. Collect them
+     from every peeled parameter layer and walk them with [nested] raised so
+     their calls are recorded as MAY_TOP (never dropped → [unreachable] stays
+     sound; never a MUST → [reaches] stays honest). *)
+  let opt_defaults = ref [] in
+  let collect_param_defaults params =
+    List.iter
+      (fun (p : Typedtree.function_param) ->
+        match p.fp_kind with
+        | Tparam_optional_default (_, de) -> opt_defaults := de :: !opt_defaults
+        | Tparam_pat _ -> ())
+      params
+  in
+  let rec peel (e : Typedtree.expression) =
+    match e.exp_desc with
+    | Texp_function (params, Tfunction_body b) ->
+        collect_param_defaults params ;
+        peel b
+    | Texp_function (params, Tfunction_cases _) ->
+        collect_param_defaults params ;
+        e
+    | _ -> e
+  in
+  let root = peel expr in
+  (match root.exp_desc with
+  | Texp_function (_, Tfunction_cases {cases; _}) ->
+      (* A root [function <cases>] is sugar for [fun x -> match x with <cases>]:
+         the arm taken depends on the argument, so each guard/RHS is conditional,
+         exactly like a [Texp_match] arm → walk deferred (MAY_TOP), never MUST. *)
+      incr nested ;
+      List.iter
+        (fun (c : Typedtree.value Typedtree.case) ->
+          (match c.c_guard with Some g -> iter.expr iter g | None -> ()) ;
+          iter.expr iter c.c_rhs)
+        cases ;
+      decr nested
+  | _ -> iter.expr iter root) ;
+  (* Walk the collected optional-arg defaults as conditional (MAY_TOP). *)
+  incr nested ;
+  List.iter (fun de -> iter.expr iter de) !opt_defaults ;
+  decr nested ;
   !calls
 
 (* -------------------------------------------------------------------------- *)
@@ -526,7 +774,7 @@ let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
                               Hashtbl.replace
                                 local_fn_stamps
                                 (Ident.unique_name id)
-                                ()
+                                (fn_arity vb.vb_expr)
                           | _ -> ())
                         vbs
                   | _ -> ())
