@@ -143,18 +143,34 @@ say "$DB" escapes "$fn_clean" 2>&1 \
   }
 
 # ---------- dominance: a conditional (if-branch) static call is NOT MUST ----------
-# island is uniquely resolved but only called inside `if b`, so it must be MAY_TOP,
-# never a MUST edge and never dropped.
+# island is uniquely resolved but only called inside `if b`, so it must never be
+# a MUST edge and never dropped. (Its demoted KIND depends on DOM_ENUM below.)
 say "$DB" reaches "$fn_gated" "$fn_island" \
   | grep -q 'no MUST path' || note "reaches $fn_gated $fn_island should be no MUST path (conditional call, dominance-demoted)"
-# The demoted call is recorded as a MAY_TOP frontier → UNKNOWN, not REACHABLE, not UNREACHABLE.
-say "$DB" unreachable "$fn_gated" "$fn_island" \
-  | grep -q 'UNKNOWN:' || note "unreachable $fn_gated $fn_island should be UNKNOWN (conditional call → MAY_TOP frontier)"
+if [ "${DOM_ENUM:-0}" != 1 ]; then
+  # Pre-US-4: demotion target is MAY_TOP → verdict is UNKNOWN.
+  say "$DB" unreachable "$fn_gated" "$fn_island" \
+    | grep -q 'UNKNOWN:' || note "unreachable $fn_gated $fn_island should be UNKNOWN (conditional call → MAY_TOP frontier)"
+fi
 say "$DB" unreachable "$fn_gated" "$fn_island" \
   | grep -q 'UNREACHABLE:' && note "unreachable $fn_gated $fn_island must NOT be UNREACHABLE (conditional call is still recorded)"
 # Direct call in gatedEntry's other branch is ALSO conditional → no MUST path either.
 say "$DB" reaches "$fn_gated" "$fn_direct" \
   | grep -q 'no MUST path' || note "reaches $fn_gated $fn_direct should be no MUST path (else-branch is conditional)"
+
+# ---------- enumerated demotion (cfg-postdom-dominance US-4) ----------
+# A conditional call with a uniquely-resolved static callee is MAY_ENUMERATED
+# (candidate set of one), not MAY_TOP — so unreachable becomes decidable.
+# Gated behind DOM_ENUM until the Go backend lands the change (step 4 flips the
+# default to 1).
+if [ "${DOM_ENUM:-0}" = 1 ]; then
+  gated_kind=$(sqlite3 "$DB" "SELECT COALESCE(MAX(kind),'MISSING') FROM calls WHERE caller_name LIKE '%gatedEntry%' AND callee_name LIKE '%island%';")
+  [ "$gated_kind" = "MAY_ENUMERATED" ] || note "gatedEntry→island should be MAY_ENUMERATED (enumerated demotion), got $gated_kind"
+  say "$DB" unreachable "$fn_gated" "$fn_island" \
+    | grep -q 'REACHABLE (may-reach)' || note "unreachable $fn_gated $fn_island should be REACHABLE (enumerated conditional callee)"
+else
+  echo "  (DOM_ENUM=0: enumerated-demotion assertions skipped — pre-US-4 behavior)"
+fi
 
 # ---------- edge-kind integrity: no un-kinded edges in the produced DB ----------
 bad=$(sqlite3 "$DB" "SELECT count(*) FROM calls WHERE kind IS NULL OR kind NOT IN ('MUST','MAY_ENUMERATED','MAY_TOP');")
