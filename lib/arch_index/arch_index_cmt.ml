@@ -251,28 +251,42 @@ type pending_dep = {
   line_number : int;
 }
 
-(** How a collected call's edge-kind is decided at resolution time. *)
-type call_kind_hint =
-  | Resolve
-      (** Normal call: resolve the callee via fn_lookup — MUST if it is an
-          indexed function (local or qualified) or an external leaf. *)
-  | May_top
-      (** Unresolvable target — a computed application head, or an applied
-          parameter / local closure — that could call anything → MAY_TOP. *)
-  | May_enumerated
-      (** A named local function passed as a function-typed ARGUMENT to another
-          call: the callee (e.g. [List.map]) may invoke it, so it is a bounded
-          candidate target → MAY_ENUMERATED (resolved to the named function). *)
+(** What is statically known about a call's TARGET, independent of whether the
+    call is conditional. Conditionality ([pending_call.cond]) is computed by
+    CFG post-dominance; the final edge kind is decided at resolution time from
+    the (head × cond × partial) facts. *)
+type call_head =
+  | Head_local of string
+      (** Unqualified name resolving (stamp-based) to a same-module top-level
+          function body — a MUST candidate when unconditional and saturated. *)
+  | Head_qualified of string option * string
+      (** Resolved qualified path [(module, name)] with a persistent root —
+          a MUST candidate (external leaf or in-index) when unconditional. *)
+  | Head_enumerated of string
+      (** A named local function passed as a function-typed ARGUMENT: the
+          callee (e.g. [List.map]) may invoke it → bounded candidate set. *)
+  | Head_unknown of string
+      (** Unknowable target: applied parameter/local closure, computed head,
+          dynamic-root qualified path (functor/first-class-module), or an
+          over-application residual — display name or ["*TOP*"]. *)
 
 (** Collected call information before resolution. *)
 type pending_call = {
   caller_module : string; (* Module path, e.g. "src/foo.ml" *)
   caller_name : string; (* Function name *)
-  callee_name : string; (* Function name *)
-  callee_module : string option; (* Module name if qualified, e.g. "List" *)
+  head : call_head; (* target facts (resolution identity preserved) *)
+  partial : bool; (* under-saturated / returns-a-function → body deferred *)
+  cond : bool; (* call block does NOT post-dominate entry (or is deferred) *)
   call_site : string; (* file:line *)
-  kind_hint : call_kind_hint;
 }
+
+(** Flat display of a pending call's callee: [(name, module)] — the qualified
+    module component when the head preserves one, for kind-less consumers
+    (LSP fallback path). *)
+let pending_display (p : pending_call) =
+  match p.head with
+  | Head_local n | Head_enumerated n | Head_unknown n -> (n, None)
+  | Head_qualified (m, n) -> (n, m)
 
 (** Collected type usage information.
     We store function_id directly since we have it when processing value bindings.
@@ -377,13 +391,25 @@ let rec fn_arity (e : Typedtree.expression) =
     Returns a list of pending calls. *)
 let collect_calls_from_expr ~src_path ~caller_module ~caller_name
     ~local_fn_stamps (expr : Typedtree.expression) =
-  let calls = ref [] in
-  let add_call ?(kind_hint = Resolve) callee_name callee_module loc =
+  (* Per-function CFG: calls record their basic block; after the walk we solve
+     post-dominance and mark every call whose block is not always-executed as
+     conditional ([cond = true]). Deferred bodies (closures, lazy thunks,
+     object methods, functor bodies) are walked in ISOLATED blocks with no
+     incoming edge — entry-unreachable, hence never always-exec — which forces
+     [cond] without a separate counter and guarantees the calls are still
+     recorded (never dropped). *)
+  let g = Arch_index_cfg.create () in
+  let cb = ref Arch_index_cfg.entry in
+  (* Active [try] handler-dispatch blocks (innermost first): a diverging
+     terminator inside a try body edges to the innermost dispatch (the handler
+     may catch) IN ADDITION to the virtual exit (it may not match). *)
+  let handler_stack = ref [] in
+  (* raw record: block id resolved to [cond] after solving *)
+  let raw = ref [] in
+  let add_call ?(partial = false) head loc =
     let line = loc.Location.loc_start.pos_lnum in
     let call_site = Printf.sprintf "%s:%d" src_path line in
-    calls :=
-      {caller_module; caller_name; callee_name; callee_module; call_site; kind_hint}
-      :: !calls
+    raw := (head, partial, !cb, call_site) :: !raw
   in
   (* An applied [Path.Pident] resolves to a MUST-candidate only if it is a
      same-module top-level function body; otherwise it is a parameter / local
@@ -419,66 +445,46 @@ let collect_calls_from_expr ~src_path ~caller_module ~caller_name
   let qualified_is_dynamic path =
     match path_root path with Some id -> not (Ident.persistent id) | None -> false
   in
-  (* Conditional-or-deferred depth. A MUST edge is *execution-sound* (dominance):
-     the call runs on EVERY execution of the enclosing function. So [nested] is
-     raised whenever we descend into a position that is NOT guaranteed to run:
-       - deferred bodies: function literals, [lazy] thunks, object methods,
-         un-applied functor bodies (only run if invoked/forced/applied);
-       - conditional bodies: [if]/[match] arms, [try] handlers, loop bodies,
-         [assert] conditions (elided under -noassert), the right operand of a
-         short-circuit [&&]/[||].
-     Any call recorded while [nested]>0 becomes MAY_TOP — never a false MUST
-     (keeps [reaches] an honest under-approximation) and never dropped (keeps
-     [unreachable] a sound over-approximation, the call is still recorded as ⊤).
-     Genuinely-unconditional positions (a sequence, a let-binding RHS, the
-     scrutinee of a match, an [if] condition, a [try] body, call arguments) stay
-     at depth 0 so a straight-line call remains MUST. *)
-  let nested = ref 0 in
   (* A function-typed argument may be invoked by the callee. A named local
-     function → MAY_ENUMERATED (bounded candidate); a parameter / external /
-     computed function value → MAY_TOP. Under a closure, force MAY_TOP. *)
+     function → bounded candidate (Head_enumerated); a parameter / external /
+     computed function value → unknowable (Head_unknown). Conditionality is a
+     separate fact, decided by the block. *)
   let add_arg_escapes (args : (_ * Typedtree.expression option) list) loc =
     List.iter
       (fun (_, arg_opt) ->
         match arg_opt with
         | Some ae when is_arrow ae.Typedtree.exp_type ->
-            let hint, name =
+            let head =
               match ae.exp_desc with
               | Texp_ident (Path.Pident id, _, _) when ident_is_local_fn id ->
-                  (May_enumerated, Ident.name id)
-              | Texp_ident (Path.Pident id, _, _) -> (May_top, Ident.name id)
+                  Head_enumerated (Ident.name id)
+              | Texp_ident (Path.Pident id, _, _) -> Head_unknown (Ident.name id)
               | Texp_ident ((Path.Pdot _ as p), _, _) ->
                   let _, n = path_to_module_name p in
-                  (May_top, n)
-              | _ -> (May_top, "*TOP*") (* computed function value → unknowable *)
+                  Head_unknown n
+              | _ -> Head_unknown "*TOP*" (* computed function value *)
             in
-            let hint =
-              if !nested > 0 && hint = May_enumerated then May_top else hint
-            in
-            add_call ~kind_hint:hint name None loc
+            add_call head loc
         | _ -> ())
       args
   in
   (* Emit a call to a function named by a resolved [Path.t] — e.g. a let*/and*
-     bind operator, which is applied but is not a [Texp_apply] node. Classified
-     like an applied head: a same-module local fn or a qualified target is MUST
-     at depth 0, forced to MAY_TOP inside a nested/conditional/deferred position. *)
+     bind operator, which is applied but is not a [Texp_apply] node. *)
   let add_path_call (path : Path.t) loc =
     match path with
     | Path.Pident id when ident_is_local_fn id ->
-        if !nested > 0 then add_call ~kind_hint:May_top (Ident.name id) None loc
-        else add_call (Ident.name id) None loc
-    | Path.Pident id -> add_call ~kind_hint:May_top (Ident.name id) None loc
+        add_call (Head_local (Ident.name id)) loc
+    | Path.Pident id -> add_call (Head_unknown (Ident.name id)) loc
     | _ ->
         let callee_module, callee_name = path_to_module_name path in
-        if !nested > 0 || qualified_is_dynamic path then
+        if qualified_is_dynamic path then
           let disp =
             match callee_module with
             | Some m -> m ^ "." ^ callee_name
             | None -> callee_name
           in
-          add_call ~kind_hint:May_top disp None loc
-        else add_call callee_name callee_module loc
+          add_call (Head_unknown disp) loc
+        else add_call (Head_qualified (callee_module, callee_name)) loc
   in
   (* [&&] and [||] short-circuit: the right operand runs only conditionally. *)
   let short_circuit_arity (fn : Typedtree.expression) =
@@ -494,60 +500,146 @@ let collect_calls_from_expr ~src_path ~caller_module ~caller_name
       default_iterator with
       expr =
         (fun self expr ->
-          (* Walk [e] as conditional/deferred: any call inside becomes MAY_TOP. *)
-          let walk_deferred e =
-            incr nested ;
+          (* Walk [e] in a fresh CONDITIONAL block branching off the current
+             one: current → b …(walk)… → join, current → join. The walked
+             region never post-dominates the entry (the join bypass exists),
+             so its calls are demoted; execution continues in [join]. *)
+          let walk_conditional e =
+            let b = Arch_index_cfg.new_block g in
+            let join = Arch_index_cfg.new_block g in
+            Arch_index_cfg.add_edge g !cb b ;
+            Arch_index_cfg.add_edge g !cb join ;
+            cb := b ;
             self.expr self e ;
-            decr nested
+            Arch_index_cfg.add_edge g !cb join ;
+            cb := join
           in
-          (* A match/try case: both the guard and the RHS run only when the
-             pattern matches → conditional. Polymorphic over value/computation. *)
-          let walk_case : type k. k Typedtree.case -> unit =
+          (* Walk [e] in an ISOLATED block (no incoming edge): a deferred body
+             (closure/lazy/object) whose calls are recorded but can never be
+             always-exec. The current block is untouched. *)
+          let walk_isolated_default () =
+            let saved = !cb in
+            cb := Arch_index_cfg.new_block g ;
+            default_iterator.expr self expr ;
+            cb := saved
+          in
+          (* A match/try case walked inside an already-conditional block:
+             guard and RHS execute only if the pattern matches. *)
+          let walk_case_in : type k. k Typedtree.case -> unit =
            fun c ->
-            (match c.c_guard with Some g -> walk_deferred g | None -> ()) ;
-            walk_deferred c.c_rhs
+            (match c.c_guard with Some gd -> self.expr self gd | None -> ()) ;
+            self.expr self c.c_rhs
           in
           match expr.exp_desc with
           | Texp_function _ | Texp_lazy _ | Texp_object _ ->
               (* Deferred-execution boundaries: a closure body, a [lazy] thunk,
-                 or an object's method bodies run only if invoked/forced. Descend
-                 with the nesting flag raised so their calls are recorded as
-                 MAY_TOP — never a false MUST, never dropped. *)
-              incr nested ;
-              default_iterator.expr self expr ;
-              decr nested
+                 or an object's method bodies run only if invoked/forced —
+                 walked in an isolated (never always-exec) block so their calls
+                 are recorded, demoted, never dropped. *)
+              walk_isolated_default ()
           | Texp_ifthenelse (cond, e_then, e_else) ->
-              (* Condition runs unconditionally; each branch is conditional. *)
+              (* Condition runs unconditionally; each branch is a CFG arm. *)
               self.expr self cond ;
-              walk_deferred e_then ;
-              (match e_else with Some e -> walk_deferred e | None -> ())
+              let c_end = !cb in
+              let join = Arch_index_cfg.new_block g in
+              let bt = Arch_index_cfg.new_block g in
+              Arch_index_cfg.add_edge g c_end bt ;
+              cb := bt ;
+              self.expr self e_then ;
+              Arch_index_cfg.add_edge g !cb join ;
+              (match e_else with
+              | Some e ->
+                  let bf = Arch_index_cfg.new_block g in
+                  Arch_index_cfg.add_edge g c_end bf ;
+                  cb := bf ;
+                  self.expr self e ;
+                  Arch_index_cfg.add_edge g !cb join
+              | None -> Arch_index_cfg.add_edge g c_end join) ;
+              cb := join
           | Texp_match (scrut, comp_cases, val_cases, _) ->
-              (* Scrutinee runs unconditionally; every arm is conditional. *)
+              (* Scrutinee runs unconditionally; every arm is a CFG branch. *)
               self.expr self scrut ;
-              List.iter walk_case comp_cases ;
-              List.iter walk_case val_cases
+              let s_end = !cb in
+              let join = Arch_index_cfg.new_block g in
+              let walk_arm : type k. k Typedtree.case -> unit =
+               fun c ->
+                let arm = Arch_index_cfg.new_block g in
+                Arch_index_cfg.add_edge g s_end arm ;
+                cb := arm ;
+                walk_case_in c ;
+                Arch_index_cfg.add_edge g !cb join
+              in
+              List.iter walk_arm comp_cases ;
+              List.iter walk_arm val_cases ;
+              cb := join
           | Texp_try (body, val_cases, eff_cases) ->
-              (* The try body runs unconditionally; handlers are conditional. *)
+              (* The try body runs unconditionally. Handlers hang off a
+                 dispatch block that BRANCHES from the body's end (an exception
+                 "may or may not" occur), so a handler never post-dominates the
+                 entry. A diverging terminator inside the body (step 3) also
+                 edges to the dispatch: the handler may catch — and to the
+                 virtual exit: it may not match. *)
+              let dispatch = Arch_index_cfg.new_block g in
+              handler_stack := dispatch :: !handler_stack ;
               self.expr self body ;
-              List.iter walk_case val_cases ;
-              List.iter walk_case eff_cases
+              (match !handler_stack with
+              | _ :: tl -> handler_stack := tl
+              | [] -> ()) ;
+              let b_end = !cb in
+              let join = Arch_index_cfg.new_block g in
+              Arch_index_cfg.add_edge g b_end join ;
+              Arch_index_cfg.add_edge g b_end dispatch ;
+              let walk_handler : type k. k Typedtree.case -> unit =
+               fun c ->
+                let h = Arch_index_cfg.new_block g in
+                Arch_index_cfg.add_edge g dispatch h ;
+                cb := h ;
+                walk_case_in c ;
+                Arch_index_cfg.add_edge g !cb join
+              in
+              List.iter walk_handler val_cases ;
+              List.iter walk_handler eff_cases ;
+              cb := join
           | Texp_while (cond, body) ->
-              (* Condition is evaluated at least once; body may run zero times. *)
+              (* head → {body → head, after}: condition evaluated on every
+                 iteration path; body may run zero times. No constant folding —
+                 [while true] keeps its exit edge (documented termination-
+                 insensitivity residual). *)
+              let head = Arch_index_cfg.new_block g in
+              Arch_index_cfg.add_edge g !cb head ;
+              cb := head ;
               self.expr self cond ;
-              walk_deferred body
+              let c_end = !cb in
+              let bodyb = Arch_index_cfg.new_block g in
+              let after = Arch_index_cfg.new_block g in
+              Arch_index_cfg.add_edge g c_end bodyb ;
+              Arch_index_cfg.add_edge g c_end after ;
+              cb := bodyb ;
+              self.expr self body ;
+              Arch_index_cfg.add_edge g !cb head ;
+              cb := after
           | Texp_for (_, _, lo, hi, _, body) ->
               (* Bounds run unconditionally; body may run zero times. *)
               self.expr self lo ;
               self.expr self hi ;
-              walk_deferred body
+              let head = Arch_index_cfg.new_block g in
+              Arch_index_cfg.add_edge g !cb head ;
+              let bodyb = Arch_index_cfg.new_block g in
+              let after = Arch_index_cfg.new_block g in
+              Arch_index_cfg.add_edge g head bodyb ;
+              Arch_index_cfg.add_edge g head after ;
+              cb := bodyb ;
+              self.expr self body ;
+              Arch_index_cfg.add_edge g !cb head ;
+              cb := after
           | Texp_assert (e, _) ->
               (* Assertion condition is elided under -noassert → conditional. *)
-              walk_deferred e
+              walk_conditional e
           | Texp_letop {let_; ands; body; _} ->
               (* [let* y = e and* z = e' in body]: the bind operators are applied
-                 unconditionally (MUST), and their operands run eagerly (MUST),
-                 but [body] is the continuation the bind operator may or may not
-                 invoke (e.g. [let*] on [None] short-circuits) → conditional. *)
+                 unconditionally, their operands run eagerly, but [body] is the
+                 continuation the bind operator may or may not invoke (e.g.
+                 [let*] on [None] short-circuits) → a conditional region. *)
               add_path_call let_.bop_op_path let_.bop_loc ;
               List.iter
                 (fun (b : Typedtree.binding_op) ->
@@ -557,7 +649,14 @@ let collect_calls_from_expr ~src_path ~caller_module ~caller_name
               List.iter
                 (fun (b : Typedtree.binding_op) -> self.expr self b.bop_exp)
                 ands ;
-              walk_case body
+              let c = Arch_index_cfg.new_block g in
+              let join = Arch_index_cfg.new_block g in
+              Arch_index_cfg.add_edge g !cb c ;
+              Arch_index_cfg.add_edge g !cb join ;
+              cb := c ;
+              walk_case_in body ;
+              Arch_index_cfg.add_edge g !cb join ;
+              cb := join
           | Texp_apply (fn_expr, args) ->
               (* A partial application supplies fewer arguments than the callee's
                  arity: it builds a closure and does NOT run the callee's body,
@@ -585,61 +684,67 @@ let collect_calls_from_expr ~src_path ~caller_module ~caller_name
               let partial = is_arrow expr.exp_type || nargs < head_arity in
               (match fn_expr.exp_desc with
               | Texp_ident (Path.Pident id, _, _) when ident_is_local_fn id ->
-                  (* Same-module top-level function: MUST in the direct body,
-                     MAY_TOP if the call sits inside a nested closure or is a
-                     partial application (fewer args than the callee's arity). *)
-                  if !nested > 0 || partial then
-                    add_call ~kind_hint:May_top (Ident.name id) None expr.exp_loc
-                  else add_call (Ident.name id) None expr.exp_loc
+                  (* Same-module top-level function — MUST candidate; [cond] and
+                     [partial] decide the final kind at resolution. *)
+                  add_call ~partial (Head_local (Ident.name id)) expr.exp_loc
               | Texp_ident (Path.Pident id, _, _) ->
                   (* Parameter / local / shadowing binding → unknowable target. *)
-                  add_call ~kind_hint:May_top (Ident.name id) None expr.exp_loc
+                  add_call ~partial (Head_unknown (Ident.name id)) expr.exp_loc
               | Texp_ident (path, _, _) ->
                   let callee_module, callee_name = path_to_module_name path in
-                  if !nested > 0 || partial || qualified_is_dynamic path then
+                  if qualified_is_dynamic path then
                     let disp =
                       match callee_module with
                       | Some m -> m ^ "." ^ callee_name
                       | None -> callee_name
                     in
-                    add_call ~kind_hint:May_top disp None expr.exp_loc
-                  else add_call callee_name callee_module expr.exp_loc
+                    add_call ~partial (Head_unknown disp) expr.exp_loc
+                  else
+                    add_call
+                      ~partial
+                      (Head_qualified (callee_module, callee_name))
+                      expr.exp_loc
               | _ ->
-                  (* Computed function head → unresolvable → MAY_TOP. *)
-                  add_call ~kind_hint:May_top "*TOP*" None expr.exp_loc) ;
+                  (* Computed function head → unresolvable. *)
+                  add_call ~partial (Head_unknown "*TOP*") expr.exp_loc) ;
               (* Over-application [f a b c] where [f] has arity 2: the head call
                  is saturated (handled above), but the extra args are applied to
                  the (unknown) returned function value — a residual call to an
-                 unknowable target. Record it as a MAY_TOP ⊤ so [unreachable]
-                 stays sound (the residual could reach anything). *)
+                 unknowable target. Record it as ⊤ so [unreachable] stays sound. *)
               if head_arity > 0 && nargs > head_arity then
-                add_call ~kind_hint:May_top "*TOP*" None expr.exp_loc ;
+                add_call (Head_unknown "*TOP*") expr.exp_loc ;
               add_arg_escapes args expr.exp_loc ;
-              (* Short-circuit [&&]/[||]: the operator itself runs, but its right
-                 operand only runs conditionally, so descend into it deferred. *)
+              (* Short-circuit [&&]/[||]: the operator itself runs, but the
+                 right operand(s) run conditionally → a conditional CFG region. *)
               (match short_circuit_arity fn_expr with
               | Some () -> (
                   self.expr self fn_expr ;
                   match args with
                   | (_, first) :: rest ->
                       Option.iter (self.expr self) first ;
-                      incr nested ;
+                      let r = Arch_index_cfg.new_block g in
+                      let join = Arch_index_cfg.new_block g in
+                      Arch_index_cfg.add_edge g !cb r ;
+                      Arch_index_cfg.add_edge g !cb join ;
+                      cb := r ;
                       List.iter (fun (_, a) -> Option.iter (self.expr self) a) rest ;
-                      decr nested
+                      Arch_index_cfg.add_edge g !cb join ;
+                      cb := join
                   | [] -> ())
               | None ->
-                  (* Descend into fn + args (nested lambdas handled via counter). *)
+                  (* Descend into fn + args (nested constructs split blocks). *)
                   default_iterator.expr self expr)
           | _ -> default_iterator.expr self expr);
       module_expr =
         (fun self me ->
           match me.mod_desc with
           | Tmod_functor (_, _) ->
-              (* A functor body only runs when the functor is applied → its
-                 calls are deferred, never a MUST of the enclosing function. *)
-              incr nested ;
+              (* A functor body only runs when the functor is applied → walked
+                 in an isolated (never always-exec) block. *)
+              let saved = !cb in
+              cb := Arch_index_cfg.new_block g ;
               default_iterator.module_expr self me ;
-              decr nested
+              cb := saved
           | _ -> default_iterator.module_expr self me);
     }
   in
@@ -677,21 +782,42 @@ let collect_calls_from_expr ~src_path ~caller_module ~caller_name
   (match root.exp_desc with
   | Texp_function (_, Tfunction_cases {cases; _}) ->
       (* A root [function <cases>] is sugar for [fun x -> match x with <cases>]:
-         the arm taken depends on the argument, so each guard/RHS is conditional,
-         exactly like a [Texp_match] arm → walk deferred (MAY_TOP), never MUST. *)
-      incr nested ;
+         each arm is a CFG branch from the entry (conditional on the argument). *)
+      let s_end = !cb in
+      let join = Arch_index_cfg.new_block g in
       List.iter
         (fun (c : Typedtree.value Typedtree.case) ->
-          (match c.c_guard with Some g -> iter.expr iter g | None -> ()) ;
-          iter.expr iter c.c_rhs)
+          let arm = Arch_index_cfg.new_block g in
+          Arch_index_cfg.add_edge g s_end arm ;
+          cb := arm ;
+          (match c.c_guard with Some gd -> iter.expr iter gd | None -> ()) ;
+          iter.expr iter c.c_rhs ;
+          Arch_index_cfg.add_edge g !cb join)
         cases ;
-      decr nested
+      cb := join
   | _ -> iter.expr iter root) ;
-  (* Walk the collected optional-arg defaults as conditional (MAY_TOP). *)
-  incr nested ;
-  List.iter (fun de -> iter.expr iter de) !opt_defaults ;
-  decr nested ;
-  !calls
+  (* Optional-arg default expressions run only when the caller omits the
+     argument → each walked in an isolated (never always-exec) block: recorded,
+     demoted, never dropped. *)
+  List.iter
+    (fun de ->
+      cb := Arch_index_cfg.new_block g ;
+      iter.expr iter de)
+    !opt_defaults ;
+  (* Solve post-dominance and finalize: a call is conditional unless its block
+     runs on every execution of this function. *)
+  let v = Arch_index_cfg.solve g in
+  List.rev_map
+    (fun (head, partial, block, call_site) ->
+      {
+        caller_module;
+        caller_name;
+        head;
+        partial;
+        cond = not (Arch_index_cfg.always_exec v block);
+        call_site;
+      })
+    !raw
 
 (* -------------------------------------------------------------------------- *)
 (* Process a single .cmt file                                                 *)

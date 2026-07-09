@@ -282,63 +282,69 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
       with
       | None -> ()
       | Some caller_id ->
-          (* Edge-kind classification (soundy, mirroring the Go producer):
-               - computed head (callee_top)  → MAY_TOP (⊤ sentinel), unresolvable
-               - unqualified name resolving to a same-module top-level fn → MUST
-               - unqualified name NOT resolving (a function parameter or
-                 let-bound closure applied by name) → MAY_TOP: the target is
-                 not statically known, so it could call anything
-               - qualified name (external or in-index) → MUST: a uniquely
-                 resolved static call; an unresolved external is a MUST leaf. *)
-          (* Resolve an unqualified same-module callee name to its id. *)
-          let resolve_local () =
-            Hashtbl.find_opt fn_lookup (call.caller_module, call.callee_name)
+          (* Edge-kind classification from the (head × cond × partial) facts —
+             execution-sound dominance:
+               - Head_unknown → MAY_TOP (⊤): could call anything.
+               - Head_enumerated → MAY_ENUMERATED (bounded candidate)…
+                 …but forced MAY_TOP when conditional (step-2 behavior
+                 preservation; step 4 lifts this to MAY_ENUMERATED).
+               - Head_local / Head_qualified, unconditional + saturated → MUST
+                 (resolved id or external leaf).
+               - Head_local / Head_qualified, conditional or partial → demoted;
+                 the resolution identity is PRESERVED in the pending_call, and
+                 the demotion target is MAY_TOP at this step (MAY_ENUMERATED
+                 from step 4). *)
+          let resolve_local name =
+            Hashtbl.find_opt fn_lookup (call.caller_module, name)
           in
+          let resolve_qualified mod_name name =
+            (* For library-qualified names like Epure_db.Db_util, the lookup
+               table only has the last component "Db_util". *)
+            let lookup_name =
+              match String.rindex_opt mod_name '.' with
+              | Some i ->
+                  String.sub mod_name (i + 1) (String.length mod_name - i - 1)
+              | None -> mod_name
+            in
+            match Hashtbl.find_opt mod_name_to_path lookup_name with
+            | Some mod_path -> Hashtbl.find_opt fn_lookup (mod_path, name)
+            | None -> None
+          in
+          let demoted = call.cond || call.partial in
           let callee_id, callee_display_name, kind =
-            match call.kind_hint with
-            | Arch_index_cmt.May_top -> (None, call.callee_name, "MAY_TOP")
-            | Arch_index_cmt.May_enumerated ->
+            match call.head with
+            | Arch_index_cmt.Head_unknown n -> (None, n, "MAY_TOP")
+            | Arch_index_cmt.Head_enumerated n ->
                 (* A named local function passed as a callback — resolve it to a
                    node so the closure can follow it, but as MAY_ENUMERATED (the
-                   callee may or may not invoke it), never MUST. *)
-                (match resolve_local () with
-                 | Some id -> incr n_resolved ; (Some id, call.callee_name, "MAY_ENUMERATED")
-                 | None -> (None, call.callee_name, "MAY_ENUMERATED"))
-            | Arch_index_cmt.Resolve -> (
-              match call.callee_module with
-              | None -> (
-                  match
-                    Hashtbl.find_opt
-                      fn_lookup
-                      (call.caller_module, call.callee_name)
-                  with
-                  | Some id ->
-                      incr n_resolved ;
-                      (Some id, call.callee_name, "MUST")
-                  | None -> (None, call.callee_name, "MAY_TOP"))
-              | Some mod_name -> (
-                  let display_name = mod_name ^ "." ^ call.callee_name in
-                  (* For library-qualified names like Epure_db.Db_util,
-                     the lookup table only has the last component "Db_util". *)
-                  let lookup_name =
-                    match String.rindex_opt mod_name '.' with
-                    | Some i ->
-                        String.sub
-                          mod_name
-                          (i + 1)
-                          (String.length mod_name - i - 1)
-                    | None -> mod_name
-                  in
-                  match Hashtbl.find_opt mod_name_to_path lookup_name with
-                  | Some mod_path -> (
-                      match
-                        Hashtbl.find_opt fn_lookup (mod_path, call.callee_name)
-                      with
-                      | Some id ->
-                          incr n_resolved ;
-                          (Some id, display_name, "MUST")
-                      | None -> (None, display_name, "MUST"))
-                  | None -> (None, display_name, "MUST")))
+                   callee may or may not invoke it), never MUST. Conditional →
+                   MAY_TOP (behavior-preserving; lifted in step 4). *)
+                if call.cond then (None, n, "MAY_TOP")
+                else (
+                  match resolve_local n with
+                  | Some id -> incr n_resolved ; (Some id, n, "MAY_ENUMERATED")
+                  | None -> (None, n, "MAY_ENUMERATED"))
+            | Arch_index_cmt.Head_local n ->
+                if demoted then (None, n, "MAY_TOP")
+                else (
+                  match resolve_local n with
+                  | Some id -> incr n_resolved ; (Some id, n, "MUST")
+                  | None -> (None, n, "MAY_TOP"))
+            | Arch_index_cmt.Head_qualified (mod_opt, n) -> (
+                let display_name =
+                  match mod_opt with Some m -> m ^ "." ^ n | None -> n
+                in
+                if demoted then (None, display_name, "MAY_TOP")
+                else
+                  match mod_opt with
+                  | None -> (
+                      match resolve_local n with
+                      | Some id -> incr n_resolved ; (Some id, n, "MUST")
+                      | None -> (None, n, "MAY_TOP"))
+                  | Some mod_name -> (
+                      match resolve_qualified mod_name n with
+                      | Some id -> incr n_resolved ; (Some id, display_name, "MUST")
+                      | None -> (None, display_name, "MUST")))
           in
           insert_call
             db

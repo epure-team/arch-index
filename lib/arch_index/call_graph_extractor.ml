@@ -230,13 +230,16 @@ let extract_calls_from_cmts ~project_dir fn_rows =
                       structure.Typedtree.str_items ;
                     List.map
                       (fun (pc : Arch_index_cmt.pending_call) ->
+                        let callee_name, _mod =
+                          Arch_index_cmt.pending_display pc
+                        in
                         let callee_file =
-                          Hashtbl.find_opt name_to_file pc.callee_name
+                          Hashtbl.find_opt name_to_file callee_name
                         in
                         {
                           caller_name = pc.caller_name;
                           caller_file = rel_src;
-                          callee_name = pc.callee_name;
+                          callee_name;
                           callee_file;
                           call_site = pc.call_site;
                         })
