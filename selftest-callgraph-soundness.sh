@@ -209,6 +209,27 @@ let dead_lambda (x : int) : int =
 (* nested literals: inner node chains through the outer lambda node *)
 let nested_lam (xs : int list list) : int list list =
   List.map (fun l -> List.map (fun y -> island y) l) xs
+
+(* ── R2b negative fixtures: stamp table must NOT resolve these ───────────── *)
+(* conditional binding: two candidate literals → invocation stays MAY_TOP *)
+let cond_bind (b : bool) (x : int) : int =
+  let h = if b then (fun v -> island v) else (fun v -> v) in
+  h x
+(* tuple-pattern binding: not recorded → invocation stays MAY_TOP *)
+let tuple_bind (x : int) : int =
+  let (h, k) = ((fun v -> island v), 0) in
+  ignore k ; h x
+(* shadowing: inner h is a NEW non-literal binding; h x must not resolve to
+   the outer literal (fresh stamp → not in table) *)
+let shadow_bind (f : int -> int) (x : int) : int =
+  let h = fun v -> island v in
+  ignore h ;
+  let h = f in
+  h x
+(* partial application of a bound lambda (arity 2, one arg) → never MUST *)
+let partial_bind (x : int) : int -> int =
+  let h = fun (a : int) (b : int) -> island (a + b) in
+  h x
 ML
 
 ( cd "$MOD" && dune build 2>/tmp/soundness-dune.txt ) \
@@ -285,6 +306,12 @@ chk P1 "reaches single_guarded sink = no must (guard may fail)" "$(verdict reach
 chk P1 "reaches false_arg sink = no must (raising argument precedes the call)" "$(verdict reaches false_arg sink)" "no MUST path"
 chk P1 "false_arg mk_exn edge is MUST (argument evaluation runs)" "$(sqlite3 "$DB" "SELECT COALESCE(MAX(kind),'MISSING') FROM calls c JOIN functions f ON c.caller_id=f.id WHERE f.name='false_arg' AND c.callee_name='mk_exn';")" "MUST"
 chk P1 "reaches no_shadow_stdlib g = must (local Stdlib.failwith is not a terminator)" "$(verdict reaches no_shadow_stdlib g)" "PATH EXISTS"
+# R2b stamp-table negatives: only single-literal Tpat_var bindings resolve.
+chk P1 "reaches cond_bind island = no must (conditional binding not recorded)" "$(verdict reaches cond_bind island)" "no MUST path"
+chk P1 "unreachable cond_bind island = REACHABLE (arm literals are enumerated occurrences)" "$(verdict unreachable cond_bind island)" "REACHABLE (may-reach)"
+chk P1 "reaches tuple_bind island = no must (tuple pattern not recorded)" "$(verdict reaches tuple_bind island)" "no MUST path"
+chk P1 "reaches shadow_bind island = no must (rebound name is a fresh stamp)" "$(verdict reaches shadow_bind island)" "no MUST path"
+chk P1 "reaches partial_bind island = no must (partial application of bound lambda)" "$(verdict reaches partial_bind island)" "no MUST path"
 
 echo "── P2: cfg-postdom-dominance targets (computed dominance / lambda nodes / enumerated demotion) ──"
 # R1 — divergence residual closed: code after an unconditional raise is demoted.

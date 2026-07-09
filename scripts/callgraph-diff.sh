@@ -57,21 +57,35 @@ lam_edge_sites() { # root callers holding at least one lambda edge in $1
                 FROM calls c JOIN functions f ON c.caller_id=f.id
                 WHERE c.callee_name LIKE '%<fun:%';" | norm | LC_ALL=C sort -u
 }
+lam_edge_caller_sites() { # (root_caller, site) pairs with a lambda-node CALLEE
+  # (R2b: a local-lambda invocation's callee is renamed from the bare local
+  # name to the node name at the SAME site — sanctioned rename, not a drop)
+  sqlite3 "$1" "SELECT DISTINCT f.name||'\`'||c.call_site
+                FROM calls c JOIN functions f ON c.caller_id=f.id
+                WHERE c.callee_name LIKE '%<fun:%';" | norm | LC_ALL=C sort -u
+}
 
 dump "$OLD_DB" > /tmp/cgdiff-old.txt
 dump "$NEW_DB" > /tmp/cgdiff-new.txt
 sites "$OLD_DB" > /tmp/cgdiff-old-sites.txt
 sites "$NEW_DB" > /tmp/cgdiff-new-sites.txt
 lam_edge_sites "$NEW_DB" > /tmp/cgdiff-new-lamsites.txt
+lam_edge_caller_sites "$NEW_DB" > /tmp/cgdiff-new-lamcallersites.txt
 
 raw_dropped=$(LC_ALL=C comm -23 /tmp/cgdiff-old-sites.txt /tmp/cgdiff-new-sites.txt)
-# Filter the sanctioned replacement: an old '*TOP*' row whose (caller, site)
-# now carries a lambda edge. Everything else is a REAL drop.
+# Filter the sanctioned replacements:
+#   (a) an old '*TOP*' row whose root caller now carries a lambda edge
+#       (literal argument's escape marker replaced by the enumerated edge);
+#   (b) an old bare-local-name row whose exact (caller, site) now carries a
+#       lambda-node callee (local-lambda invocation renamed to the node).
+# Everything else is a REAL drop.
 dropped=$(echo "$raw_dropped" | awk -F'|' '
-  NR==FNR { lam[$0]=1; next }
+  FILENAME ~ /lamsites/    { lam[$0]=1; next }
+  FILENAME ~ /lamcallersites/ { lamsite[$0]=1; next }
   $2=="*TOP*" && ($1 in lam) { next }
+  (($1"`"$3) in lamsite) { next }
   NF { print }
-' /tmp/cgdiff-new-lamsites.txt -)
+' /tmp/cgdiff-new-lamsites.txt /tmp/cgdiff-new-lamcallersites.txt -)
 added=$(LC_ALL=C comm -13 /tmp/cgdiff-old-sites.txt /tmp/cgdiff-new-sites.txt | wc -l)
 replaced=$(( $(echo "$raw_dropped" | grep -c . || true) - $(echo "$dropped" | grep -c . || true) ))
 echo "== sanctioned *TOP*→lambda replacements: $replaced =="

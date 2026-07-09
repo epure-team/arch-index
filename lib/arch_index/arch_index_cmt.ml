@@ -455,13 +455,17 @@ let collect_calls_from_expr ~src_path ~caller_module ~caller_name
   let markers = Hashtbl.create 8 in
   (* literal loc → assigned node name (filled at visit; read by apply heads) *)
   let lam_names = Hashtbl.create 8 in
-  (* locs of literals in APPLY-HEAD position: the head classification emits
-     their (Head_local) edge, so the literal visit must not also emit an
-     occurrence edge. *)
-  let head_literals = Hashtbl.create 4 in
   (* locs of literals that are a let-binding RHS: the BINDING itself is not an
      occurrence — a never-referenced lambda gets no parent→lambda edge. *)
   let binding_literals = Hashtbl.create 8 in
+  (* Local let-bound literals: [Ident.unique_name] stamp → (lambda node name,
+     syntactic arity). Stamps are globally unique per binder (every OCaml [let]
+     introduces a fresh Ident), so a flat table is scope-correct: shadowing and
+     rebinding create NEW stamps that simply are not in the table. Only a
+     [Tpat_var] pattern with a SINGLE literal RHS is recorded — conditional
+     bindings, tuple patterns, and aliases stay unknowable (MAY_TOP). *)
+  let local_lam_stamps = Hashtbl.create 8 in
+  let lam_stamp id = Hashtbl.find_opt local_lam_stamps (Ident.unique_name id) in
   (* forward ref: walks a promoted literal's peeled body in the current ctx
      (defined after the iterator, which it mutually uses). *)
   let walk_fn_body_ref = ref (fun (_ : Typedtree.expression) -> ()) in
@@ -527,8 +531,12 @@ let collect_calls_from_expr ~src_path ~caller_module ~caller_name
                 ()
             | Texp_ident (Path.Pident id, _, _) when ident_is_local_fn id ->
                 add_call (Head_enumerated (Ident.name id)) loc
-            | Texp_ident (Path.Pident id, _, _) ->
-                add_call (Head_unknown (Ident.name id)) loc
+            | Texp_ident (Path.Pident id, _, _) -> (
+                (* A let-bound lambda passed by name is an escape OCCURRENCE:
+                   parent→lambda MAY_ENUMERATED at this site. *)
+                match lam_stamp id with
+                | Some (node_name, _) -> add_call (Head_enumerated node_name) loc
+                | None -> add_call (Head_unknown (Ident.name id)) loc)
             | Texp_ident ((Path.Pdot _ as p), _, _) ->
                 let _, n = path_to_module_name p in
                 add_call (Head_unknown n) loc
@@ -639,10 +647,11 @@ let collect_calls_from_expr ~src_path ~caller_module ~caller_name
               (* A nested [fun …]/[function] literal is PROMOTED to its own
                  synthetic node: register the node, emit a parent→lambda
                  occurrence edge (unless this literal is a let-binding RHS —
-                 zero-occurrence lambdas get no edge — or an apply head, whose
-                 classification emits the edge itself), and walk the body in
-                 the lambda's OWN context (own CFG: its calls attribute to the
-                 node and MUST = post-dominates the LAMBDA's entry). *)
+                 zero-occurrence lambdas get no edge; head applications and
+                 escapes of the bound name emit per-occurrence edges instead),
+                 and walk the body in the lambda's OWN context (own CFG: its
+                 calls attribute to the node and MUST = post-dominates the
+                 LAMBDA's entry). *)
               let name = lambda_name expr.exp_loc in
               Hashtbl.replace lam_names expr.exp_loc name ;
               lambdas :=
@@ -653,27 +662,43 @@ let collect_calls_from_expr ~src_path ~caller_module ~caller_name
                   lam_arity = fn_arity expr;
                 }
                 :: !lambdas ;
-              if
-                (not (Hashtbl.mem head_literals expr.exp_loc))
-                && not (Hashtbl.mem binding_literals expr.exp_loc)
-              then add_call (Head_enumerated name) expr.exp_loc ;
+              if not (Hashtbl.mem binding_literals expr.exp_loc) then
+                add_call (Head_enumerated name) expr.exp_loc ;
               let saved = !cur in
               let c = new_ctx name in
               all_ctxs := c :: !all_ctxs ;
               cur := c ;
               !walk_fn_body_ref expr ;
               cur := saved
-          | Texp_let (_, vbs, _) ->
-              (* Mark single-literal Tpat_var binding RHSs: the BINDING is not
-                 an occurrence (a never-referenced lambda gets no edge). *)
+          | Texp_let (_, vbs, body) ->
+              (* Single-literal [Tpat_var] binding RHSs: the BINDING is not an
+                 occurrence (a never-referenced lambda gets no edge). Each RHS
+                 walk assigns the literal's node name; the binder's stamp is
+                 then recorded → (node, arity) BEFORE the let body walks, so
+                 head applications of the bound name resolve to the lambda node
+                 (MUST when always-exec + saturated) and escapes of the name
+                 become enumerated occurrence edges. Stamps are unique per
+                 binder (fresh Ident per [let]), so shadowing/rebinding create
+                 new stamps and no eviction is needed. *)
               List.iter
                 (fun (vb : Typedtree.value_binding) ->
-                  match (vb.vb_pat.pat_desc, vb.vb_expr.exp_desc) with
+                  (match (vb.vb_pat.pat_desc, vb.vb_expr.exp_desc) with
                   | Tpat_var _, Texp_function _ ->
                       Hashtbl.replace binding_literals vb.vb_expr.exp_loc ()
+                  | _ -> ()) ;
+                  default_iterator.value_binding self vb ;
+                  match (vb.vb_pat.pat_desc, vb.vb_expr.exp_desc) with
+                  | Tpat_var (id, _, _), Texp_function _ -> (
+                      match Hashtbl.find_opt lam_names vb.vb_expr.exp_loc with
+                      | Some node_name ->
+                          Hashtbl.replace
+                            local_lam_stamps
+                            (Ident.unique_name id)
+                            (node_name, fn_arity vb.vb_expr)
+                      | None -> ())
                   | _ -> ())
                 vbs ;
-              default_iterator.expr self expr
+              self.expr self body
           | Texp_lazy _ | Texp_object _ ->
               (* Non-promoted deferred boundaries: a lazy thunk or an object's
                  method bodies run only if forced/invoked — walked in an
@@ -833,6 +858,10 @@ let collect_calls_from_expr ~src_path ~caller_module ~caller_name
                     (match local_fn_arity id with
                      | Some a -> a
                      | None -> arrow_arity fn_expr.exp_type)
+                | Texp_ident (Path.Pident id, _, _) -> (
+                    match lam_stamp id with
+                    | Some (_, a) -> a (* recorded literal's syntactic arity *)
+                    | None -> arrow_arity fn_expr.exp_type)
                 | _ -> arrow_arity fn_expr.exp_type
               in
               (* Under-saturated (partial) application → builds a closure, the
@@ -850,9 +879,19 @@ let collect_calls_from_expr ~src_path ~caller_module ~caller_name
                     (* Same-module top-level function — MUST candidate; [cond]
                        and [partial] decide the final kind at resolution. *)
                     add_call ~partial (Head_local (Ident.name id)) expr.exp_loc
-                | Texp_ident (Path.Pident id, _, _) ->
-                    (* Parameter / local / shadowing binding → unknowable. *)
-                    add_call ~partial (Head_unknown (Ident.name id)) expr.exp_loc
+                | Texp_ident (Path.Pident id, _, _) -> (
+                    match lam_stamp id with
+                    | Some (node_name, _) ->
+                        (* Head application of a let-bound literal: resolves to
+                           the lambda node — MUST when unconditional+saturated,
+                           MAY_ENUMERATED otherwise (same rule as top-level). *)
+                        add_call ~partial (Head_local node_name) expr.exp_loc
+                    | None ->
+                        (* Parameter / local / shadowing binding → unknowable. *)
+                        add_call
+                          ~partial
+                          (Head_unknown (Ident.name id))
+                          expr.exp_loc)
                 | Texp_ident (path, _, _) ->
                     let callee_module, callee_name = path_to_module_name path in
                     if qualified_is_dynamic path then
