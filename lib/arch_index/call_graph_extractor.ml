@@ -184,6 +184,28 @@ let extract_calls_from_cmts ~project_dir fn_rows =
                 | Some abs_src ->
                     let rel_src = relative_path ~project_dir abs_src in
                     let pending = ref [] in
+                    (* Same-module top-level function-body stamps: an applied
+                       unqualified identifier is MUST-resolvable only if its
+                       stamp is here (see Arch_index_cmt.collect_calls_from_expr). *)
+                    let local_fn_stamps = Hashtbl.create 64 in
+                    List.iter
+                      (fun (item : Typedtree.structure_item) ->
+                        match item.str_desc with
+                        | Typedtree.Tstr_value (_, vbs) ->
+                            List.iter
+                              (fun (vb : Typedtree.value_binding) ->
+                                match vb.vb_pat.pat_desc with
+                                | Typedtree.Tpat_var (id, _, _)
+                                  when Arch_index_cmt.is_function_rhs vb.vb_expr
+                                  ->
+                                    Hashtbl.replace
+                                      local_fn_stamps
+                                      (Ident.unique_name id)
+                                      ()
+                                | _ -> ())
+                              vbs
+                        | _ -> ())
+                      structure.Typedtree.str_items ;
                     List.iter
                       (fun (item : Typedtree.structure_item) ->
                         match item.str_desc with
@@ -198,6 +220,7 @@ let extract_calls_from_cmts ~project_dir fn_rows =
                                         ~src_path:rel_src
                                         ~caller_module:rel_src
                                         ~caller_name
+                                        ~local_fn_stamps
                                         vb.vb_expr
                                     in
                                     pending := calls @ !pending

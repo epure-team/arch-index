@@ -251,6 +251,19 @@ type pending_dep = {
   line_number : int;
 }
 
+(** How a collected call's edge-kind is decided at resolution time. *)
+type call_kind_hint =
+  | Resolve
+      (** Normal call: resolve the callee via fn_lookup — MUST if it is an
+          indexed function (local or qualified) or an external leaf. *)
+  | May_top
+      (** Unresolvable target — a computed application head, or an applied
+          parameter / local closure — that could call anything → MAY_TOP. *)
+  | May_enumerated
+      (** A named local function passed as a function-typed ARGUMENT to another
+          call: the callee (e.g. [List.map]) may invoke it, so it is a bounded
+          candidate target → MAY_ENUMERATED (resolved to the named function). *)
+
 (** Collected call information before resolution. *)
 type pending_call = {
   caller_module : string; (* Module path, e.g. "src/foo.ml" *)
@@ -258,6 +271,7 @@ type pending_call = {
   callee_name : string; (* Function name *)
   callee_module : string option; (* Module name if qualified, e.g. "List" *)
   call_site : string; (* file:line *)
+  kind_hint : call_kind_hint;
 }
 
 (** Collected type usage information.
@@ -332,17 +346,61 @@ let extract_types_from_signature ty =
   walk ty 0 ;
   List.rev !types
 
+(** [true] iff the binding RHS is a syntactic function body — the only shape we
+    can treat as a statically-callable node. A function-TYPED value with a
+    non-function RHS (e.g. [let f = if c then g else h], or a plain alias
+    [let f = g]) is NOT: a call through it could dispatch to any of several
+    targets we do not track, so it must classify MAY_TOP, not MUST. *)
+let is_function_rhs (e : Typedtree.expression) =
+  (* A `(fun … : t)` / coercion keeps its [Texp_function] desc — the constraint
+     lives in [exp_extra], not wrapping [exp_desc] — so matching the desc is
+     enough. *)
+  match e.exp_desc with Texp_function _ -> true | _ -> false
+
 (** Walk a value binding expression to collect all function calls.
+    [local_fn_stamps] is the set of [Ident.stamp]s of same-module top-level
+    function-body bindings; an applied unqualified identifier counts as a
+    resolvable (MUST-candidate) call only if its stamp is in this set —
+    otherwise it is a parameter / local binding / closure and is MAY_TOP.
     Returns a list of pending calls. *)
 let collect_calls_from_expr ~src_path ~caller_module ~caller_name
-    (expr : Typedtree.expression) =
+    ~local_fn_stamps (expr : Typedtree.expression) =
   let calls = ref [] in
-  let add_call callee_name callee_module loc =
+  let add_call ?(kind_hint = Resolve) callee_name callee_module loc =
     let line = loc.Location.loc_start.pos_lnum in
     let call_site = Printf.sprintf "%s:%d" src_path line in
     calls :=
-      {caller_module; caller_name; callee_name; callee_module; call_site}
+      {caller_module; caller_name; callee_name; callee_module; call_site; kind_hint}
       :: !calls
+  in
+  (* An applied [Path.Pident] resolves to a MUST-candidate only if it is a
+     same-module top-level function body; otherwise it is a parameter / local
+     closure with an unknowable target → MAY_TOP. *)
+  let ident_is_local_fn id = Hashtbl.mem local_fn_stamps (Ident.unique_name id) in
+  (* A function-typed argument passed to a call may be invoked by the callee.
+     If it is a named local function, record a MAY_ENUMERATED escape to it
+     (precise, bounded candidate); if it is a parameter / external / computed
+     function value, record a MAY_TOP escape (unknowable target). Lambdas need
+     no escape — their bodies are walked and their calls attributed here. *)
+  let is_arrow ty = match Types.get_desc ty with Tarrow _ -> true | _ -> false in
+  let add_arg_escapes (args : (_ * Typedtree.expression option) list) loc =
+    List.iter
+      (fun (_, arg_opt) ->
+        match arg_opt with
+        | Some ae when is_arrow ae.Typedtree.exp_type -> (
+            match ae.exp_desc with
+            | Texp_ident (Path.Pident id, _, _) when ident_is_local_fn id ->
+                add_call ~kind_hint:May_enumerated (Ident.name id) None loc
+            | Texp_ident (Path.Pident id, _, _) ->
+                add_call ~kind_hint:May_top (Ident.name id) None loc
+            | Texp_ident ((Path.Pdot _ as p), _, _) ->
+                (* An external/qualified function passed as a callback: we do
+                   not model its body, so its invocation escapes → MAY_TOP. *)
+                let _, n = path_to_module_name p in
+                add_call ~kind_hint:May_top n None loc
+            | _ -> ())
+        | _ -> ())
+      args
   in
   (* Use Tast_iterator to walk all subexpressions *)
   let open Tast_iterator in
@@ -352,15 +410,33 @@ let collect_calls_from_expr ~src_path ~caller_module ~caller_name
       expr =
         (fun self expr ->
           (match expr.exp_desc with
-          | Texp_apply (fn_expr, _args) -> (
+          | Texp_apply (fn_expr, args) ->
               (* This is a function application - extract the callee.
                  Use the application node's location for better accuracy
                  with multiline calls. *)
-              match fn_expr.exp_desc with
+              (match fn_expr.exp_desc with
+              | Texp_ident (Path.Pident id, _longident, _vd)
+                when not (ident_is_local_fn id) ->
+                  (* Unqualified identifier that is NOT a same-module top-level
+                     function: a parameter, let-bound local, or nested closure.
+                     Its target is not statically known → MAY_TOP. Keeping the
+                     real name (not "*TOP*") is informative; May_top forces the
+                     MAY_TOP kind and prevents name-based (mis)resolution to a
+                     shadowed top-level of the same name. *)
+                  add_call ~kind_hint:May_top (Ident.name id) None expr.exp_loc
               | Texp_ident (path, _longident, _vd) ->
                   let callee_module, callee_name = path_to_module_name path in
                   add_call callee_name callee_module expr.exp_loc
-              | _ -> ())
+              | _ ->
+                  (* Computed function head (higher-order application whose
+                     callee is not a syntactic identifier): unresolvable →
+                     MAY_TOP. Emit a synthetic edge to the ⊤ sentinel rather
+                     than dropping it, so [unreachable] stays sound. *)
+                  add_call ~kind_hint:May_top "*TOP*" None expr.exp_loc) ;
+              (* A function passed as an argument may be invoked by the callee
+                 (e.g. [List.map island]) — record a callback escape so the
+                 callback does not read as UNREACHABLE. *)
+              add_arg_escapes args expr.exp_loc
           | _ -> ()) ;
           (* Continue walking into subexpressions *)
           default_iterator.expr self expr);
@@ -432,6 +508,29 @@ let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
               let pending_calls = ref [] in
               let pending_deps = ref [] in
               let pending_type_usages = ref [] in
+              (* Pre-pass: the set of Ident.stamps of top-level bindings whose
+                 RHS is a real function body. A same-module unqualified call
+                 resolves to MUST only if the callee's stamp is in this set;
+                 everything else (parameters, locals, function-typed values with
+                 non-function RHS) is MAY_TOP. Whole-structure pass so forward
+                 references and `let rec … and …` groups are all covered. *)
+              let local_fn_stamps = Hashtbl.create 64 in
+              List.iter
+                (fun (it : Typedtree.structure_item) ->
+                  match it.str_desc with
+                  | Tstr_value (_, vbs) ->
+                      List.iter
+                        (fun (vb : Typedtree.value_binding) ->
+                          match vb.vb_pat.pat_desc with
+                          | Tpat_var (id, _, _) when is_function_rhs vb.vb_expr ->
+                              Hashtbl.replace
+                                local_fn_stamps
+                                (Ident.unique_name id)
+                                ()
+                          | _ -> ())
+                        vbs
+                  | _ -> ())
+                structure.str_items ;
               let add_dep target_path dep_kind alias_name line_number =
                 pending_deps :=
                   {
@@ -675,6 +774,7 @@ let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
                                   ~src_path:rel_path
                                   ~caller_module:rel_path
                                   ~caller_name:name
+                                  ~local_fn_stamps
                                   vb.vb_expr
                               in
                               pending_calls :=

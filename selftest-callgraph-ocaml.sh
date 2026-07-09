@@ -12,6 +12,11 @@ say()   { "$Q" "$@" 2>&1; }
 command -v opam    >/dev/null 2>&1 || { echo "selftest-callgraph-ocaml: opam required" >&2; exit 2; }
 command -v sqlite3 >/dev/null 2>&1 || { echo "selftest-callgraph-ocaml: sqlite3 required" >&2; exit 2; }
 
+# Pin the opam switch env resolved from the repo root NOW, before we cd into the
+# mktemp fixture dir below. opam auto-detects local switches from CWD, so a later
+# `opam exec -- dune build` from /tmp fails with "No switch is currently set".
+eval "$(cd "$HERE" && opam env 2>/dev/null)" || true
+
 # Use locally built binary (standalone — no EPURE_SRC dependency)
 BIN_INSTALL="$HERE/_build/install/default/bin/arch_callgraph_ocaml"
 BIN_DEFAULT="$HERE/_build/default/bin/arch_callgraph_ocaml/arch_callgraph_ocaml.exe"
@@ -70,7 +75,7 @@ let dirty_entry () : int = apply_fn (fun n -> n + 1) 42
 OCAML
 
 # Build the module to produce .cmt files
-( cd "$MOD" && opam exec -- dune build 2>/tmp/dune-err.txt ) \
+( cd "$MOD" && dune build 2>/tmp/dune-err.txt ) \
   || { cat /tmp/dune-err.txt >&2; note "dune build of test module failed"; }
 CMT_DIR="$MOD/_build/default"
 [ -d "$CMT_DIR" ] || { cat /tmp/dune-err.txt >&2; note "dune build dir not found"; exit 1; }
@@ -93,7 +98,7 @@ nfn=$(sqlite3 "$DB" "SELECT count(*) FROM functions;")
 fn_clean=$(sqlite3 "$DB"  "SELECT name FROM functions WHERE name LIKE '%clean_entry%' LIMIT 1;")
 fn_dirty=$(sqlite3 "$DB"  "SELECT name FROM functions WHERE name LIKE '%dirty_entry%' LIMIT 1;")
 fn_island=$(sqlite3 "$DB" "SELECT name FROM functions WHERE name LIKE '%island%' LIMIT 1;")
-fn_add=$(sqlite3 "$DB"    "SELECT name FROM functions WHERE name LIKE '%.add' LIMIT 1;")
+fn_add=$(sqlite3 "$DB"    "SELECT name FROM functions WHERE name = 'add' OR name LIKE '%.add' LIMIT 1;")
 fn_apply=$(sqlite3 "$DB"  "SELECT name FROM functions WHERE name LIKE '%apply_fn%' LIMIT 1;")
 
 [ -n "$fn_clean"  ] || note "function 'clean_entry' not found in DB"
@@ -144,6 +149,76 @@ echo "$esc_clean" | grep -qE 'no escaping|0 functions|^$' 2>/dev/null || \
 # ---------- edge-kind integrity ----------
 bad=$(sqlite3 "$DB" "SELECT count(*) FROM calls WHERE kind IS NULL OR kind NOT IN ('MUST','MAY_ENUMERATED','MAY_TOP');")
 [ "$bad" -eq 0 ] || note "DB has $bad edges with missing/invalid kind"
+
+# ══════════════════════════════════════════════════════════════════════════════
+# PART 2: soundness regressions — parameter shadowing, function-typed values,
+# cross-module closure, empty-universe (guards against false UNREACHABLE).
+# ══════════════════════════════════════════════════════════════════════════════
+MOD2="$TMPDIR_ROOT/snd"; mkdir -p "$MOD2"
+cat > "$MOD2/dune-project" <<'DP'
+(lang dune 3.0)
+DP
+cat > "$MOD2/dune" <<'DF'
+(library (name snd) (modules efa crossb))
+DF
+# Crossb.mid applies a PARAMETER (MAY_TOP); Crossb.direct is a pure MUST chain.
+cat > "$MOD2/crossb.ml" <<'ML'
+let sink (x : int) : int = x
+let direct (x : int) : int = sink (x + 5)
+let mid (f : int -> int) (x : int) : int = f x
+ML
+# efa: entry_direct -> Crossb.direct (cross-module MUST); entry_unknown -> Crossb.mid (MAY_TOP inside);
+# call_param applies a parameter that SHADOWS top-level `target`; entry_val calls a function-typed VALUE.
+cat > "$MOD2/efa.ml" <<'ML'
+let target (x : int) : int = x + 1
+let island (x : int) : int = x + 2
+let entry_direct (x : int) : int = Crossb.direct x
+let entry_unknown (x : int) : int = Crossb.mid (fun y -> y) x
+let call_param (target : int -> int) (x : int) : int = target x
+let chosen : int -> int = if Array.length Sys.argv > 0 then target else island
+let entry_val (x : int) : int = chosen x
+let entry_hof (xs : int list) : int list = List.map island xs
+let entry_hof_param (g : int -> int) (xs : int list) : int list = List.map g xs
+ML
+( cd "$MOD2" && dune build 2>/tmp/snd-dune-err.txt ) \
+  || { cat /tmp/snd-dune-err.txt >&2; note "PART2 dune build failed"; }
+DB2="$TMPDIR_ROOT/snd.db"
+"$BIN" --build-dir "$MOD2/_build/default" --db-path "$DB2" --schema-path "$SCHEMA" 2>/tmp/snd-idx-err.txt \
+  || note "PART2 arch_callgraph_ocaml failed"
+
+v2() { say "$DB2" "$@" 2>&1; }
+# contract must be stamped on this non-empty index
+[ "$(sqlite3 "$DB2" "SELECT value FROM comment_db_meta WHERE key='callgraph_contract';")" = "v1" ] \
+  || note "PART2: callgraph_contract flag not set on a non-empty index"
+# F1: applying a parameter that shadows a top-level function must NOT be a MUST edge
+v2 reaches call_param target | grep -q 'no MUST path' \
+  || note "F1: reaches call_param target must be 'no MUST path' (parameter, not top-level)"
+v2 unreachable call_param island | grep -q 'UNKNOWN' \
+  || note "F1: unreachable call_param island must be UNKNOWN (param call is MAY_TOP)"
+# F3: calling a function-typed value (non-function RHS) must be MAY_TOP → UNKNOWN
+v2 unreachable entry_val island | grep -q 'UNKNOWN' \
+  || note "F3: unreachable entry_val island must be UNKNOWN (function-typed value)"
+# F2: cross-module MUST chain must be followed; MAY_TOP inside a cross-module callee must surface
+v2 reaches entry_direct sink | grep -q 'PATH EXISTS' \
+  || note "F2: reaches entry_direct sink must be PATH EXISTS (cross-module MUST chain)"
+v2 unreachable entry_unknown sink | grep -q 'UNKNOWN' \
+  || note "F2: unreachable entry_unknown sink must be UNKNOWN (cross-module MAY_TOP)"
+# sound negative: a pure MUST-only chain that never reaches island
+v2 unreachable entry_direct island | grep -q 'UNREACHABLE' \
+  || note "F2: unreachable entry_direct island must be UNREACHABLE (sound negative)"
+# F4: an unknown root must be REFUSED (exit 3), never answered UNREACHABLE
+rc4=0; say "$DB2" unreachable no_such_fn also_missing >/dev/null 2>&1 || rc4=$?
+[ "$rc4" -eq 3 ] || note "F4: unreachable on an unknown root must REFUSE (exit 3), got exit $rc4"
+# HOF callback: a named local function passed to an external higher-order call
+# (List.map island) must be reachable (MAY_ENUMERATED), NOT falsely UNREACHABLE.
+v2 unreachable entry_hof island | grep -q 'REACHABLE (may-reach)' \
+  || note "HOF: unreachable entry_hof island must be REACHABLE (callback escape)"
+# ...but a parameter callback (List.map g) is an unknown target → UNKNOWN.
+v2 unreachable entry_hof_param island | grep -q 'UNKNOWN' \
+  || note "HOF: unreachable entry_hof_param island must be UNKNOWN (param callback → MAY_TOP)"
+# reaches must NOT treat a callback as a definite (MUST) path.
+v2 reaches entry_hof island | grep -q 'no MUST path' \
+  || note "HOF: reaches entry_hof island must be 'no MUST path' (callback is MAY_ENUMERATED)"
 
 if [ "$fails" -eq 0 ]; then
   echo "arch-index callgraph-ocaml selftest: PASS"

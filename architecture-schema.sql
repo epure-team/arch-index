@@ -90,6 +90,14 @@ CREATE INDEX IF NOT EXISTS idx_calls_caller ON calls(caller_id);
 CREATE INDEX IF NOT EXISTS idx_calls_callee ON calls(callee_id);
 CREATE INDEX IF NOT EXISTS idx_calls_callee_name ON calls(callee_name);
 
+-- Backend/contract metadata (key/value). A ⊤-marking backend sets
+-- callgraph_contract='v1' here once every calls.kind is populated (see EDGE-KIND
+-- CONTRACT above); arch-query's `unreachable`/`escapes` REFUSE without it.
+CREATE TABLE IF NOT EXISTS comment_db_meta (
+    key TEXT PRIMARY KEY,
+    value TEXT
+);
+
 -- Module dependencies (open, include, alias, local_open)
 CREATE TABLE IF NOT EXISTS module_deps (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

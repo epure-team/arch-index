@@ -1,0 +1,14 @@
+{
+  "task": "callgraph-ocaml-edge-kinds",
+  "mode": "fast",
+  "current_phase": "implement",
+  "events": [
+    { "phase": "investigate", "outcome": "ROOT_CAUSE_IDENTIFIED", "at": "2026-07-09T00:00:00Z", "by": "roster-investigate" },
+    { "phase": "implement", "outcome": "COMPLETED", "at": "2026-07-09T00:00:00Z", "by": "roster-implement" },
+    { "phase": "review", "outcome": "NO-GO", "reason": "3 HIGH cross-runtime soundness findings (false UNREACHABLE): name-based MUST for params/shadows, name-based main-schema CTE breaks cross-module closure, function-typed values marked MUST", "at": "2026-07-09T00:00:00Z", "by": "roster-review" },
+    { "phase": "implement", "outcome": "COMPLETED", "at": "2026-07-09T00:00:00Z", "by": "roster-implement", "note": "F1 stamp resolution, F2 id-based CTE, F3 RHS-gating, F4 empty-index guard, HOF callback-escape" },
+    { "phase": "review", "outcome": "GO-partial", "at": "2026-07-09T00:00:00Z", "by": "roster-review", "note": "round 2: F1-F4 + HOF verified fixed; NEW HIGH: external HOF callback dropped" },
+    { "phase": "implement", "outcome": "COMPLETED", "at": "2026-07-09T00:00:00Z", "by": "roster-implement", "note": "callback-escape MAY_ENUMERATED/MAY_TOP for function-typed args" },
+    { "phase": "review", "outcome": "NO-GO", "at": "2026-07-09T00:00:00Z", "by": "roster-review", "note": "round 3: HOF fix verified; 3 new HIGH — computed-callback (easy), first-class-module-param (medium), NESTED-BODY-MUST (core walker redesign). Escalated to maintainer: soundness bar / CFA investment decision." }
+  ]
+}

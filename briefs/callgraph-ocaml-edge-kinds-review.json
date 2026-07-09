@@ -1,0 +1,49 @@
+{
+  "task": "callgraph-ocaml-edge-kinds",
+  "date": "2026-07-09",
+  "status": "NO-GO",
+  "mode": "fast",
+  "review_rounds": 3,
+  "resolved_across_rounds": [
+    "F1 param/shadow false MUST (stamp-based resolution) — VERIFIED FIXED",
+    "F2 name-based main-schema CTE breaks cross-module closure (id-based CTE) — VERIFIED FIXED",
+    "F3 function-typed value marked MUST (is_function_rhs gating) — VERIFIED FIXED",
+    "F4 contract stamped on empty index (guard + unreachable refuse) — VERIFIED FIXED",
+    "HOF-callback false UNREACHABLE for List.map island (callback-escape MAY_ENUMERATED/MAY_TOP) — VERIFIED FIXED"
+  ],
+  "findings": [],
+  "cross_runtime_findings": [
+    {
+      "severity": "HIGH", "confidence": 5,
+      "path": "lib/arch_index/arch_index_cmt.ml", "line": 401,
+      "category": "correctness",
+      "summary": "Computed function-typed argument (List.map (make ()) xs) is dropped instead of MAY_TOP → false UNREACHABLE.",
+      "evidence": "computed_callback edges only List.map MUST + make MUST, no MAY_TOP; unreachable computed_callback island = UNREACHABLE (false).",
+      "fix": "add_arg_escapes wildcard for arrow-typed args must emit MAY_TOP (or MAY_ENUMERATED if resolvable).",
+      "fingerprint": "arch_index_cmt.ml:401:correctness", "specialist": "codex-xruntime", "status": "OPEN"
+    },
+    {
+      "severity": "HIGH", "confidence": 5,
+      "path": "lib/arch_index/arch_index.ml", "line": 319,
+      "category": "correctness",
+      "summary": "Calls through a first-class module PARAMETER (M.run where M is a (module M:S) param) classified MUST external leaf, not MAY_TOP → false UNREACHABLE.",
+      "evidence": "first_class_param -> M.run kind MUST; unreachable first_class_param island = UNREACHABLE though caller-supplied M.run may call island.",
+      "fix": "Detect qualified calls whose module-path root is a local/first-class module parameter; emit MAY_TOP.",
+      "fingerprint": "arch_index.ml:319:correctness", "specialist": "codex-xruntime", "status": "OPEN"
+    },
+    {
+      "severity": "HIGH", "confidence": 5,
+      "path": "lib/arch_index/arch_index_cmt.ml", "line": 442,
+      "category": "correctness",
+      "summary": "Walker descends into nested function/lambda bodies and attributes their calls as MUST on the enclosing top-level function → FALSE MUST paths (breaks reaches ground truth).",
+      "evidence": "let unused_local_closure = let local y = island y in ignore local → edge unused_local_closure -> island MUST; reaches unused_local_closure island = PATH EXISTS though local is never invoked. Pre-existing flatten-everything traversal, exposed by MUST labeling.",
+      "fix": "Do not recurse into Texp_function bodies as part of the enclosing caller's MUST calls; model nested functions/lambdas as deferred bodies linked only when invoked/passed (MAY_ENUMERATED/MAY_TOP). CORE WALKER REDESIGN — blast radius: LSP path + effects extractor share this traversal.",
+      "fingerprint": "arch_index_cmt.ml:442:correctness", "specialist": "codex-xruntime", "status": "OPEN"
+    }
+  ],
+  "summary": {"critical": 0, "high": 3, "medium": 0, "low": 0, "auto_fixed": 0},
+  "no_go_reason": {"type": "cross-runtime-finding", "failed_acs": []},
+  "escalation_needed": true,
+  "escalation_reason": "implicit-design-decision",
+  "notes": "3 codex rounds. F1-F4 + HOF-callback all fixed & regression-tested. Findings 1-2 tractable. Finding 3 is the crux: TRUE MUST-soundness for OCaml higher-order/nested/first-class-module code requires redesigning the shared CMT walker traversal (deferred nested bodies / CFA), a substantial project with tool-wide blast radius. Escalating: the soundness bar / investment is the maintainer's call."
+}

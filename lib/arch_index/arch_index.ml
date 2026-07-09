@@ -190,8 +190,8 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
   let stmt_call =
     Sqlite3.prepare
       db
-      "INSERT INTO calls (caller_id, callee_id, callee_name, call_site) VALUES \
-       (?, ?, ?, ?)"
+      "INSERT INTO calls (caller_id, callee_id, callee_name, call_site, kind) \
+       VALUES (?, ?, ?, ?, ?)"
   in
   let stmt_dep =
     Sqlite3.prepare
@@ -282,41 +282,63 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
       with
       | None -> ()
       | Some caller_id ->
-          let callee_id, callee_display_name =
-            match call.callee_module with
-            | None -> (
-                match
-                  Hashtbl.find_opt
-                    fn_lookup
-                    (call.caller_module, call.callee_name)
-                with
-                | Some id ->
-                    incr n_resolved ;
-                    (Some id, call.callee_name)
-                | None -> (None, call.callee_name))
-            | Some mod_name -> (
-                let display_name = mod_name ^ "." ^ call.callee_name in
-                (* For library-qualified names like Epure_db.Db_util,
-                   the lookup table only has the last component "Db_util". *)
-                let lookup_name =
-                  match String.rindex_opt mod_name '.' with
-                  | Some i ->
-                      String.sub
-                        mod_name
-                        (i + 1)
-                        (String.length mod_name - i - 1)
-                  | None -> mod_name
-                in
-                match Hashtbl.find_opt mod_name_to_path lookup_name with
-                | Some mod_path -> (
-                    match
-                      Hashtbl.find_opt fn_lookup (mod_path, call.callee_name)
-                    with
-                    | Some id ->
-                        incr n_resolved ;
-                        (Some id, display_name)
-                    | None -> (None, display_name))
-                | None -> (None, display_name))
+          (* Edge-kind classification (soundy, mirroring the Go producer):
+               - computed head (callee_top)  → MAY_TOP (⊤ sentinel), unresolvable
+               - unqualified name resolving to a same-module top-level fn → MUST
+               - unqualified name NOT resolving (a function parameter or
+                 let-bound closure applied by name) → MAY_TOP: the target is
+                 not statically known, so it could call anything
+               - qualified name (external or in-index) → MUST: a uniquely
+                 resolved static call; an unresolved external is a MUST leaf. *)
+          (* Resolve an unqualified same-module callee name to its id. *)
+          let resolve_local () =
+            Hashtbl.find_opt fn_lookup (call.caller_module, call.callee_name)
+          in
+          let callee_id, callee_display_name, kind =
+            match call.kind_hint with
+            | Arch_index_cmt.May_top -> (None, call.callee_name, "MAY_TOP")
+            | Arch_index_cmt.May_enumerated ->
+                (* A named local function passed as a callback — resolve it to a
+                   node so the closure can follow it, but as MAY_ENUMERATED (the
+                   callee may or may not invoke it), never MUST. *)
+                (match resolve_local () with
+                 | Some id -> incr n_resolved ; (Some id, call.callee_name, "MAY_ENUMERATED")
+                 | None -> (None, call.callee_name, "MAY_ENUMERATED"))
+            | Arch_index_cmt.Resolve -> (
+              match call.callee_module with
+              | None -> (
+                  match
+                    Hashtbl.find_opt
+                      fn_lookup
+                      (call.caller_module, call.callee_name)
+                  with
+                  | Some id ->
+                      incr n_resolved ;
+                      (Some id, call.callee_name, "MUST")
+                  | None -> (None, call.callee_name, "MAY_TOP"))
+              | Some mod_name -> (
+                  let display_name = mod_name ^ "." ^ call.callee_name in
+                  (* For library-qualified names like Epure_db.Db_util,
+                     the lookup table only has the last component "Db_util". *)
+                  let lookup_name =
+                    match String.rindex_opt mod_name '.' with
+                    | Some i ->
+                        String.sub
+                          mod_name
+                          (i + 1)
+                          (String.length mod_name - i - 1)
+                    | None -> mod_name
+                  in
+                  match Hashtbl.find_opt mod_name_to_path lookup_name with
+                  | Some mod_path -> (
+                      match
+                        Hashtbl.find_opt fn_lookup (mod_path, call.callee_name)
+                      with
+                      | Some id ->
+                          incr n_resolved ;
+                          (Some id, display_name, "MUST")
+                      | None -> (None, display_name, "MUST"))
+                  | None -> (None, display_name, "MUST")))
           in
           insert_call
             db
@@ -324,9 +346,21 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
             ~caller_id
             ~callee_id
             ~callee_name:callee_display_name
-            ~call_site:(Some call.call_site) ;
+            ~call_site:(Some call.call_site)
+            ~kind ;
           incr n_calls)
     !all_pending_calls ;
+  (* Every emitted edge now carries a valid kind (MUST | MAY_TOP), so this
+     backend satisfies the ⊤-marking contract — but ONLY stamp the flag when a
+     non-empty universe was actually indexed. Stamping on an empty/failed scan
+     (0 functions) would let `unreachable` answer with false confidence for
+     roots that simply were not indexed. *)
+  (* fn_lookup holds one entry per indexed function; use it as the "non-empty
+     universe" test — the n_functions counter is not populated until later. *)
+  if Hashtbl.length fn_lookup > 0 then
+    exec_exn db
+      "INSERT OR REPLACE INTO comment_db_meta (key, value) VALUES \
+       ('callgraph_contract', 'v1')" ;
   exec_exn db "COMMIT" ;
   Arch_io.printf
     "Inserted %d calls (%d resolved to known functions)\n%!"

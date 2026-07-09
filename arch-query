@@ -67,6 +67,10 @@ kind_col=$(qraw "SELECT 1 FROM pragma_table_info('calls') WHERE name='kind' LIMI
 contract=$(qraw "SELECT value FROM comment_db_meta WHERE key='callgraph_contract' LIMIT 1;")
 # `reaches` must-filter: MUST edges when the column exists, else treat every edge as MUST (legacy).
 must_filter=""; [ -n "$kind_col" ] && must_filter="AND c.kind='MUST'"
+# Schema detection for the reachability verbs: flat callgraph DBs (arch-load) have a
+# caller_name TEXT column; the main arch-index schema (arch-callgraph-ocaml) uses a
+# caller_id FK → functions(id), so the caller's name is functions.name.
+cn_col=$(qraw "SELECT 1 FROM pragma_table_info('calls') WHERE name='caller_name' LIMIT 1;")
 
 A="${1-}"; A="${A//\'/}"       # sanitize (strip single quotes); null-safe under set -u
 B="${2-}"; B="${B//\'/}"
@@ -100,36 +104,82 @@ case "$CMD" in
     q "WITH RECURSIVE reach(n) AS (SELECT '$A' UNION SELECT c.callee_name FROM calls c JOIN reach r ON c.caller_name=r.n) SELECT n AS reachable FROM reach WHERE n<>'$A' ORDER BY 1;" ;;
 
   reaches)   # under-approximation: MUST edges only. A POSITIVE is must-reach ground truth.
-    q "WITH RECURSIVE reach(n) AS (
-         SELECT '$A'
-         UNION SELECT c.callee_name FROM calls c JOIN reach r ON c.caller_name=r.n WHERE 1=1 $must_filter)
-       SELECT CASE
-         WHEN EXISTS(SELECT 1 FROM reach WHERE n='$B') THEN 'PATH EXISTS (must-reach): $A -> $B'
-         ELSE 'no MUST path: $A -> $B  (NOT proof of unreachability — use \`unreachable\`)'
-       END AS result;" ;;
+    if [ -n "$cn_col" ]; then
+      # Flat schema: caller_name/callee_name are TEXT; recurse on names.
+      q "WITH RECURSIVE reach(n) AS (
+           SELECT '$A'
+           UNION SELECT c.callee_name FROM calls c JOIN reach r ON c.caller_name=r.n WHERE 1=1 $must_filter)
+         SELECT CASE
+           WHEN EXISTS(SELECT 1 FROM reach WHERE n='$B') THEN 'PATH EXISTS (must-reach): $A -> $B'
+           ELSE 'no MUST path: $A -> $B  (NOT proof of unreachability — use \`unreachable\`)'
+         END AS result;"
+    else
+      # Main schema: recurse ID-based (caller_id/callee_id FKs). Display names are
+      # not unique keys (qualified callee_name 'Mod.fn' != functions.name 'fn'),
+      # so name-recursion would break the closure — seed and recurse on ids.
+      q "WITH RECURSIVE reach(id) AS (
+           SELECT id FROM functions WHERE name='$A'
+           UNION SELECT c.callee_id FROM calls c JOIN reach r ON c.caller_id=r.id
+                 WHERE c.callee_id IS NOT NULL $must_filter)
+         SELECT CASE
+           WHEN EXISTS(SELECT 1 FROM functions f JOIN reach r ON f.id=r.id WHERE f.name='$B') THEN 'PATH EXISTS (must-reach): $A -> $B'
+           ELSE 'no MUST path: $A -> $B  (NOT proof of unreachability — use \`unreachable\`)'
+         END AS result;"
+    fi ;;
 
   unreachable)   # over-approximation dual; SOUND only on a ⊤-marked index.
     require_contract
-    q "WITH RECURSIVE reach_res(n) AS (
-         SELECT '$A'
-         UNION SELECT c.callee_name FROM calls c JOIN reach_res r ON c.caller_name=r.n
-               WHERE c.kind IN ('MUST','MAY_ENUMERATED'))
-       SELECT CASE
-         WHEN EXISTS(SELECT 1 FROM reach_res WHERE n='$B')
-           THEN 'REACHABLE (may-reach): $A -> $B'
-         WHEN EXISTS(SELECT 1 FROM calls c WHERE c.caller_name IN (SELECT n FROM reach_res) AND (c.kind IS NULL OR c.kind NOT IN ('MUST','MAY_ENUMERATED')))
-           THEN 'UNKNOWN: no resolved path $A -> $B, but $A reaches a non-resolved (MAY_TOP / NULL / unknown-kind) edge — could-call-anything; cannot rule out a path. Do NOT kill G2.'
-         ELSE 'UNREACHABLE: no resolved path $A -> $B and no reachable MAY_TOP — sound; G2 fails by construction.'
-       END AS verdict;" ;;
+    if [ -n "$cn_col" ]; then
+      q "WITH RECURSIVE reach_res(n) AS (
+           SELECT '$A'
+           UNION SELECT c.callee_name FROM calls c JOIN reach_res r ON c.caller_name=r.n
+                 WHERE c.kind IN ('MUST','MAY_ENUMERATED'))
+         SELECT CASE
+           WHEN EXISTS(SELECT 1 FROM reach_res WHERE n='$B')
+             THEN 'REACHABLE (may-reach): $A -> $B'
+           WHEN EXISTS(SELECT 1 FROM calls c WHERE c.caller_name IN (SELECT n FROM reach_res) AND (c.kind IS NULL OR c.kind NOT IN ('MUST','MAY_ENUMERATED')))
+             THEN 'UNKNOWN: no resolved path $A -> $B, but $A reaches a non-resolved (MAY_TOP / NULL / unknown-kind) edge — could-call-anything; cannot rule out a path. Do NOT kill G2.'
+           ELSE 'UNREACHABLE: no resolved path $A -> $B and no reachable MAY_TOP — sound; G2 fails by construction.'
+         END AS verdict;"
+    else
+      # Main schema: id-based closure. REFUSE if the source name resolves to no
+      # function node — an empty/unknown universe cannot yield a sound verdict.
+      if [ "$(qraw "SELECT count(*) FROM functions WHERE name='$A';")" = "0" ]; then
+        echo "arch-query: REFUSED — source '$A' resolves to no function in this index; 'unreachable' cannot give a sound verdict for an unknown root." >&2
+        exit 3
+      fi
+      q "WITH RECURSIVE reach_res(id) AS (
+           SELECT id FROM functions WHERE name='$A'
+           UNION SELECT c.callee_id FROM calls c JOIN reach_res r ON c.caller_id=r.id
+                 WHERE c.callee_id IS NOT NULL AND c.kind IN ('MUST','MAY_ENUMERATED'))
+         SELECT CASE
+           WHEN EXISTS(SELECT 1 FROM functions f JOIN reach_res r ON f.id=r.id WHERE f.name='$B')
+             THEN 'REACHABLE (may-reach): $A -> $B'
+           WHEN EXISTS(SELECT 1 FROM calls c WHERE c.caller_id IN (SELECT id FROM reach_res) AND (c.kind IS NULL OR c.kind NOT IN ('MUST','MAY_ENUMERATED')))
+             THEN 'UNKNOWN: no resolved path $A -> $B, but $A reaches a non-resolved (MAY_TOP / NULL / unknown-kind) edge — could-call-anything; cannot rule out a path. Do NOT kill G2.'
+           ELSE 'UNREACHABLE: no resolved path $A -> $B and no reachable MAY_TOP — sound; G2 fails by construction.'
+         END AS verdict;"
+    fi ;;
 
   escapes)   # the ⊤ frontier reachable from FROM (why unreachability is UNKNOWN past here).
     require_contract
-    q "WITH RECURSIVE reach_res(n) AS (
-         SELECT '$A'
-         UNION SELECT c.callee_name FROM calls c JOIN reach_res r ON c.caller_name=r.n
-               WHERE c.kind IN ('MUST','MAY_ENUMERATED'))
-       SELECT DISTINCT c.caller_name AS escaping_fn, c.call_site, COALESCE(c.kind,'NULL') AS kind
-       FROM calls c WHERE c.caller_name IN (SELECT n FROM reach_res) AND (c.kind IS NULL OR c.kind NOT IN ('MUST','MAY_ENUMERATED')) ORDER BY 1;" ;;
+    if [ -n "$cn_col" ]; then
+      q "WITH RECURSIVE reach_res(n) AS (
+           SELECT '$A'
+           UNION SELECT c.callee_name FROM calls c JOIN reach_res r ON c.caller_name=r.n
+                 WHERE c.kind IN ('MUST','MAY_ENUMERATED'))
+         SELECT DISTINCT c.caller_name AS escaping_fn, c.call_site, COALESCE(c.kind,'NULL') AS kind
+         FROM calls c WHERE c.caller_name IN (SELECT n FROM reach_res) AND (c.kind IS NULL OR c.kind NOT IN ('MUST','MAY_ENUMERATED')) ORDER BY 1;"
+    else
+      # Main schema: id-based closure; report escaping caller by its functions.name.
+      q "WITH RECURSIVE reach_res(id) AS (
+           SELECT id FROM functions WHERE name='$A'
+           UNION SELECT c.callee_id FROM calls c JOIN reach_res r ON c.caller_id=r.id
+                 WHERE c.callee_id IS NOT NULL AND c.kind IN ('MUST','MAY_ENUMERATED'))
+         SELECT DISTINCT cf.name AS escaping_fn, c.call_site, COALESCE(c.kind,'NULL') AS kind
+         FROM calls c JOIN functions cf ON c.caller_id=cf.id
+         WHERE c.caller_id IN (SELECT id FROM reach_res) AND (c.kind IS NULL OR c.kind NOT IN ('MUST','MAY_ENUMERATED')) ORDER BY 1;"
+    fi ;;
 
   fan-in)       q "SELECT callee_name, count(DISTINCT caller_name) AS callers FROM calls GROUP BY callee_name ORDER BY callers DESC LIMIT ${1:-25};" ;;
   exported)     q "SELECT name, file_path FROM functions WHERE exported=1 ORDER BY file_path, name;" ;;

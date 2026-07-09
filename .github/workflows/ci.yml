@@ -23,10 +23,12 @@ jobs:
         run: opam exec -- dune test
       - name: Shell integration tests
         run: |
-          chmod +x selftest-contract.sh selftest-load.sh selftest-effects.sh
+          chmod +x selftest-contract.sh selftest-load.sh selftest-effects.sh selftest-callgraph-ocaml.sh selftest-callgraph-soundness.sh
           ./selftest-contract.sh
           ./selftest-load.sh
           ./selftest-effects.sh
+          ./selftest-callgraph-ocaml.sh
+          ./selftest-callgraph-soundness.sh
       - name: Self-index smoke test
         run: |
           BIN="./_build/default/bin/arch_callgraph_ocaml/arch_callgraph_ocaml.exe"
