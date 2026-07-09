@@ -59,6 +59,17 @@ func dirty(v interface{}) {
 	reflect.ValueOf(v).Call(nil)
 }
 
+// --- gated: island is called ONLY inside an if-branch → dominance demotes the
+//     otherwise-uniquely-resolved MUST edge to MAY_TOP (conditional execution).
+//     So reaches gatedEntry island = no MUST path, and unreachable = UNKNOWN
+//     (a MAY_TOP frontier), NOT REACHABLE and NOT UNREACHABLE. ---
+func gatedEntry(b bool) int {
+	if b {
+		return island()
+	}
+	return direct()
+}
+
 // --- entry points ---
 func cleanEntry() int   { return direct() + useInterface(ImplA{}) }
 func dirtyEntry()       { dirty(nil) }
@@ -84,12 +95,14 @@ fn_island=$(sqlite3 "$DB" "SELECT name FROM functions WHERE name LIKE '%island%'
 fn_clean=$(sqlite3 "$DB"  "SELECT name FROM functions WHERE name LIKE '%cleanEntry%' LIMIT 1;")
 fn_dirty_e=$(sqlite3 "$DB" "SELECT name FROM functions WHERE name LIKE '%dirtyEntry%' LIMIT 1;")
 fn_implA=$(sqlite3 "$DB"  "SELECT name FROM functions WHERE name LIKE '%(ImplA).Do%' LIMIT 1;")
+fn_gated=$(sqlite3 "$DB"  "SELECT name FROM functions WHERE name LIKE '%gatedEntry%' LIMIT 1;")
 
 [ -n "$fn_direct" ] || note "function 'direct' not found in DB"
 [ -n "$fn_island" ] || note "function 'island' not found in DB"
 [ -n "$fn_clean"  ] || note "function 'cleanEntry' not found in DB"
 [ -n "$fn_dirty_e" ] || note "function 'dirtyEntry' not found in DB"
 [ -n "$fn_implA"  ] || note "function '(ImplA).Do' not found in DB"
+[ -n "$fn_gated"  ] || note "function 'gatedEntry' not found in DB"
 
 # bail early if names missing — subsequent tests would be vacuously wrong
 [ "$fails" -gt 0 ] && { echo "selftest-callgraph-go: FAIL (function discovery, $fails failures)"; exit 1; }
@@ -128,6 +141,20 @@ say "$DB" escapes "$fn_clean" 2>&1 \
       echo "$esc_out" | grep -q 'no escaping' || \
       note "escapes $fn_clean should have no MAY_TOP in closure (got: $esc_out)"
   }
+
+# ---------- dominance: a conditional (if-branch) static call is NOT MUST ----------
+# island is uniquely resolved but only called inside `if b`, so it must be MAY_TOP,
+# never a MUST edge and never dropped.
+say "$DB" reaches "$fn_gated" "$fn_island" \
+  | grep -q 'no MUST path' || note "reaches $fn_gated $fn_island should be no MUST path (conditional call, dominance-demoted)"
+# The demoted call is recorded as a MAY_TOP frontier → UNKNOWN, not REACHABLE, not UNREACHABLE.
+say "$DB" unreachable "$fn_gated" "$fn_island" \
+  | grep -q 'UNKNOWN:' || note "unreachable $fn_gated $fn_island should be UNKNOWN (conditional call → MAY_TOP frontier)"
+say "$DB" unreachable "$fn_gated" "$fn_island" \
+  | grep -q 'UNREACHABLE:' && note "unreachable $fn_gated $fn_island must NOT be UNREACHABLE (conditional call is still recorded)"
+# Direct call in gatedEntry's other branch is ALSO conditional → no MUST path either.
+say "$DB" reaches "$fn_gated" "$fn_direct" \
+  | grep -q 'no MUST path' || note "reaches $fn_gated $fn_direct should be no MUST path (else-branch is conditional)"
 
 # ---------- edge-kind integrity: no un-kinded edges in the produced DB ----------
 bad=$(sqlite3 "$DB" "SELECT count(*) FROM calls WHERE kind IS NULL OR kind NOT IN ('MUST','MAY_ENUMERATED','MAY_TOP');")
