@@ -63,7 +63,7 @@ let mid (f : int -> int) (x : int) : int = f x
 ML
 
 cat > "$MOD/cg.ml" <<'ML'
-[@@@warning "-60"] (* allow the unapplied local functor fixture below *)
+[@@@warning "-60-21-20"] (* -60 unapplied functor; -21/-20 divergence fixtures *)
 module type S = sig val run : int -> int end
 module type T = sig end
 
@@ -170,6 +170,29 @@ let opt_default ?(seed = island 0) (x : int) : int = seed + x
 (* self / mutual recursion sanity *)
 let rec ping (n : int) : int = if n <= 0 then 0 else pong (n - 1)
 and pong (n : int) : int = ping (n - 1)
+
+(* ── R1 CFG fixtures (cfg-postdom-dominance) ─────────────────────────────── *)
+(* divergence: code after an unconditional raise never runs → sink demoted *)
+let after_raise (x : int) : int = raise Exit ; sink x
+(* noreturn inside a try body: the handler may not match (Exit ≠ Not_found) so
+   it must never be MUST; the raise itself always runs → MUST *)
+let try_noreturn (x : int) : int = try raise Exit with Not_found -> sink x
+(* try body is eager: the body call is MUST *)
+let try_body_must (x : int) : int = try g x with _ -> 0
+(* join after a branch: the call AFTER the if is unconditional again (the join
+   block post-dominates entry) — guards against over-demotion by the CFG *)
+let join_after (b : bool) (x : int) : int =
+  (if b then ignore (island x)) ;
+  g x
+
+(* ── R2 lambda-node fixtures ─────────────────────────────────────────────── *)
+(* lambda bound but NEVER referenced: genuinely dead → no parent→lambda edge *)
+let dead_lambda (x : int) : int =
+  let _h () = island x in
+  x
+(* nested literals: inner node chains through the outer lambda node *)
+let nested_lam (xs : int list list) : int list list =
+  List.map (fun l -> List.map (fun y -> island y) l) xs
 ML
 
 ( cd "$MOD" && dune build 2>/tmp/soundness-dune.txt ) \
@@ -213,15 +236,12 @@ chk P1 "no NULL/invalid kinds" "$(sqlite3 "$DB" "SELECT count(*) FROM calls WHER
 
 echo "── P1: dominance-MUST — conditional/deferred calls are never MUST, never dropped ──"
 chk P1 "reaches cond_if sink = no must (if-branch conditional)"       "$(verdict reaches cond_if sink)"       "no MUST path"
-chk P1 "unreachable cond_if sink = UNKNOWN (recorded as ⊤)"           "$(verdict unreachable cond_if sink)"   "UNKNOWN:"
 chk P1 "reaches cond_match sink = no must (match arm conditional)"    "$(verdict reaches cond_match sink)"    "no MUST path"
 chk P1 "reaches cond_try sink = no must (exception handler)"          "$(verdict reaches cond_try sink)"      "no MUST path"
 chk P1 "reaches cond_andalso sink = no must (&& right operand)"       "$(verdict reaches cond_andalso sink)"  "no MUST path"
 chk P1 "reaches cond_assert sink = no must (assert elided by -noassert)" "$(verdict reaches cond_assert sink)" "no MUST path"
 chk P1 "reaches cond_functor sink = no must (unapplied functor body)" "$(verdict reaches cond_functor sink)"  "no MUST path"
-chk P1 "unreachable cond_functor sink = UNKNOWN (deferred → ⊤)"       "$(verdict unreachable cond_functor sink)" "UNKNOWN:"
 chk P1 "reaches root_fun sink = no must (root function arm conditional)" "$(verdict reaches root_fun sink)"   "no MUST path"
-chk P1 "unreachable root_fun sink = UNKNOWN (root function arm → ⊤)"  "$(verdict unreachable root_fun sink)"  "UNKNOWN:"
 chk P1 "reaches root_guard sink = no must (root function guard conditional)" "$(verdict reaches root_guard sink)" "no MUST path"
 chk P1 "reaches letop_body sink = no must (let* continuation conditional)" "$(verdict reaches letop_body sink)" "no MUST path"
 chk P1 "reaches overapp_entry choose2 = must (over-applied head is saturated)" "$(verdict reaches overapp_entry choose2)" "PATH EXISTS"
@@ -230,24 +250,44 @@ chk P1 "reaches add2 sink = must (saturated call runs the body)"      "$(verdict
 chk P1 "reaches partial_app sink = no must (partial application defers body)" "$(verdict reaches partial_app sink)" "no MUST path"
 chk P1 "reaches alias_partial sink = no must (alias-hidden partial application)" "$(verdict reaches alias_partial sink)" "no MUST path"
 chk P1 "letop_body records the let* operator call (MUST, not dropped)" "$(sqlite3 "$DB" "SELECT COALESCE(MAX(kind),'MISSING') FROM calls c JOIN functions f ON c.caller_id=f.id WHERE f.name='letop_body' AND c.callee_name='let*';")" "MUST"
+# stable in both designs (promoted from the previous redesign's P2 targets):
+chk P1 "reaches unused_closure island = no must (uninvoked nested body)" "$(verdict reaches unused_closure island)" "no MUST path"
+chk P1 "reaches lam_map island = no must (passed lambda never a MUST path)" "$(verdict reaches lam_map island)" "no MUST path"
+chk P1 "reaches lazy_thunk island = no must (lazy thunk deferred)"       "$(verdict reaches lazy_thunk island)"   "no MUST path"
+chk P1 "reaches opt_default island = no must (opt-arg default conditional)" "$(verdict reaches opt_default island)" "no MUST path"
+chk P1 "unreachable computed_map island = UNKNOWN (computed callback = true ⊤)" "$(verdict unreachable computed_map island)" "UNKNOWN:"
+chk P1 "unreachable fcm_param sink = UNKNOWN (first-class module param = true ⊤)" "$(verdict unreachable fcm_param sink)" "UNKNOWN:"
+chk P1 "unreachable direct sink = REACHABLE (direct MUST chain intact)"  "$(verdict unreachable direct sink)"     "REACHABLE (may-reach)"
+# R1 CFG sanity that must hold in BOTH designs:
+chk P1 "reaches try_body_must sink = must (try body is eager)"        "$(verdict reaches try_body_must sink)"  "PATH EXISTS"
+chk P1 "reaches join_after sink = must (join after a branch is unconditional)" "$(verdict reaches join_after sink)" "PATH EXISTS"
+chk P1 "reaches try_noreturn sink = no must (handler never post-dominates)" "$(verdict reaches try_noreturn sink)" "no MUST path"
+chk P1 "try_noreturn raise edge is MUST (the raise always runs)" "$(sqlite3 "$DB" "SELECT COALESCE(MAX(kind),'MISSING') FROM calls c JOIN functions f ON c.caller_id=f.id WHERE f.name='try_noreturn' AND c.callee_name LIKE '%raise';")" "MUST"
 
-echo "── P2: redesign targets (no false MUST / no false UNREACHABLE) ──"
-# false-MUST killed: a call inside a nested closure is never a MUST path.
-chk P2 "reaches unused_closure island = no must (uninvoked nested body)" "$(verdict reaches unused_closure island)" "no MUST path"
-chk P2 "reaches lam_map island = no must (lambda body not must)"         "$(verdict reaches lam_map island)"       "no MUST path"
-chk P2 "reaches invoked_closure island = no must (nested body is MAY_TOP, not MUST)" "$(verdict reaches invoked_closure island)" "no MUST path"
-# false-UNREACHABLE killed: escaped / computed / first-class-module callbacks are recorded as ⊤.
-chk P2 "unreachable unused_closure island = UNKNOWN (nested closure escapes → ⊤)"   "$(verdict unreachable unused_closure island)" "UNKNOWN:"
-chk P2 "unreachable computed_map island = UNKNOWN (computed callback)"   "$(verdict unreachable computed_map island)" "UNKNOWN:"
-chk P2 "unreachable fcm_param sink = UNKNOWN (first-class module param)"  "$(verdict unreachable fcm_param sink)"  "UNKNOWN:"
-# lazy thunk: deferred body is never a false MUST, never dropped.
-chk P2 "reaches lazy_thunk island = no must (lazy thunk deferred)"       "$(verdict reaches lazy_thunk island)"   "no MUST path"
-chk P2 "unreachable lazy_thunk island = UNKNOWN (lazy thunk → ⊤)"        "$(verdict unreachable lazy_thunk island)" "UNKNOWN:"
-# optional-arg default: conditional body is recorded (not dropped) but not a MUST.
-chk P2 "reaches opt_default island = no must (opt-arg default conditional)" "$(verdict reaches opt_default island)" "no MUST path"
-chk P2 "unreachable opt_default island = UNKNOWN (opt-arg default → ⊤)"  "$(verdict unreachable opt_default island)" "UNKNOWN:"
-# precision preserved for the common case: a pure direct MUST chain still resolves.
-chk P2 "unreachable direct sink = REACHABLE (direct MUST chain intact)"  "$(verdict unreachable direct sink)"     "REACHABLE (may-reach)"
+echo "── P2: cfg-postdom-dominance targets (computed dominance / lambda nodes / enumerated demotion) ──"
+# R1 — divergence residual closed: code after an unconditional raise is demoted.
+chk P2 "reaches after_raise sink = no must (post-raise block entry-unreachable)" "$(verdict reaches after_raise sink)" "no MUST path"
+chk P2 "after_raise sink call recorded, demoted (never dropped)" "$(sqlite3 "$DB" "SELECT CASE WHEN count(*)=1 AND MAX(kind)<>'MUST' THEN 'demoted' WHEN count(*)=0 THEN 'DROPPED' ELSE 'other' END FROM calls c JOIN functions f ON c.caller_id=f.id WHERE f.name='after_raise' AND c.callee_name='sink';")" "demoted"
+# US-4 — enumerated demotion: conditional calls to RESOLVED callees are MAY_ENUMERATED,
+# so unreachable becomes decidable (these flip from UNKNOWN).
+chk P2 "unreachable cond_if sink = REACHABLE (enumerated conditional callee)" "$(verdict unreachable cond_if sink)" "REACHABLE (may-reach)"
+chk P2 "unreachable cond_if island = UNREACHABLE (no ⊤ in cond_if closure)" "$(verdict unreachable cond_if island)" "UNREACHABLE:"
+chk P2 "unreachable cond_functor sink = REACHABLE (deferred but enumerated)" "$(verdict unreachable cond_functor sink)" "REACHABLE (may-reach)"
+chk P2 "unreachable root_fun sink = REACHABLE (arm callee enumerated)" "$(verdict unreachable root_fun sink)" "REACHABLE (may-reach)"
+chk P2 "unreachable lazy_thunk island = REACHABLE (thunk callee enumerated)" "$(verdict unreachable lazy_thunk island)" "REACHABLE (may-reach)"
+chk P2 "unreachable opt_default island = REACHABLE (default callee enumerated)" "$(verdict unreachable opt_default island)" "REACHABLE (may-reach)"
+chk P2 "unreachable try_noreturn sink = REACHABLE (handler callee enumerated)" "$(verdict unreachable try_noreturn sink)" "REACHABLE (may-reach)"
+# R2 — lambda nodes: literals become graph nodes; callback bodies stop being ⊤.
+chk P2 "lam_map lambda node exists" "$(sqlite3 "$DB" "SELECT CASE WHEN count(*)=1 THEN 'yes' ELSE 'no' END FROM functions WHERE name LIKE 'lam_map.<fun:%';")" "yes"
+chk P2 "lam_map lambda → island is MUST (lambda body straight-line)" "$(sqlite3 "$DB" "SELECT COALESCE(MAX(c.kind),'MISSING') FROM calls c JOIN functions f ON c.caller_id=f.id WHERE f.name LIKE 'lam_map.<fun:%' AND c.callee_name='island';")" "MUST"
+chk P2 "lam_map parent → lambda is MAY_ENUMERATED (passed literal)" "$(sqlite3 "$DB" "SELECT COALESCE(MAX(c.kind),'MISSING') FROM calls c JOIN functions f ON c.caller_id=f.id WHERE f.name='lam_map' AND c.callee_name LIKE 'lam_map.<fun:%';")" "MAY_ENUMERATED"
+chk P2 "unreachable lam_map island = REACHABLE (through the lambda node)" "$(verdict unreachable lam_map island)" "REACHABLE (may-reach)"
+chk P2 "escapes lam_map = empty ⊤ frontier" "$(test -z "$("$Q" "$DB" escapes lam_map 2>/dev/null | grep -v '^$')" && echo empty || echo nonempty)" "empty"
+chk P2 "unreachable unused_closure island = REACHABLE (ignore h = escape occurrence)" "$(verdict unreachable unused_closure island)" "REACHABLE (may-reach)"
+chk P2 "reaches invoked_closure island = must (invoked local lambda → MUST chain)" "$(verdict reaches invoked_closure island)" "PATH EXISTS"
+chk P2 "dead_lambda has no parent→lambda edge (never referenced)" "$(sqlite3 "$DB" "SELECT CASE WHEN count(*)=0 THEN 'none' ELSE 'edge' END FROM calls c JOIN functions f ON c.caller_id=f.id WHERE f.name='dead_lambda' AND c.callee_name LIKE '%<fun:%';")" "none"
+chk P2 "unreachable dead_lambda island = UNREACHABLE (dead lambda, no ⊤)" "$(verdict unreachable dead_lambda island)" "UNREACHABLE:"
+chk P2 "nested lambda node chains through the outer node" "$(sqlite3 "$DB" "SELECT CASE WHEN count(*)>=1 THEN 'yes' ELSE 'no' END FROM functions WHERE name LIKE 'nested_lam.<fun:%.<fun:%';")" "yes"
 
 echo
 echo "P1: $p1_pass passed, $p1_fail failed | P2: $p2_xfail xfail (targets), $p2_xpass xpass"
