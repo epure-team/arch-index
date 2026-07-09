@@ -179,6 +179,14 @@ let after_raise (x : int) : int = raise Exit ; sink x
 let try_noreturn (x : int) : int = try raise Exit with Not_found -> sink x
 (* try body is eager: the body call is MUST *)
 let try_body_must (x : int) : int = try g x with _ -> 0
+(* raising ARGUMENT: h is never invoked (arg evaluation diverges first) *)
+let mk_exn () : exn = Exit
+let false_arg () : int = ignore (sink (raise (mk_exn ()))) ; g 1
+(* local module named Stdlib: its failwith returns normally → NOT a terminator *)
+let no_shadow_stdlib () : int =
+  let module Stdlib = struct let failwith (x : int) = x end in
+  ignore (Stdlib.failwith 3) ;
+  g 2
 (* join after a branch: the call AFTER the if is unconditional again (the join
    block post-dominates entry) — guards against over-demotion by the CFG *)
 let join_after (b : bool) (x : int) : int =
@@ -274,6 +282,9 @@ chk P1 "try_noreturn raise edge is MUST (the raise always runs)" "$(sqlite3 "$DB
 chk P1 "reaches single_total sink = must (total unguarded single arm always runs)" "$(verdict reaches single_total sink)" "PATH EXISTS"
 chk P1 "reaches single_partial sink = no must (refutable arm may fail)" "$(verdict reaches single_partial sink)" "no MUST path"
 chk P1 "reaches single_guarded sink = no must (guard may fail)" "$(verdict reaches single_guarded sink)" "no MUST path"
+chk P1 "reaches false_arg sink = no must (raising argument precedes the call)" "$(verdict reaches false_arg sink)" "no MUST path"
+chk P1 "false_arg mk_exn edge is MUST (argument evaluation runs)" "$(sqlite3 "$DB" "SELECT COALESCE(MAX(kind),'MISSING') FROM calls c JOIN functions f ON c.caller_id=f.id WHERE f.name='false_arg' AND c.callee_name='mk_exn';")" "MUST"
+chk P1 "reaches no_shadow_stdlib g = must (local Stdlib.failwith is not a terminator)" "$(verdict reaches no_shadow_stdlib g)" "PATH EXISTS"
 
 echo "── P2: cfg-postdom-dominance targets (computed dominance / lambda nodes / enumerated demotion) ──"
 # R1 — divergence residual closed: code after an unconditional raise is demoted.
