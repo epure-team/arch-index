@@ -283,17 +283,20 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
       | None -> ()
       | Some caller_id ->
           (* Edge-kind classification from the (head × cond × partial) facts —
-             execution-sound dominance:
-               - Head_unknown → MAY_TOP (⊤): could call anything.
-               - Head_enumerated → MAY_ENUMERATED (bounded candidate)…
-                 …but forced MAY_TOP when conditional (step-2 behavior
-                 preservation; step 4 lifts this to MAY_ENUMERATED).
+             execution-sound dominance with ENUMERATED demotion:
+               - Head_unknown → MAY_TOP (⊤): could call anything. This is the
+                 ONLY source of ⊤ — computed heads, parameter/local-value
+                 calls, dynamic roots, over-application residuals.
+               - Head_enumerated → MAY_ENUMERATED (bounded candidate), whether
+                 or not the escape site is conditional.
                - Head_local / Head_qualified, unconditional + saturated → MUST
                  (resolved id or external leaf).
-               - Head_local / Head_qualified, conditional or partial → demoted;
-                 the resolution identity is PRESERVED in the pending_call, and
-                 the demotion target is MAY_TOP at this step (MAY_ENUMERATED
-                 from step 4). *)
+               - Head_local / Head_qualified, conditional or partial →
+                 MAY_ENUMERATED (candidate set of one): the call either invokes
+                 that exact callee or does not execute — it can never reach
+                 anything outside the callee's subtree, so demoting to ⊤ would
+                 only inject false UNKNOWNs. Resolution identity is preserved
+                 (callee_id when in-index; external leaf otherwise). *)
           let resolve_local name =
             Hashtbl.find_opt fn_lookup (call.caller_module, name)
           in
@@ -314,37 +317,39 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
           let callee_id, callee_display_name, kind =
             match call.head with
             | Arch_index_cmt.Head_unknown n -> (None, n, "MAY_TOP")
-            | Arch_index_cmt.Head_enumerated n ->
+            | Arch_index_cmt.Head_enumerated n -> (
                 (* A named local function passed as a callback — resolve it to a
                    node so the closure can follow it, but as MAY_ENUMERATED (the
-                   callee may or may not invoke it), never MUST. Conditional →
-                   MAY_TOP (behavior-preserving; lifted in step 4). *)
-                if call.cond then (None, n, "MAY_TOP")
-                else (
-                  match resolve_local n with
-                  | Some id -> incr n_resolved ; (Some id, n, "MAY_ENUMERATED")
-                  | None -> (None, n, "MAY_ENUMERATED"))
-            | Arch_index_cmt.Head_local n ->
-                if demoted then (None, n, "MAY_TOP")
-                else (
-                  match resolve_local n with
-                  | Some id -> incr n_resolved ; (Some id, n, "MUST")
-                  | None -> (None, n, "MAY_TOP"))
+                   callee may or may not invoke it), never MUST — conditional or
+                   not, the candidate set is the same. *)
+                match resolve_local n with
+                | Some id -> incr n_resolved ; (Some id, n, "MAY_ENUMERATED")
+                | None -> (None, n, "MAY_ENUMERATED"))
+            | Arch_index_cmt.Head_local n -> (
+                match resolve_local n with
+                | Some id ->
+                    incr n_resolved ;
+                    (Some id, n, (if demoted then "MAY_ENUMERATED" else "MUST"))
+                | None ->
+                    (* Not in the function table (shadow/anomaly): unknowable. *)
+                    (None, n, "MAY_TOP"))
             | Arch_index_cmt.Head_qualified (mod_opt, n) -> (
                 let display_name =
                   match mod_opt with Some m -> m ^ "." ^ n | None -> n
                 in
-                if demoted then (None, display_name, "MAY_TOP")
-                else
-                  match mod_opt with
-                  | None -> (
-                      match resolve_local n with
-                      | Some id -> incr n_resolved ; (Some id, n, "MUST")
-                      | None -> (None, n, "MAY_TOP"))
-                  | Some mod_name -> (
-                      match resolve_qualified mod_name n with
-                      | Some id -> incr n_resolved ; (Some id, display_name, "MUST")
-                      | None -> (None, display_name, "MUST")))
+                let kind = if demoted then "MAY_ENUMERATED" else "MUST" in
+                match mod_opt with
+                | None -> (
+                    match resolve_local n with
+                    | Some id -> incr n_resolved ; (Some id, n, kind)
+                    | None -> (None, n, (if demoted then "MAY_ENUMERATED" else "MAY_TOP")))
+                | Some mod_name -> (
+                    match resolve_qualified mod_name n with
+                    | Some id -> incr n_resolved ; (Some id, display_name, kind)
+                    | None ->
+                        (* Unresolved external: a leaf either way — MUST leaf
+                           when unconditional, enumerated leaf when demoted. *)
+                        (None, display_name, kind)))
           in
           insert_call
             db

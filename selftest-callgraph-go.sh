@@ -147,7 +147,7 @@ say "$DB" escapes "$fn_clean" 2>&1 \
 # a MUST edge and never dropped. (Its demoted KIND depends on DOM_ENUM below.)
 say "$DB" reaches "$fn_gated" "$fn_island" \
   | grep -q 'no MUST path' || note "reaches $fn_gated $fn_island should be no MUST path (conditional call, dominance-demoted)"
-if [ "${DOM_ENUM:-0}" != 1 ]; then
+if [ "${DOM_ENUM:-1}" != 1 ]; then
   # Pre-US-4: demotion target is MAY_TOP → verdict is UNKNOWN.
   say "$DB" unreachable "$fn_gated" "$fn_island" \
     | grep -q 'UNKNOWN:' || note "unreachable $fn_gated $fn_island should be UNKNOWN (conditional call → MAY_TOP frontier)"
@@ -161,9 +161,9 @@ say "$DB" reaches "$fn_gated" "$fn_direct" \
 # ---------- enumerated demotion (cfg-postdom-dominance US-4) ----------
 # A conditional call with a uniquely-resolved static callee is MAY_ENUMERATED
 # (candidate set of one), not MAY_TOP — so unreachable becomes decidable.
-# Gated behind DOM_ENUM until the Go backend lands the change (step 4 flips the
-# default to 1).
-if [ "${DOM_ENUM:-0}" = 1 ]; then
+# DOM_ENUM defaults to 1 since the Go backend landed enumerated demotion
+# (set DOM_ENUM=0 to test a pre-US-4 binary).
+if [ "${DOM_ENUM:-1}" = 1 ]; then
   gated_kind=$(sqlite3 "$DB" "SELECT COALESCE(MAX(kind),'MISSING') FROM calls WHERE caller_name LIKE '%gatedEntry%' AND callee_name LIKE '%island%';")
   [ "$gated_kind" = "MAY_ENUMERATED" ] || note "gatedEntry→island should be MAY_ENUMERATED (enumerated demotion), got $gated_kind"
   say "$DB" unreachable "$fn_gated" "$fn_island" \
