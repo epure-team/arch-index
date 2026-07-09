@@ -1,7 +1,7 @@
 {
   "task": "cfg-postdom-dominance",
   "mode": "full",
-  "current_phase": "implement",
+  "current_phase": "review",
   "events": [
     {
       "phase": "question",
@@ -38,6 +38,12 @@
       "outcome": "COMPLETED",
       "at": "2026-07-09T00:00:00Z",
       "by": "roster-implement"
+    },
+    {
+      "phase": "review",
+      "outcome": "GO",
+      "at": "2026-07-09T00:00:00Z",
+      "by": "roster-review"
     }
   ]
 }
