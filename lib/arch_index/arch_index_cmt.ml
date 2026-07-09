@@ -288,6 +288,27 @@ let pending_display (p : pending_call) =
   | Head_local n | Head_enumerated n | Head_unknown n -> (n, None)
   | Head_qualified (m, n) -> (n, m)
 
+(** A synthetic function node for a nested [fun …]/[function] literal:
+    [lam_name] chains through every enclosing node
+    ([parent.<fun:LINE:COL>], 1-based column, [#N] in-marker ordinal on a
+    same-position collision). The literal's body has its own CFG; its calls are
+    attributed to this node. *)
+type lambda_node = {
+  lam_name : string;
+  lam_line_start : int;
+  lam_line_end : int;
+  lam_arity : int;
+}
+
+(* Per-node lowering context (internal): one CFG per function or lambda node. *)
+type lctx = {
+  cid : int; (* unique id, keys the solved verdicts *)
+  lg : Arch_index_cfg.t;
+  mutable lblk : int; (* current block *)
+  mutable lhandlers : int list; (* active try-dispatch blocks, innermost first *)
+  lcaller : string; (* attribution: top-level name or lambda chain *)
+}
+
 (** Collected type usage information.
     We store function_id directly since we have it when processing value bindings.
     type_path is the full path (e.g., "Epure_lib.Types.story") for resolution. *)
@@ -391,25 +412,69 @@ let rec fn_arity (e : Typedtree.expression) =
     Returns a list of pending calls. *)
 let collect_calls_from_expr ~src_path ~caller_module ~caller_name
     ~local_fn_stamps (expr : Typedtree.expression) =
-  (* Per-function CFG: calls record their basic block; after the walk we solve
-     post-dominance and mark every call whose block is not always-executed as
-     conditional ([cond = true]). Deferred bodies (closures, lazy thunks,
-     object methods, functor bodies) are walked in ISOLATED blocks with no
-     incoming edge — entry-unreachable, hence never always-exec — which forces
-     [cond] without a separate counter and guarantees the calls are still
-     recorded (never dropped). *)
-  let g = Arch_index_cfg.create () in
-  let cb = ref Arch_index_cfg.entry in
-  (* Active [try] handler-dispatch blocks (innermost first): a diverging
-     terminator inside a try body edges to the innermost dispatch (the handler
-     may catch) IN ADDITION to the virtual exit (it may not match). *)
-  let handler_stack = ref [] in
-  (* raw record: block id resolved to [cond] after solving *)
+  (* Per-node CFG: every function — the top-level binding AND each nested
+     lambda node — gets its own lowering context with its own graph, current
+     block, and try-dispatch stack. Calls record their (context, block); after
+     the walk each graph is solved and a call is conditional unless its block
+     post-dominates ITS OWN node's entry. Non-promoted deferred bodies (lazy
+     thunks, object methods, functor bodies) walk in ISOLATED blocks of the
+     current context — entry-unreachable, hence never always-exec — which
+     forces [cond] while guaranteeing the calls are still recorded. *)
+  let next_ctx_id = ref 0 in
+  let new_ctx caller =
+    let id = !next_ctx_id in
+    incr next_ctx_id ;
+    {
+      cid = id;
+      lg = Arch_index_cfg.create ();
+      lblk = Arch_index_cfg.entry;
+      lhandlers = [];
+      lcaller = caller;
+    }
+  in
+  let root_ctx = new_ctx caller_name in
+  let all_ctxs = ref [root_ctx] in
+  let cur = ref root_ctx in
+  (* raw record: (ctx id, block, caller, head, partial, site) — [cond] is
+     resolved after solving every context's graph. *)
   let raw = ref [] in
   let add_call ?(partial = false) head loc =
     let line = loc.Location.loc_start.pos_lnum in
     let call_site = Printf.sprintf "%s:%d" src_path line in
-    raw := (head, partial, !cb, call_site) :: !raw
+    let c = !cur in
+    raw := (c.cid, c.lblk, c.lcaller, head, partial, call_site) :: !raw
+  in
+  (* Current-context CFG shorthands. *)
+  let blk () = (!cur).lblk in
+  let set_blk b = (!cur).lblk <- b in
+  let new_blk () = Arch_index_cfg.new_block (!cur).lg in
+  let edge a b = Arch_index_cfg.add_edge (!cur).lg a b in
+  (* Collected synthetic lambda nodes. *)
+  let lambdas = ref [] in
+  (* marker → occurrence count, for the [#N] collision ordinal *)
+  let markers = Hashtbl.create 8 in
+  (* literal loc → assigned node name (filled at visit; read by apply heads) *)
+  let lam_names = Hashtbl.create 8 in
+  (* locs of literals in APPLY-HEAD position: the head classification emits
+     their (Head_local) edge, so the literal visit must not also emit an
+     occurrence edge. *)
+  let head_literals = Hashtbl.create 4 in
+  (* locs of literals that are a let-binding RHS: the BINDING itself is not an
+     occurrence — a never-referenced lambda gets no parent→lambda edge. *)
+  let binding_literals = Hashtbl.create 8 in
+  (* forward ref: walks a promoted literal's peeled body in the current ctx
+     (defined after the iterator, which it mutually uses). *)
+  let walk_fn_body_ref = ref (fun (_ : Typedtree.expression) -> ()) in
+  (* Node name for a literal at [loc], chained under the current caller:
+     [<caller>.<fun:LINE:COL>] with 1-based column and a [#N] in-marker ordinal
+     on a same-position collision (ghost/ppx locs). *)
+  let lambda_name (loc : Location.t) =
+    let p = loc.loc_start in
+    let line = p.pos_lnum and col = p.pos_cnum - p.pos_bol + 1 in
+    let base = Printf.sprintf "%s.<fun:%d:%d" (!cur).lcaller line col in
+    let n = (try Hashtbl.find markers base with Not_found -> 0) + 1 in
+    Hashtbl.replace markers base n ;
+    if n = 1 then base ^ ">" else Printf.sprintf "%s#%d>" base n
   in
   (* An applied [Path.Pident] resolves to a MUST-candidate only if it is a
      same-module top-level function body; otherwise it is a parameter / local
@@ -453,18 +518,22 @@ let collect_calls_from_expr ~src_path ~caller_module ~caller_name
     List.iter
       (fun (_, arg_opt) ->
         match arg_opt with
-        | Some ae when is_arrow ae.Typedtree.exp_type ->
-            let head =
-              match ae.exp_desc with
-              | Texp_ident (Path.Pident id, _, _) when ident_is_local_fn id ->
-                  Head_enumerated (Ident.name id)
-              | Texp_ident (Path.Pident id, _, _) -> Head_unknown (Ident.name id)
-              | Texp_ident ((Path.Pdot _ as p), _, _) ->
-                  let _, n = path_to_module_name p in
-                  Head_unknown n
-              | _ -> Head_unknown "*TOP*" (* computed function value *)
-            in
-            add_call head loc
+        | Some ae when is_arrow ae.Typedtree.exp_type -> (
+            match ae.exp_desc with
+            | Texp_function _ ->
+                (* Literal argument: the literal's own visit emits the
+                   parent→lambda MAY_ENUMERATED edge — the old ⊤ arg-escape
+                   row is REPLACED by that enumerated edge (FR-012). *)
+                ()
+            | Texp_ident (Path.Pident id, _, _) when ident_is_local_fn id ->
+                add_call (Head_enumerated (Ident.name id)) loc
+            | Texp_ident (Path.Pident id, _, _) ->
+                add_call (Head_unknown (Ident.name id)) loc
+            | Texp_ident ((Path.Pdot _ as p), _, _) ->
+                let _, n = path_to_module_name p in
+                add_call (Head_unknown n) loc
+            | _ -> add_call (Head_unknown "*TOP*") loc
+            (* computed function value *))
         | _ -> ())
       args
   in
@@ -515,11 +584,11 @@ let collect_calls_from_expr ~src_path ~caller_module ~caller_name
      in a fresh block with NO incoming edge: code after the divergence is
      entry-unreachable → recorded, demoted, never dropped. *)
   let diverge () =
-    (match !handler_stack with
-    | dispatch :: _ -> Arch_index_cfg.add_edge g !cb dispatch
+    (match (!cur).lhandlers with
+    | dispatch :: _ -> edge (blk ()) dispatch
     | [] -> ()) ;
-    Arch_index_cfg.terminate g !cb ;
-    cb := Arch_index_cfg.new_block g
+    Arch_index_cfg.terminate (!cur).lg (blk ()) ;
+    set_blk (new_blk ())
   in
   (* [&&] and [||] short-circuit: the right operand runs only conditionally. *)
   let short_circuit_arity (fn : Typedtree.expression) =
@@ -540,23 +609,23 @@ let collect_calls_from_expr ~src_path ~caller_module ~caller_name
              region never post-dominates the entry (the join bypass exists),
              so its calls are demoted; execution continues in [join]. *)
           let walk_conditional e =
-            let b = Arch_index_cfg.new_block g in
-            let join = Arch_index_cfg.new_block g in
-            Arch_index_cfg.add_edge g !cb b ;
-            Arch_index_cfg.add_edge g !cb join ;
-            cb := b ;
+            let b = new_blk () in
+            let join = new_blk () in
+            edge (blk ()) b ;
+            edge (blk ()) join ;
+            set_blk b ;
             self.expr self e ;
-            Arch_index_cfg.add_edge g !cb join ;
-            cb := join
+            edge (blk ()) join ;
+            set_blk join
           in
           (* Walk [e] in an ISOLATED block (no incoming edge): a deferred body
              (closure/lazy/object) whose calls are recorded but can never be
              always-exec. The current block is untouched. *)
           let walk_isolated_default () =
-            let saved = !cb in
-            cb := Arch_index_cfg.new_block g ;
+            let saved = (blk ()) in
+            set_blk (new_blk ()) ;
             default_iterator.expr self expr ;
-            cb := saved
+            set_blk saved
           in
           (* A match/try case walked inside an already-conditional block:
              guard and RHS execute only if the pattern matches. *)
@@ -566,31 +635,70 @@ let collect_calls_from_expr ~src_path ~caller_module ~caller_name
             self.expr self c.c_rhs
           in
           match expr.exp_desc with
-          | Texp_function _ | Texp_lazy _ | Texp_object _ ->
-              (* Deferred-execution boundaries: a closure body, a [lazy] thunk,
-                 or an object's method bodies run only if invoked/forced —
-                 walked in an isolated (never always-exec) block so their calls
-                 are recorded, demoted, never dropped. *)
+          | Texp_function _ ->
+              (* A nested [fun …]/[function] literal is PROMOTED to its own
+                 synthetic node: register the node, emit a parent→lambda
+                 occurrence edge (unless this literal is a let-binding RHS —
+                 zero-occurrence lambdas get no edge — or an apply head, whose
+                 classification emits the edge itself), and walk the body in
+                 the lambda's OWN context (own CFG: its calls attribute to the
+                 node and MUST = post-dominates the LAMBDA's entry). *)
+              let name = lambda_name expr.exp_loc in
+              Hashtbl.replace lam_names expr.exp_loc name ;
+              lambdas :=
+                {
+                  lam_name = name;
+                  lam_line_start = expr.exp_loc.loc_start.pos_lnum;
+                  lam_line_end = expr.exp_loc.loc_end.pos_lnum;
+                  lam_arity = fn_arity expr;
+                }
+                :: !lambdas ;
+              if
+                (not (Hashtbl.mem head_literals expr.exp_loc))
+                && not (Hashtbl.mem binding_literals expr.exp_loc)
+              then add_call (Head_enumerated name) expr.exp_loc ;
+              let saved = !cur in
+              let c = new_ctx name in
+              all_ctxs := c :: !all_ctxs ;
+              cur := c ;
+              !walk_fn_body_ref expr ;
+              cur := saved
+          | Texp_let (_, vbs, _) ->
+              (* Mark single-literal Tpat_var binding RHSs: the BINDING is not
+                 an occurrence (a never-referenced lambda gets no edge). *)
+              List.iter
+                (fun (vb : Typedtree.value_binding) ->
+                  match (vb.vb_pat.pat_desc, vb.vb_expr.exp_desc) with
+                  | Tpat_var _, Texp_function _ ->
+                      Hashtbl.replace binding_literals vb.vb_expr.exp_loc ()
+                  | _ -> ())
+                vbs ;
+              default_iterator.expr self expr
+          | Texp_lazy _ | Texp_object _ ->
+              (* Non-promoted deferred boundaries: a lazy thunk or an object's
+                 method bodies run only if forced/invoked — walked in an
+                 isolated (never always-exec) block so their calls are
+                 recorded, demoted, never dropped. *)
               walk_isolated_default ()
           | Texp_ifthenelse (cond, e_then, e_else) ->
               (* Condition runs unconditionally; each branch is a CFG arm. *)
               self.expr self cond ;
-              let c_end = !cb in
-              let join = Arch_index_cfg.new_block g in
-              let bt = Arch_index_cfg.new_block g in
-              Arch_index_cfg.add_edge g c_end bt ;
-              cb := bt ;
+              let c_end = (blk ()) in
+              let join = new_blk () in
+              let bt = new_blk () in
+              edge c_end bt ;
+              set_blk bt ;
               self.expr self e_then ;
-              Arch_index_cfg.add_edge g !cb join ;
+              edge (blk ()) join ;
               (match e_else with
               | Some e ->
-                  let bf = Arch_index_cfg.new_block g in
-                  Arch_index_cfg.add_edge g c_end bf ;
-                  cb := bf ;
+                  let bf = new_blk () in
+                  edge c_end bf ;
+                  set_blk bf ;
                   self.expr self e ;
-                  Arch_index_cfg.add_edge g !cb join
-              | None -> Arch_index_cfg.add_edge g c_end join) ;
-              cb := join
+                  edge (blk ()) join
+              | None -> edge c_end join) ;
+              set_blk join
           | Texp_match (scrut, comp_cases, val_cases, partiality) ->
               (* Scrutinee runs unconditionally; every arm is a CFG branch.
                  A single TOTAL unguarded arm post-dominates the entry (it
@@ -599,20 +707,20 @@ let collect_calls_from_expr ~src_path ~caller_module ~caller_name
                  guard) additionally gets a Match_failure BYPASS edge so a
                  lone arm can never forge a MUST. *)
               self.expr self scrut ;
-              let s_end = !cb in
-              let join = Arch_index_cfg.new_block g in
-              if partiality = Partial then Arch_index_cfg.add_edge g s_end join ;
+              let s_end = (blk ()) in
+              let join = new_blk () in
+              if partiality = Partial then edge s_end join ;
               let walk_arm : type k. k Typedtree.case -> unit =
                fun c ->
-                let arm = Arch_index_cfg.new_block g in
-                Arch_index_cfg.add_edge g s_end arm ;
-                cb := arm ;
+                let arm = new_blk () in
+                edge s_end arm ;
+                set_blk arm ;
                 walk_case_in c ;
-                Arch_index_cfg.add_edge g !cb join
+                edge (blk ()) join
               in
               List.iter walk_arm comp_cases ;
               List.iter walk_arm val_cases ;
-              cb := join
+              set_blk join
           | Texp_try (body, val_cases, eff_cases) ->
               (* The try body runs unconditionally. Handlers hang off a
                  dispatch block that BRANCHES from the body's end (an exception
@@ -620,59 +728,59 @@ let collect_calls_from_expr ~src_path ~caller_module ~caller_name
                  entry. A diverging terminator inside the body (step 3) also
                  edges to the dispatch: the handler may catch — and to the
                  virtual exit: it may not match. *)
-              let dispatch = Arch_index_cfg.new_block g in
-              handler_stack := dispatch :: !handler_stack ;
+              let dispatch = new_blk () in
+              (!cur).lhandlers <- dispatch :: (!cur).lhandlers ;
               self.expr self body ;
-              (match !handler_stack with
-              | _ :: tl -> handler_stack := tl
+              (match (!cur).lhandlers with
+              | _ :: tl -> (!cur).lhandlers <- tl
               | [] -> ()) ;
-              let b_end = !cb in
-              let join = Arch_index_cfg.new_block g in
-              Arch_index_cfg.add_edge g b_end join ;
-              Arch_index_cfg.add_edge g b_end dispatch ;
+              let b_end = (blk ()) in
+              let join = new_blk () in
+              edge b_end join ;
+              edge b_end dispatch ;
               let walk_handler : type k. k Typedtree.case -> unit =
                fun c ->
-                let h = Arch_index_cfg.new_block g in
-                Arch_index_cfg.add_edge g dispatch h ;
-                cb := h ;
+                let h = new_blk () in
+                edge dispatch h ;
+                set_blk h ;
                 walk_case_in c ;
-                Arch_index_cfg.add_edge g !cb join
+                edge (blk ()) join
               in
               List.iter walk_handler val_cases ;
               List.iter walk_handler eff_cases ;
-              cb := join
+              set_blk join
           | Texp_while (cond, body) ->
               (* head → {body → head, after}: condition evaluated on every
                  iteration path; body may run zero times. No constant folding —
                  [while true] keeps its exit edge (documented termination-
                  insensitivity residual). *)
-              let head = Arch_index_cfg.new_block g in
-              Arch_index_cfg.add_edge g !cb head ;
-              cb := head ;
+              let head = new_blk () in
+              edge (blk ()) head ;
+              set_blk head ;
               self.expr self cond ;
-              let c_end = !cb in
-              let bodyb = Arch_index_cfg.new_block g in
-              let after = Arch_index_cfg.new_block g in
-              Arch_index_cfg.add_edge g c_end bodyb ;
-              Arch_index_cfg.add_edge g c_end after ;
-              cb := bodyb ;
+              let c_end = (blk ()) in
+              let bodyb = new_blk () in
+              let after = new_blk () in
+              edge c_end bodyb ;
+              edge c_end after ;
+              set_blk bodyb ;
               self.expr self body ;
-              Arch_index_cfg.add_edge g !cb head ;
-              cb := after
+              edge (blk ()) head ;
+              set_blk after
           | Texp_for (_, _, lo, hi, _, body) ->
               (* Bounds run unconditionally; body may run zero times. *)
               self.expr self lo ;
               self.expr self hi ;
-              let head = Arch_index_cfg.new_block g in
-              Arch_index_cfg.add_edge g !cb head ;
-              let bodyb = Arch_index_cfg.new_block g in
-              let after = Arch_index_cfg.new_block g in
-              Arch_index_cfg.add_edge g head bodyb ;
-              Arch_index_cfg.add_edge g head after ;
-              cb := bodyb ;
+              let head = new_blk () in
+              edge (blk ()) head ;
+              let bodyb = new_blk () in
+              let after = new_blk () in
+              edge head bodyb ;
+              edge head after ;
+              set_blk bodyb ;
               self.expr self body ;
-              Arch_index_cfg.add_edge g !cb head ;
-              cb := after
+              edge (blk ()) head ;
+              set_blk after
           | Texp_assert (e, _) -> (
               match e.exp_desc with
               | Texp_construct (_, {cstr_name = "false"; _}, _) ->
@@ -698,14 +806,14 @@ let collect_calls_from_expr ~src_path ~caller_module ~caller_name
               List.iter
                 (fun (b : Typedtree.binding_op) -> self.expr self b.bop_exp)
                 ands ;
-              let c = Arch_index_cfg.new_block g in
-              let join = Arch_index_cfg.new_block g in
-              Arch_index_cfg.add_edge g !cb c ;
-              Arch_index_cfg.add_edge g !cb join ;
-              cb := c ;
+              let c = new_blk () in
+              let join = new_blk () in
+              edge (blk ()) c ;
+              edge (blk ()) join ;
+              set_blk c ;
               walk_case_in body ;
-              Arch_index_cfg.add_edge g !cb join ;
-              cb := join
+              edge (blk ()) join ;
+              set_blk join
           | Texp_apply (fn_expr, args) ->
               (* A partial application supplies fewer arguments than the callee's
                  arity: it builds a closure and does NOT run the callee's body,
@@ -781,14 +889,14 @@ let collect_calls_from_expr ~src_path ~caller_module ~caller_name
                   | (_, first) :: rest ->
                       Option.iter (self.expr self) first ;
                       record_head () ;
-                      let r = Arch_index_cfg.new_block g in
-                      let join = Arch_index_cfg.new_block g in
-                      Arch_index_cfg.add_edge g !cb r ;
-                      Arch_index_cfg.add_edge g !cb join ;
-                      cb := r ;
+                      let r = new_blk () in
+                      let join = new_blk () in
+                      edge (blk ()) r ;
+                      edge (blk ()) join ;
+                      set_blk r ;
                       List.iter (fun (_, a) -> Option.iter (self.expr self) a) rest ;
-                      Arch_index_cfg.add_edge g !cb join ;
-                      cb := join
+                      edge (blk ()) join ;
+                      set_blk join
                   | [] -> record_head ())
               | None ->
                   (* Descend into fn + args FIRST (argument evaluation precedes
@@ -806,10 +914,10 @@ let collect_calls_from_expr ~src_path ~caller_module ~caller_name
           | Tmod_functor (_, _) ->
               (* A functor body only runs when the functor is applied → walked
                  in an isolated (never always-exec) block. *)
-              let saved = !cb in
-              cb := Arch_index_cfg.new_block g ;
+              let saved = (blk ()) in
+              set_blk (new_blk ()) ;
               default_iterator.module_expr self me ;
-              cb := saved
+              set_blk saved
           | _ -> default_iterator.module_expr self me);
     }
   in
@@ -819,74 +927,80 @@ let collect_calls_from_expr ~src_path ~caller_module ~caller_name
      function's own arms would be mistaken for nested closures and every call
      would be demoted to MAY_TOP. Genuinely-nested function literals inside BODY
      still raise [nested]. *)
-  (* Optional-argument default expressions (`?(x = e)`) run only when the caller
-     omits the argument — conditional, like a nested-closure body. Collect them
-     from every peeled parameter layer and walk them with [nested] raised so
-     their calls are recorded as MAY_TOP (never dropped → [unreachable] stays
-     sound; never a MUST → [reaches] stays honest). *)
-  let opt_defaults = ref [] in
-  let collect_param_defaults params =
-    List.iter
-      (fun (p : Typedtree.function_param) ->
-        match p.fp_kind with
-        | Tparam_optional_default (_, de) -> opt_defaults := de :: !opt_defaults
-        | Tparam_pat _ -> ())
-      params
-  in
-  let rec peel (e : Typedtree.expression) =
-    match e.exp_desc with
-    | Texp_function (params, Tfunction_body b) ->
-        collect_param_defaults params ;
-        peel b
-    | Texp_function (params, Tfunction_cases _) ->
-        collect_param_defaults params ;
-        e
-    | _ -> e
-  in
-  let root = peel expr in
-  (match root.exp_desc with
-  | Texp_function (_, Tfunction_cases {cases; partial; _}) ->
-      (* A root [function <cases>] is sugar for [fun x -> match x with <cases>]:
-         each arm is a CFG branch from the entry. Same partiality rule as
-         [Texp_match]: a Partial function gets a Match_failure bypass edge so a
-         lone refutable/guarded arm cannot forge a MUST; a single TOTAL
-         unguarded arm always runs and is legitimately MUST. *)
-      let s_end = !cb in
-      let join = Arch_index_cfg.new_block g in
-      if partial = Partial then Arch_index_cfg.add_edge g s_end join ;
+  (* Walk a FUNCTION ROOT (the top-level binding's RHS, or a promoted lambda
+     literal) inside the CURRENT context: peel its own leading parameter
+     lambdas (they are this node's params, not nested closures), walk each
+     optional-argument default expression in an isolated block (it runs only
+     when the caller omits the argument — recorded, demoted, never dropped),
+     then walk the peeled body: a [Tfunction_cases] root is sugar for
+     [fun x -> match x with <cases>] — each arm is a CFG branch, with a
+     Match_failure bypass edge when the compiler marks it Partial so a lone
+     refutable/guarded arm cannot forge a MUST (a single TOTAL unguarded arm
+     always runs and is legitimately MUST). *)
+  let walk_function_root (e0 : Typedtree.expression) =
+    let opt_defaults = ref [] in
+    let collect_param_defaults params =
       List.iter
-        (fun (c : Typedtree.value Typedtree.case) ->
-          let arm = Arch_index_cfg.new_block g in
-          Arch_index_cfg.add_edge g s_end arm ;
-          cb := arm ;
-          (match c.c_guard with Some gd -> iter.expr iter gd | None -> ()) ;
-          iter.expr iter c.c_rhs ;
-          Arch_index_cfg.add_edge g !cb join)
-        cases ;
-      cb := join
-  | _ -> iter.expr iter root) ;
-  (* Optional-arg default expressions run only when the caller omits the
-     argument → each walked in an isolated (never always-exec) block: recorded,
-     demoted, never dropped. *)
+        (fun (p : Typedtree.function_param) ->
+          match p.fp_kind with
+          | Tparam_optional_default (_, de) ->
+              opt_defaults := de :: !opt_defaults
+          | Tparam_pat _ -> ())
+        params
+    in
+    let rec peel (e : Typedtree.expression) =
+      match e.exp_desc with
+      | Texp_function (params, Tfunction_body b) ->
+          collect_param_defaults params ;
+          peel b
+      | Texp_function (params, Tfunction_cases _) ->
+          collect_param_defaults params ;
+          e
+      | _ -> e
+    in
+    let root = peel e0 in
+    (match root.exp_desc with
+    | Texp_function (_, Tfunction_cases {cases; partial; _}) ->
+        let s_end = blk () in
+        let join = new_blk () in
+        if partial = Partial then edge s_end join ;
+        List.iter
+          (fun (c : Typedtree.value Typedtree.case) ->
+            let arm = new_blk () in
+            edge s_end arm ;
+            set_blk arm ;
+            (match c.c_guard with Some gd -> iter.expr iter gd | None -> ()) ;
+            iter.expr iter c.c_rhs ;
+            edge (blk ()) join)
+          cases ;
+        set_blk join
+    | _ -> iter.expr iter root) ;
+    List.iter
+      (fun de ->
+        set_blk (new_blk ()) ;
+        iter.expr iter de)
+      !opt_defaults
+  in
+  walk_fn_body_ref := walk_function_root ;
+  walk_function_root expr ;
+  (* Solve every context's post-dominance and finalize: a call is conditional
+     unless its block runs on every execution of ITS OWN node. *)
+  let verdicts = Hashtbl.create 8 in
   List.iter
-    (fun de ->
-      cb := Arch_index_cfg.new_block g ;
-      iter.expr iter de)
-    !opt_defaults ;
-  (* Solve post-dominance and finalize: a call is conditional unless its block
-     runs on every execution of this function. *)
-  let v = Arch_index_cfg.solve g in
-  List.rev_map
-    (fun (head, partial, block, call_site) ->
-      {
-        caller_module;
-        caller_name;
-        head;
-        partial;
-        cond = not (Arch_index_cfg.always_exec v block);
-        call_site;
-      })
-    !raw
+    (fun c -> Hashtbl.replace verdicts c.cid (Arch_index_cfg.solve c.lg))
+    !all_ctxs ;
+  let calls =
+    List.rev_map
+      (fun (cid, block, caller, head, partial, call_site) ->
+        let cond =
+          match Hashtbl.find_opt verdicts cid with
+          | Some v -> not (Arch_index_cfg.always_exec v block)
+          | None -> true (* unknown ctx: demote, never promote *)
+        in
+        {caller_module; caller_name = caller; head; partial; cond; call_site})
+      !raw
+  in
+  (calls, List.rev !lambdas)
 
 (* -------------------------------------------------------------------------- *)
 (* Process a single .cmt file                                                 *)
@@ -1211,8 +1325,9 @@ let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
                                     }
                                     :: !pending_type_usages)
                                 type_usages ;
-                              (* Collect calls from this function's body *)
-                              let calls =
+                              (* Collect calls (and promoted lambda nodes) from
+                                 this function's body *)
+                              let calls, lam_nodes =
                                 collect_calls_from_expr
                                   ~src_path:rel_path
                                   ~caller_module:rel_path
@@ -1220,6 +1335,25 @@ let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
                                   ~local_fn_stamps
                                   vb.vb_expr
                               in
+                              (* Insert a synthetic functions row per nested
+                                 lambda literal: exposed=0, parent module,
+                                 comment fields empty — so parent→lambda and
+                                 lambda→callee edges resolve to real ids. *)
+                              List.iter
+                                (fun (l : lambda_node) ->
+                                  ignore
+                                    (insert_function
+                                       db
+                                       stmt_fn
+                                       ~module_id
+                                       ~name:l.lam_name
+                                       ~signature:None
+                                       ~line_start:l.lam_line_start
+                                       ~line_end:l.lam_line_end
+                                       ~exposed:false
+                                       ~intent:None
+                                       ()))
+                                lam_nodes ;
                               pending_calls :=
                                 List.rev_append calls !pending_calls
                           | _ -> ())
