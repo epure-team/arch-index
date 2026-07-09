@@ -22,6 +22,7 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -29,6 +30,7 @@ import (
 	"go/types"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"golang.org/x/tools/go/callgraph"
@@ -72,11 +74,54 @@ type callRecord struct {
 	Kind       string  `json:"kind"`
 }
 
-var enc = json.NewEncoder(os.Stdout)
+// Records are buffered and emitted in a deterministic sorted order at the end,
+// so the NDJSON output is reproducible regardless of Go map iteration order
+// (which is randomised). The DB content was always order-independent, but a
+// stable byte stream is required for reproducible producers and goldens.
+type bufferedRec struct {
+	key  string
+	line string
+}
+
+var outBuf []bufferedRec
+
+func recSortKey(v any) string {
+	switch r := v.(type) {
+	case funcRecord:
+		return "0\x00" + r.Name
+	case callRecord:
+		return "1\x00" + r.CallerName + "\x00" + r.CalleeName + "\x00" + r.CallSite
+	default:
+		return "2"
+	}
+}
 
 func emit(v any) {
-	if err := enc.Encode(v); err != nil {
+	b, err := json.Marshal(v)
+	if err != nil {
 		die("JSON encode: %v", err)
+	}
+	outBuf = append(outBuf, bufferedRec{key: recSortKey(v), line: string(b)})
+}
+
+// flushOut writes all buffered records to stdout in a stable order (functions
+// before calls, then by name/edge), producing deterministic NDJSON.
+func flushOut() {
+	// Sort by key, then by the full marshaled line as a tie-breaker, so records
+	// that share a key (e.g. two same-named functions in different files) still
+	// have a deterministic order — a stable sort alone would preserve the
+	// randomised map insertion order for equal keys.
+	sort.Slice(outBuf, func(i, j int) bool {
+		if outBuf[i].key != outBuf[j].key {
+			return outBuf[i].key < outBuf[j].key
+		}
+		return outBuf[i].line < outBuf[j].line
+	})
+	w := bufio.NewWriter(os.Stdout)
+	defer w.Flush()
+	for _, r := range outBuf {
+		w.WriteString(r.line)
+		w.WriteByte('\n')
 	}
 }
 
@@ -133,6 +178,112 @@ func isExternalCGO(callee *ssa.Function) bool {
 
 func isWellKnownTop(callee *ssa.Function) bool {
 	return callee != nil && wellKnownTop[funcName(callee)]
+}
+
+// alwaysExec returns the set of basic blocks that lie on EVERY execution path
+// from the function entry to a terminal (return/panic) block — i.e. the blocks
+// that post-dominate the entry. A call in such a block runs on every execution
+// of the function (dominance); a call in an if/switch/loop arm does not.
+//
+// This makes the Go producer's MUST edges execution-sound, matching the OCaml
+// backend: a uniquely-resolved static call is MUST only when it always runs,
+// otherwise it is demoted to MAY_TOP (recorded, never dropped, never a false
+// MUST). MUST = block post-dominates entry (Ferrante-Ottenstein-Warren control
+// dependence; post-dominators = dominators on the reversed CFG).
+//
+// Computed by the standard iterative post-dominance fixpoint over a CFG whose
+// terminal blocks (no successors: return/panic) flow to one virtual exit node.
+// If the function has no terminal block (e.g. `for {}`), nothing is guaranteed
+// to complete, so the result is empty (all calls demote — sound, conservative).
+func alwaysExec(fn *ssa.Function) map[*ssa.BasicBlock]bool {
+	result := make(map[*ssa.BasicBlock]bool)
+	n := len(fn.Blocks)
+	if n == 0 {
+		return result
+	}
+	idx := make(map[*ssa.BasicBlock]int, n)
+	for i, b := range fn.Blocks {
+		idx[b] = i
+	}
+	exit := n // virtual exit node index
+	succ := make([][]int, n)
+	hasExit := false
+	for i, b := range fn.Blocks {
+		if len(b.Succs) == 0 { // terminal (return/panic) → virtual exit
+			succ[i] = []int{exit}
+			hasExit = true
+		} else {
+			for _, s := range b.Succs {
+				succ[i] = append(succ[i], idx[s])
+			}
+		}
+	}
+	if !hasExit {
+		return result
+	}
+	// pdom[i]: set of nodes (0..n, where n = exit) that post-dominate block i.
+	// Backward dataflow: pdom[i] = {i} ∪ (∩_{s ∈ succ[i]} pdom[s]); pdom[exit] = {exit}.
+	pdom := make([][]bool, n+1)
+	for i := 0; i < n; i++ {
+		pdom[i] = make([]bool, n+1)
+		for k := range pdom[i] {
+			pdom[i][k] = true // initialise to full set, then intersect down
+		}
+	}
+	pdom[exit] = make([]bool, n+1)
+	pdom[exit][exit] = true
+	for changed := true; changed; {
+		changed = false
+		for i := 0; i < n; i++ {
+			next := make([]bool, n+1)
+			for k := range next {
+				next[k] = true
+			}
+			for _, s := range succ[i] {
+				for k := 0; k <= n; k++ {
+					next[k] = next[k] && pdom[s][k]
+				}
+			}
+			next[i] = true
+			for k := 0; k <= n; k++ {
+				if next[k] != pdom[i][k] {
+					changed = true
+					break
+				}
+			}
+			pdom[i] = next
+		}
+	}
+	// Blocks post-dominating the entry (block 0) are always executed.
+	for j := 0; j < n; j++ {
+		if pdom[0][j] {
+			result[fn.Blocks[j]] = true
+		}
+	}
+	return result
+}
+
+// alwaysExecCache memoises alwaysExec per function.
+type alwaysExecCache struct {
+	m map[*ssa.Function]map[*ssa.BasicBlock]bool
+}
+
+func newAlwaysExecCache() *alwaysExecCache {
+	return &alwaysExecCache{m: make(map[*ssa.Function]map[*ssa.BasicBlock]bool)}
+}
+
+// runsAlways reports whether the given call site block runs on every execution
+// of fn. A nil block or unknown function is treated as NOT always-run (sound).
+func (c *alwaysExecCache) runsAlways(fn *ssa.Function, blk *ssa.BasicBlock) bool {
+	if fn == nil || blk == nil {
+		return false
+	}
+	set, ok := c.m[fn]
+	if !ok {
+		set = alwaysExec(fn)
+		c.m[fn] = set
+	}
+	return set[blk]
 }
 
 // scanForTopAnchors scans SSA instructions directly for calls to wellKnownTop functions.
@@ -309,6 +460,7 @@ func main() {
 
 	var null *string
 	emitted := make(map[string]bool) // shared by edge visitor + scanForTopAnchors
+	pdCache := newAlwaysExecCache()  // dominance: MUST only when the call always runs
 
 	if cgPanic != nil {
 		// CHA panicked on generics: fall back to direct SSA instruction walk.
@@ -369,6 +521,11 @@ func main() {
 
 					calleeName := funcName(static)
 					kind := "MUST"
+					// Dominance: MUST only if this call runs on every execution
+					// of fn; a conditional/looped call is demoted to MAY_TOP.
+					if !pdCache.runsAlways(fn, b) {
+						kind = "MAY_TOP"
+					}
 					if isWellKnownTop(static) || isExternalCGO(static) {
 						calleeName = "*TOP*"
 						kind = "MAY_TOP"
@@ -418,6 +575,15 @@ func main() {
 			kind := "MAY_ENUMERATED"
 			if edge.Site != nil && edge.Site.Common().StaticCallee() != nil {
 				kind = "MUST"
+				// Dominance: a uniquely-resolved static call is MUST only if it
+				// runs on every execution of the caller. A call in an
+				// if/switch/loop arm (block does not post-dominate entry) is
+				// conditional → demote to MAY_TOP (keep the resolved callee name;
+				// MAY_TOP is detected by kind, so the ⊤ frontier still forces
+				// UNKNOWN and the edge is excluded from the MUST closure).
+				if !pdCache.runsAlways(caller, edge.Site.Block()) {
+					kind = "MAY_TOP"
+				}
 			}
 
 			// Reclassify known soundiness holes to MAY_TOP regardless of static resolution.
@@ -461,6 +627,7 @@ func main() {
 		scanForTopAnchors(fset, prog, emitted)
 	}
 
+	flushOut() // write buffered records in deterministic sorted order
 	fmt.Fprintf(os.Stderr, "arch-callgraph-go: %d SSA functions, %d edges emitted\n",
 		nFuncs, len(emitted))
 }
