@@ -466,6 +466,10 @@ let collect_calls_from_expr ~src_path ~caller_module ~caller_name
      bindings, tuple patterns, and aliases stay unknowable (MAY_TOP). *)
   let local_lam_stamps = Hashtbl.create 8 in
   let lam_stamp id = Hashtbl.find_opt local_lam_stamps (Ident.unique_name id) in
+  (* locs of stamped idents consumed as APPLY HEADS: their edge is emitted by
+     the head classification (Head_local, possibly MUST); the generic
+     Texp_ident occurrence case must not also emit an escape edge for them. *)
+  let head_idents = Hashtbl.create 8 in
   (* forward ref: walks a promoted literal's peeled body in the current ctx
      (defined after the iterator, which it mutually uses). *)
   let walk_fn_body_ref = ref (fun (_ : Typedtree.expression) -> ()) in
@@ -531,12 +535,12 @@ let collect_calls_from_expr ~src_path ~caller_module ~caller_name
                 ()
             | Texp_ident (Path.Pident id, _, _) when ident_is_local_fn id ->
                 add_call (Head_enumerated (Ident.name id)) loc
-            | Texp_ident (Path.Pident id, _, _) -> (
-                (* A let-bound lambda passed by name is an escape OCCURRENCE:
-                   parent→lambda MAY_ENUMERATED at this site. *)
-                match lam_stamp id with
-                | Some (node_name, _) -> add_call (Head_enumerated node_name) loc
-                | None -> add_call (Head_unknown (Ident.name id)) loc)
+            | Texp_ident (Path.Pident id, _, _) when lam_stamp id <> None ->
+                (* Let-bound lambda passed by name: the generic Texp_ident
+                   occurrence case emits the enumerated edge — nothing here. *)
+                ()
+            | Texp_ident (Path.Pident id, _, _) ->
+                add_call (Head_unknown (Ident.name id)) loc
             | Texp_ident ((Path.Pdot _ as p), _, _) ->
                 let _, n = path_to_module_name p in
                 add_call (Head_unknown n) loc
@@ -699,6 +703,20 @@ let collect_calls_from_expr ~src_path ~caller_module ~caller_name
                   | _ -> ())
                 vbs ;
               self.expr self body
+          | Texp_ident (Path.Pident id, _, _)
+            when lam_stamp id <> None
+                 && not (Hashtbl.mem head_idents expr.exp_loc) ->
+              (* ANY non-head occurrence of a let-bound lambda's name — as an
+                 argument, in a record field, tuple, ref store, or return
+                 position — is an escape site: the lambda may be invoked from
+                 wherever the value flows, so emit a parent→lambda
+                 MAY_ENUMERATED edge here. Without this, a stored lambda's node
+                 is orphaned and everything reachable only through its body
+                 falsely reads as dead/unreachable. *)
+              (match lam_stamp id with
+              | Some (node_name, _) ->
+                  add_call (Head_enumerated node_name) expr.exp_loc
+              | None -> ())
           | Texp_lazy _ | Texp_object _ ->
               (* Non-promoted deferred boundaries: a lazy thunk or an object's
                  method bodies run only if forced/invoked — walked in an
@@ -860,7 +878,12 @@ let collect_calls_from_expr ~src_path ~caller_module ~caller_name
                      | None -> arrow_arity fn_expr.exp_type)
                 | Texp_ident (Path.Pident id, _, _) -> (
                     match lam_stamp id with
-                    | Some (_, a) -> a (* recorded literal's syntactic arity *)
+                    | Some (_, a) ->
+                        (* head consumption of a stamped lambda: the head
+                           classification emits its edge — suppress the generic
+                           occurrence case for this loc. *)
+                        Hashtbl.replace head_idents fn_expr.exp_loc () ;
+                        a
                     | None -> arrow_arity fn_expr.exp_type)
                 | _ -> arrow_arity fn_expr.exp_type
               in
