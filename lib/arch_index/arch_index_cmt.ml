@@ -496,6 +496,10 @@ let collect_calls_from_expr ~src_path ~caller_module ~caller_name
     &&
     match fn.exp_desc with
     | Texp_ident (path, _, _) -> (
+        (* The root must be the PERSISTENT Stdlib compilation unit — a local
+           module named Stdlib (non-persistent root) must not terminate. *)
+        (not (qualified_is_dynamic path))
+        &&
         match path_to_module_name path with
         | ( Some "Stdlib",
             ("raise" | "raise_notrace" | "failwith" | "invalid_arg" | "exit") )
@@ -727,46 +731,56 @@ let collect_calls_from_expr ~src_path ~caller_module ~caller_name
                  callee body does not run → never MUST. A result that is itself
                  a function (arrow) is also under-saturated / returns-a-function. *)
               let partial = is_arrow expr.exp_type || nargs < head_arity in
-              (match fn_expr.exp_desc with
-              | Texp_ident (Path.Pident id, _, _) when ident_is_local_fn id ->
-                  (* Same-module top-level function — MUST candidate; [cond] and
-                     [partial] decide the final kind at resolution. *)
-                  add_call ~partial (Head_local (Ident.name id)) expr.exp_loc
-              | Texp_ident (Path.Pident id, _, _) ->
-                  (* Parameter / local / shadowing binding → unknowable target. *)
-                  add_call ~partial (Head_unknown (Ident.name id)) expr.exp_loc
-              | Texp_ident (path, _, _) ->
-                  let callee_module, callee_name = path_to_module_name path in
-                  if qualified_is_dynamic path then
-                    let disp =
-                      match callee_module with
-                      | Some m -> m ^ "." ^ callee_name
-                      | None -> callee_name
-                    in
-                    add_call ~partial (Head_unknown disp) expr.exp_loc
-                  else
-                    add_call
-                      ~partial
-                      (Head_qualified (callee_module, callee_name))
-                      expr.exp_loc
-              | _ ->
-                  (* Computed function head → unresolvable. *)
-                  add_call ~partial (Head_unknown "*TOP*") expr.exp_loc) ;
-              (* Over-application [f a b c] where [f] has arity 2: the head call
-                 is saturated (handled above), but the extra args are applied to
-                 the (unknown) returned function value — a residual call to an
-                 unknowable target. Record it as ⊤ so [unreachable] stays sound. *)
-              if head_arity > 0 && nargs > head_arity then
-                add_call (Head_unknown "*TOP*") expr.exp_loc ;
-              add_arg_escapes args expr.exp_loc ;
-              (* Short-circuit [&&]/[||]: the operator itself runs, but the
-                 right operand(s) run conditionally → a conditional CFG region. *)
+              (* The call fires AFTER its arguments evaluate, so the head (and
+                 the residual/escape records) belong to the block reached AFTER
+                 descending into fn + args: if an argument diverges
+                 ([h (raise A)]) or branches, the head lands in the resulting
+                 block and is demoted accordingly — never a false MUST. *)
+              let record_head () =
+                (match fn_expr.exp_desc with
+                | Texp_ident (Path.Pident id, _, _) when ident_is_local_fn id ->
+                    (* Same-module top-level function — MUST candidate; [cond]
+                       and [partial] decide the final kind at resolution. *)
+                    add_call ~partial (Head_local (Ident.name id)) expr.exp_loc
+                | Texp_ident (Path.Pident id, _, _) ->
+                    (* Parameter / local / shadowing binding → unknowable. *)
+                    add_call ~partial (Head_unknown (Ident.name id)) expr.exp_loc
+                | Texp_ident (path, _, _) ->
+                    let callee_module, callee_name = path_to_module_name path in
+                    if qualified_is_dynamic path then
+                      let disp =
+                        match callee_module with
+                        | Some m -> m ^ "." ^ callee_name
+                        | None -> callee_name
+                      in
+                      add_call ~partial (Head_unknown disp) expr.exp_loc
+                    else
+                      add_call
+                        ~partial
+                        (Head_qualified (callee_module, callee_name))
+                        expr.exp_loc
+                | _ ->
+                    (* Computed function head → unresolvable. *)
+                    add_call ~partial (Head_unknown "*TOP*") expr.exp_loc) ;
+                (* Over-application [f a b c] where [f] has arity 2: the head
+                   call is saturated (handled above), but the extra args are
+                   applied to the (unknown) returned function value — a residual
+                   call to an unknowable target. Record it as ⊤ so [unreachable]
+                   stays sound. *)
+                if head_arity > 0 && nargs > head_arity then
+                  add_call (Head_unknown "*TOP*") expr.exp_loc ;
+                add_arg_escapes args expr.exp_loc
+              in
               (match short_circuit_arity fn_expr with
               | Some () -> (
+                  (* Short-circuit [&&]/[||]: the operator itself runs after its
+                     FIRST operand; the right operand(s) run conditionally → a
+                     conditional CFG region. *)
                   self.expr self fn_expr ;
                   match args with
                   | (_, first) :: rest ->
                       Option.iter (self.expr self) first ;
+                      record_head () ;
                       let r = Arch_index_cfg.new_block g in
                       let join = Arch_index_cfg.new_block g in
                       Arch_index_cfg.add_edge g !cb r ;
@@ -775,15 +789,16 @@ let collect_calls_from_expr ~src_path ~caller_module ~caller_name
                       List.iter (fun (_, a) -> Option.iter (self.expr self) a) rest ;
                       Arch_index_cfg.add_edge g !cb join ;
                       cb := join
-                  | [] -> ())
+                  | [] -> record_head ())
               | None ->
-                  (* Descend into fn + args (nested constructs split blocks). *)
-                  default_iterator.expr self expr) ;
-              (* Diverging head (raise/failwith/…): terminate AFTER the head
-                 call and its argument evaluations were recorded in this block
-                 (they all run), so the raise itself can be MUST while
-                 everything sequenced after it lands entry-unreachable. *)
-              if noreturn_head fn_expr nargs then diverge ()
+                  (* Descend into fn + args FIRST (argument evaluation precedes
+                     the call; nested constructs split blocks), then record. *)
+                  default_iterator.expr self expr ;
+                  record_head () ;
+                  (* Diverging head (raise/failwith/…): terminate AFTER the
+                     head call was recorded in this block (the raise itself
+                     runs), so post-divergence code lands entry-unreachable. *)
+                  if noreturn_head fn_expr nargs then diverge ())
           | _ -> default_iterator.expr self expr);
       module_expr =
         (fun self me ->
