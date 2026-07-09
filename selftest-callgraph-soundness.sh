@@ -63,7 +63,7 @@ let mid (f : int -> int) (x : int) : int = f x
 ML
 
 cat > "$MOD/cg.ml" <<'ML'
-[@@@warning "-60-21-20"] (* -60 unapplied functor; -21/-20 divergence fixtures *)
+[@@@warning "-60-21-20-8"] (* -60 functor; -21/-20 divergence; -8 partial-match fixtures *)
 module type S = sig val run : int -> int end
 module type T = sig end
 
@@ -185,6 +185,14 @@ let join_after (b : bool) (x : int) : int =
   (if b then ignore (island x)) ;
   g x
 
+(* ── single-arm match partiality (codex step-2 finding) ──────────────────── *)
+(* total unguarded single arm always runs → MUST (sound precision gain) *)
+let single_total (u : unit) : int = match u with () -> sink 3
+(* refutable single arm: Match_failure possible → never MUST *)
+let single_partial (o : int option) : int = match o with Some y -> sink y
+(* guarded single arm: guard may fail → RHS never MUST *)
+let single_guarded (x : int) : int = match x with _ when x > 0 -> sink x
+
 (* ── R2 lambda-node fixtures ─────────────────────────────────────────────── *)
 (* lambda bound but NEVER referenced: genuinely dead → no parent→lambda edge *)
 let dead_lambda (x : int) : int =
@@ -263,6 +271,9 @@ chk P1 "reaches try_body_must sink = must (try body is eager)"        "$(verdict
 chk P1 "reaches join_after sink = must (join after a branch is unconditional)" "$(verdict reaches join_after sink)" "PATH EXISTS"
 chk P1 "reaches try_noreturn sink = no must (handler never post-dominates)" "$(verdict reaches try_noreturn sink)" "no MUST path"
 chk P1 "try_noreturn raise edge is MUST (the raise always runs)" "$(sqlite3 "$DB" "SELECT COALESCE(MAX(kind),'MISSING') FROM calls c JOIN functions f ON c.caller_id=f.id WHERE f.name='try_noreturn' AND c.callee_name LIKE '%raise';")" "MUST"
+chk P1 "reaches single_total sink = must (total unguarded single arm always runs)" "$(verdict reaches single_total sink)" "PATH EXISTS"
+chk P1 "reaches single_partial sink = no must (refutable arm may fail)" "$(verdict reaches single_partial sink)" "no MUST path"
+chk P1 "reaches single_guarded sink = no must (guard may fail)" "$(verdict reaches single_guarded sink)" "no MUST path"
 
 echo "── P2: cfg-postdom-dominance targets (computed dominance / lambda nodes / enumerated demotion) ──"
 # R1 — divergence residual closed: code after an unconditional raise is demoted.
