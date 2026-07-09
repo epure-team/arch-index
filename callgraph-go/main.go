@@ -172,8 +172,22 @@ func filePath(fset *token.FileSet, fn *ssa.Function) string {
 }
 
 func isExternalCGO(callee *ssa.Function) bool {
-	return callee != nil && callee.Package() != nil &&
-		callee.Package().Pkg.Path() == "C"
+	if callee == nil {
+		return false
+	}
+	if callee.Package() != nil && callee.Package().Pkg.Path() == "C" {
+		return true
+	}
+	// cgo does not leave callees in package "C": it synthesizes wrapper
+	// functions INSIDE the user's package (_Cfunc_<name>, _cgo*/_Cgo_*
+	// helpers). A call through such a wrapper crosses into C — which can call
+	// back into arbitrary exported Go — so it must be a ⊤ anchor, never MUST
+	// and never MAY_ENUMERATED (a MAY_ENUMERATED cgo edge would let
+	// `unreachable` claim UNREACHABLE across a C callback: false negative).
+	name := callee.Name()
+	return strings.HasPrefix(name, "_Cfunc_") ||
+		strings.HasPrefix(name, "_cgo") ||
+		strings.HasPrefix(name, "_Cgo_")
 }
 
 func isWellKnownTop(callee *ssa.Function) bool {

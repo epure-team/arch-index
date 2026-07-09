@@ -172,6 +172,49 @@ else
   echo "  (DOM_ENUM=0: enumerated-demotion assertions skipped — pre-US-4 behavior)"
 fi
 
+# ---------- cgo wrapper calls are ⊤ anchors (never MAY_ENUMERATED/MUST) ----------
+# cgo synthesizes _Cfunc_* wrappers INSIDE the user's package; a call through one
+# crosses into C (which may call back into arbitrary exported Go), so it must be
+# reclassified to *TOP*/MAY_TOP — otherwise `unreachable` can claim UNREACHABLE
+# across a C callback. Skipped when no C toolchain / CGO disabled.
+if [ "$(go env CGO_ENABLED 2>/dev/null)" = 1 ] && command -v cc >/dev/null 2>&1; then
+  CGOMOD="$TMPDIR_ROOT/cgomod"
+  mkdir -p "$CGOMOD"
+  printf 'module cgocb\ngo 1.21\n' > "$CGOMOD/go.mod"
+  cat > "$CGOMOD/main.go" <<'GOCGO'
+package main
+
+/*
+extern void goCallback();
+static void call_go() { goCallback(); }
+*/
+import "C"
+
+func island() int { return 1 }
+
+//export goCallback
+func goCallback() { island() }
+
+func cgoBranch(b bool) {
+	if b {
+		C.call_go()
+	}
+}
+
+func main() { cgoBranch(true) }
+GOCGO
+  cgo_kind=$("$BIN" "$CGOMOD" 2>/dev/null | python3 -c "
+import sys,json
+for line in sys.stdin:
+    r=json.loads(line)
+    if r.get('type')=='call' and 'cgoBranch' in r.get('caller_name',''):
+        print(r['kind']); break
+")
+  [ "$cgo_kind" = "MAY_TOP" ] || note "cgoBranch's cgo-wrapper call should be MAY_TOP (⊤ anchor), got '${cgo_kind:-none}'"
+else
+  echo "  (cgo assertion skipped: CGO disabled or no C toolchain)"
+fi
+
 # ---------- edge-kind integrity: no un-kinded edges in the produced DB ----------
 bad=$(sqlite3 "$DB" "SELECT count(*) FROM calls WHERE kind IS NULL OR kind NOT IN ('MUST','MAY_ENUMERATED','MAY_TOP');")
 [ "$bad" -eq 0 ] || note "DB has $bad call edges with missing/invalid kind — loader enforcement failed"
