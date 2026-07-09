@@ -556,11 +556,17 @@ let collect_calls_from_expr ~src_path ~caller_module ~caller_name
                   Arch_index_cfg.add_edge g !cb join
               | None -> Arch_index_cfg.add_edge g c_end join) ;
               cb := join
-          | Texp_match (scrut, comp_cases, val_cases, _) ->
-              (* Scrutinee runs unconditionally; every arm is a CFG branch. *)
+          | Texp_match (scrut, comp_cases, val_cases, partiality) ->
+              (* Scrutinee runs unconditionally; every arm is a CFG branch.
+                 A single TOTAL unguarded arm post-dominates the entry (it
+                 always runs — e.g. [match e with () -> body]) and its calls
+                 are legitimately MUST. A [Partial] match (refutable pattern /
+                 guard) additionally gets a Match_failure BYPASS edge so a
+                 lone arm can never forge a MUST. *)
               self.expr self scrut ;
               let s_end = !cb in
               let join = Arch_index_cfg.new_block g in
+              if partiality = Partial then Arch_index_cfg.add_edge g s_end join ;
               let walk_arm : type k. k Typedtree.case -> unit =
                fun c ->
                 let arm = Arch_index_cfg.new_block g in
@@ -780,11 +786,15 @@ let collect_calls_from_expr ~src_path ~caller_module ~caller_name
   in
   let root = peel expr in
   (match root.exp_desc with
-  | Texp_function (_, Tfunction_cases {cases; _}) ->
+  | Texp_function (_, Tfunction_cases {cases; partial; _}) ->
       (* A root [function <cases>] is sugar for [fun x -> match x with <cases>]:
-         each arm is a CFG branch from the entry (conditional on the argument). *)
+         each arm is a CFG branch from the entry. Same partiality rule as
+         [Texp_match]: a Partial function gets a Match_failure bypass edge so a
+         lone refutable/guarded arm cannot forge a MUST; a single TOTAL
+         unguarded arm always runs and is legitimately MUST. *)
       let s_end = !cb in
       let join = Arch_index_cfg.new_block g in
+      if partial = Partial then Arch_index_cfg.add_edge g s_end join ;
       List.iter
         (fun (c : Typedtree.value Typedtree.case) ->
           let arm = Arch_index_cfg.new_block g in
