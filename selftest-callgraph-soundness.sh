@@ -230,6 +230,13 @@ let shadow_bind (f : int -> int) (x : int) : int =
 let partial_bind (x : int) : int -> int =
   let h = fun (a : int) (b : int) -> island (a + b) in
   h x
+(* lambda stored in a tuple (non-argument occurrence): the value escapes, so a
+   parent→lambda enumerated edge must exist — island stays may-reachable, and
+   the lambda node must NOT be orphaned (dead-code false-positive guard) *)
+let stored_bind (x : int) : int =
+  let h () = island x in
+  let t = (h, 0) in
+  ignore t ; x
 ML
 
 ( cd "$MOD" && dune build 2>/tmp/soundness-dune.txt ) \
@@ -312,6 +319,8 @@ chk P1 "unreachable cond_bind island = REACHABLE (arm literals are enumerated oc
 chk P1 "reaches tuple_bind island = no must (tuple pattern not recorded)" "$(verdict reaches tuple_bind island)" "no MUST path"
 chk P1 "reaches shadow_bind island = no must (rebound name is a fresh stamp)" "$(verdict reaches shadow_bind island)" "no MUST path"
 chk P1 "reaches partial_bind island = no must (partial application of bound lambda)" "$(verdict reaches partial_bind island)" "no MUST path"
+chk P1 "unreachable stored_bind island = REACHABLE (tuple-stored lambda escapes)" "$(verdict unreachable stored_bind island)" "REACHABLE (may-reach)"
+chk P1 "stored_bind lambda not orphaned (has an incoming enumerated edge)" "$(sqlite3 "$DB" "SELECT COALESCE(MAX(c.kind),'ORPHAN') FROM calls c WHERE c.callee_name LIKE 'stored_bind.<fun:%';")" "MAY_ENUMERATED"
 
 echo "── P2: cfg-postdom-dominance targets (computed dominance / lambda nodes / enumerated demotion) ──"
 # R1 — divergence residual closed: code after an unconditional raise is demoted.
