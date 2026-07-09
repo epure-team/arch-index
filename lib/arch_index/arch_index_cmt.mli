@@ -111,22 +111,32 @@ type pending_dep = {
   line_number : int;
 }
 
-(** How a collected call's edge-kind is decided at resolution time. *)
-type call_kind_hint =
-  | Resolve  (** resolve via fn_lookup → MUST (indexed) or MUST leaf (external) *)
-  | May_top  (** unresolvable target (computed head / parameter / closure) → MAY_TOP *)
-  | May_enumerated
-      (** a named local function passed as a function-typed argument → MAY_ENUMERATED *)
+(** What is statically known about a call's TARGET, independent of whether the
+    call is conditional (see the .ml for the full taxonomy). *)
+type call_head =
+  | Head_local of string  (** same-module top-level fn — MUST candidate *)
+  | Head_qualified of string option * string
+      (** resolved qualified [(module, name)] — MUST candidate / external leaf *)
+  | Head_enumerated of string
+      (** named local fn passed as a callback → bounded candidate set *)
+  | Head_unknown of string
+      (** unknowable target (param / computed / dynamic root / residual) *)
 
-(** Collected call information before resolution. *)
+(** Collected call information before resolution. [cond] is computed by CFG
+    post-dominance: [false] iff the call's basic block runs on EVERY execution
+    of the enclosing function. [partial] marks under-saturated applications. *)
 type pending_call = {
   caller_module : string;
   caller_name : string;
-  callee_name : string;
-  callee_module : string option;
+  head : call_head;
+  partial : bool;
+  cond : bool;
   call_site : string;
-  kind_hint : call_kind_hint;
 }
+
+(** Flat [(name, module)] display of a pending call's callee, for kind-less
+    consumers (the LSP fallback path). *)
+val pending_display : pending_call -> string * string option
 
 (** [collect_calls_from_expr ~src_path ~caller_module ~caller_name expr]
     walks [expr] and returns all function-application call edges. *)
