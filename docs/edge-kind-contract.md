@@ -10,6 +10,21 @@ arch-index tags every `calls` row with a `kind` value that encodes what is stati
 
 When a backend produces a ⊤-marked index it sets `callgraph_contract = v1` in `comment_db_meta`. Backends that cannot tag edges must not produce a DB at all — the loader aborts on missing or invalid `kind` values (exit 2) to prevent a silent false-confidence index.
 
+### Backends
+
+| Backend | Edge kinds | Notes |
+|---|---|---|
+| Go SSA (`callgraph-go` → `arch-load`) | ✅ | static callee → `MUST`; CHA candidate set → `MAY_ENUMERATED`; interface/closure/reflection/cgo → `MAY_TOP` |
+| OCaml CMT (`arch-callgraph-ocaml`) | ⚠️ partial | direct top-level call → `MUST`; qualified/external → `MUST` leaf; applied parameter/closure or computed head → `MAY_TOP`; named local function passed as a callback → `MAY_ENUMERATED`. Resolution is `Ident`-stamp-based, so a parameter/local that shadows a top-level name is correctly `MAY_TOP` (not a spurious `MUST`). |
+
+**OCaml MUST-soundness is being hardened (execution-sound redesign in progress).** The current
+walker still attributes calls inside *un-invoked* nested function/lambda bodies as `MUST` of the
+enclosing function (a false `MUST`), and drops a computed-function callback / a first-class-module
+parameter call to a `MUST` leaf instead of `MAY_TOP` (a false `UNREACHABLE`). These exact cases are
+pinned as `PHASE2` targets in `selftest-callgraph-soundness.sh`; the redesign models nested/lambda
+bodies as deferred and links them only when invoked or passed. Until it lands, treat OCaml
+`reaches`/`unreachable` as sound for the `PHASE1`-covered cases and best-effort for the rest.
+
 ## Reachability semantics
 
 **`reaches A B`** — MUST-only under-approximation.

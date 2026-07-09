@@ -149,10 +149,11 @@ let insert_constructor db stmt_ctor ~type_id ~constructor_name ~position
   bind_text_opt stmt_ctor 4 arg_types ;
   exec_stmt db stmt_ctor
 
-let insert_call db stmt_call ~caller_id ~callee_id ~callee_name ~call_site =
+let insert_call db stmt_call ~caller_id ~callee_id ~callee_name ~call_site ~kind =
   bind_int stmt_call 1 caller_id ;
   bind_text stmt_call 3 callee_name ;
   bind_text_opt stmt_call 4 call_site ;
+  bind_text stmt_call 5 kind ;
   (match callee_id with
   | Some id -> bind_int stmt_call 2 id
   | None -> ignore (Sqlite3.bind stmt_call 2 Sqlite3.Data.NULL)) ;

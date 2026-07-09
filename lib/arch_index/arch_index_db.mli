@@ -294,6 +294,7 @@ val insert_call :
   callee_id:int option ->
   callee_name:string ->
   call_site:string option ->
+  kind:string ->
   unit
 
 (** Insert a module dependency.

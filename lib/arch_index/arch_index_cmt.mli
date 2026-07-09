@@ -111,6 +111,13 @@ type pending_dep = {
   line_number : int;
 }
 
+(** How a collected call's edge-kind is decided at resolution time. *)
+type call_kind_hint =
+  | Resolve  (** resolve via fn_lookup → MUST (indexed) or MUST leaf (external) *)
+  | May_top  (** unresolvable target (computed head / parameter / closure) → MAY_TOP *)
+  | May_enumerated
+      (** a named local function passed as a function-typed argument → MAY_ENUMERATED *)
+
 (** Collected call information before resolution. *)
 type pending_call = {
   caller_module : string;
@@ -118,14 +125,20 @@ type pending_call = {
   callee_name : string;
   callee_module : string option;
   call_site : string;
+  kind_hint : call_kind_hint;
 }
 
 (** [collect_calls_from_expr ~src_path ~caller_module ~caller_name expr]
     walks [expr] and returns all function-application call edges. *)
+(** [is_function_rhs e] is [true] iff [e] is a syntactic function body — the
+    only binding shape treated as a statically-callable (MUST) node. *)
+val is_function_rhs : Typedtree.expression -> bool
+
 val collect_calls_from_expr :
   src_path:string ->
   caller_module:string ->
   caller_name:string ->
+  local_fn_stamps:(string, unit) Hashtbl.t ->
   Typedtree.expression ->
   pending_call list
 
