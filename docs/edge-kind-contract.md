@@ -4,7 +4,7 @@ arch-index tags every `calls` row with a `kind` value that encodes what is stati
 
 | `calls.kind` | Meaning | Use |
 |---|---|---|
-| `MUST` | Uniquely-resolved static call | `reaches` (a positive path = must-reach ground truth) |
+| `MUST` | Uniquely-resolved static call that runs on **every** execution of the caller (dominance) | `reaches` (a positive path = must-reach ground truth) |
 | `MAY_ENUMERATED` | Dynamic call bounded to a candidate set (e.g. all interface implementers) | Over-approx closure for `unreachable` |
 | `MAY_TOP` | Unresolvable / dynamic / reflective / FFI call — **could call anything** | Forces `UNKNOWN`; never silently dropped |
 
@@ -14,21 +14,72 @@ When a backend produces a ⊤-marked index it sets `callgraph_contract = v1` in 
 
 | Backend | Edge kinds | Notes |
 |---|---|---|
-| Go SSA (`callgraph-go` → `arch-load`) | ✅ | static callee → `MUST`; CHA candidate set → `MAY_ENUMERATED`; interface/closure/reflection/cgo → `MAY_TOP` |
-| OCaml CMT (`arch-callgraph-ocaml`) | ⚠️ partial | direct top-level call → `MUST`; qualified/external → `MUST` leaf; applied parameter/closure or computed head → `MAY_TOP`; named local function passed as a callback → `MAY_ENUMERATED`. Resolution is `Ident`-stamp-based, so a parameter/local that shadows a top-level name is correctly `MAY_TOP` (not a spurious `MUST`). |
+| Go SSA (`callgraph-go` → `arch-load`) | ✅ execution-sound | A statically-resolved call (`StaticCallee() != nil`) is `MUST` only if its SSA basic block **post-dominates the function entry** (runs on every execution); a call in an `if`/`switch`/`select`/loop block is demoted to `MAY_TOP`. CHA candidate set → `MAY_ENUMERATED`; interface/closure/reflection/cgo → `MAY_TOP`. Output is emitted in deterministic sorted order. |
+| OCaml CMT (`arch-callgraph-ocaml`) | ✅ execution-sound | A call is `MUST` only if it runs on **every** execution of the enclosing function (dominance): it sits on the unconditional straight-line path and resolves to a unique same-module/qualified target. Every call in a position that is *not* guaranteed to run is demoted to `MAY_TOP`. Named local function passed as a callback → `MAY_ENUMERATED`. Resolution is `Ident`-stamp-based, so a parameter/local that shadows a top-level name is correctly `MAY_TOP` (not a spurious `MUST`). |
 
-**OCaml MUST-soundness is being hardened (execution-sound redesign in progress).** The current
-walker still attributes calls inside *un-invoked* nested function/lambda bodies as `MUST` of the
-enclosing function (a false `MUST`), and drops a computed-function callback / a first-class-module
-parameter call to a `MUST` leaf instead of `MAY_TOP` (a false `UNREACHABLE`). These exact cases are
-pinned as `PHASE2` targets in `selftest-callgraph-soundness.sh`; the redesign models nested/lambda
-bodies as deferred and links them only when invoked or passed. Until it lands, treat OCaml
-`reaches`/`unreachable` as sound for the `PHASE1`-covered cases and best-effort for the rest.
+**Both backends now define `MUST` as execution-sound dominance** — the definitions agree, so a
+`reaches`/`unreachable` verdict means the same thing regardless of source language. The Go backend
+computes dominance precisely over the SSA control-flow graph (post-dominators); the OCaml backend
+approximates it syntactically over the Typedtree (no CFG). See the shared-residuals note below for
+the two places this dominance is deliberately *insensitive*.
+
+### OCaml dominance-MUST — what is demoted to `MAY_TOP`
+
+A `MUST` edge is *execution-sound*: it never over-claims that a call happens. The walker
+(`arch_index_cmt.ml`, `collect_calls_from_expr`) demotes a call to `MAY_TOP` whenever it sits in a
+position that is not guaranteed to run on every execution of the enclosing function:
+
+- **Deferred bodies** — function literals (`fun …`), `lazy` thunks, object method bodies, and
+  un-applied functor bodies: they run only if invoked / forced / applied.
+- **Conditional bodies** — `if`/`match` arms, `try` handlers, loop bodies (`while`/`for`, which may
+  iterate zero times), and the right operand of a short-circuit `&&` / `||`.
+- **Optional-argument default expressions** (`?(x = e)`) — `e` runs only when the caller omits `x`.
+
+Only the genuinely-unconditional positions stay at `MUST`: a sequence step, a `let`-binding RHS, the
+scrutinee of a `match`, an `if` condition, a `try` body, the left operand of `&&`/`||`, and call
+arguments. Demoted calls are **never dropped** — they are still recorded as `MAY_TOP`, so
+`unreachable` stays a sound over-approximation. These cases are locked by
+`selftest-callgraph-soundness.sh` (run `STRICT=1` in CI).
+
+### Shared residuals (accepted) — where dominance is deliberately insensitive
+
+Both backends' dominance is **termination-, exception-, and divergence-insensitive**, the standard
+approximation of every practical intraprocedural analysis without a whole-program termination /
+`noreturn` oracle. Concretely, a call is still `MUST` even when a *preceding* construct may prevent
+it from running:
+
+- **After a possibly-non-terminating loop** — `while c do … done; f ()` marks `f` `MUST` though the
+  loop may spin forever.
+- **After a call that may raise/panic/exit** — `g (); f ()` (or Go `mayPanic(); f()`) marks `f`
+  `MUST` though `g` may divert.
+- **After an *unconditional* divergence** — `raise Exit; f ()` / `failwith …; f ()` / Go
+  `os.Exit(0); f()` marks `f` `MUST` though `f` is dead code.
+- An `assert` condition is treated as conditional (`MAY_TOP`) since `-noassert` elides it — a mild
+  under-claim, the opposite (safe) direction.
+
+Every one of these only ever **over-claims `reaches`** (a must-path that might not run) — the
+fail-safe direction for a blocking gate. **None can produce a false `UNREACHABLE`**: the calls are
+always recorded, so `unreachable` (the security-critical over-approximation) stays sound. Closing
+these would require a `noreturn`/termination analysis (a curated diverging-function set plus loop
+termination reasoning); tracked as future work, not a soundness blocker for `unreachable`.
+
+Both backends also share one **precision** limitation (not a soundness issue): when *every* arm of
+a branch calls the same target (`if b then f () else f ()`), the call is `MAY_TOP`, not `MUST` —
+neither backend reasons about callee-level coverage across mutually-exclusive blocks.
+
+**Precision follow-up (not soundness):** the syntactic walk approximates dominance without a real
+control-flow graph, so ~76% of self-index edges are `MAY_TOP` — sound but blunt. The precise version
+builds a per-function CFG + post-dominator tree (MUST = post-dominance) and recovers precision by
+linking invoked higher-order-function bodies; see
+[docs/research/control-flow-coverage-analysis.md](research/control-flow-coverage-analysis.md).
 
 ## Reachability semantics
 
 **`reaches A B`** — MUST-only under-approximation.
-A positive result (`PATH EXISTS (must-reach)`) is ground truth: there is a definite static call chain from A to B. A negative result does not prove unreachability — dynamic edges may exist.
+A positive result (`PATH EXISTS (must-reach)`) is ground truth: there is a call chain from A to B in
+which **every hop runs on every execution** of its caller (each edge is a dominance-`MUST`). A
+negative result (`no MUST path`) does not prove unreachability — the call may still happen on some
+executions via `MAY_*` edges (use `unreachable` for that direction).
 
 **`unreachable A B`** — sound over-approximation (requires ⊤-marking).
 Returns one of three verdicts:
