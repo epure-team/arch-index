@@ -486,6 +486,37 @@ let collect_calls_from_expr ~src_path ~caller_module ~caller_name
           add_call (Head_unknown disp) loc
         else add_call (Head_qualified (callee_module, callee_name)) loc
   in
+  (* Diverging (noreturn) application head: a SATURATED call whose head Path
+     resolves to a Stdlib primitive that never returns. Path-based detection is
+     shadow-proof (a local [let failwith x = …] resolves to a Pident, not
+     Stdlib); [raise] as an argument / partial / eta-expanded is not an applied
+     head here. All listed heads have arity 1. *)
+  let noreturn_head (fn : Typedtree.expression) nargs =
+    nargs >= 1
+    &&
+    match fn.exp_desc with
+    | Texp_ident (path, _, _) -> (
+        match path_to_module_name path with
+        | ( Some "Stdlib",
+            ("raise" | "raise_notrace" | "failwith" | "invalid_arg" | "exit") )
+          ->
+            true
+        | _ -> false)
+    | _ -> false
+  in
+  (* Terminate the current block as diverging: inside a [try] body it FIRST
+     edges to the innermost handler dispatch (the handler may catch — added
+     before [terminate], which freezes successors) and always flows to the
+     virtual exit (the handler may not match / no handler). Execution resumes
+     in a fresh block with NO incoming edge: code after the divergence is
+     entry-unreachable → recorded, demoted, never dropped. *)
+  let diverge () =
+    (match !handler_stack with
+    | dispatch :: _ -> Arch_index_cfg.add_edge g !cb dispatch
+    | [] -> ()) ;
+    Arch_index_cfg.terminate g !cb ;
+    cb := Arch_index_cfg.new_block g
+  in
   (* [&&] and [||] short-circuit: the right operand runs only conditionally. *)
   let short_circuit_arity (fn : Typedtree.expression) =
     match fn.exp_desc with
@@ -638,9 +669,17 @@ let collect_calls_from_expr ~src_path ~caller_module ~caller_name
               self.expr self body ;
               Arch_index_cfg.add_edge g !cb head ;
               cb := after
-          | Texp_assert (e, _) ->
-              (* Assertion condition is elided under -noassert → conditional. *)
-              walk_conditional e
+          | Texp_assert (e, _) -> (
+              match e.exp_desc with
+              | Texp_construct (_, {cstr_name = "false"; _}, _) ->
+                  (* [assert false] is NEVER elided by -noassert (compiler
+                     special case) and always diverges → block terminator. *)
+                  diverge ()
+              | _ ->
+                  (* Ordinary assertion: condition elided under -noassert →
+                     conditional; fall-through only (may-raise is the accepted
+                     exception-insensitivity residual). *)
+                  walk_conditional e)
           | Texp_letop {let_; ands; body; _} ->
               (* [let* y = e and* z = e' in body]: the bind operators are applied
                  unconditionally, their operands run eagerly, but [body] is the
@@ -739,7 +778,12 @@ let collect_calls_from_expr ~src_path ~caller_module ~caller_name
                   | [] -> ())
               | None ->
                   (* Descend into fn + args (nested constructs split blocks). *)
-                  default_iterator.expr self expr)
+                  default_iterator.expr self expr) ;
+              (* Diverging head (raise/failwith/…): terminate AFTER the head
+                 call and its argument evaluations were recorded in this block
+                 (they all run), so the raise itself can be MUST while
+                 everything sequenced after it lands entry-unreachable. *)
+              if noreturn_head fn_expr nargs then diverge ()
           | _ -> default_iterator.expr self expr);
       module_expr =
         (fun self me ->
