@@ -149,8 +149,6 @@ type lambda_node = {
   lam_arity : int;
 }
 
-(** [collect_calls_from_expr ~src_path ~caller_module ~caller_name expr]
-    walks [expr] and returns all function-application call edges. *)
 (** [is_function_rhs e] is [true] iff [e] is a syntactic function body — the
     only binding shape treated as a statically-callable (MUST) node. *)
 val is_function_rhs : Typedtree.expression -> bool
@@ -160,6 +158,17 @@ val is_function_rhs : Typedtree.expression -> bool
     non-function expression has arity 0. *)
 val fn_arity : Typedtree.expression -> int
 
+(** Shared pre-pass: top-level function-binder stamps ([Ident.unique_name]) →
+    syntactic arity, over a whole structure (covers forward references and
+    [let rec … and …] groups). Used by both the main indexer and the LSP
+    fallback so the two paths cannot drift. *)
+val build_local_fn_stamps : Typedtree.structure -> (string, int) Hashtbl.t
+
+(** [collect_calls_from_expr ~src_path ~caller_module ~caller_name
+    ~local_fn_stamps expr] lowers [expr] onto per-node CFGs and returns the
+    collected call edges plus the promoted lambda nodes. [local_fn_stamps] maps
+    same-module top-level function-binder stamps ([Ident.unique_name]) to their
+    syntactic arity. *)
 val collect_calls_from_expr :
   src_path:string ->
   caller_module:string ->

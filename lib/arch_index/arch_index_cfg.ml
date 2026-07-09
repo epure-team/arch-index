@@ -93,15 +93,23 @@ let solve g =
   else begin
     (* pdom.(i) : bool array over 0..n — the set of nodes post-dominating i.
        Init: full set for real blocks, {exit} for the exit. Iterate
-       pdom(i) = {i} ∪ ∩_{s ∈ succ(i)} pdom(s) to fixpoint. *)
+       pdom(i) = {i} ∪ ∩_{s ∈ succ(i)} pdom(s) to fixpoint.
+
+       Post-dominance is a BACKWARD dataflow problem and blocks are allocated
+       roughly in program order (successors after predecessors), so iterating
+       in DESCENDING index order propagates facts from the exit in ~2 passes
+       instead of one-block-per-pass (which made a 2000-branch function take
+       minutes). One scratch row is reused across all blocks — no per-block
+       allocation. *)
     let pdom = Array.init (n + 1) (fun _ -> Array.make (n + 1) true) in
     Array.fill pdom.(exit) 0 (n + 1) false ;
     pdom.(exit).(exit) <- true ;
+    let next = Array.make (n + 1) true in
     let changed = ref true in
     while !changed do
       changed := false ;
-      for i = 0 to n - 1 do
-        let next = Array.make (n + 1) true in
+      for i = n - 1 downto 0 do
+        Array.fill next 0 (n + 1) true ;
         List.iter
           (fun s ->
             let ps = pdom.(s) in
@@ -110,14 +118,15 @@ let solve g =
             done)
           succ.(i) ;
         next.(i) <- true ;
+        let row = pdom.(i) in
         let diff = ref false in
         for k = 0 to n do
-          if next.(k) <> pdom.(i).(k) then diff := true
+          if next.(k) <> row.(k) then begin
+            diff := true ;
+            row.(k) <- next.(k)
+          end
         done ;
-        if !diff then begin
-          pdom.(i) <- next ;
-          changed := true
-        end
+        if !diff then changed := true
       done
     done ;
     (* a block runs on every execution iff it post-dominates the entry AND is

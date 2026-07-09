@@ -80,12 +80,15 @@ raw_dropped=$(LC_ALL=C comm -23 /tmp/cgdiff-old-sites.txt /tmp/cgdiff-new-sites.
 #       lambda-node callee (local-lambda invocation renamed to the node).
 # Everything else is a REAL drop.
 dropped=$(echo "$raw_dropped" | awk -F'|' '
-  FILENAME ~ /lamsites/    { lam[$0]=1; next }
   FILENAME ~ /lamcallersites/ { lamsite[$0]=1; next }
+  FILENAME ~ /lamsites/    { lam[$0]=1; next }
   $2=="*TOP*" && ($1 in lam) { next }
-  (($1"`"$3) in lamsite) { next }
+  # rule (b) is deliberately narrow: only an old BARE-LOCAL-NAME callee (no
+  # module qualifier, not *TOP*) may be a renamed local-lambda invocation —
+  # a qualified or *TOP* callee dropped at a lambda-edge site is a REAL drop.
+  $2 != "*TOP*" && index($2, ".") == 0 && (($1"`"$3) in lamsite) { next }
   NF { print }
-' /tmp/cgdiff-new-lamsites.txt /tmp/cgdiff-new-lamcallersites.txt -)
+' /tmp/cgdiff-new-lamcallersites.txt /tmp/cgdiff-new-lamsites.txt -)
 added=$(LC_ALL=C comm -13 /tmp/cgdiff-old-sites.txt /tmp/cgdiff-new-sites.txt | wc -l)
 replaced=$(( $(echo "$raw_dropped" | grep -c . || true) - $(echo "$dropped" | grep -c . || true) ))
 echo "== sanctioned *TOP*→lambda replacements: $replaced =="
@@ -94,10 +97,6 @@ echo "== kind distribution =="
 echo "old:"; sqlite3 "$OLD_DB" "SELECT '  '||kind||': '||count(*) FROM calls GROUP BY kind;"
 echo "new:"; sqlite3 "$NEW_DB" "SELECT '  '||kind||': '||count(*) FROM calls GROUP BY kind;"
 echo "== kind movements (old-kind → new-kind, per shared site) =="
-join -t'|' -j1 \
-  <(awk -F'|' '{print $1"|"$2"|"$3"\t"$4}' /tmp/cgdiff-old.txt | sort -u | awk -F'\t' '{print $1"|"$2}' OFS='|' | sort -t'|' -u) \
-  /dev/null 2>/dev/null || true
-# simpler movement report via sqlite
 sqlite3 "" <<SQL
 ATTACH '$OLD_DB' AS o; ATTACH '$NEW_DB' AS n;
 SELECT '  '||ok||' -> '||nk||': '||count(*) FROM (

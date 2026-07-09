@@ -404,6 +404,33 @@ let rec fn_arity (e : Typedtree.expression) =
   | Texp_function (params, Tfunction_cases _) -> List.length params + 1
   | _ -> 0
 
+(** Pre-pass shared by the main indexer and the LSP fallback: the table of
+    top-level bindings whose RHS is a real function body, mapping the binder's
+    [Ident.unique_name] stamp to its syntactic arity. A same-module unqualified
+    call resolves to a MUST candidate only if the callee's stamp is in this
+    table; everything else (parameters, locals, function-typed values with
+    non-function RHS) is unknowable. Whole-structure pass so forward references
+    and [let rec … and …] groups are all covered. *)
+let build_local_fn_stamps (structure : Typedtree.structure) =
+  let local_fn_stamps = Hashtbl.create 64 in
+  List.iter
+    (fun (it : Typedtree.structure_item) ->
+      match it.str_desc with
+      | Tstr_value (_, vbs) ->
+          List.iter
+            (fun (vb : Typedtree.value_binding) ->
+              match vb.vb_pat.pat_desc with
+              | Tpat_var (id, _, _) when is_function_rhs vb.vb_expr ->
+                  Hashtbl.replace
+                    local_fn_stamps
+                    (Ident.unique_name id)
+                    (fn_arity vb.vb_expr)
+              | _ -> ())
+            vbs
+      | _ -> ())
+    structure.str_items ;
+  local_fn_stamps
+
 (** Walk a value binding expression to collect all function calls.
     [local_fn_stamps] is the set of [Ident.stamp]s of same-module top-level
     function-body bindings; an applied unqualified identifier counts as a
@@ -472,7 +499,10 @@ let collect_calls_from_expr ~src_path ~caller_module ~caller_name
   let head_idents = Hashtbl.create 8 in
   (* forward ref: walks a promoted literal's peeled body in the current ctx
      (defined after the iterator, which it mutually uses). *)
-  let walk_fn_body_ref = ref (fun (_ : Typedtree.expression) -> ()) in
+  let walk_fn_body_ref =
+    ref (fun (_ : Typedtree.expression) ->
+        invalid_arg "walk_fn_body_ref used before initialization")
+  in
   (* Node name for a literal at [loc], chained under the current caller:
      [<caller>.<fun:LINE:COL>] with 1-based column and a [#N] in-marker ordinal
      on a same-position collision (ghost/ppx locs). *)
@@ -489,10 +519,13 @@ let collect_calls_from_expr ~src_path ~caller_module ~caller_name
      closure with an unknowable target → MAY_TOP. *)
   let ident_is_local_fn id = Hashtbl.mem local_fn_stamps (Ident.unique_name id) in
   let local_fn_arity id = Hashtbl.find_opt local_fn_stamps (Ident.unique_name id) in
-  (* True iff [ty] is a function type. Expands type aliases first (via the
-     expression's own env) so an arrow hidden behind [type unary = int -> int]
-     is still recognised — otherwise a partial application returning [unary]
-     would evade the under-saturation check and forge a MUST edge. *)
+  (* True iff [ty] is SYNTACTICALLY a function type. No alias expansion:
+     .cmt-restored environments do not carry manifest type declarations, so
+     [type unary = int -> int] cannot be expanded here. Same-module partial
+     applications are protected by the SYNTACTIC arity tables instead
+     (local_fn_stamps / local_lam_stamps); the residual is a CROSS-module
+     partial application whose result arrow hides behind an alias in the
+     callee's interface — its head stays MUST (documented residual). *)
   let is_arrow ty =
     match Types.get_desc ty with Tarrow _ -> true | _ -> false
   in
@@ -836,18 +869,21 @@ let collect_calls_from_expr ~src_path ~caller_module ~caller_name
                      exception-insensitivity residual). *)
                   walk_conditional e)
           | Texp_letop {let_; ands; body; _} ->
-              (* [let* y = e and* z = e' in body]: the bind operators are applied
-                 unconditionally, their operands run eagerly, but [body] is the
-                 continuation the bind operator may or may not invoke (e.g.
-                 [let*] on [None] short-circuits) → a conditional region. *)
+              (* [let* y = e and* z = e' in body]: the operands run eagerly and
+                 the bind operators are applied AFTER them — so the operand
+                 expressions are walked first and the operator calls recorded in
+                 the block reached afterwards (a diverging operand like
+                 [let* y = raise Exit in …] demotes the operator, same ordering
+                 rule as Texp_apply). [body] is the continuation the bind
+                 operator may or may not invoke → a conditional region. *)
+              self.expr self let_.bop_exp ;
+              List.iter
+                (fun (b : Typedtree.binding_op) -> self.expr self b.bop_exp)
+                ands ;
               add_path_call let_.bop_op_path let_.bop_loc ;
               List.iter
                 (fun (b : Typedtree.binding_op) ->
                   add_path_call b.bop_op_path b.bop_loc)
-                ands ;
-              self.expr self let_.bop_exp ;
-              List.iter
-                (fun (b : Typedtree.binding_op) -> self.expr self b.bop_exp)
                 ands ;
               let c = new_blk () in
               let join = new_blk () in
@@ -870,6 +906,12 @@ let collect_calls_from_expr ~src_path ~caller_module ~caller_name
                  defeats type inspection on a .cmt-restored env; otherwise use
                  the callee's type arrow arity. *)
               let nargs = List.length args in
+              (* A literal head's edge is emitted by record_head (Head_local to
+                 the node) — suppress the literal visit's occurrence edge. *)
+              (match fn_expr.exp_desc with
+              | Texp_function _ ->
+                  Hashtbl.replace binding_literals fn_expr.exp_loc ()
+              | _ -> ()) ;
               let head_arity =
                 match fn_expr.exp_desc with
                 | Texp_ident (Path.Pident id, _, _) when ident_is_local_fn id ->
@@ -929,6 +971,14 @@ let collect_calls_from_expr ~src_path ~caller_module ~caller_name
                         ~partial
                         (Head_qualified (callee_module, callee_name))
                         expr.exp_loc
+                | Texp_function _ -> (
+                    (* Immediately-applied literal (beta-redex): the head IS
+                       the lambda node named during the descent — a resolved
+                       target, never ⊤ (MUST when always-exec + saturated). *)
+                    match Hashtbl.find_opt lam_names fn_expr.exp_loc with
+                    | Some node_name ->
+                        add_call ~partial (Head_local node_name) expr.exp_loc
+                    | None -> add_call ~partial (Head_unknown "*TOP*") expr.exp_loc)
                 | _ ->
                     (* Computed function head → unresolvable. *)
                     add_call ~partial (Head_unknown "*TOP*") expr.exp_loc) ;
@@ -1127,29 +1177,7 @@ let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
               let pending_calls = ref [] in
               let pending_deps = ref [] in
               let pending_type_usages = ref [] in
-              (* Pre-pass: the set of Ident.stamps of top-level bindings whose
-                 RHS is a real function body. A same-module unqualified call
-                 resolves to MUST only if the callee's stamp is in this set;
-                 everything else (parameters, locals, function-typed values with
-                 non-function RHS) is MAY_TOP. Whole-structure pass so forward
-                 references and `let rec … and …` groups are all covered. *)
-              let local_fn_stamps = Hashtbl.create 64 in
-              List.iter
-                (fun (it : Typedtree.structure_item) ->
-                  match it.str_desc with
-                  | Tstr_value (_, vbs) ->
-                      List.iter
-                        (fun (vb : Typedtree.value_binding) ->
-                          match vb.vb_pat.pat_desc with
-                          | Tpat_var (id, _, _) when is_function_rhs vb.vb_expr ->
-                              Hashtbl.replace
-                                local_fn_stamps
-                                (Ident.unique_name id)
-                                (fn_arity vb.vb_expr)
-                          | _ -> ())
-                        vbs
-                  | _ -> ())
-                structure.str_items ;
+              let local_fn_stamps = build_local_fn_stamps structure in
               let add_dep target_path dep_kind alias_name line_number =
                 pending_deps :=
                   {

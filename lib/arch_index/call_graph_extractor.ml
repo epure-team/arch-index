@@ -186,26 +186,10 @@ let extract_calls_from_cmts ~project_dir fn_rows =
                     let pending = ref [] in
                     (* Same-module top-level function-body stamps: an applied
                        unqualified identifier is MUST-resolvable only if its
-                       stamp is here (see Arch_index_cmt.collect_calls_from_expr). *)
-                    let local_fn_stamps = Hashtbl.create 64 in
-                    List.iter
-                      (fun (item : Typedtree.structure_item) ->
-                        match item.str_desc with
-                        | Typedtree.Tstr_value (_, vbs) ->
-                            List.iter
-                              (fun (vb : Typedtree.value_binding) ->
-                                match vb.vb_pat.pat_desc with
-                                | Typedtree.Tpat_var (id, _, _)
-                                  when Arch_index_cmt.is_function_rhs vb.vb_expr
-                                  ->
-                                    Hashtbl.replace
-                                      local_fn_stamps
-                                      (Ident.unique_name id)
-                                      (Arch_index_cmt.fn_arity vb.vb_expr)
-                                | _ -> ())
-                              vbs
-                        | _ -> ())
-                      structure.Typedtree.str_items ;
+                       stamp is here — shared pre-pass with the main indexer. *)
+                    let local_fn_stamps =
+                      Arch_index_cmt.build_local_fn_stamps structure
+                    in
                     List.iter
                       (fun (item : Typedtree.structure_item) ->
                         match item.str_desc with
