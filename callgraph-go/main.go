@@ -522,9 +522,13 @@ func main() {
 					calleeName := funcName(static)
 					kind := "MUST"
 					// Dominance: MUST only if this call runs on every execution
-					// of fn; a conditional/looped call is demoted to MAY_TOP.
+					// of fn. A conditional/looped call with a uniquely-resolved
+					// callee demotes to MAY_ENUMERATED (candidate set of one) —
+					// it either calls that exact callee or nothing, so it never
+					// forges a ⊤ frontier. MAY_TOP stays reserved for truly
+					// unknowable targets (the reclassification below wins last).
 					if !pdCache.runsAlways(fn, b) {
-						kind = "MAY_TOP"
+						kind = "MAY_ENUMERATED"
 					}
 					if isWellKnownTop(static) || isExternalCGO(static) {
 						calleeName = "*TOP*"
@@ -578,11 +582,13 @@ func main() {
 				// Dominance: a uniquely-resolved static call is MUST only if it
 				// runs on every execution of the caller. A call in an
 				// if/switch/loop arm (block does not post-dominate entry) is
-				// conditional → demote to MAY_TOP (keep the resolved callee name;
-				// MAY_TOP is detected by kind, so the ⊤ frontier still forces
-				// UNKNOWN and the edge is excluded from the MUST closure).
+				// conditional → demote to MAY_ENUMERATED (candidate set of one:
+				// it either calls that exact callee or nothing, so it never
+				// forges a ⊤ frontier; unreachable stays decidable). MAY_TOP is
+				// reserved for truly unknowable targets — the well-known-⊤
+				// reclassification below always wins last.
 				if !pdCache.runsAlways(caller, edge.Site.Block()) {
-					kind = "MAY_TOP"
+					kind = "MAY_ENUMERATED"
 				}
 			}
 
