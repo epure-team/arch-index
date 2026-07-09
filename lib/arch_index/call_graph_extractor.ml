@@ -201,7 +201,7 @@ let extract_calls_from_cmts ~project_dir fn_rows =
                                     Hashtbl.replace
                                       local_fn_stamps
                                       (Ident.unique_name id)
-                                      ()
+                                      (Arch_index_cmt.fn_arity vb.vb_expr)
                                 | _ -> ())
                               vbs
                         | _ -> ())

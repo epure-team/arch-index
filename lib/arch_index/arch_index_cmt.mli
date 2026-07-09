@@ -134,11 +134,16 @@ type pending_call = {
     only binding shape treated as a statically-callable (MUST) node. *)
 val is_function_rhs : Typedtree.expression -> bool
 
+(** [fn_arity e] is the syntactic arity (leading parameter count) of a function
+    binding's RHS — used to detect partial (under-saturated) applications. A
+    non-function expression has arity 0. *)
+val fn_arity : Typedtree.expression -> int
+
 val collect_calls_from_expr :
   src_path:string ->
   caller_module:string ->
   caller_name:string ->
-  local_fn_stamps:(string, unit) Hashtbl.t ->
+  local_fn_stamps:(string, int) Hashtbl.t ->
   Typedtree.expression ->
   pending_call list
 
