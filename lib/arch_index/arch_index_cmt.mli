@@ -138,6 +138,17 @@ type pending_call = {
     consumers (the LSP fallback path). *)
 val pending_display : pending_call -> string * string option
 
+(** A synthetic function node for a nested [fun …]/[function] literal
+    ([parent.<fun:LINE:COL>], chained through enclosing nodes, [#N] in-marker
+    ordinal on a same-position collision). Its body's calls are attributed to
+    this node under its own CFG. *)
+type lambda_node = {
+  lam_name : string;
+  lam_line_start : int;
+  lam_line_end : int;
+  lam_arity : int;
+}
+
 (** [collect_calls_from_expr ~src_path ~caller_module ~caller_name expr]
     walks [expr] and returns all function-application call edges. *)
 (** [is_function_rhs e] is [true] iff [e] is a syntactic function body — the
@@ -155,7 +166,7 @@ val collect_calls_from_expr :
   caller_name:string ->
   local_fn_stamps:(string, int) Hashtbl.t ->
   Typedtree.expression ->
-  pending_call list
+  pending_call list * lambda_node list
 
 (** Collected type usage information. *)
 type pending_type_usage = {

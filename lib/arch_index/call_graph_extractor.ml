@@ -215,7 +215,7 @@ let extract_calls_from_cmts ~project_dir fn_rows =
                                 match vb.vb_pat.pat_desc with
                                 | Typedtree.Tpat_var (id, _, _) ->
                                     let caller_name = Ident.name id in
-                                    let calls =
+                                    let calls, _lam_nodes =
                                       Arch_index_cmt.collect_calls_from_expr
                                         ~src_path:rel_src
                                         ~caller_module:rel_src
@@ -223,6 +223,9 @@ let extract_calls_from_cmts ~project_dir fn_rows =
                                         ~local_fn_stamps
                                         vb.vb_expr
                                     in
+                                    (* Flat path: lambda-attributed calls flow
+                                       through with synthetic caller names; no
+                                       function rows here (kind-less schema). *)
                                     pending := calls @ !pending
                                 | _ -> ())
                               vbs
