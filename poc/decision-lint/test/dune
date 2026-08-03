@@ -1,0 +1,7 @@
+; The fixture is intentionally full of dead logic, so warnings are off. Building
+; it produces test/fixture.cmt, which lets the Typedtree frontend be validated
+; against the very same corpus as the Parsetree one.
+(library
+ (name fixture_lib)
+ (modules fixture)
+ (flags (:standard -w -a)))
