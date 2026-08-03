@@ -1,5 +1,10 @@
 (library
  (name arch_effects)
+ ; R1 — the compiler already proves a `match` arm unreachable (warning 11) and
+ ; a match inexhaustive (warning 8). Relying on dune's implicit dev-profile
+ ; default means the guarantee vanishes under --profile release. Make it
+ ; explicit and profile-independent.
+ (flags (:standard -w +8+11+26+27 -warn-error +8+11))
  (libraries
   sqlite3
   yojson

@@ -131,6 +131,10 @@ type pending_call = {
   head : call_head;
   partial : bool;
   cond : bool;
+  dead : bool;
+      (** call block is UNREACHABLE from the CFG entry: this call can never
+          execute (R2). Under-approximate — unmodelled constructs stay
+          reachable, so this never over-claims. *)
   call_site : string;
 }
 

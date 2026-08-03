@@ -101,7 +101,7 @@ let insert_function db stmt_fn ~module_id ~name ~signature ~line_start ~line_end
     ~exposed ~intent ?(comment_quality_score = None) ?(has_pre = false)
     ?(has_post = false) ?(has_violators = false) ?(has_violates = false)
     ?(violators_raw = None) ?(violates_raw = None) ?(tests_raw = None)
-    ?(quint_raw = None) () =
+    ?(quint_raw = None) ?(mutation_sites = None) ?(deref_sites = None) () =
   bind_int stmt_fn 1 module_id ;
   bind_text stmt_fn 2 name ;
   bind_text_opt stmt_fn 3 signature ;
@@ -118,6 +118,8 @@ let insert_function db stmt_fn ~module_id ~name ~signature ~line_start ~line_end
   bind_text_opt stmt_fn 14 violates_raw ;
   bind_text_opt stmt_fn 15 tests_raw ;
   bind_text_opt stmt_fn 16 quint_raw ;
+  bind_int_opt stmt_fn 17 mutation_sites ;
+  bind_int_opt stmt_fn 18 deref_sites ;
   exec_stmt db stmt_fn ;
   last_insert_rowid db
 

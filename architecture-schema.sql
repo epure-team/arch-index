@@ -40,6 +40,13 @@ CREATE TABLE IF NOT EXISTS functions (
     violates_raw TEXT DEFAULT NULL,        -- JSON: [{"name":"...","reason":"..."}]
     tests_raw TEXT DEFAULT NULL,           -- JSON: [{"file":"test/...","case":"..."}]
     quint_raw TEXT DEFAULT NULL,           -- body of {quint} comment section (raw Quint action fragment)
+    -- Mutability metrics (R8): diagnostic complexity signals, NOT a gate.
+    -- mutation_sites counts writes (:=, incr/decr, record field <-, array/bytes
+    -- set, container mutation); deref_sites counts ref reads (!). Writes are
+    -- what makes a function hard to reason about; reads are the symptom. NULL
+    -- on backends that do not compute them.
+    mutation_sites INTEGER DEFAULT NULL,
+    deref_sites INTEGER DEFAULT NULL,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(module_id, name)
 );
@@ -65,6 +72,25 @@ CREATE INDEX IF NOT EXISTS idx_functions_module ON functions(module_id);
 CREATE INDEX IF NOT EXISTS idx_functions_exposed ON functions(exposed);
 CREATE INDEX IF NOT EXISTS idx_functions_no_intent ON functions(intent) WHERE intent IS NULL;
 CREATE INDEX IF NOT EXISTS idx_functions_large ON functions(line_count DESC);
+CREATE INDEX IF NOT EXISTS idx_functions_mutation ON functions(mutation_sites DESC)
+  WHERE mutation_sites IS NOT NULL;
+
+-- Mutability density (R8). Advisory only: a threshold on this is gameable by
+-- hiding writes behind a helper, so surface it for sorting and review, never as
+-- a CI gate.
+CREATE VIEW IF NOT EXISTS v_mutation_heavy AS
+SELECT
+    m.path            AS module_path,
+    f.name            AS function_name,
+    f.mutation_sites,
+    f.deref_sites,
+    f.line_count,
+    CASE WHEN f.line_count > 0
+         THEN ROUND(f.mutation_sites * 1000.0 / f.line_count, 1) END AS mutations_per_kloc
+FROM functions f
+JOIN modules m ON m.id = f.module_id
+WHERE f.mutation_sites IS NOT NULL AND f.mutation_sites > 0
+ORDER BY f.mutation_sites DESC;
 
 -- Call relationships (which functions call which)
 -- callee_id is NULL for external/unresolved calls (stdlib, dependencies)
@@ -143,6 +169,96 @@ CREATE TABLE IF NOT EXISTS unsafe_params (
 );
 
 CREATE INDEX IF NOT EXISTS idx_unsafe_unfixed ON unsafe_params(fixed) WHERE fixed = 0;
+
+-- Decision / condition analysis (study §5). One row per boolean decision site,
+-- one per atomic condition. Verdicts carry their PROVENANCE: a finding that says
+-- "dead" without a reason is unusable by a reviewer and dangerous when applied
+-- by an agent (§6.7). Written by a decision-analysis producer; absent on
+-- backends that do not run one.
+CREATE TABLE IF NOT EXISTS decisions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    function_id INTEGER REFERENCES functions(id) ON DELETE CASCADE,
+                                            -- NULL when no function range contains
+                                            -- the site: recorded, never dropped
+    file_path TEXT NOT NULL,
+    line INTEGER NOT NULL,
+    col INTEGER,
+    form TEXT NOT NULL,                     -- if | match | while | when | assert | boolexpr
+    arity INTEGER NOT NULL,                 -- number of atomic conditions
+    verdict TEXT NOT NULL,                  -- OK | CONSTANT_TRUE | CONSTANT_FALSE
+                                            --  | DEAD_SUBTERM | IDENTICAL_ARMS
+                                            --  | IMPLIED_TRUE | IMPLIED_FALSE
+                                            --  | UNREACHABLE_PATH | HIGH_ARITY
+    decided_by TEXT NOT NULL,               -- enumeration | smt | budget_exhausted | no_solver
+    evidence TEXT,                          -- removable atoms, or the settling guards
+    snippet TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_decisions_fn ON decisions(function_id);
+CREATE INDEX IF NOT EXISTS idx_decisions_verdict ON decisions(verdict);
+
+-- One row per atomic condition of a decision that carried a verdict.
+--
+-- NOT POPULATED BY ANY PRODUCER IN THIS TREE. decision-lint records the decision and its arity;
+-- it does not yet emit the per-condition independence verdicts this table is shaped for. It is
+-- listed here as the intended shape, and `decision-lint --db` DELETEs it on every run so that
+-- rows from some future or out-of-tree producer cannot survive a reload and be read as current
+-- — but a consumer must treat an empty `conditions` as "not computed", never as "no condition
+-- carried a verdict".
+CREATE TABLE IF NOT EXISTS conditions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    decision_id INTEGER NOT NULL REFERENCES decisions(id) ON DELETE CASCADE,
+    ordinal INTEGER NOT NULL,               -- short-circuit evaluation order
+    text TEXT NOT NULL,                     -- the condition as written
+    merge_rung INTEGER,                     -- 0..4: which canonicalisation rung merged it
+    verdict TEXT NOT NULL                   -- INDEPENDENT | REMOVABLE | UNKNOWN
+);
+
+CREATE INDEX IF NOT EXISTS idx_conditions_decision ON conditions(decision_id);
+
+-- Decisions carrying an actionable verdict. Advisory: report and review, never
+-- a CI gate in this form (ratcheting is a separate, later decision).
+CREATE VIEW IF NOT EXISTS v_useless_branches AS
+SELECT
+    d.file_path,
+    d.line,
+    f.name AS function_name,
+    d.form,
+    d.verdict,
+    d.decided_by,
+    d.evidence,
+    d.snippet
+FROM decisions d
+LEFT JOIN functions f ON f.id = d.function_id
+WHERE d.verdict NOT IN ('OK', 'HIGH_ARITY')
+ORDER BY d.file_path, d.line;
+
+-- Statically dead call sites (R2). A call recorded in a basic block that is
+-- UNREACHABLE from its function's CFG entry can never execute — code after an
+-- unconditional `raise`, an arm the walker proved unenterable, and so on.
+-- Under-approximate: unmodelled constructs stay reachable, so this table
+-- under-reports and never over-claims. Reported, never a gate.
+CREATE TABLE IF NOT EXISTS dead_code_sites (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    function_id INTEGER NOT NULL REFERENCES functions(id) ON DELETE CASCADE,
+    call_site TEXT,                         -- file:line of the unreachable call
+    callee_name TEXT NOT NULL,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_dead_sites_fn ON dead_code_sites(function_id);
+
+CREATE VIEW IF NOT EXISTS v_dead_code AS
+SELECT
+    m.path        AS module_path,
+    f.name        AS function_name,
+    d.call_site,
+    d.callee_name
+FROM dead_code_sites d
+JOIN functions f ON f.id = d.function_id
+JOIN modules m ON m.id = f.module_id
+ORDER BY m.path, f.name, d.call_site;
 
 -- Test coverage tracking
 CREATE TABLE IF NOT EXISTS coverage (

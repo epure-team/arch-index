@@ -45,6 +45,19 @@ let extract_doc (attrs : Parsetree.attributes) =
 (* Scanning .cmt/.cmti files                                                  *)
 (* -------------------------------------------------------------------------- *)
 
+(** Is this cmt dune's generated alias module rather than a module someone wrote?
+
+    For a wrapped library [foo] the alias is [foo__.cmt] — the basename ends in [__] — while
+    real modules are [foo__Bar.cmt]. That is the only generated wrapper to skip.
+
+    An earlier version filtered on the [dune__] PREFIX instead, which matched nothing in a
+    library and matched EVERY module of an EXECUTABLE, since dune names those
+    [dune__exe__Main.cmt]. The effect was that arch-index could not index a single one of its
+    own binaries — found by trying to index the MCP server with it. *)
+let is_dune_alias_module path =
+  let base = Filename.remove_extension (Filename.basename path) in
+  String.length base >= 2 && String.ends_with ~suffix:"__" base
+
 let find_cmt_files build_dir =
   let files = ref [] in
   let rec walk dir =
@@ -57,8 +70,7 @@ let find_cmt_files build_dir =
         else if
           (Filename.check_suffix path ".cmt"
           || Filename.check_suffix path ".cmti")
-          (* Filter out dune-generated wrapper modules *)
-          && not (String.starts_with ~prefix:"dune__" (Filename.basename path))
+          && not (is_dune_alias_module path)
         then files := path :: !files)
       entries
   in
@@ -277,6 +289,15 @@ type pending_call = {
   head : call_head; (* target facts (resolution identity preserved) *)
   partial : bool; (* under-saturated / returns-a-function → body deferred *)
   cond : bool; (* call block does NOT post-dominate entry (or is deferred) *)
+  dead : bool;
+      (* this call can never execute: its block is reachable neither from the
+         CFG entry nor from any DEFERRED entry point ([Arch_index_cfg.may_run]).
+         The deferred half matters — lazy thunks, object methods, functor bodies
+         and optional-argument defaults are lowered into isolated blocks, so
+         entry-reachability alone would report all of them as dead.
+         Under-approximate by construction: constructs the walker does not model
+         degrade to opaque straight-line nodes, so they stay reachable — the
+         analysis under-reports dead code and never over-claims. *)
   call_site : string; (* file:line *)
 }
 
@@ -306,6 +327,11 @@ type lctx = {
   lg : Arch_index_cfg.t;
   mutable lblk : int; (* current block *)
   mutable lhandlers : int list; (* active try-dispatch blocks, innermost first *)
+  mutable ldeferred : int list;
+      (* blocks that are entry-unreachable BY DESIGN: the isolated root of a
+         lazy thunk, an object method, a functor body, an optional argument's
+         default. They must stay unreachable (that is what demotes their calls
+         to conditional) while not counting as dead code. *)
   lcaller : string; (* attribution: top-level name or lambda chain *)
 }
 
@@ -342,6 +368,76 @@ let path_to_module_name path =
       in
       (Some (module_path prefix), name)
   | Path.Papply _ | Path.Pextra_ty _ -> (None, Path.name path)
+
+(* -------------------------------------------------------------------------- *)
+(* Mutability metrics (R8)                                                    *)
+(* -------------------------------------------------------------------------- *)
+
+(** Count mutation sites (writes) and deref sites (ref reads) in one function
+    body. These are DIAGNOSTIC complexity signals, not correctness verdicts: a
+    high count means the function is hard to reason about — for a reader and for
+    any static analysis, since a condition on mutable state is opaque to both.
+
+    Detection is on the RESOLVED [Path], so a local rebinding of [incr] or [!]
+    is not miscounted — the same shadow-proof rule the noreturn-head detection
+    uses. Unresolved heads are simply not counted (under-approximate, never
+    over-claim). *)
+let count_mutability (e : Typedtree.expression) =
+  let mutations = ref 0 and derefs = ref 0 in
+  let stdlib_write =
+    [":="; "incr"; "decr"]
+  and container_write =
+    [
+      "Array.set"; "Bytes.set"; "Hashtbl.replace"; "Hashtbl.add";
+      "Hashtbl.remove"; "Hashtbl.reset"; "Hashtbl.clear"; "Buffer.add_string";
+      "Buffer.add_char"; "Buffer.add_bytes"; "Queue.push"; "Queue.add";
+      "Stack.push";
+    ]
+  in
+  let head_name (fn : Typedtree.expression) =
+    match fn.exp_desc with
+    | Texp_ident (path, _, _) -> (
+        (* persistent root only: a local shadow resolves to a different path *)
+        match path_to_module_name path with
+        | Some m, n -> Some (m ^ "." ^ n)
+        | None, n -> Some n)
+    | _ -> None
+  in
+  let open Tast_iterator in
+  let it =
+    {
+      default_iterator with
+      expr =
+        (fun self (ex : Typedtree.expression) ->
+          (match ex.exp_desc with
+          | Texp_setfield _ -> incr mutations
+          | Texp_apply (fn, _) -> (
+              match head_name fn with
+              | Some n ->
+                  let base = Filename.basename n in
+                  let short =
+                    match String.rindex_opt n '.' with
+                    | Some i -> String.sub n (i + 1) (String.length n - i - 1)
+                    | None -> n
+                  in
+                  ignore base ;
+                  if List.mem short stdlib_write then incr mutations
+                  else if
+                    List.exists
+                      (fun c ->
+                        let cs = String.length c in
+                        String.length n >= cs
+                        && String.sub n (String.length n - cs) cs = c)
+                      container_write
+                  then incr mutations
+                  else if short = "!" then incr derefs
+              | None -> ())
+          | _ -> ()) ;
+          default_iterator.expr self ex);
+    }
+  in
+  it.expr it e ;
+  (!mutations, !derefs)
 
 (** Extract type path from a Path.t.
     Returns full path like "Stdlib.List" or "Types.story". *)
@@ -456,6 +552,7 @@ let collect_calls_from_expr ~src_path ~caller_module ~caller_name
       lg = Arch_index_cfg.create ();
       lblk = Arch_index_cfg.entry;
       lhandlers = [];
+      ldeferred = [];
       lcaller = caller;
     }
   in
@@ -475,6 +572,15 @@ let collect_calls_from_expr ~src_path ~caller_module ~caller_name
   let blk () = (!cur).lblk in
   let set_blk b = (!cur).lblk <- b in
   let new_blk () = Arch_index_cfg.new_block (!cur).lg in
+  (* A fresh block that is a DEFERRED entry point rather than an accident of the
+     lowering. Isolation is deliberate — it is what makes the enclosed calls
+     conditional — but the block is registered so it is not also read as
+     unreachable-hence-deletable. *)
+  let deferred_blk () =
+    let b = new_blk () in
+    (!cur).ldeferred <- b :: (!cur).ldeferred ;
+    b
+  in
   let edge a b = Arch_index_cfg.add_edge (!cur).lg a b in
   (* Collected synthetic lambda nodes. *)
   let lambdas = ref [] in
@@ -668,7 +774,7 @@ let collect_calls_from_expr ~src_path ~caller_module ~caller_name
              always-exec. The current block is untouched. *)
           let walk_isolated_default () =
             let saved = (blk ()) in
-            set_blk (new_blk ()) ;
+            set_blk (deferred_blk ()) ;
             default_iterator.expr self expr ;
             set_blk saved
           in
@@ -1027,7 +1133,7 @@ let collect_calls_from_expr ~src_path ~caller_module ~caller_name
               (* A functor body only runs when the functor is applied → walked
                  in an isolated (never always-exec) block. *)
               let saved = (blk ()) in
-              set_blk (new_blk ()) ;
+              set_blk (deferred_blk ()) ;
               default_iterator.module_expr self me ;
               set_blk saved
           | _ -> default_iterator.module_expr self me);
@@ -1089,7 +1195,7 @@ let collect_calls_from_expr ~src_path ~caller_module ~caller_name
     | _ -> iter.expr iter root) ;
     List.iter
       (fun de ->
-        set_blk (new_blk ()) ;
+        set_blk (deferred_blk ()) ;
         iter.expr iter de)
       !opt_defaults
   in
@@ -1099,7 +1205,9 @@ let collect_calls_from_expr ~src_path ~caller_module ~caller_name
      unless its block runs on every execution of ITS OWN node. *)
   let verdicts = Hashtbl.create 8 in
   List.iter
-    (fun c -> Hashtbl.replace verdicts c.cid (Arch_index_cfg.solve c.lg))
+    (fun c ->
+      Hashtbl.replace verdicts c.cid
+        (Arch_index_cfg.solve ~deferred:c.ldeferred c.lg))
     !all_ctxs ;
   let calls =
     List.rev_map
@@ -1109,7 +1217,17 @@ let collect_calls_from_expr ~src_path ~caller_module ~caller_name
           | Some v -> not (Arch_index_cfg.always_exec v block)
           | None -> true (* unknown ctx: demote, never promote *)
         in
-        {caller_module; caller_name = caller; head; partial; cond; call_site})
+        let dead =
+          match Hashtbl.find_opt verdicts cid with
+          (* [may_run], NOT [reachable]: the lowering makes every deferred body
+             entry-unreachable on purpose, so [reachable] would report an
+             optional argument's default, a lazy thunk, an object method and a
+             functor body as code that can never execute. That is the wrong
+             direction for a verdict whose only use is "delete this". *)
+          | Some v -> not (Arch_index_cfg.may_run v block)
+          | None -> false (* unknown ctx: never claim dead *)
+        in
+        {caller_module; caller_name = caller; head; partial; cond; dead; call_site})
       !raw
   in
   (calls, List.rev !lambdas)
@@ -1255,6 +1373,8 @@ let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
                                     Some (Arch_index_comment_parser.parse doc)
                                 | None -> None
                               in
+                              (* R8 mutability metrics: diagnostic only *)
+                              let muts, derefs = count_mutability vb.vb_expr in
                               let function_id =
                                 insert_function
                                   db
@@ -1266,6 +1386,8 @@ let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
                                   ~line_end
                                   ~exposed
                                   ~intent
+                                  ~mutation_sites:(Some muts)
+                                  ~deref_sites:(Some derefs)
                                   ?comment_quality_score:
                                     (Option.map
                                        (fun p ->

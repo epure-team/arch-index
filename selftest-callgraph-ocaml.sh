@@ -220,6 +220,83 @@ v2 unreachable entry_hof_param island | grep -q 'UNKNOWN' \
 v2 reaches entry_hof island | grep -q 'no MUST path' \
   || note "HOF: reaches entry_hof island must be 'no MUST path' (callback is MAY_ENUMERATED)"
 
+# ══════════════════════════════════════════════════════════════════════════════
+# PART 3: dead_code_sites — DEFERRED is not DEAD.
+#
+# The lowering represents deferred code (lazy thunks, object methods, functor
+# bodies, optional-argument defaults) as a CFG block with no incoming edge. That
+# isolation is deliberate: it is what stops those calls being MUST. But
+# "unreachable from this invocation's entry" and "can never run" are different
+# questions, and dead_code_sites answers the second — its only use is telling
+# someone to delete code. Reading the first as the second reported every
+# optional-argument default in the project as dead.
+#
+# The self-index golden cannot catch this: it counts modules/functions/calls,
+# and dead_code_sites is 0 there either way.
+# ══════════════════════════════════════════════════════════════════════════════
+MOD3="$TMPDIR_ROOT/deferred"; mkdir -p "$MOD3"
+cat > "$MOD3/dune-project" <<'DP'
+(lang dune 3.0)
+DP
+# -w -a: `truly_dead` below deliberately writes a statement after an unconditional
+# raise, which is warning 21 — an error under dune's dev profile. Without this the
+# module fails to compile and every assertion in PART 3 passes vacuously.
+cat > "$MOD3/dune" <<'DF'
+(library (name defr) (modules defr) (flags (:standard -w -a)))
+DF
+# The deferred constructs are INSIDE function bodies: collect_calls_from_expr walks
+# value bindings, so a top-level `lazy`/functor is never lowered onto a CFG at all
+# and would test nothing.
+cat > "$MOD3/defr.ml" <<'ML'
+let in_default () = 1
+let in_lazy () = 2
+let in_method () = 3
+let in_functor () = 4
+let after_raise () = 5
+
+(* DEFERRED, not dead: the default runs on every call that omits ?fmt. *)
+let opt_default ?(fmt = in_default ()) (x : int) : int = fmt + x
+
+(* DEFERRED, not dead: forced later. *)
+let uses_lazy () : int =
+  let l = lazy (in_lazy ()) in
+  Lazy.force l
+
+(* DEFERRED, not dead: invoked through the object. *)
+let uses_object () : int =
+  let o = object method go () = in_method () end in
+  o#go ()
+
+(* DEFERRED, not dead: runs on functor application. *)
+let uses_functor () : int =
+  let module Make (X : sig end) = struct let v = in_functor () end in
+  let module M = Make (struct end) in
+  M.v
+
+(* GENUINELY dead: nothing can execute after a raise in the same block. *)
+let truly_dead (x : int) : int =
+  if x > 0 then failwith "boom" else failwith "bang" ;
+  after_raise ()
+ML
+( cd "$MOD3" && dune build 2>/tmp/defr-dune-err.txt ) \
+  || { cat /tmp/defr-dune-err.txt >&2; note "PART3 dune build failed"; }
+DB3="$TMPDIR_ROOT/defr.db"
+"$BIN" --build-dir "$MOD3/_build/default" --db-path "$DB3" --schema-path "$SCHEMA" 2>/tmp/defr-idx-err.txt \
+  || note "PART3 arch_callgraph_ocaml failed"
+
+dead_names="$(sqlite3 "$DB3" "SELECT DISTINCT callee_name FROM dead_code_sites;" 2>/dev/null)"
+for callee in in_default in_lazy in_method in_functor; do
+  # Present in the index at all? Otherwise the assertion below passes vacuously.
+  sqlite3 "$DB3" "SELECT 1 FROM calls WHERE callee_name='$callee' LIMIT 1;" 2>/dev/null | grep -q 1 \
+    || note "PART3: no call edge to $callee — the fixture stopped exercising this construct"
+  echo "$dead_names" | grep -qx "$callee" \
+    && note "PART3: $callee is DEFERRED, not dead — it runs on a later entry, so telling someone to delete it is wrong"
+done
+# The counterweight: a real never-executes site must still be reported, or the
+# fix above would have been "stop computing dead code" wearing a disguise.
+echo "$dead_names" | grep -qx "after_raise" \
+  || note "PART3: after_raise follows an unconditional raise and must still be reported dead"
+
 if [ "$fails" -eq 0 ]; then
   echo "arch-index callgraph-ocaml selftest: PASS"
   exit 0
