@@ -1,4 +1,4 @@
-(lang dune 3.13)
+(lang dune 3.15)
 (name arch-index)
 (generate_opam_files true)
 
@@ -22,6 +22,8 @@
   ppx_blob
   ppx_deriving_yojson
   sqlite3
+  caqti
+  (caqti-driver-sqlite3 (>= 3.0))
   ocaml-compiler-libs
   (ppx_inline_test (>= v0.16))
   (ppx_assert (>= v0.16))

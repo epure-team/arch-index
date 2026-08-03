@@ -54,5 +54,37 @@ printf '%s\n' '{"type":"function","name":"solo","file_path":"x"}' | "$LOAD" --al
 [ "$?" -eq 0 ] || note "loader with --allow-empty must succeed on 0-edge input"
 rm -f "$EMPTY"
 
+# ── R9 producer-contract strictness ─────────────────────────────────────────
+# The loader refuses an invalid `kind` because a silently-dropped edge is a lie.
+# An unknown FIELD is the same failure wearing a different hat: the producer
+# author believes data was carried when it was not. These cases pin that, plus
+# the x_-prefixed escape hatch that keeps a future field from being a breaking
+# change, plus the rule that decision_contract is stamped ONLY when a producer
+# actually supplied the analysis.
+R9="$(mktemp -d)"
+EDGE='{"type":"call","caller_name":"f","callee_name":"g","kind":"MUST"}'
+
+printf '%s\n%s\n' '{"type":"function","name":"f","mutation_sites":3}' "$EDGE" \
+  | "$LOAD" "$R9/unknown-field.db" >/dev/null 2>&1 \
+  && note "unknown field must abort the load"
+
+printf '%s\n%s\n' '{"type":"widget","name":"f"}' "$EDGE" \
+  | "$LOAD" "$R9/unknown-type.db" >/dev/null 2>&1 \
+  && note "unknown record type must abort the load"
+
+printf '%s\n%s\n' '{"type":"function","name":"f","x_private":3}' "$EDGE" \
+  | "$LOAD" "$R9/xprefix.db" >/dev/null 2>&1 \
+  || note "x_-prefixed producer extension must be accepted"
+
+printf '%s\n%s\n' "$EDGE" '{"type":"decision","file_path":"x.go","line":42,"form":"if","verdict":"DEAD_SUBTERM","decided_by":"enumeration"}' \
+  | "$LOAD" "$R9/decision.db" >/dev/null 2>&1
+[ "$(sqlite3 "$R9/decision.db" "SELECT value FROM comment_db_meta WHERE key='decision_contract';")" = "v1" ] \
+  || note "decision_contract must be stamped when decision records are supplied"
+
+[ -z "$(sqlite3 "$R9/xprefix.db" "SELECT value FROM comment_db_meta WHERE key='decision_contract';")" ] \
+  || note "decision_contract must NOT be stamped when no decision records are supplied"
+
+rm -rf "$R9"
+
 rm -f "$DB" "$BAD"
 if [ "$fails" -eq 0 ]; then echo "arch-index load selftest: PASS"; exit 0; else echo "arch-index load selftest: FAIL ($fails)"; exit 1; fi

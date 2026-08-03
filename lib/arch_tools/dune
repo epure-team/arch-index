@@ -1,0 +1,10 @@
+; The read model shared by every arch-* consumer, and by the MCP server.
+;
+; It exists so the tools cannot drift on the thing that matters most — how the call graph is
+; keyed and which edges are in a closure. Two subtly different copies of `edges` would produce
+; two different answers to the same reachability question, and the whole point of this index is
+; that a reachability answer means one thing.
+(library
+ (name arch_tools)
+ (flags (:standard -w +8+11+26+27 -warn-error +8+11))
+ (libraries caqti caqti.classic caqti.blocking caqti-driver-sqlite3 uri unix yojson))
