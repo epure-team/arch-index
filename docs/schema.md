@@ -55,11 +55,37 @@ Key/value store for index metadata.
 | Key | Value |
 |---|---|
 | `callgraph_contract` | `v1` when the index is ⊤-marked |
+| `decision_contract` | `v1` when a producer actually ran the decision analysis |
+| `built_by` | the producing tool, e.g. `arch-load` |
+
+`decision_contract` is stamped only when decisions were supplied, so a consumer can tell
+"computed nothing" from "computed nothing to report". The `decisions` table exists either way —
+presence proves nothing, which is why every consumer checks whether it is **non-empty**.
 
 ## Additional tables
 
 `types`, `type_fields`, `type_constructors` — indexed type definitions.
 `module_deps` — import/open dependencies between modules.
 `type_usage` — function-level type usage tracking.
+`decisions`, `conditions` — dead-logic analysis (`v_useless_branches`).
+`dead_code_sites` — call sites in CFG-unreachable blocks (`v_dead_code`).
+`coverage` — written by [`arch-coverage`](coverage.md) from an LCOV tracefile:
+`covered_lines` / `total_lines` per function, where `total_lines` counts **instrumented** lines
+only. A function with no instrumentation gets no row rather than a 0% one — "no data" and
+"never executed" are different facts and must not be merged.
+
+## The flat schema
+
+`arch-load` builds a deliberately smaller schema for NDJSON producers: `functions(name,
+file_path, exported, line_start, line_end)` and `calls(caller_name, caller_file, callee_name,
+callee_file, call_site, kind)`. Names are global there, so the graph is keyed by name; in the
+main schema `functions` is `UNIQUE(module_id, name)`, so a name is unique only within its module
+and the graph must be keyed by row id. Consumers get this right via `Arch_tools.Arch_graph` (`lib/arch_tools/arch_graph.ml`)
+rather than each re-deriving it: it keys nodes by `#<rowid>` on the main schema and by name on
+the flat one, behind one node type.
+
+`line_start`/`line_end` are optional on the wire but required for any per-diff or per-line join
+(`arch-impact`, `arch-mutants`, `arch-coverage`). A **half** span aborts the load: it would
+mis-map every hunk in the file, which is worse than having no span at all.
 
 See [`architecture-schema.sql`](../architecture-schema.sql) for full column definitions, indices, and triggers.

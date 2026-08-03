@@ -12,6 +12,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Full history: the change-impact step below diffs against the PR base (or HEAD~1 on a
+          # push). With the default fetch-depth of 1 neither commit exists in the clone, and the
+          # step fails on every run.
+          fetch-depth: 0
       - uses: ocaml/setup-ocaml@v3
         with:
           ocaml-compiler: '5.3'
@@ -26,13 +31,19 @@ jobs:
         run: opam exec -- dune test
       - name: Shell integration tests
         run: |
-          chmod +x selftest-contract.sh selftest-load.sh selftest-effects.sh selftest-callgraph-ocaml.sh selftest-callgraph-soundness.sh selftest-callgraph-go.sh
+          chmod +x selftest-contract.sh selftest-load.sh selftest-effects.sh selftest-callgraph-ocaml.sh selftest-callgraph-soundness.sh selftest-callgraph-go.sh selftest-impact.sh
+          chmod +x selftest-rules.sh selftest-mutants.sh selftest-coverage.sh selftest-decision-lint.sh
           ./selftest-contract.sh
           ./selftest-load.sh
+          ./selftest-impact.sh
+          ./selftest-rules.sh
+          ./selftest-mutants.sh
+          ./selftest-coverage.sh
           ./selftest-effects.sh
           ./selftest-callgraph-ocaml.sh
           STRICT=1 ./selftest-callgraph-soundness.sh
           ./selftest-callgraph-go.sh
+          ./selftest-decision-lint.sh
       - name: Self-index smoke test
         run: |
           BIN="./_build/default/bin/arch_callgraph_ocaml/arch_callgraph_ocaml.exe"
@@ -47,6 +58,83 @@ jobs:
             > /tmp/self-stats.txt
           diff test/fixtures/self-index-stats.txt /tmp/self-stats.txt \
             || { echo "Golden file mismatch — update: see docs/adr/001-self-index-golden.md"; exit 1; }
+
+      - name: Architecture rules (self)
+        run: |
+          # --on-vacuous fail is the point: if a rule's selector stops matching (a rename, a
+          # split), it turns green forever and looks like coverage. That must break the build.
+          ./arch-rules /tmp/self.db arch-rules.txt --on-vacuous fail
+
+      - name: Change-impact briefing (self)
+        run: |
+          # Not a gate — but running it on every build is how a broken briefing gets noticed
+          # before someone relies on it in review.
+          ./arch-impact /tmp/self.db --diff "${{ github.event.pull_request.base.sha || 'HEAD~1' }}..HEAD" --repo .
+
+  # mcp-kit lives in a PRIVATE repo (epure-team/ocaml-mcp), so `opam pin` needs credentials that
+  # a fork or an unconfigured checkout does not have. Rather than let the mcp job fail on every
+  # such run — a permanently-red check teaches people to ignore it — decide up front whether the
+  # credential exists, and say so loudly when it does not. `secrets` is not readable from a
+  # job-level `if:`, hence this one-step job to turn it into an output.
+  mcp-credentials:
+    runs-on: ubuntu-latest
+    outputs:
+      available: ${{ steps.check.outputs.available }}
+    steps:
+      - id: check
+        env:
+          TOKEN: ${{ secrets.OCAML_MCP_TOKEN }}
+        run: |
+          if [ -n "$TOKEN" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::warning title=MCP server NOT verified in this run::OCAML_MCP_TOKEN is unset, so bin/arch_mcp was neither built nor protocol-tested. mcp-kit is pinned from the private repo epure-team/ocaml-mcp and cannot be fetched without a token. Do not read a green CI as evidence that the MCP server still compiles."
+          fi
+
+  mcp:
+    # Separate job because it needs an opam PIN: mcp-kit is not published. bin/arch_mcp is behind
+    # `(enabled_if %{env:ARCH_MCP=no} = yes)`, so the main build never sees it; this job is the
+    # only thing that stops the target rotting unnoticed behind that flag.
+    needs: mcp-credentials
+    if: needs.mcp-credentials.outputs.available == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ocaml/setup-ocaml@v3
+        with:
+          ocaml-compiler: '5.3'
+      - name: Pin mcp-kit
+        env:
+          TOKEN: ${{ secrets.OCAML_MCP_TOKEN }}
+        run: |
+          opam pin add -y --no-action mcp-kit \
+            "https://x-access-token:${TOKEN}@github.com/epure-team/ocaml-mcp.git"
+      - name: Install deps
+        # --deps-only . as well as mcp-kit: selftest-mcp.sh drives the server against an index it
+        # builds with arch-load and cross-checks with arch-query, so this job needs the whole
+        # toolchain, not just the server's own dependencies.
+        run: |
+          opam install --deps-only --yes .
+          opam install --yes mcp-kit
+      - name: Build the MCP server and the CLIs it is checked against
+        env:
+          ARCH_MCP: 'yes'
+        run: |
+          opam exec -- dune build bin/arch_mcp/arch_mcp.exe bin/arch_load bin/arch_query
+          # A false enabled_if makes `dune build <target>` exit 0 while producing nothing, so a
+          # green dune is not evidence. Assert the binary.
+          test -x _build/default/bin/arch_mcp/arch_mcp.exe \
+            || { echo "arch_mcp was SKIPPED, not built — ARCH_MCP or the pin did not take"; exit 1; }
+      - name: Protocol smoke test
+        run: |
+          chmod +x selftest-mcp.sh
+          # selftest-mcp.sh SKIPs when the binary is absent. The step above already proved it is
+          # present, so a skip here would mean something moved it — fail instead of passing.
+          out="$(./selftest-mcp.sh)"; rc=$?
+          echo "$out"
+          [ $rc -eq 0 ] || exit $rc
+          case "$out" in *SKIP*) echo "selftest-mcp skipped despite a built binary"; exit 1;; esac
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
@@ -80,13 +168,25 @@ jobs:
       - name: Package binaries
         run: |
           mkdir -p dist
-          for bin in arch_index_cli arch_serve arch_callgraph_ocaml; do
+          # arch_mcp is deliberately absent: it needs a pin of a private library, so it cannot be
+          # produced by a tag build. Everything else a user invokes gets shipped — the five query
+          # and analysis CLIs were added to the repo without being added here, which meant a
+          # release tarball contained tools the docs told people to run.
+          # A missing binary FAILS the job. Skipping it silently publishes a release that is
+          # quietly missing a tool the docs tell people to run — the same "green without data"
+          # shape this pipeline refuses everywhere else.
+          missing=""
+          for bin in arch_index_cli arch_serve arch_callgraph_ocaml \
+                     arch_query arch_load arch_rules arch_impact arch_mutants arch_coverage; do
             src=$(find _build -name "${bin}.exe" | head -1)
-            if [ -n "$src" ]; then
-              cp "$src" "dist/${bin}-${{ matrix.suffix }}"
-              strip "dist/${bin}-${{ matrix.suffix }}" || true
-            fi
+            if [ -z "$src" ]; then missing="$missing $bin"; continue; fi
+            cp "$src" "dist/${bin}-${{ matrix.suffix }}"
+            strip "dist/${bin}-${{ matrix.suffix }}" || true
           done
+          if [ -n "$missing" ]; then
+            echo "::error::release build produced no binary for:$missing — refusing to publish a partial release"
+            exit 1
+          fi
           ls -la dist/
       - name: Upload to release
         uses: softprops/action-gh-release@v2
