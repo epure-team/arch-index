@@ -62,6 +62,8 @@ let terminate g b = g.terminated.(b) <- true
 type verdict = {
   always : bool array;  (* block post-dominates entry → calls can be MUST *)
   reachable : bool array;  (* block reachable from entry *)
+  live : bool array;
+      (* block reachable from the entry OR from a DEFERRED root — see [solve] *)
 }
 
 (** Compute post-dominance of the entry and entry-reachability.
@@ -69,8 +71,18 @@ type verdict = {
     Terminal blocks (no successors) and terminated blocks flow to a virtual
     exit [n]. If NO block flows to the exit (e.g. [while true do () done] with
     no other path out), nothing is guaranteed to complete: [always] is all
-    false (sound: everything demotes). *)
-let solve g =
+    false (sound: everything demotes).
+
+    [deferred] lists blocks that are entry-unreachable ON PURPOSE: the lowering
+    represents deferred code — a [lazy] thunk, an object method, a functor body,
+    an optional argument's default — as an isolated block, which is what forces
+    its calls to be conditional. Those two questions are NOT the same question.
+    "Never runs on this call" is why they are demoted; "never runs at all" would
+    be a claim that the code can be deleted, and it is false: an optional
+    default runs whenever a caller omits the argument. So entry-reachability
+    answers the first, and [live] — reachability from the entry or from any
+    deferred root — answers the second. *)
+let solve ?(deferred = []) g =
   let n = g.n_blocks in
   let exit = n in
   (* successor lists including virtual-exit edges *)
@@ -80,16 +92,20 @@ let solve g =
         else g.succs.(i))
   in
   let has_exit = Array.exists (fun l -> List.mem exit l) succ in
-  let reachable = Array.make n false in
-  (* entry-reachability: simple DFS over real successors *)
-  let rec visit b =
-    if b < n && not reachable.(b) then begin
-      reachable.(b) <- true ;
-      List.iter (fun s -> if s < n then visit s) g.succs.(b)
-    end
+  let reach_from roots =
+    let seen = Array.make n false in
+    let rec visit b =
+      if b < n && not seen.(b) then begin
+        seen.(b) <- true ;
+        List.iter (fun s -> if s < n then visit s) g.succs.(b)
+      end
+    in
+    List.iter visit roots ;
+    seen
   in
-  visit entry ;
-  if not has_exit then {always = Array.make n false; reachable}
+  let reachable = reach_from [entry] in
+  let live = if deferred = [] then reachable else reach_from (entry :: deferred) in
+  if not has_exit then {always = Array.make n false; reachable; live}
   else begin
     (* pdom.(i) : bool array over 0..n — the set of nodes post-dominating i.
        Init: full set for real blocks, {exit} for the exit. Iterate
@@ -133,7 +149,7 @@ let solve g =
        reachable from the entry (an unreachable block trivially "post-dominates"
        nothing meaningful — it never runs). *)
     let always = Array.init n (fun j -> pdom.(entry).(j) && reachable.(j)) in
-    {always; reachable}
+    {always; reachable; live}
   end
 
 (** [always_exec v b] — does block [b] run on every execution? *)
@@ -141,3 +157,9 @@ let always_exec v b = b < Array.length v.always && v.always.(b)
 
 (** [reachable v b] — is block [b] reachable from the entry? *)
 let reachable v b = b < Array.length v.reachable && v.reachable.(b)
+
+(** [may_run v b] — can block [b] execute at all, counting deferred entry
+    points? The negation is the only honest basis for a "this code is dead"
+    verdict; [reachable] is not, because deferred bodies are entry-unreachable
+    by construction. *)
+let may_run v b = b < Array.length v.live && v.live.(b)

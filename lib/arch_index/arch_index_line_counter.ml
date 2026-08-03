@@ -7,108 +7,83 @@
 
 (** Count non-comment, non-blank lines in an OCaml source file.
     Handles nested comments and string literals, including quoted strings. *)
+
+(** Lexer state carried through the scan. Immutable and threaded as a parameter,
+    so every condition below is a stable expression an analyser can reason about
+    — unlike the previous [ref]-based state machine, where `!i < len` was opaque
+    to arch-index's own decision analysis. Tail calls compile to jumps, so this
+    costs nothing at runtime. *)
+type scan_state = {
+  depth : int;  (** comment nesting depth *)
+  in_string : bool;
+  quoted : string option;  (** delimiter of an open {id|…|id} literal *)
+}
+
+let initial_state = {depth = 0; in_string = false; quoted = None}
+
+let is_ident_char c =
+  (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+  || (c >= '0' && c <= '9')
+  || c = '_'
+
+(** [scan_line st line] returns the state after [line] and whether it held code. *)
+let scan_line st line =
+  let len = String.length line in
+  let rec ident_end j = if j < len && is_ident_char line.[j] then ident_end (j + 1) else j in
+  let rec go st i has_code =
+    if i >= len then (st, has_code)
+    else
+      match st.quoted with
+      | Some delim ->
+          (* inside {id|…|id} — look for the closing |id} *)
+          let dl = String.length delim in
+          if
+            i + dl < len
+            && line.[i] = '|'
+            && String.sub line (i + 1) dl = delim
+            && i + dl + 1 < len
+            && line.[i + dl + 1] = '}'
+          then go {st with quoted = None} (i + dl + 2) has_code
+          else go st (i + 1) has_code
+      | None ->
+          if st.in_string then
+            if line.[i] = '\\' && i + 1 < len then go st (i + 2) has_code
+            else if line.[i] = '"' then go {st with in_string = false} (i + 1) has_code
+            else go st (i + 1) has_code
+          else if st.depth > 0 then
+            if i + 1 < len && line.[i] = '*' && line.[i + 1] = ')' then
+              go {st with depth = st.depth - 1} (i + 2) has_code
+            else if i + 1 < len && line.[i] = '(' && line.[i + 1] = '*' then
+              go {st with depth = st.depth + 1} (i + 2) has_code
+            else go st (i + 1) has_code
+          else if line.[i] = '"' then go {st with in_string = true} (i + 1) true
+          else if line.[i] = '{' && i + 1 < len && line.[i + 1] = '|' then
+            go {st with quoted = Some ""} (i + 2) true
+          else if line.[i] = '{' then
+            let j = ident_end (i + 1) in
+            if j < len && line.[j] = '|' && j > i + 1 then
+              go {st with quoted = Some (String.sub line (i + 1) (j - i - 1))} (j + 1) true
+            else go st (i + 1) true
+          else if i + 1 < len && line.[i] = '(' && line.[i + 1] = '*' then
+            go {st with depth = st.depth + 1} (i + 2) has_code
+          else
+            let c = line.[i] in
+            go st (i + 1) (has_code || (c <> ' ' && c <> '\t' && c <> '\r'))
+  in
+  go st 0 false
+
+(** Count non-comment, non-blank lines in an OCaml source file.
+    Handles nested comments and string literals, including quoted strings. *)
 let run_count_code_lines path =
   let ic = open_in path in
   Fun.protect
     ~finally:(fun () -> close_in ic)
     (fun () ->
-      let code_lines = ref 0 in
-      let in_comment = ref 0 in
-      (* nesting depth *)
-      let in_string = ref false in
-      let in_quoted_string = ref None in
-      (* None or Some delimiter *)
-      let line_has_code = ref false in
-      try
-        while true do
-          let line = input_line ic in
-          line_has_code := false ;
-          let len = String.length line in
-          let i = ref 0 in
-          while !i < len do
-            match !in_quoted_string with
-            | Some delim ->
-                (* Inside quoted string {id|...|id} - look for |id} *)
-                let delim_len = String.length delim in
-                if
-                  !i + delim_len < len
-                  && line.[!i] = '|'
-                  && String.sub line (!i + 1) delim_len = delim
-                  && !i + delim_len + 1 < len
-                  && line.[!i + delim_len + 1] = '}'
-                then (
-                  in_quoted_string := None ;
-                  i := !i + delim_len + 2)
-                else incr i
-            | None ->
-                if !in_string then
-                  if
-                    (* Inside regular string - look for end quote or escape *)
-                    line.[!i] = '\\' && !i + 1 < len
-                  then i := !i + 2 (* skip escaped char *)
-                  else if line.[!i] = '"' then (
-                    in_string := false ;
-                    incr i)
-                  else incr i
-                else if !in_comment > 0 then
-                  if
-                    (* Inside comment - look for end or nested start *)
-                    !i + 1 < len && line.[!i] = '*' && line.[!i + 1] = ')'
-                  then (
-                    decr in_comment ;
-                    i := !i + 2)
-                  else if !i + 1 < len && line.[!i] = '(' && line.[!i + 1] = '*'
-                  then (
-                    incr in_comment ;
-                    i := !i + 2)
-                  else incr i
-                else if line.[!i] = '"' then (
-                  (* Start of regular string *)
-                  in_string := true ;
-                  line_has_code := true ;
-                  incr i)
-                else if line.[!i] = '{' && !i + 1 < len && line.[!i + 1] = '|'
-                then (
-                  (* Start of quoted string {|...|} *)
-                  in_quoted_string := Some "" ;
-                  line_has_code := true ;
-                  i := !i + 2)
-                else if line.[!i] = '{' then (
-                  (* Check for {id|...|id} where id is alphanumeric *)
-                  let j = ref (!i + 1) in
-                  while
-                    !j < len
-                    &&
-                    let c = line.[!j] in
-                    (c >= 'a' && c <= 'z')
-                    || (c >= 'A' && c <= 'Z')
-                    || (c >= '0' && c <= '9')
-                    || c = '_'
-                  do
-                    incr j
-                  done ;
-                  if !j < len && line.[!j] = '|' && !j > !i + 1 then (
-                    (* Found opening of quoted string with delimiter *)
-                    let delim = String.sub line (!i + 1) (!j - !i - 1) in
-                    in_quoted_string := Some delim ;
-                    line_has_code := true ;
-                    i := !j + 1)
-                  else (
-                    line_has_code := true ;
-                    incr i))
-                else if !i + 1 < len && line.[!i] = '(' && line.[!i + 1] = '*'
-                then (
-                  (* Start of comment *)
-                  incr in_comment ;
-                  i := !i + 2)
-                else
-                  (* Outside comment and string - check if this is code *)
-                  let c = line.[!i] in
-                  if c <> ' ' && c <> '\t' && c <> '\r' then
-                    line_has_code := true ;
-                  incr i
-          done ;
-          if !line_has_code then incr code_lines
-        done ;
-        !code_lines
-      with End_of_file -> !code_lines)
+      let rec lines st acc =
+        match input_line ic with
+        | line ->
+            let st, has_code = scan_line st line in
+            lines st (if has_code then acc + 1 else acc)
+        | exception End_of_file -> acc
+      in
+      lines initial_state 0)

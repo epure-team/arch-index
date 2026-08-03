@@ -10,6 +10,27 @@ arch-index tags every `calls` row with a `kind` value that encodes what is stati
 
 When a backend produces a ⊤-marked index it sets `callgraph_contract = v1` in `comment_db_meta`. Backends that cannot tag edges must not produce a DB at all — the loader aborts on missing or invalid `kind` values (exit 2) to prevent a silent false-confidence index.
 
+### Producer contract strictness (R9)
+
+The NDJSON wire format (`arch-load`) carries four record types — `function`,
+`call`, `decision`, `dead_site` — and is **strict in both directions**:
+
+- an **invalid or missing `kind`** on a call edge aborts the load, because a
+  silently-dropped edge would be invisible to the sound queries;
+- an **unknown record type** or an **unknown field** aborts the load too. This
+  is the same failure wearing a different hat: a producer author who adds a
+  field the loader does not know would otherwise believe the data was carried
+  when it was not.
+
+Fields prefixed `x_` are reserved for producer-private extensions and are
+accepted-and-ignored, so adding one is never a breaking change.
+
+`decision_contract = v1` is stamped in `comment_db_meta` **only when a producer
+actually supplied decision records** — so a consumer can distinguish a backend
+that computed nothing from one that computed nothing *to report*. The decision
+subcommands (`useless-branches`, `dead-blocks`) refuse on an index that lacks
+the stamp rather than answering emptily.
+
 ### Backends
 
 | Backend | Edge kinds | Notes |

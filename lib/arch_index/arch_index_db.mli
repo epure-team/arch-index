@@ -201,6 +201,8 @@ val insert_function :
   ?violates_raw:string option ->
   ?tests_raw:string option ->
   ?quint_raw:string option ->
+  ?mutation_sites:int option ->
+  ?deref_sites:int option ->
   unit ->
   int
 

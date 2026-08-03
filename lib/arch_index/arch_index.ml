@@ -166,8 +166,8 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
       "INSERT OR REPLACE INTO functions (module_id, name, signature, \
        line_start, line_end, exposed, intent, comment_quality_score, has_pre, \
        has_post, has_violators, has_violates, violators_raw, violates_raw, \
-       tests_raw, quint_raw) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, \
-       ?, ?)"
+       tests_raw, quint_raw, mutation_sites, deref_sites) VALUES (?, ?, ?, ?, \
+       ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
   in
   let stmt_ty =
     Sqlite3.prepare
@@ -186,6 +186,12 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
       db
       "INSERT INTO type_constructors (type_id, constructor_name, position, \
        arg_types) VALUES (?, ?, ?, ?)"
+  in
+  let stmt_dead =
+    Sqlite3.prepare
+      db
+      "INSERT INTO dead_code_sites (function_id, call_site, callee_name) \
+       VALUES (?, ?, ?)"
   in
   let stmt_call =
     Sqlite3.prepare
@@ -254,6 +260,7 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
   exec_exn db "BEGIN TRANSACTION" ;
   let n_calls = ref 0 in
   let n_resolved = ref 0 in
+  let n_dead_sites = ref 0 in
   let fn_lookup = Hashtbl.create 1024 in
   ignore
     (Sqlite3.exec_not_null
@@ -359,6 +366,16 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
             ~callee_name:callee_display_name
             ~call_site:(Some call.call_site)
             ~kind ;
+          (* R2: the call sits in a block unreachable from its function's CFG
+             entry, so it can never execute. Recorded with its location — that
+             is what makes the finding actionable. *)
+          if call.dead then begin
+            Arch_index_db.bind_int stmt_dead 1 caller_id ;
+            Arch_index_db.bind_text stmt_dead 2 call.call_site ;
+            Arch_index_db.bind_text stmt_dead 3 callee_display_name ;
+            Arch_index_db.exec_stmt db stmt_dead ;
+            incr n_dead_sites
+          end ;
           incr n_calls)
     !all_pending_calls ;
   (* Every emitted edge now carries a valid kind (MUST | MAY_ENUMERATED | MAY_TOP), so this
