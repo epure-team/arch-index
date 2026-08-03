@@ -1,0 +1,27 @@
+# arch-rules.txt — architecture rules for arch-index itself.
+#
+# Checked in CI against the self-index (see selftest-selfrules.sh). Every rule here is one a
+# reviewer would otherwise have to enforce by remembering, which is exactly the class of
+# invariant that decays silently.
+#
+# Read the verdicts as: FAIL = a MUST path exists; FAIL? = reachable via dynamic dispatch;
+# UNKNOWN = the cone escapes through a ⊤ edge, so nothing is proved either way; pass = proved
+# unreachable in a closed universe.
+
+rule "the comment parser must not reach the SQLite layer"
+  # Parsing is a pure text-to-structure step. If it can reach the DB, the layering has slipped
+  # and the parser has become untestable without a database.
+  forbid reach from file:**/comment_parser.ml to file:**/arch_index_db.ml
+
+rule "the CFG builder must not reach the SQLite layer"
+  # arch_index_cfg computes dominance over a graph. It has no business touching storage.
+  forbid reach from file:**/arch_index_cfg.ml to file:**/arch_index_db.ml
+
+rule "the line counter must not reach the SQLite layer"
+  # A pure function over file contents; the R8 rewrite made it state-free, and this pins that.
+  forbid reach from file:**/arch_index_line_counter.ml to file:**/arch_index_db.ml
+
+rule "the LSP client must not reach the CMT walker"
+  # The two frontends are alternatives, not a pipeline. A path from one to the other means a
+  # backend has grown a dependency on the other backend's internals.
+  forbid reach from file:**/lsp_client.ml to file:**/arch_index_cmt.ml

@@ -1,0 +1,5 @@
+(executable
+ (name arch_rules)
+ (public_name arch_rules)
+ (flags (:standard -w +8+11+26+27 -warn-error +8+11))
+ (libraries arch_tools yojson))

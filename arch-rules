@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# arch-rules — architecture fitness functions over a sound call graph.
+# Thin wrapper over the OCaml binary; run `dune build bin/arch_rules` (or ./build.sh) first.
+HERE="$(cd "$(dirname "$0")" && pwd)"
+for cand in "$HERE/bin/arch-rules" "$HERE/_build/default/bin/arch_rules/arch_rules.exe"; do
+  [ -x "$cand" ] && exec "$cand" "$@"
+done
+echo "arch-rules: binary not found; run: dune build bin/arch_rules" >&2
+exit 2

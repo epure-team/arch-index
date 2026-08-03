@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# arch-mutants — mutation testing targeted by the call graph.
+# Thin wrapper over the OCaml binary; run `dune build bin/arch_mutants` (or ./build.sh) first.
+HERE="$(cd "$(dirname "$0")" && pwd)"
+for cand in "$HERE/bin/arch-mutants" "$HERE/_build/default/bin/arch_mutants/arch_mutants.exe"; do
+  [ -x "$cand" ] && exec "$cand" "$@"
+done
+echo "arch-mutants: binary not found; run: dune build bin/arch_mutants" >&2
+exit 2
