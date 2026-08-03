@@ -1,0 +1,428 @@
+(** arch-query — canned call-graph queries over an arch-index comment_db.
+
+    {1 EDGE-KIND CONTRACT}
+
+    When the index is built by a ⊤-marking backend it carries [calls.kind] ∈
+    {MUST, MAY_ENUMERATED, MAY_TOP} and a [callgraph_contract] meta flag:
+
+    - [MUST] a uniquely-resolved static call → trust a POSITIVE (reachability)
+    - [MAY_ENUMERATED] a dynamic call bounded to a candidate set → over-approx
+    - [MAY_TOP] an unresolvable/dynamic/reflective/FFI call → "could call anything"; never dropped
+
+    [reaches] is an UNDER-approximation (MUST edges only): a positive path is must-reach ground
+    truth. [unreachable] is the DUAL: sound ONLY when the graph is ⊤-marked, so it REFUSES on a
+    legacy DB, where "no path" may merely hide a silently-dropped dynamic edge.
+
+    {1 Port note}
+
+    This replaces a bash script that interpolated arguments into SQL after stripping single
+    quotes ([A="${A//\'/}"]). That is not escaping, it is mutilation — a function name
+    containing a quote silently became a different name, and the query answered a question
+    nobody asked. The SQL below is carried over verbatim, with [?] parameters bound as values. *)
+
+open Arch_tools
+
+let usage =
+  {|arch-query — canned call-graph queries over an arch-index comment_db (SQLite).
+Usage: arch-query <db> <subcommand> [args]
+
+Subcommands:
+  callers-of   <name>          who calls NAME (1 hop)
+  callees-of   <name>          what NAME calls (1 hop)
+  reachable-from <name>        transitive closure of callees from NAME
+  reaches      <from> <to>     MUST-only: does a definite call path exist?
+  unreachable  <from> <to>     SOUND dual (requires ⊤-marking): REACHABLE | UNREACHABLE | UNKNOWN
+  escapes      <from>          the MAY_TOP (⊤) edges reachable from FROM
+  fan-in       [N]             top-N most-called functions
+  exported                     all exported functions
+  useless-branches [limit]     decisions with an actionable verdict — dead logic
+  dead-blocks [limit]          call sites in CFG-unreachable blocks
+  mutation-density [limit]     functions ranked by mutation sites (advisory — never a gate)
+  unresolved                   callees with no matching function row
+  find         <substr>        functions whose name matches substr
+  stats                        row counts (+ contract status)
+  mutators-of  <value-kind>    functions that mutate <value-kind> (direct + transitive)
+  effects-of   <fn>            all mutations reachable from <fn>
+  pure-fns                     functions with no effects, transitively
+  dead-code    [--roots exported|<fn1,fn2,...>]
+  capabilities-of <component>  Phase-2 capability attributes
+  compose      <action>        forward 'sequence'/'removes_guard' edges
+  removes-guard <guard>        gated actions and their unlockers
+  actor-paths  <value-kind>    paths across >=2 distinct actor roles
+  prune        <A> <B>         P13 pruning signal
+
+ARCH_QUERY_FORMAT=box|list|json|csv|line|markdown selects the output mode (default box).
+Machine consumers should set `list` or `json`: -box wraps a one-line verdict in ~400
+box-drawing characters.|}
+
+let die code msg =
+  prerr_endline msg ;
+  exit code
+
+let mode () =
+  match Sys.getenv_opt "ARCH_QUERY_FORMAT" with
+  | None -> Arch_fmt.Box
+  | Some s -> (
+      match Arch_fmt.mode_of_string s with
+      | Some m -> m
+      | None ->
+          die 2
+            (Printf.sprintf
+               "arch-query: unknown ARCH_QUERY_FORMAT='%s' \
+                (box|list|json|csv|line|markdown)"
+               s))
+
+(* ------------------------------------------------------------------ *)
+
+let () =
+  let argv = Array.to_list Sys.argv in
+  match argv with
+  | _ :: db_path :: cmd :: rest -> (
+      let fmt = mode () in
+      let t =
+        try Arch_db.open_ro db_path
+        with Arch_db.Refused m | Arch_db.Broken m -> die 2 ("arch-query: " ^ m)
+      in
+      let flat = t.Arch_db.schema = Arch_db.Flat in
+      let a = match rest with x :: _ -> x | [] -> "" in
+      let b = match rest with _ :: y :: _ -> y | _ -> "" in
+      (* Every result shape is DECLARED: the Caqti row type and its projection into display
+         cells, plus the column headers. Headers used to come from Sqlite3.column_name at
+         runtime; hardcoding them is the cost of a typed API, and the differential gate against
+         the tool being replaced is what proves they still match sqlite's own AS aliases. *)
+      let q ~h ~shape ~cells ~pty sql params =
+        Arch_fmt.print fmt h (Arch_db.rows t ~params_ty:pty ~shape ~to_cells:cells sql params)
+      in
+      (* A preamble line that says something about the ANSWER — the contract stamp, which rungs
+         the decision analysis ran — printed as bare text in every format, so with
+         ARCH_QUERY_FORMAT=json it landed in the middle of the JSON stream and a consumer either
+         choked on it or learned to strip lines. In json mode it becomes a document of its own,
+         which is already the shape of that stream (several of these commands emit more than one
+         table). Text formats keep the exact line they had. *)
+      let preamble ~h ~cells ~text =
+        if fmt = Arch_fmt.Json then Arch_fmt.print fmt h [ List.map (fun s -> Arch_db.Text s) cells ]
+        else print_endline text
+      in
+      let unit_ty = Arch_db.Ty.unit in
+      let str1 = Arch_db.Ty.string in
+      let str2 = Arch_db.Ty.(t2 string string) in
+      ignore str2 ;
+      let need_contract () = Arch_db.require_contract t cmd in
+      (* Is this name a node of the graph at all?
+
+         On the FLAT schema a node need not have a `functions` row — an unresolved callee exists
+         only as a `calls.callee_name` — so `functions` alone is not the universe. The guard below
+         used to run on the main schema only, for exactly that reason, which left the flat schema
+         answering "UNREACHABLE … sound" for a name that is not in the index: a typo returned a
+         proof. *)
+      let known name =
+        if name = "" then false
+        else if flat then
+          Arch_db.count1 t "SELECT count(*) FROM functions WHERE name=?" name > 0
+          || Arch_db.count2 t
+               "SELECT count(*) FROM calls WHERE caller_name=? OR callee_name=?" (name, name)
+             > 0
+        else Arch_db.count1 t "SELECT count(*) FROM functions WHERE name=?" name > 0
+      in
+      let need_known role name =
+        if not (known name) then
+          die 3
+            (Printf.sprintf
+               "arch-query: REFUSED — %s '%s' resolves to no function in this index; '%s' cannot \
+                give a sound verdict about a name it does not know."
+               role name cmd)
+      in
+      let limit_of s default = match int_of_string_opt s with Some n -> n | None -> default in
+      let vis =
+        if Arch_db.has_col t "functions" "exported" then "exported" else "exposed"
+      in
+      try
+        (match cmd with
+        (* PORT FIX. These four read `calls.caller_name`, which exists only on the FLAT
+           schema, so on arch-index's own CMT-produced schema the bash version died with a
+           raw sqlite error and exit 1 — including `callers-of`, which the README advertises
+           as the variant-analysis entry point. Each now has a main-schema form. *)
+        | "callers-of" ->
+            if flat then
+              q
+                ~h:[ "caller_name"; "caller_file" ] ~shape:Arch_db.Rows.t2' ~cells:Arch_db.Rows.c2 ~pty:str1
+                "SELECT DISTINCT caller_name, caller_file FROM calls WHERE callee_name=? ORDER BY 1"
+                a
+            else
+              (* On the main schema a callee is EITHER a resolved id or a qualified name
+                 string, and both mean "calls a", so both must be matched or the answer is a
+                 silent under-count. *)
+              q ~h:[ "caller_name"; "caller_file" ] ~shape:Arch_db.Rows.t2' ~cells:Arch_db.Rows.c2 ~pty:str2
+                "SELECT DISTINCT cf.name AS caller_name, COALESCE(m.path,'') AS caller_file FROM \
+                 calls c JOIN functions cf ON c.caller_id=cf.id LEFT JOIN modules m ON \
+                 cf.module_id=m.id WHERE c.callee_name=? OR c.callee_id IN (SELECT id FROM \
+                 functions WHERE name=?) ORDER BY 1"
+                (a, a)
+        | "callees-of" ->
+            if flat then
+              q
+                ~h:[ "callee_name"; "callee_file" ] ~shape:Arch_db.Rows.t2' ~cells:Arch_db.Rows.c2 ~pty:str1
+                "SELECT DISTINCT callee_name, callee_file FROM calls WHERE caller_name=? ORDER BY 1"
+                a
+            else
+              q ~h:[ "callee_name"; "callee_file" ] ~shape:Arch_db.Rows.t2' ~cells:Arch_db.Rows.c2 ~pty:str1
+                "SELECT DISTINCT c.callee_name, COALESCE(m.path,'') AS callee_file FROM calls c \
+                 JOIN functions f ON c.caller_id=f.id LEFT JOIN functions ef ON c.callee_id=ef.id \
+                 LEFT JOIN modules m ON ef.module_id=m.id WHERE f.name=? ORDER BY 1"
+                a
+        | "reachable-from" ->
+            if flat then
+              q ~h:[ "reachable" ] ~shape:Arch_db.Rows.t1 ~cells:Arch_db.Rows.c1 ~pty:str2
+                "WITH RECURSIVE reach(n) AS (SELECT ? UNION SELECT c.callee_name FROM calls c JOIN \
+                 reach r ON c.caller_name=r.n) SELECT n AS reachable FROM reach WHERE n<>? ORDER BY 1"
+                (a, a)
+            else
+              q ~h:[ "reachable" ] ~shape:Arch_db.Rows.t1 ~cells:Arch_db.Rows.c1 ~pty:str2
+                "WITH RECURSIVE reach(id) AS (SELECT id FROM functions WHERE name=? UNION SELECT \
+                 c.callee_id FROM calls c JOIN reach r ON c.caller_id=r.id WHERE c.callee_id IS NOT \
+                 NULL) SELECT DISTINCT f.name AS reachable FROM functions f JOIN reach r ON \
+                 f.id=r.id WHERE f.name<>? ORDER BY 1"
+                (a, a)
+        (* SQL RETURNS FACTS, OCaml WRITES PROSE.
+           These verdicts used to be assembled inside the query with `||`, which is why the
+           bindings ran to NINE positional parameters per call — and nothing checks that a
+           parameter list matches the `?` count, so a miscount binds NULL and silently changes
+           the verdict. Asking SQL for the boolean and formatting in OCaml drops it to one
+           parameter per name and states each sentence exactly once instead of four times. *)
+        | "reaches" ->
+            let sql =
+              if flat then
+                Printf.sprintf
+                  "WITH RECURSIVE reach(n) AS (SELECT ? UNION SELECT c.callee_name FROM calls c \
+                   JOIN reach r ON c.caller_name=r.n WHERE 1=1 %s) SELECT EXISTS(SELECT 1 FROM \
+                   reach WHERE n=?)"
+                  (if t.Arch_db.kinded then "AND c.kind='MUST'" else "")
+              else
+                Printf.sprintf
+                  "WITH RECURSIVE reach(id) AS (SELECT id FROM functions WHERE name=? UNION SELECT \
+                   c.callee_id FROM calls c JOIN reach r ON c.caller_id=r.id WHERE c.callee_id IS \
+                   NOT NULL %s) SELECT EXISTS(SELECT 1 FROM functions f JOIN reach r ON f.id=r.id \
+                   WHERE f.name=?)"
+                  (if t.Arch_db.kinded then "AND c.kind='MUST'" else "")
+            in
+            let hit = Arch_db.count2 t sql (a, b) = 1 in
+            Arch_fmt.print fmt [ "result" ]
+              [ [ Arch_db.Text
+                    (if hit then Printf.sprintf "PATH EXISTS (must-reach): %s -> %s" a b
+                     else
+                       Printf.sprintf
+                         "no MUST path: %s -> %s  (NOT proof of unreachability — use `unreachable`)"
+                         a b) ] ]
+        | "unreachable" ->
+            need_contract () ;
+            (* An empty/unknown universe cannot yield a sound verdict — and that applies to the
+               TARGET too: a typo'd target has no row, so the query finds no path and reports
+               UNREACHABLE as a proof about a function that does not exist. *)
+            need_known "source" a ;
+            need_known "target" b ;
+            let sql =
+              if flat then
+                "WITH RECURSIVE reach_res(n) AS (SELECT ? UNION SELECT c.callee_name FROM calls c \
+                 JOIN reach_res r ON c.caller_name=r.n WHERE c.kind IN ('MUST','MAY_ENUMERATED')) \
+                 SELECT EXISTS(SELECT 1 FROM reach_res WHERE n=?) AS hit, EXISTS(SELECT 1 FROM \
+                 calls c WHERE c.caller_name IN (SELECT n FROM reach_res) AND (c.kind IS NULL OR \
+                 c.kind NOT IN ('MUST','MAY_ENUMERATED'))) AS escapes"
+              else
+                "WITH RECURSIVE reach_res(id) AS (SELECT id FROM functions WHERE name=? UNION \
+                 SELECT c.callee_id FROM calls c JOIN reach_res r ON c.caller_id=r.id WHERE \
+                 c.callee_id IS NOT NULL AND c.kind IN ('MUST','MAY_ENUMERATED')) SELECT \
+                 EXISTS(SELECT 1 FROM functions f JOIN reach_res r ON f.id=r.id WHERE f.name=?) AS \
+                 hit, EXISTS(SELECT 1 FROM calls c WHERE c.caller_id IN (SELECT id FROM reach_res) \
+                 AND (c.kind IS NULL OR c.kind NOT IN ('MUST','MAY_ENUMERATED'))) AS escapes"
+            in
+            let verdict =
+              match
+                Arch_db.rows t ~params_ty:str2 ~shape:Arch_db.Rows.i_i
+                  ~to_cells:(fun (x, y) -> [ Arch_db.int_cell x; Arch_db.int_cell y ])
+                  sql (a, b)
+              with
+              | [ [ Arch_db.Int 1; _ ] ] -> Printf.sprintf "REACHABLE (may-reach): %s -> %s" a b
+              | [ [ _; Arch_db.Int 1 ] ] ->
+                  Printf.sprintf
+                    "UNKNOWN: no resolved path %s -> %s, but %s reaches a non-resolved (MAY_TOP / \
+                     NULL / unknown-kind) edge — could-call-anything; cannot rule out a path. Do \
+                     NOT kill G2."
+                    a b a
+              | _ ->
+                  Printf.sprintf
+                    "UNREACHABLE: no resolved path %s -> %s and no reachable MAY_TOP — sound; G2 \
+                     fails by construction."
+                    a b
+            in
+            Arch_fmt.print fmt [ "verdict" ] [ [ Arch_db.Text verdict ] ]
+        | "escapes" ->
+            need_contract () ;
+            (* An unknown root yields an empty ⊤ frontier, which reads as "nothing escapes" — the
+               most reassuring possible answer to a question that was never asked. *)
+            need_known "source" a ;
+            let hesc = [ "escaping_fn"; "call_site"; "kind" ] in
+            if flat then
+              q ~h:hesc ~shape:Arch_db.Rows.t3' ~cells:Arch_db.Rows.c3 ~pty:str1
+                "WITH RECURSIVE reach_res(n) AS (SELECT ? UNION SELECT c.callee_name FROM calls c \
+                 JOIN reach_res r ON c.caller_name=r.n WHERE c.kind IN ('MUST','MAY_ENUMERATED')) \
+                 SELECT DISTINCT c.caller_name AS escaping_fn, c.call_site, COALESCE(c.kind,'NULL') \
+                 AS kind FROM calls c WHERE c.caller_name IN (SELECT n FROM reach_res) AND (c.kind \
+                 IS NULL OR c.kind NOT IN ('MUST','MAY_ENUMERATED')) ORDER BY 1"
+                a
+            else
+              q ~h:hesc ~shape:Arch_db.Rows.t3' ~cells:Arch_db.Rows.c3 ~pty:str1
+                "WITH RECURSIVE reach_res(id) AS (SELECT id FROM functions WHERE name=? UNION \
+                 SELECT c.callee_id FROM calls c JOIN reach_res r ON c.caller_id=r.id WHERE \
+                 c.callee_id IS NOT NULL AND c.kind IN ('MUST','MAY_ENUMERATED')) SELECT DISTINCT \
+                 cf.name AS escaping_fn, c.call_site, COALESCE(c.kind,'NULL') AS kind FROM calls c \
+                 JOIN functions cf ON c.caller_id=cf.id WHERE c.caller_id IN (SELECT id FROM \
+                 reach_res) AND (c.kind IS NULL OR c.kind NOT IN ('MUST','MAY_ENUMERATED')) ORDER BY 1"
+                a
+        | "fan-in" ->
+            q ~h:[ "callee_name"; "callers" ] ~shape:Arch_db.Rows.s_i ~cells:Arch_db.Rows.csi ~pty:unit_ty
+              (Printf.sprintf
+                 (if flat then
+                    "SELECT callee_name, count(DISTINCT caller_name) AS callers FROM calls GROUP \
+                     BY callee_name ORDER BY callers DESC LIMIT %d"
+                  else
+                    "SELECT callee_name, count(DISTINCT caller_id) AS callers FROM calls GROUP BY \
+                     callee_name ORDER BY callers DESC LIMIT %d")
+                 (limit_of a 25))
+              ()
+        | "exported" ->
+            let hexp = [ "name"; "file_path" ] in
+            if Arch_db.has_col t "functions" "exported" then
+              q ~h:hexp ~shape:Arch_db.Rows.t2' ~cells:Arch_db.Rows.c2 ~pty:unit_ty
+                "SELECT name, file_path FROM functions WHERE exported=1 ORDER BY file_path, name" ()
+            else
+              q ~h:hexp ~shape:Arch_db.Rows.t2' ~cells:Arch_db.Rows.c2 ~pty:unit_ty
+                "SELECT f.name, m.path AS file_path FROM functions f LEFT JOIN modules m ON \
+                 f.module_id=m.id WHERE f.exposed=1 ORDER BY m.path, f.name"
+                ()
+        | "unresolved" ->
+            q ~h:[ "callee_name" ] ~shape:Arch_db.Rows.t1 ~cells:Arch_db.Rows.c1 ~pty:unit_ty
+              "SELECT DISTINCT callee_name FROM calls WHERE callee_name NOT IN (SELECT name FROM \
+               functions) ORDER BY 1"
+              ()
+        | "find" ->
+            let pat = "%" ^ a ^ "%" in
+            let hfind = [ "name"; "file_path"; "exported" ] in
+            if Arch_db.has_col t "functions" "exported" then
+              q ~h:hfind ~shape:Arch_db.Rows.s_s_i ~cells:Arch_db.Rows.cssi ~pty:str1
+                "SELECT name, file_path, exported FROM functions WHERE name LIKE ? ORDER BY name" pat
+            else
+              q ~h:hfind ~shape:Arch_db.Rows.s_s_i ~cells:Arch_db.Rows.cssi ~pty:str1
+                "SELECT f.name, m.path AS file_path, f.exposed AS exported FROM functions f LEFT \
+                 JOIN modules m ON f.module_id=m.id WHERE f.name LIKE ? ORDER BY f.name"
+                pat
+        | "stats" ->
+            let contract_s =
+              match t.Arch_db.contract with
+              | Some c -> c
+              | None -> "<none — not ⊤-marked; 'unreachable' will refuse>"
+            in
+            preamble ~h:[ "contract" ] ~cells:[ contract_s ]
+              ~text:("contract: " ^ contract_s) ;
+            q ~h:[ "functions"; "exported"; "call_edges" ] ~shape:Arch_db.Rows.i_i_i ~cells:Arch_db.Rows.ciii ~pty:unit_ty
+              (Printf.sprintf
+                 "SELECT (SELECT count(*) FROM functions) AS functions, (SELECT count(*) FROM \
+                  functions WHERE %s=1) AS exported, (SELECT count(*) FROM calls) AS call_edges"
+                 vis)
+              () ;
+            if t.Arch_db.kinded then
+              q ~h:[ "kind"; "edges" ] ~shape:Arch_db.Rows.s_i ~cells:Arch_db.Rows.csi ~pty:unit_ty
+                "SELECT kind, count(*) AS edges FROM calls GROUP BY kind ORDER BY 2 DESC" () ;
+            if Arch_db.has_table t "function_effects" then
+              q ~h:[ "effect_rows"; "fns_with_effects"; "value_kinds_seen" ] ~shape:Arch_db.Rows.i_i_i ~pty:unit_ty
+                ~cells:Arch_db.Rows.ciii
+                "SELECT (SELECT count(*) FROM function_effects) AS effect_rows, (SELECT \
+                 count(DISTINCT function_name) FROM function_effects) AS fns_with_effects, (SELECT \
+                 count(DISTINCT value_kind) FROM function_effects) AS value_kinds_seen"
+                () ;
+            if Arch_db.has_table t "dead_code_sites" then
+              q ~h:[ "dead_call_sites" ] ~shape:Arch_db.Rows.i ~cells:(fun x -> [ Arch_db.int_cell x ]) ~pty:unit_ty
+                "SELECT count(*) AS dead_call_sites FROM dead_code_sites" () ;
+            if Arch_db.has_col t "functions" "mutation_sites" then
+              if Arch_db.count t "SELECT count(*) FROM functions WHERE mutation_sites IS NOT NULL" > 0
+              then
+                q ~h:[ "mutation_sites"; "deref_sites"; "fns_measured" ] ~shape:Arch_db.Rows.i_i_i ~pty:unit_ty
+                  ~cells:Arch_db.Rows.ciii
+                  "SELECT sum(mutation_sites) AS mutation_sites, sum(deref_sites) AS deref_sites, \
+                   count(*) AS fns_measured FROM functions WHERE mutation_sites IS NOT NULL"
+                  ()
+              else
+                preamble ~h:[ "mutability_metrics" ]
+                  ~cells:[ "not computed by this backend" ]
+                  ~text:"mutability metrics: not computed by this backend"
+        | "useless-branches" ->
+            if not (Arch_db.has_table t "decisions") then
+              die 3 "arch-query: useless-branches requires a schema with a decisions table." ;
+            if Arch_db.count t "SELECT count(*) FROM decisions" = 0 then
+              die 3
+                "arch-query: this index carries no decision analysis (no producer has run \
+                 decision-lint --db against it)." ;
+            (* Degradation must be VISIBLE: a clean result on a degraded run must not be
+               mistakable for a clean result on a complete one. A blank is not an honest
+               answer. *)
+            let meta_or k = match Arch_db.meta t k with Some v when v <> "" -> v | _ -> "<not reported>" in
+            let armed = meta_or "decision_armed_rungs"
+            and frontend = meta_or "decision_frontend"
+            and solver = meta_or "decision_solver"
+            (* Files the producer could not read or could not walk. A partial run and a clean run
+               both yield an empty finding list, so the difference has to be stated. *)
+            and skipped = meta_or "decision_parse_failures"
+            and failed = meta_or "decision_analysis_failures" in
+            preamble
+              ~h:[ "armed"; "frontend"; "solver"; "files_unparsed"; "files_unanalysed" ]
+              ~cells:[ armed; frontend; solver; skipped; failed ]
+              ~text:
+                (Printf.sprintf
+                   "armed: %s   frontend: %s   solver: %s   files unparsed: %s   files \
+                    unanalysed: %s"
+                   armed frontend solver skipped failed) ;
+            q ~h:[ "file_path"; "line"; "function_name"; "verdict"; "decided_by"; "evidence" ] ~pty:unit_ty
+              ~shape:Arch_db.Rows.ub_shape ~cells:Arch_db.Rows.ub_cells
+              (Printf.sprintf
+                 "SELECT file_path, line, function_name, verdict, decided_by, evidence FROM \
+                  v_useless_branches LIMIT %d"
+                 (limit_of a 50))
+              ()
+        | "dead-blocks" ->
+            if not (Arch_db.has_table t "dead_code_sites") then
+              die 3
+                "arch-query: dead-blocks requires a schema with dead_code_sites (this backend did \
+                 not compute block reachability)." ;
+            q ~h:[ "module_path"; "function_name"; "call_site"; "callee_name" ] ~shape:Arch_db.Rows.t4' ~pty:unit_ty
+              ~cells:Arch_db.Rows.c4
+              (Printf.sprintf
+                 "SELECT module_path, function_name, call_site, callee_name FROM v_dead_code LIMIT %d"
+                 (limit_of a 50))
+              ()
+        | "mutation-density" ->
+            if not (Arch_db.has_col t "functions" "mutation_sites") then
+              die 3 "arch-query: mutation-density requires a schema with functions.mutation_sites." ;
+            if Arch_db.count t "SELECT count(*) FROM functions WHERE mutation_sites IS NOT NULL" = 0
+            then
+              die 3
+                "arch-query: this index carries no mutability metrics (backend did not compute them)." ;
+            q
+              ~h:[ "module_path"; "function_name"; "mutation_sites"; "deref_sites"; "line_count";
+                   "mutations_per_kloc" ]
+              ~shape:Arch_db.Rows.mut ~cells:Arch_db.Rows.cmut ~pty:unit_ty
+              (Printf.sprintf
+                 "SELECT module_path, function_name, mutation_sites, deref_sites, line_count, \
+                  mutations_per_kloc FROM v_mutation_heavy LIMIT %d"
+                 (limit_of a 25))
+              ()
+        | _ -> Arch_effects_queries.dispatch t fmt ~cmd ~a ~b ~flat ~usage) ;
+        exit 0
+      with
+      (* Exit 3 is a VERDICT — "this index cannot answer that soundly". A database that could
+         not be read is not a verdict, and callers that treat 3 as an answer must not receive one
+         for a locked file or a SQL error. *)
+      | Arch_db.Refused m -> die 3 ("arch-query: " ^ m)
+      | Arch_db.Broken m -> die 2 ("arch-query: " ^ m)
+      | Sqlite3.Error e -> die 2 ("arch-query: sqlite error: " ^ e))
+  | _ ->
+      prerr_endline usage ;
+      exit 2

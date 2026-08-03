@@ -78,5 +78,40 @@ NK="$(mktemp --suffix=.db)"; rm -f "$NK"
 sqlite3 "$NK" "CREATE TABLE comment_db_meta(key TEXT,value TEXT); INSERT INTO comment_db_meta VALUES('callgraph_contract','v1'); CREATE TABLE functions(name TEXT,file_path TEXT,exported INT); CREATE TABLE calls(caller_name TEXT,caller_file TEXT,callee_name TEXT,callee_file TEXT,call_site TEXT); INSERT INTO calls VALUES('A','x','b','x','x:1');"
 say "$NK" unreachable A b >/dev/null 2>&1; [ "$?" -eq 3 ] || note "flag set but no kind column must REFUSE (exit 3)"
 
-rm -f "$TM" "$LG" "$ML" "$NK"
+# --- an unknown NAME must refuse on BOTH schemas ---------------------------------------------
+# The guard ran on the main schema only, because on the flat schema a node need not have a
+# `functions` row (an unresolved callee lives in `calls.callee_name`). The result was that a
+# typo'd name on a flat index came back "UNREACHABLE … sound" — a proof about a function that
+# does not exist. The universe on the flat schema is functions ∪ callers ∪ callees.
+UN="$(mktemp --suffix=.db)"; rm -f "$UN"
+"$HERE/arch-load" "$UN" <<'NDJSON' >/dev/null 2>&1
+{"type":"function","name":"a","file_path":"x","exported":true}
+{"type":"function","name":"b","file_path":"x"}
+{"type":"call","caller_name":"a","caller_file":"x","callee_name":"b","callee_file":"x","call_site":"x:1","kind":"MUST"}
+{"type":"call","caller_name":"b","caller_file":"x","callee_name":"ext_only","callee_file":null,"call_site":"x:2","kind":"MAY_ENUMERATED"}
+NDJSON
+say "$UN" unreachable no_such a >/dev/null 2>&1
+[ "$?" -eq 3 ] || note "flat schema: an unknown SOURCE must REFUSE, never answer UNREACHABLE"
+say "$UN" unreachable a no_such >/dev/null 2>&1
+[ "$?" -eq 3 ] || note "flat schema: an unknown TARGET must REFUSE — 'no path to a name that does not exist' is not a proof"
+say "$UN" escapes no_such >/dev/null 2>&1
+[ "$?" -eq 3 ] || note "flat schema: escapes on an unknown root must REFUSE, not report an empty ⊤ frontier"
+# ...and a callee that exists ONLY as an edge endpoint is still a known name, or the guard would
+# refuse legitimate questions about unresolved callees.
+say "$UN" unreachable a ext_only 2>&1 | grep -q 'REACHABLE' \
+  || note "flat schema: a callee with no functions row is still a node — it must not be refused"
+rm -f "$UN"
+
+# --- exit 3 is a VERDICT, so a broken database must not produce one -------------------------
+# Exit 3 means "this index cannot answer that soundly" and callers (the MCP server, CI gates)
+# are told to report it as a considered result. A file that could not be read is not a result.
+CORRUPT="$(mktemp --suffix=.db)"; head -c 512 /dev/urandom > "$CORRUPT"
+say "$CORRUPT" stats >/dev/null 2>&1
+[ "$?" -eq 2 ] || note "an unreadable database must exit 2, never 3 — 3 would present an I/O failure as a soundness verdict"
+say "$CORRUPT" unreachable a b >/dev/null 2>&1
+[ "$?" -eq 2 ] || note "an unreadable database must exit 2 even on a query whose refusal code IS 3"
+say /nonexistent/nope.db stats >/dev/null 2>&1
+[ "$?" -eq 2 ] || note "a missing database must exit 2"
+
+rm -f "$TM" "$LG" "$ML" "$NK" "$CORRUPT"
 if [ "$fails" -eq 0 ]; then echo "arch-index contract selftest: PASS"; exit 0; else echo "arch-index contract selftest: FAIL ($fails)"; exit 1; fi

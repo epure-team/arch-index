@@ -5,7 +5,7 @@ synopsis:
 description:
   "Extracts function definitions, doc comments, and call graphs from OCaml, TypeScript, Go, Rust, and Python projects via LSP and CMT analysis."
 depends: [
-  "dune" {>= "3.13"}
+  "dune" {>= "3.15"}
   "ocaml" {>= "5.3.0"}
   "cmdliner"
   "yojson"
@@ -21,6 +21,8 @@ depends: [
   "ppx_blob"
   "ppx_deriving_yojson"
   "sqlite3"
+  "caqti"
+  "caqti-driver-sqlite3" {>= "3.0"}
   "ocaml-compiler-libs"
   "ppx_inline_test" {>= "v0.16"}
   "ppx_assert" {>= "v0.16"}
