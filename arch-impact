@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# arch-impact — change-impact briefing for a diff, over a sound call graph.
+# Thin wrapper over the OCaml binary; run `dune build bin/arch_impact` (or ./build.sh) first.
+HERE="$(cd "$(dirname "$0")" && pwd)"
+for cand in "$HERE/bin/arch-impact" "$HERE/_build/default/bin/arch_impact/arch_impact.exe"; do
+  [ -x "$cand" ] && exec "$cand" "$@"
+done
+echo "arch-impact: binary not found; run: dune build bin/arch_impact" >&2
+exit 2

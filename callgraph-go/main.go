@@ -1,7 +1,7 @@
 // arch-callgraph-go — Go Tier-1 call-graph producer for the arch-index edge-kind contract.
 //
 // Emits NDJSON function+call records on stdout, one per line:
-//   {"type":"function","name":"pkg.Fn","file_path":"x.go","exported":true}
+//   {"type":"function","name":"pkg.Fn","file_path":"x.go","exported":true,"line_start":10,"line_end":42}
 //   {"type":"call","caller_name":"pkg.Fn","caller_file":"x.go","callee_name":"pkg.Gn",
 //    "callee_file":"y.go","call_site":"x.go:42","kind":"MUST|MAY_ENUMERATED|MAY_TOP"}
 //
@@ -62,6 +62,12 @@ type funcRecord struct {
 	Name     string `json:"name"`
 	FilePath string `json:"file_path"`
 	Exported bool   `json:"exported"`
+	// Source span, omitted when the function has no syntax (wrappers, bound
+	// methods, synthetic init). Consumed by arch-impact to map a diff hunk to
+	// the functions it touches; a HALF span is worse than none (it would
+	// mis-map every line), so both are emitted or neither.
+	LineStart int `json:"line_start,omitempty"`
+	LineEnd   int `json:"line_end,omitempty"`
 }
 
 type callRecord struct {
@@ -157,6 +163,27 @@ func funcName(fn *ssa.Function) string {
 }
 
 // filePath returns the source file of an SSA function (best-effort).
+// lineSpan returns the 1-based [start, end] source lines of fn's declaration,
+// or (0, 0) when fn has no syntax to point at — synthetic functions (wrappers,
+// thunks, package init) genuinely have no span, and inventing one would make
+// arch-impact attribute a diff hunk to a function the developer never wrote.
+// Returns (0, 0) rather than a half span for the same reason.
+func lineSpan(fset *token.FileSet, fn *ssa.Function) (int, int) {
+	syn := fn.Syntax()
+	if syn == nil {
+		return 0, 0
+	}
+	sp, ep := syn.Pos(), syn.End()
+	if !sp.IsValid() || !ep.IsValid() {
+		return 0, 0
+	}
+	s, e := fset.Position(sp).Line, fset.Position(ep).Line
+	if s <= 0 || e < s {
+		return 0, 0
+	}
+	return s, e
+}
+
 func filePath(fset *token.FileSet, fn *ssa.Function) string {
 	if fn.Pos().IsValid() {
 		return fset.Position(fn.Pos()).Filename
@@ -452,11 +479,14 @@ func main() {
 		if fn.Package() == nil || !loadedPkgPaths[fn.Package().Pkg.Path()] {
 			continue // skip stdlib / transitive deps
 		}
+		ls, le := lineSpan(fset, fn)
 		emit(funcRecord{
-			Type:     "function",
-			Name:     funcName(fn),
-			FilePath: filePath(fset, fn),
-			Exported: fn.Object() != nil && fn.Object().Exported(),
+			Type:      "function",
+			Name:      funcName(fn),
+			FilePath:  filePath(fset, fn),
+			Exported:  fn.Object() != nil && fn.Object().Exported(),
+			LineStart: ls,
+			LineEnd:   le,
 		})
 	}
 	if nFuncs == 0 {
