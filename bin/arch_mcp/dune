@@ -1,0 +1,20 @@
+; NOT built by default: mcp-kit is not on opam yet (it lives in a private repo — pin it from
+; https://github.com/epure-team/ocaml-mcp, see docs/mcp-server.md). Set ARCH_MCP=yes to build it.
+;
+; `enabled_if` and NOT `(optional)`. (optional) only drops the *install* entry; the target stays
+; in the directory's @all alias, which @default depends on, so `dune build` still fails with
+; "Library mcp-kit.stdio not found". That is exactly how this broke CI. enabled_if removes the
+; target from the rule set, so a checkout without the pin builds clean.
+;
+; %{env:...} in enabled_if is why dune-project is at (lang dune 3.15). %{lib-available:...} would
+; auto-detect instead of needing the flag, but dune rejects it in an executable's enabled_if at
+; every language version — checked up to 3.20.
+;
+; The `mcp` CI job sets ARCH_MCP=yes and asserts the .exe exists afterwards, so neither a stale
+; target nor a silently-disabled one can pass unnoticed.
+(executable
+ (name arch_mcp)
+ (public_name arch_mcp)
+ (enabled_if
+  (= %{env:ARCH_MCP=no} yes))
+ (libraries mcp-kit mcp-kit.stdio sqlite3 unix))
