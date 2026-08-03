@@ -59,10 +59,20 @@ arch-index makes call-graph reachability answerable as a SQL query:
 - **Variant analysis** — find all callers of a fixed function to check for unfixed siblings: `callers-of vulnerableHelper`.
 - **Panic / exit reachability** — "is `os.Exit` reachable from `ServeHTTP`?" Useful for detecting accidental shutdown paths in request handlers.
 - **Documentation quality** — every function row carries a `comment_quality_score` (0–100). Query `SELECT name FROM functions WHERE comment_quality_score < 50 AND exposed = 1` to surface underdocumented public API.
+- **Change-impact briefing** — `./arch-impact /tmp/repo.db --diff main...HEAD` answers what a PR touches, which exported functions are affected, the blast radius, and where the ⊤ frontier makes that radius a lower bound rather than a bound. See [change impact](docs/change-impact.md).
+- **Targeted mutation testing** — `./arch-mutants plan` decides what is worth mutating (test-reachable code only) and which tests must rerun for each target; `./arch-mutants report` attributes each surviving mutant to the tests that should have killed it. No engine of its own — it drives Mutaml, cargo-mutants, go-mutesting and friends. See [mutation testing](docs/mutation-testing.md).
+- **Reachability-weighted coverage** — `./arch-coverage /tmp/repo.db coverage.lcov` answers which API-reachable functions are never exercised, which covered functions are only ⊤-reachable, and — crossed with `arch-mutants` — which are covered by tests that check nothing. LCOV in, so it works for every language. See [coverage](docs/coverage.md).
+- **Agent access over MCP** — `arch_mcp` serves these verdicts to an agent, with a `provenance` block on every answer so it can tell "UNREACHABLE, proved over a ⊤-marked index" from "UNREACHABLE on an index that never marked ⊤". See [MCP server](docs/mcp-server.md).
+- **Architecture fitness functions** — `./arch-rules /tmp/repo.db arch-rules.txt` enforces layering, export-surface and effect rules over the *sound* graph. Unlike ArchUnit/deptrac/import-linter, which check declared imports, it answers whether a call can actually reach — and says `UNKNOWN` instead of a green tick when it cannot tell. See [fitness functions](docs/fitness-functions.md).
 
 ## Documentation
 
 - [Install & LSP backends](docs/install.md)
+- [Mutation testing, targeted by the call graph](docs/mutation-testing.md)
+- [Reachability-weighted coverage](docs/coverage.md)
+- [MCP server for agents](docs/mcp-server.md)
+- [Change impact for reviewers and agents](docs/change-impact.md)
+- [Architecture fitness functions](docs/fitness-functions.md)
 - [Edge-kind contract & soundness](docs/edge-kind-contract.md)
 - [DB schema reference](docs/schema.md)
 - [Formal soundness spec](SPEC-sound-callgraph.md)
