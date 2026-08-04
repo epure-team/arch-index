@@ -116,7 +116,9 @@ let plan (t : Arch_db.t) (g : Arch_graph.t) test_keys heuristic fmt maxlist =
   let unaccounted =
     indexed - (List.length targets + List.length no_location + List.length roots + SS.cardinal unreached)
   in
-  let sound = t.contract <> None && t.kinded in
+  (* Arch_db.contract_ok, not t.contract <> None && t.kinded — see arch_coverage.ml's identical
+     comment; round-2 review, F6. *)
+  let sound = Arch_db.contract_ok t "mutants" in
   let proof = escapes = [] && sound in
   let without_span =
     List.length (List.filter (fun ((n : Arch_graph.node), _, _, _) -> n.line_start = None) targets)

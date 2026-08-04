@@ -64,6 +64,11 @@
 - `arch-rules --format json`: added `results[].detail_total`, the untruncated count each
   `detail` list (capped at 20) was cut from — previously a consumer could not tell "20 shown, 20
   total" from "20 of 200" without recounting from text output.
+- `arch-coverage` and `arch-mutants` still computed `sound`/`sound_reachability` via the same
+  weak `t.contract <> None && t.kinded` check `arch-impact` was just fixed to stop using
+  (round-2 review, follow-up to the `contract_ok` unification above). Both now call the shared
+  `Arch_db.contract_ok` helper too, so a NULL-kind edge reads `sound:false` consistently across
+  all four tools instead of only the two that gate the `proof-carrying-change` workflow.
 
 ## [0.2.0] - 2026-06-25
 

@@ -242,7 +242,11 @@ let () =
         ( List.sort (fun (a, _, x) (b, _, y) -> if x = y then compare a b else compare y x) !hits,
           List.sort_uniq compare !amb )
   in
-  let sound = t.contract <> None && t.kinded in
+  (* Arch_db.contract_ok, not t.contract <> None && t.kinded: the weaker check is satisfied by a
+     malformed index (flag set, but a real edge has NULL kind) that arch-impact/arch-rules
+     correctly refuse — see Arch_db.require_contract's doc comment. Sharing the helper means this
+     tool can never disagree with them about the same index (round-2 review, F6). *)
+  let sound = Arch_db.contract_ok t "coverage" in
 
   (if fmt = "json" then
      print_endline
