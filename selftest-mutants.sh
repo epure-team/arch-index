@@ -166,5 +166,24 @@ assert s["function"]=="inner", s
 assert s["reaching_tests"]==["t_alpha"], s
 ' 2>/dev/null || note "the mutaml adapter must attribute exactly as the generic path does"
 
+# --- contract_ok is the STRICT check (round-2 review, F6): same malformed-⊤-marked fixture as
+# selftest-contract.sh's "ML" case, selftest-impact.sh's, selftest-rules.sh's, and
+# selftest-coverage.sh's — the flag is set, `kind` exists, but a REAL edge has kind=NULL.
+# arch-mutants must agree with arch-impact/arch-rules/arch-coverage that this index is NOT sound,
+# from the same Arch_db.contract_ok helper.
+ML="$(mktemp --suffix=.db)"; rm -f "$ML"
+sqlite3 "$ML" <<'SQL'
+CREATE TABLE comment_db_meta(key TEXT, value TEXT); INSERT INTO comment_db_meta VALUES('callgraph_contract','v1');
+CREATE TABLE functions(name TEXT, file_path TEXT, exported INT, line_start INT, line_end INT); INSERT INTO functions VALUES('A','x',1,NULL,NULL),('mid','x',0,NULL,NULL),('sink','x',0,NULL,NULL);
+CREATE TABLE calls(caller_name TEXT, caller_file TEXT, callee_name TEXT, callee_file TEXT, call_site TEXT, kind TEXT);
+INSERT INTO calls VALUES ('A','x','mid','x','x:1','MUST'),('mid','x','sink','x','x:2',NULL);
+SQL
+MLOUT="$("$MUT" plan "$ML" --tests 'fn:A' --format json 2>/dev/null)"
+printf '%s' "$MLOUT" | python3 -c '
+import json,sys
+assert json.load(sys.stdin)["sound_targeting"] is False
+' 2>/dev/null || note "arch-mutants: a NULL-kind edge on a flag-stamped index must report sound_targeting:false"
+rm -f "$ML"
+
 rm -f "$DB" "$MR" "$CLEAN" "$BAD" "$NOLOC" "$NOTLIST" "$MJ"
 if [ "$fails" -eq 0 ]; then echo "selftest-mutants: PASS"; else echo "selftest-mutants: $fails FAILURE(S)"; exit 1; fi
