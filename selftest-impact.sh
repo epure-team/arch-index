@@ -13,6 +13,29 @@ set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
 LOAD="$HERE/arch-load"; IMPACT="$HERE/arch-impact"
 fails=0; note() { echo "FAIL: $*" >&2; fails=$((fails+1)); }
+
+# stdin: assert it is EXACTLY one JSON object (no trailing garbage) and that no float/Intlit
+# value appears anywhere in the tree — the machine-output contract is int/bool/string/null/
+# array/object only.
+strict_json_ok() {
+  python3 -c '
+import json, sys
+s = sys.stdin.read().lstrip()
+dec = json.JSONDecoder()
+obj, idx = dec.raw_decode(s)
+assert s[idx:].strip() == "", "trailing data after the JSON object"
+def walk(v):
+    if isinstance(v, float):
+        raise AssertionError("float found in machine output: %r" % (v,))
+    if isinstance(v, dict):
+        for x in v.values():
+            walk(x)
+    elif isinstance(v, list):
+        for x in v:
+            walk(x)
+walk(obj)
+'
+}
 command -v python3 >/dev/null 2>&1 || { echo "selftest-impact: python3 required" >&2; exit 2; }
 command -v git >/dev/null 2>&1 || { echo "selftest-impact: git required" >&2; exit 2; }
 
@@ -103,6 +126,20 @@ import json,sys
 assert json.load(sys.stdin)["decision_analysis_available"] is False
 ' 2>/dev/null || note "an empty decisions table must read as NOT COMPUTED, never as 'nothing to report'"
 
+# --- 4c. machine-output contract: one strict JSON object, computed/contract_ok/verdict --------
+printf '%s' "$OUT" | strict_json_ok \
+  || note "arch-impact --format json must emit exactly one JSON object with no float/Intlit values"
+printf '%s' "$OUT" | python3 -c '
+import json,sys
+r=json.load(sys.stdin)
+assert r["computed"] is True, r["computed"]
+assert isinstance(r["contract_ok"], bool)
+assert r["verdict"] == "pass", r["verdict"]                # --fail-on-new-findings was not requested
+assert r["new_findings"] == len(r["findings"]["decisions"])
+assert r["findings"]["computed"] is False, r["findings"]    # no decisions table on this index
+assert isinstance(r["findings"]["reason"], str) and r["findings"]["reason"], r["findings"]
+' 2>/dev/null || note "computed/contract_ok/verdict/findings.computed+reason must be present and coherent"
+
 # --- 5. no-span index degrades to file granularity, LOUDLY --------------------------------
 NOSPAN="$(mktemp --suffix=.db)"; rm -f "$NOSPAN"
 "$LOAD" "$NOSPAN" <<'NDJSON' 2>/dev/null
@@ -146,11 +183,39 @@ import json,sys; r=json.load(sys.stdin)["findings"]["decisions"]
 assert [d["line"] for d in r]==[6], r      # line 10 is NOT in the diff and must not be reported
 ' 2>/dev/null || note "only the finding on a TOUCHED line may be reported (line 10 was untouched)"
 
+# exit code 1 <-> JSON verdict "fail": a consumer with only stdout must reach the same
+# conclusion as one with only the exit code
+FFOUT="$("$IMPACT" "$FDB" --diff HEAD~1..HEAD --repo "$REPO" --format json --fail-on-new-findings 2>/dev/null)"
+printf '%s' "$FFOUT" | strict_json_ok || note "JSON output must stay strict even when --fail-on-new-findings fires"
+printf '%s' "$FFOUT" | python3 -c '
+import json,sys; r=json.load(sys.stdin)
+assert r["verdict"] == "fail", r["verdict"]
+assert r["new_findings"] == 1, r["new_findings"]
+assert r["findings"]["computed"] is True, r["findings"]
+' 2>/dev/null || note "verdict must read 'fail' exactly when the exit code is 1"
+
 # an untouched-line-only diff must pass the gate
 sed -i '2s/.*/  call helper2/' "$REPO/src/app.src"
 git -C "$REPO" commit -qam "change entry"
 "$IMPACT" "$FDB" --diff HEAD~1..HEAD --repo "$REPO" --fail-on-new-findings >/dev/null 2>&1
 [ $? -eq 0 ] || note "--fail-on-new-findings must PASS when the diff touches no finding line"
+PFOUT="$("$IMPACT" "$FDB" --diff HEAD~1..HEAD --repo "$REPO" --format json --fail-on-new-findings 2>/dev/null)"
+printf '%s' "$PFOUT" | python3 -c '
+import json,sys
+assert json.load(sys.stdin)["verdict"] == "pass"
+' 2>/dev/null || note "verdict must read 'pass' exactly when the exit code is 0"
+
+# --- 7b. exit code 3 <-> JSON verdict "refused": a gate whose input was never computed --------
+# $DB carries no decision analysis at all (built in step 1, no {"type":"decision",...} records).
+"$IMPACT" "$DB" --diff HEAD~1..HEAD --repo "$REPO" --fail-on-new-findings >/dev/null 2>&1
+[ $? -eq 3 ] || note "--fail-on-new-findings on an index with no decision analysis must REFUSE (exit 3), never pass or fail"
+RFOUT="$("$IMPACT" "$DB" --diff HEAD~1..HEAD --repo "$REPO" --format json --fail-on-new-findings 2>/dev/null)"
+printf '%s' "$RFOUT" | strict_json_ok || note "JSON output must stay strict on the sound-refusal path too"
+printf '%s' "$RFOUT" | python3 -c '
+import json,sys; r=json.load(sys.stdin)
+assert r["verdict"] == "refused", r["verdict"]
+assert r["findings"]["computed"] is False, r["findings"]
+' 2>/dev/null || note "verdict must read 'refused' exactly when the exit code is 3 — never confused with 'fail' (1) or a crash (2)"
 
 # --- diff parsing: content lines are not headers, and a pure deletion is a change -----------
 # Two failures the earlier parser had, in ONE fixture because they arise together. Under

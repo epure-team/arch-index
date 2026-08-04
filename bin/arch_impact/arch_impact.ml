@@ -252,11 +252,26 @@ let () =
     Hashtbl.fold (fun _ v acc -> v :: acc) touched []
     |> List.sort (fun a b -> compare a.name b.name)
   in
+  (* Mirrors the --fail-on-new-findings decision made below (line ~443) so the JSON `verdict`
+     and the exit code always agree — a consumer with only one of the two can still conclude. *)
+  let decision_analysis_available = Arch_db.nonempty t "decisions" in
+  let new_findings = List.length decs in
+  let verdict =
+    if not (has_flag "--fail-on-new-findings") then `Pass
+    else if not decision_analysis_available then `Refused
+    else if new_findings > 0 then `Fail
+    else `Pass
+  in
+  let verdict_str = function `Pass -> "pass" | `Fail -> "fail" | `Refused -> "refused" in
   if fmt = "json" then
     print_endline
       (Yojson.Safe.pretty_to_string
          (`Assoc
-           [ ("db", `String db_path); ("sound_reachability", `Bool sound);
+           [ ("computed", `Bool true);
+             ("contract_ok", `Bool sound);
+             ("verdict", `String (verdict_str verdict));
+             ("new_findings", `Int new_findings);
+             ("db", `String db_path); ("sound_reachability", `Bool sound);
              ("touched",
               `List
                 (List.map
@@ -277,10 +292,14 @@ let () =
               `List (List.map (fun (n, c) -> `Assoc [ ("function", `String n); ("escapes", `Int c) ]) frontier));
              ("tests_reaching", `List (List.map (fun s -> `String s) tests));
              ("may_tests_reaching", `List (List.map (fun s -> `String s) may_tests));
-             ("decision_analysis_available", `Bool (Arch_db.nonempty t "decisions"));
+             ("decision_analysis_available", `Bool decision_analysis_available);
              ("findings",
               `Assoc
-                [ ("decisions",
+                [ ("computed", `Bool decision_analysis_available);
+                  ("reason",
+                   if decision_analysis_available then `Null
+                   else `String "no decision analysis in this index — absence of data, not absence of findings");
+                  ("decisions",
                    `List
                      (List.map
                         (fun (p, l, f, v, s) ->
