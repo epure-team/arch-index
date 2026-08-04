@@ -86,11 +86,14 @@ when the diff touches a line that already carries a finding. It is off by defaul
 diagnostic goes to stderr. Every value in the tree is `null`/`bool`/`string`/int/array/object —
 no floats, no exponent notation. Absence of data is stated, never implied: a field name never
 disappears to mean "not applicable" — its sibling `computed`/`reason` pair says so explicitly.
+**"Effects crossed"** (the text/md-only section — see the table above) has no JSON key yet; a
+consumer that needs it today has to parse the `text`/`md` output, or query `function_effects`
+directly.
 
 | field | type | meaning |
 |---|---|---|
 | `computed` | bool | the reachability analysis ran (always `true` when this object is printed at all — kept as a field, not assumed, so a gate can require its presence rather than its absence of failure) |
-| `contract_ok` | bool | same value as `sound_reachability`: is this index ⊤-marked, so the closed-cone claim is trustworthy |
+| `contract_ok` | bool | same value as `sound_reachability`: is this index ⊤-marked, so the closed-cone claim is trustworthy. Computed by `Arch_db.contract_ok`, the same helper `arch-rules` uses for its own `contract_ok` — never `t.contract <> None` alone, which a flag-set-but-NULL-kind-edge index would satisfy while still being unsound |
 | `verdict` | `"pass"` \| `"fail"` \| `"refused"` | the `--fail-on-new-findings` decision, restated so a consumer with only stdout reaches the same conclusion as one with only the exit code. `"pass"` when the flag was not requested at all (informational run) |
 | `new_findings` | int | count of `findings.decisions` — the same number `--fail-on-new-findings` gates on |
 | `findings.computed` | bool | did this index carry decision analysis at all (mirrors `decision_analysis_available`) |
@@ -108,8 +111,21 @@ Exit code 2 (malformed input, or `Arch_db.Broken`) is an infrastructure failure,
 JSON object is assembled — there is no stdout to parse on that path, by design: a consumer that
 only reads stdout must never mistake "the tool crashed" for a considered verdict.
 
+**A gate must read `verdict`, not `computed`, to catch a refusal.** Root-level `computed` is
+`true` on every path that reaches the JSON print — including a `--fail-on-new-findings` refusal,
+since the object is assembled and printed *before* the refusal check runs (the refusal only
+decides the exit code and the `verdict` string; it happens too late to still be `false`).
+`findings.computed` is the field that goes `false` on that path — but a caller who only checks
+root `computed` (a plausible-looking but wrong choice) sees `true` straight through a refusal.
+Any gate meant to enforce "this diff was actually judged, not waved through" must check `verdict
+== "pass"` (which subsumes both `findings.computed` and `new_findings == 0`), not `computed`
+alone.
+
 All the richer fields (`touched`, `affected_exported`, `top_frontier`, …) are unchanged and remain
-available for the same consumer that wants the full briefing, not just the gate decision.
+available for the same consumer that wants the full briefing, not just the gate decision. Every
+list under this contract is printed **in full** — `--max-list`/the text-mode cap only apply to
+the human-readable `text`/`md` formats, never to `--format json`. `findings.dead_sites` is
+reserved for a future finding kind and is currently always `[]`.
 
 ## Honest-negative rules
 

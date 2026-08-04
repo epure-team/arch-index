@@ -51,6 +51,19 @@
 ### Fixed
 - A legacy index with no `calls.kind` column crashed the closure queries — the column cannot be
   named in SQL when it does not exist. Every edge now reads as MUST there, as `arch-query` does.
+- `arch-impact`'s `contract_ok`/`sound_reachability` used a weaker check (`t.contract <> None &&
+  t.kinded`) than `arch-rules`'s (the full `require_contract` scan, which also rejects a
+  NULL/invalid `kind` on a real edge — a flag set on a malformed index is worse than no flag at
+  all: see `Arch_db.require_contract`'s doc comment). The same index could read `contract_ok:true`
+  from one tool and `false` from the other. Both tools now derive it from one new shared helper,
+  `Arch_db.contract_ok`, so they can never disagree. New selftest fixture (the same
+  stamped-but-NULL-kind index `selftest-contract.sh` already uses) confirms both tools agree
+  `contract_ok:false` on it. `arch-impact`'s text-mode output is unaffected — no existing fixture
+  had a NULL-kind edge, so the stricter check changes nothing already covered, only what was
+  previously miscategorized.
+- `arch-rules --format json`: added `results[].detail_total`, the untruncated count each
+  `detail` list (capped at 20) was cut from — previously a consumer could not tell "20 shown, 20
+  total" from "20 of 200" without recounting from text output.
 
 ## [0.2.0] - 2026-06-25
 
