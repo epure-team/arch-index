@@ -195,5 +195,29 @@ sqlite3 "$DB" "SELECT covered_lines||'/'||total_lines FROM coverage_by_name WHER
 n2=$(sqlite3 "$DB" "SELECT count(*) FROM coverage_by_name;" 2>/dev/null)
 [ "$n2" = "$n" ] || note "--write must replace, not accumulate ($n then $n2 rows)"
 
+# --- 7. contract_ok is the STRICT check (round-2 review, F6): same malformed-⊤-marked fixture
+# as selftest-contract.sh's "ML" case, selftest-impact.sh's 4d, selftest-rules.sh's — the flag is
+# set, `kind` exists, but a REAL edge has kind=NULL. arch-coverage must agree with
+# arch-impact/arch-rules that this index is NOT sound, from the same Arch_db.contract_ok helper.
+ML="$(mktemp --suffix=.db)"; rm -f "$ML"
+sqlite3 "$ML" <<'SQL'
+CREATE TABLE comment_db_meta(key TEXT, value TEXT); INSERT INTO comment_db_meta VALUES('callgraph_contract','v1');
+CREATE TABLE functions(name TEXT, file_path TEXT, exported INT, line_start INT, line_end INT); INSERT INTO functions VALUES('A','x',1,NULL,NULL),('mid','x',0,NULL,NULL),('sink','x',0,NULL,NULL);
+CREATE TABLE calls(caller_name TEXT, caller_file TEXT, callee_name TEXT, callee_file TEXT, call_site TEXT, kind TEXT);
+INSERT INTO calls VALUES ('A','x','mid','x','x:1','MUST'),('mid','x','sink','x','x:2',NULL);
+SQL
+MLC="$(mktemp)"
+cat > "$MLC" <<'EOF'
+SF:x
+DA:1,1
+end_of_record
+EOF
+MLOUT="$("$COV" "$ML" "$MLC" --format json 2>/dev/null)"
+printf '%s' "$MLOUT" | python3 -c '
+import json,sys
+assert json.load(sys.stdin)["sound_reachability"] is False
+' 2>/dev/null || note "arch-coverage: a NULL-kind edge on a flag-stamped index must report sound_reachability:false"
+rm -f "$ML" "$MLC"
+
 rm -f "$DB" "$LC" "$EMPTY" "$BADDA" "$BADN" "$BADNEG" "$AFTEREOR" "$DUP" "$MR" "$MJ" "$NOTAREPORT" "$NOEXP" "$ORPH" "$AMB" "$AMBR" "$AMBJ"
 if [ "$fails" -eq 0 ]; then echo "selftest-coverage: PASS"; else echo "selftest-coverage: $fails FAILURE(S)"; exit 1; fi
