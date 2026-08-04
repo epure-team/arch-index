@@ -406,11 +406,30 @@ let () =
     || (on_vacuous = "fail" && (v = "NO_SOURCE" || v = "NO_TARGET"))
     || (on_not_computed = "fail" && v = "NOT_COMPUTED")
   in
+  let contract_ok = sound_contract t <> None in
+  let failed_names = List.filter_map (fun r -> if failing r.verdict then Some r.rule else None) results in
+  let count_verdicts vs = List.length (List.filter (fun r -> List.mem r.verdict vs) results) in
+  let unknown = count_verdicts [ "UNKNOWN"; "UNKNOWN_NO_CONTRACT" ] in
+  let vacuous = count_verdicts [ "NO_SOURCE"; "NO_TARGET" ] in
+  let not_computed = count_verdicts [ "NOT_COMPUTED" ] in
+  (* arch-rules never refuses at the process level (unlike arch-impact's exit 3) — an
+     un-⊤-marked or data-less index degrades individual rules to UNKNOWN_NO_CONTRACT /
+     NOT_COMPUTED verdicts instead, which the fail-open/fail-closed policy flags above already
+     govern. So `verdict` here only ever takes "pass" or "fail", mirroring the exit code
+     computed below (line ~464), never "refused". *)
+  let verdict = if failed_names <> [] then "fail" else "pass" in
   (if fmt = "json" then
      print_endline
        (Yojson.Safe.pretty_to_string
           (`Assoc
-            [ ( "results",
+            [ ("computed", `Bool true);
+              ("contract_ok", `Bool contract_ok);
+              ("verdict", `String verdict);
+              ("failing", `Int (List.length failed_names));
+              ("unknown", `Int unknown);
+              ("vacuous", `Int vacuous);
+              ("not_computed", `Int not_computed);
+              ( "results",
                 `List
                   (List.map
                      (fun r ->
@@ -426,10 +445,7 @@ let () =
                            | None, _ -> [])
                          @ (if r.exact then [ ("exact", `Bool true) ] else [])))
                      results) );
-              ("failed",
-               `List
-                 (List.filter_map (fun r -> if failing r.verdict then Some (`String r.rule) else None)
-                    results)) ]))
+              ("failed", `List (List.map (fun n -> `String n) failed_names)) ]))
    else
      let md = fmt = "md" in
      print_endline (if md then "# Architecture rules" else "== Architecture rules") ;

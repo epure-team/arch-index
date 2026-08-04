@@ -17,6 +17,29 @@ LOAD="$HERE/arch-load"; RULES="$HERE/arch-rules"
 fails=0; note() { echo "FAIL: $*" >&2; fails=$((fails+1)); }
 command -v python3 >/dev/null 2>&1 || { echo "selftest-rules: python3 required" >&2; exit 2; }
 
+# stdin: assert it is EXACTLY one JSON object (no trailing garbage) and that no float/Intlit
+# value appears anywhere in the tree — the machine-output contract is int/bool/string/null/
+# array/object only.
+strict_json_ok() {
+  python3 -c '
+import json, sys
+s = sys.stdin.read().lstrip()
+dec = json.JSONDecoder()
+obj, idx = dec.raw_decode(s)
+assert s[idx:].strip() == "", "trailing data after the JSON object"
+def walk(v):
+    if isinstance(v, float):
+        raise AssertionError("float found in machine output: %r" % (v,))
+    if isinstance(v, dict):
+        for x in v.values():
+            walk(x)
+    elif isinstance(v, list):
+        for x in v:
+            walk(x)
+walk(obj)
+'
+}
+
 # Layered fixture:
 #   ui.handle   --MUST-->        db.write          (a definite layering violation)
 #   api.serve   --MAY_ENUM-->    db.write          (possible: dynamic dispatch could land there)
@@ -61,6 +84,23 @@ for r in json.load(sys.stdin)['results']:
 [ "$(v 'api must')"  = "POSSIBLE"  ] || note "MAY_ENUMERATED path api→db must be POSSIBLE, got $(v 'api must')"
 [ "$(v 'jobs must')" = "UNKNOWN"   ] || note "a cone escaping through ⊤ must be UNKNOWN, got $(v 'jobs must')"
 [ "$(v 'pure code')" = "PASS"      ] || note "a closed cone on a ⊤-marked index must PASS, got $(v 'pure code')"
+
+# --- machine-output contract: one strict JSON object, computed/contract_ok/verdict/counts -----
+printf '%s' "$OUT" | strict_json_ok \
+  || note "arch-rules --format json must emit exactly one JSON object with no float/Intlit values"
+printf '%s' "$OUT" | python3 -c '
+import json,sys
+r=json.load(sys.stdin)
+assert r["computed"] is True, r["computed"]
+assert r["contract_ok"] is True, r          # this DB is ⊤-marked (kinded edges throughout)
+assert r["verdict"] == "fail", r["verdict"] # ui (VIOLATION) and api (POSSIBLE, fails by default)
+assert r["failing"] == len(r["failed"]) == 2, (r["failing"], r["failed"])
+assert r["unknown"] == 1, r["unknown"]      # jobs must (UNKNOWN)
+assert r["vacuous"] == 0, r["vacuous"]
+assert r["not_computed"] == 0, r["not_computed"]
+' 2>/dev/null || note "computed/contract_ok/verdict/failing/unknown/vacuous/not_computed must be present and coherent"
+"$RULES" "$DB" "$RF" >/dev/null 2>&1
+[ $? -eq 1 ] || note "verdict 'fail' above must correspond to exit code 1"
 
 # --- the glob boundary: lib/db/** must not be confused with a sibling ---------------------
 # A rule aimed at lib/db/write.ts must not silently also cover lib/db/my_write.ts's neighbours,
@@ -129,9 +169,11 @@ LF="$(mktemp)"; printf 'rule "l"\n  forbid reach from file:src/pure/** to file:l
 LOUT="$("$RULES" "$LEGACY" "$LF" --format json 2>/dev/null)"
 printf '%s' "$LOUT" | python3 -c '
 import json,sys
-r=json.load(sys.stdin)["results"][0]
+d=json.load(sys.stdin)
+r=d["results"][0]
 assert r["verdict"]=="UNKNOWN_NO_CONTRACT", r
-' 2>/dev/null || note "an un-⊤-marked index must degrade PASS to UNKNOWN_NO_CONTRACT, never PASS"
+assert d["contract_ok"] is False, d          # top-level contract_ok must track the same fact
+' 2>/dev/null || note "an un-⊤-marked index must degrade PASS to UNKNOWN_NO_CONTRACT, never PASS, and report contract_ok:false"
 
 # --- a malformed rule file ABORTS ----------------------------------------------------------
 # A gate that silently skips the rule it could not parse is a gate that silently stops gating.
@@ -175,7 +217,19 @@ assert vs==["NOT_COMPUTED","NOT_COMPUTED"], vs
 printf '%s' "$NOUT" | python3 -c '
 import json,sys
 d=json.load(sys.stdin); assert len(d["failed"])==2, d["failed"]
-' 2>/dev/null || note "the json report must list NOT_COMPUTED rules under failed"
+assert d["failing"]==2 and d["not_computed"]==2 and d["unknown"]==0 and d["vacuous"]==0, d
+assert d["verdict"]=="fail", d["verdict"]
+' 2>/dev/null || note "the json report must list NOT_COMPUTED rules under failed, and count them in not_computed/failing"
+printf '%s' "$NOUT" | strict_json_ok || note "arch-rules JSON must stay strict on the NOT_COMPUTED path too"
+# arch-rules never refuses at the process level (no exit 3 anywhere in this tool) — confirm the
+# verdict vocabulary stays within {pass, fail}, so a workflow gate never has to special-case a
+# third value that cannot occur here.
+for j in "$OUT" "$LOUT" "$NOUT"; do
+  printf '%s' "$j" | python3 -c '
+import json,sys
+assert json.load(sys.stdin)["verdict"] in ("pass","fail")
+' 2>/dev/null || note "arch-rules verdict must always be pass or fail, never refused (this tool has no exit-3 path)"
+done
 
 # --- a misspelled policy must ABORT, never silently disable the gate ------------------------
 # `--on-possible fial` used to compare unequal to "fail" and turn a failing rule green: the

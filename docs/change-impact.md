@@ -80,6 +80,37 @@ can produce it.
 `--fail-on-new-findings` implements the ratchet anyway for teams that want it. It exits 1 only
 when the diff touches a line that already carries a finding. It is off by default, deliberately.
 
+## Machine output contract (`--format json`)
+
+`--format json` prints **exactly one JSON object** on stdout — no preamble, no log line; every
+diagnostic goes to stderr. Every value in the tree is `null`/`bool`/`string`/int/array/object —
+no floats, no exponent notation. Absence of data is stated, never implied: a field name never
+disappears to mean "not applicable" — its sibling `computed`/`reason` pair says so explicitly.
+
+| field | type | meaning |
+|---|---|---|
+| `computed` | bool | the reachability analysis ran (always `true` when this object is printed at all — kept as a field, not assumed, so a gate can require its presence rather than its absence of failure) |
+| `contract_ok` | bool | same value as `sound_reachability`: is this index ⊤-marked, so the closed-cone claim is trustworthy |
+| `verdict` | `"pass"` \| `"fail"` \| `"refused"` | the `--fail-on-new-findings` decision, restated so a consumer with only stdout reaches the same conclusion as one with only the exit code. `"pass"` when the flag was not requested at all (informational run) |
+| `new_findings` | int | count of `findings.decisions` — the same number `--fail-on-new-findings` gates on |
+| `findings.computed` | bool | did this index carry decision analysis at all (mirrors `decision_analysis_available`) |
+| `findings.reason` | string \| null | set when `findings.computed` is `false` |
+
+`verdict` and the exit code are two views of the same decision, kept in lockstep intentionally:
+
+| exit code | `verdict` | meaning |
+|---|---|---|
+| 0 | `"pass"` | no gate requested, or requested and clean |
+| 1 | `"fail"` | `--fail-on-new-findings` found a finding on a touched line |
+| 3 | `"refused"` | `--fail-on-new-findings` was requested but this index carries no decision analysis — a gate whose input was never computed cannot report "clean" |
+
+Exit code 2 (malformed input, or `Arch_db.Broken`) is an infrastructure failure, raised before the
+JSON object is assembled — there is no stdout to parse on that path, by design: a consumer that
+only reads stdout must never mistake "the tool crashed" for a considered verdict.
+
+All the richer fields (`touched`, `affected_exported`, `top_frontier`, …) are unchanged and remain
+available for the same consumer that wants the full briefing, not just the gate decision.
+
 ## Honest-negative rules
 
 Three distinctions the report never collapses, because collapsing them is how a tool becomes

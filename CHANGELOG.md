@@ -41,6 +41,12 @@
   binary was actually built rather than silently skipped.
 - `selftest-impact.sh`, `selftest-rules.sh`, `selftest-mutants.sh`, `selftest-coverage.sh` and
   `selftest-mcp.sh`, wired into CI.
+- `arch-impact --format json` / `arch-rules --format json`: a strict machine-output contract —
+  `computed`, `contract_ok` and `verdict` fields that restate the exit-code decision for a
+  stdout-only consumer (workflow gates, agents), int-only counts (`new_findings` on `arch-impact`;
+  `failing`/`unknown`/`vacuous`/`not_computed` on `arch-rules`), and `findings.computed`/`reason`
+  so an absent decision analysis is stated, not implied by a missing key. No floats, no `Intlit`,
+  exactly one JSON object on stdout. Exit codes and text/md output are unchanged.
 
 ### Fixed
 - A legacy index with no `calls.kind` column crashed the closure queries — the column cannot be

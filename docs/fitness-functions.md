@@ -116,3 +116,29 @@ every backend, and recovers most of what module-level layering buys.
 ## Rules for arch-index itself
 
 [`arch-rules.txt`](../arch-rules.txt) at the repo root, checked in CI against the self-index.
+
+## Machine output contract (`--format json`)
+
+`--format json` prints **exactly one JSON object** on stdout — no preamble, no log line; every
+diagnostic goes to stderr. Every value in the tree is `null`/`bool`/`string`/int/array/object — no
+floats. Absence of data is stated, never implied.
+
+| field | type | meaning |
+|---|---|---|
+| `computed` | bool | the rule set was evaluated (always `true` when this object is printed) |
+| `contract_ok` | bool | is this index ⊤-marked (the same fact that degrades `PASS` to `UNKNOWN_NO_CONTRACT` per rule) |
+| `verdict` | `"pass"` \| `"fail"` | the same decision the exit code encodes — restated for a stdout-only consumer |
+| `failing` | int | `= len(failed)` — how many rules count as failing under the current `--on-*` policy |
+| `unknown` | int | rules verdicted `UNKNOWN` or `UNKNOWN_NO_CONTRACT` |
+| `vacuous` | int | rules verdicted `NO_SOURCE` or `NO_TARGET` (a selector matched nothing) |
+| `not_computed` | int | rules verdicted `NOT_COMPUTED` (the index lacks the data the rule form needs) |
+| `results[].verdict` | string | the per-rule verdict, unchanged (`VIOLATION`/`POSSIBLE`/`UNKNOWN`/`UNKNOWN_NO_CONTRACT`/`PASS`/`NO_SOURCE`/`NO_TARGET`/`NOT_COMPUTED`) |
+| `failed` | array of string | rule names counted failing — `failing` is its length, kept as a separate int field so a gate does not need to count an array |
+
+**`verdict` is only ever `"pass"` or `"fail"`, never `"refused"`.** Unlike `arch-impact`,
+`arch-rules` has no process-level sound-refusal path (no exit 3): an un-⊤-marked or data-less
+index does not abort the whole run — it degrades the *individual rules that need that data* to
+`UNKNOWN_NO_CONTRACT` / `NOT_COMPUTED`, and the existing `--on-unknown`/`--on-not-computed`
+policies decide whether that counts as failing. A workflow gate consuming `arch-rules` output
+should treat `failing == 0` as the pass condition and never expect a third verdict value from this
+tool.
