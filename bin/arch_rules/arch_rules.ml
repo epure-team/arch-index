@@ -142,6 +142,10 @@ type result = {
   kind : string;
   verdict : string;
   detail : string list;
+  (* The untruncated count `detail` was capped from (via `take 20`). Equal to `List.length detail`
+     when nothing was cut — a consumer that only ever sees the capped list has no way to tell "20
+     offenders, shown in full" from "20 shown out of 200" without this. *)
+  detail_total : int;
   note : string option;
   (* Selector cardinalities, reported for `reach` rules. They are what makes a VACUOUS verdict
      checkable and what pins the glob boundary: a rule aimed at write.ts must match exactly one
@@ -155,11 +159,11 @@ type result = {
 (** Order matters: a definite path is VIOLATION even when the source ALSO reaches a ⊤ edge.
     UNKNOWN is what you say when you found nothing and cannot rule it out — never a way to
     downgrade something you did find. *)
-(* `contract <> None` is NOT enough for a PASS. Arch_db documents why: a flag set on an index
-   whose `kind` column is missing or partly NULL is worse than no flag, because SQL's 3-valued
-   logic makes such an edge invisible to both the closure and the ⊤ check. The caller passes the
-   result of the full check, not the raw flag. *)
-let reach_verdict (g : Arch_graph.t) contract src dst =
+(* `sound` here is Arch_db.contract_ok's verdict, not the raw flag: a flag set on an index whose
+   `kind` column is missing or partly NULL is worse than no flag, because SQL's 3-valued logic
+   makes such an edge invisible to both the closure and the ⊤ check. The caller passes the result
+   of the full check. *)
+let reach_verdict (g : Arch_graph.t) ~sound src dst =
   if SS.is_empty src then ("NO_SOURCE", [])
   else if SS.is_empty dst then ("NO_TARGET", [])
   else
@@ -175,27 +179,17 @@ let reach_verdict (g : Arch_graph.t) contract src dst =
           SS.filter (fun k -> Arch_graph.SM.mem k g.tops) (SS.union anyc src) |> SS.elements
         in
         if escaping <> [] then ("UNKNOWN", escaping)
-        else if contract = None then ("UNKNOWN_NO_CONTRACT", [])
+        else if not sound then ("UNKNOWN_NO_CONTRACT", [])
         else ("PASS", [])
 
 let take n l = List.filteri (fun i _ -> i < n) l
 
-(** The contract, verified rather than trusted: stamped, `kind` present, and every edge valid. *)
-let sound_contract (t : Arch_db.t) =
-  match t.contract with
-  | None -> None
-  | Some _ -> (
-      try
-        Arch_db.require_contract t "reach" ;
-        t.contract
-      with Arch_db.Refused _ -> None)
-
-let eval (t : Arch_db.t) (g : Arch_graph.t) r =
+let eval (t : Arch_db.t) (g : Arch_graph.t) ~sound r =
   let lbl k = Arch_graph.label g k in
   match r.body with
   | Reach (s, d) ->
       let src = Arch_sel.select g s and dst = Arch_sel.select g d in
-      let v, hit = reach_verdict g (sound_contract t) src dst in
+      let v, hit = reach_verdict g ~sound src dst in
       let note =
         match v with
         | "NO_SOURCE" ->
@@ -230,8 +224,8 @@ let eval (t : Arch_db.t) (g : Arch_graph.t) r =
                to get a real PASS."
         | _ -> None
       in
-      { rule = r.name; kind = kind_of r.body; exact = false; verdict = v; detail = List.map lbl (take 20 hit); note;
-        sizes = Some (SS.cardinal src, SS.cardinal dst) }
+      { rule = r.name; kind = kind_of r.body; exact = false; verdict = v; detail = List.map lbl (take 20 hit);
+        detail_total = List.length hit; note; sizes = Some (SS.cardinal src, SS.cardinal dst) }
   | Exported s ->
       let allowed = Arch_sel.select g s in
       let offenders =
@@ -243,6 +237,7 @@ let eval (t : Arch_db.t) (g : Arch_graph.t) r =
         sizes = Some (SS.cardinal allowed, 0);
         verdict = (if offenders = [] then "PASS" else "VIOLATION");
         detail = List.map (fun (n : Arch_graph.node) -> lbl n.key) (take 20 offenders);
+        detail_total = List.length offenders;
         note =
           (if SS.is_empty allowed then
              Some
@@ -253,7 +248,8 @@ let eval (t : Arch_db.t) (g : Arch_graph.t) r =
            else None) }
   | Effect (s, kind) ->
       if not (Arch_db.nonempty t "function_effects") then
-        { rule = r.name; kind = kind_of r.body; exact = false; verdict = "NOT_COMPUTED"; detail = []; sizes = None;
+        { rule = r.name; kind = kind_of r.body; exact = false; verdict = "NOT_COMPUTED"; detail = [];
+          detail_total = 0; sizes = None;
           note =
             Some
               "this index has no effects data — 'no effect found' would be a lie. Effects are \
@@ -284,9 +280,10 @@ let eval (t : Arch_db.t) (g : Arch_graph.t) r =
             detail =
               take 20
                 (List.map (fun row -> String.concat " " (List.map Arch_db.string_of_cell row)) hits);
-            note = None }
+            detail_total = List.length hits; note = None }
         else if not (SS.is_empty escaping) then
-          { rule = r.name; kind = kind_of r.body; exact = false; verdict = "UNKNOWN"; detail = []; sizes = None;
+          { rule = r.name; kind = kind_of r.body; exact = false; verdict = "UNKNOWN"; detail = [];
+            detail_total = 0; sizes = None;
             note =
               Some
                 (Printf.sprintf
@@ -295,11 +292,12 @@ let eval (t : Arch_db.t) (g : Arch_graph.t) r =
                    kind (SS.cardinal escaping)) }
         else
           { rule = r.name; kind = kind_of r.body; exact = false;
-            verdict = (if sound_contract t = None then "UNKNOWN_NO_CONTRACT" else "PASS");
-            detail = []; note = None; sizes = None }
+            verdict = (if sound then "PASS" else "UNKNOWN_NO_CONTRACT");
+            detail = []; detail_total = 0; note = None; sizes = None }
   | Dep (s, d) ->
       if (not (Arch_db.has_table t "module_deps")) || t.schema = Arch_db.Flat then
-        { rule = r.name; kind = kind_of r.body; exact = false; verdict = "NOT_COMPUTED"; detail = []; sizes = None;
+        { rule = r.name; kind = kind_of r.body; exact = false; verdict = "NOT_COMPUTED"; detail = [];
+          detail_total = 0; sizes = None;
           note =
             Some
               "this index has no module_deps — declared-dependency rules are produced today only by \
@@ -326,7 +324,7 @@ let eval (t : Arch_db.t) (g : Arch_graph.t) r =
         in
         { rule = r.name; kind = kind_of r.body; exact = true;
           verdict = (if hits = [] then "PASS" else "VIOLATION");
-          detail = take 20 hits; sizes = None;
+          detail = take 20 hits; detail_total = List.length hits; sizes = None;
           note =
             Some
               "declared-dependency check: it sees what the module DECLARES, not what it can \
@@ -396,7 +394,8 @@ let () =
   in
   let rules = parse_rules rules_path in
   let g = Arch_graph.load t in
-  let results = List.map (eval t g) rules in
+  let contract_ok = Arch_db.contract_ok t "rules" in
+  let results = List.map (eval t g ~sound:contract_ok) rules in
   (* UNKNOWN is fail-OPEN by default: a rule that blocks every PR whose cone happens to touch a
      callback teaches people to delete the rule, which leaves them worse off than a warning. *)
   let failing v =
@@ -406,7 +405,6 @@ let () =
     || (on_vacuous = "fail" && (v = "NO_SOURCE" || v = "NO_TARGET"))
     || (on_not_computed = "fail" && v = "NOT_COMPUTED")
   in
-  let contract_ok = sound_contract t <> None in
   let failed_names = List.filter_map (fun r -> if failing r.verdict then Some r.rule else None) results in
   let count_verdicts vs = List.length (List.filter (fun r -> List.mem r.verdict vs) results) in
   let unknown = count_verdicts [ "UNKNOWN"; "UNKNOWN_NO_CONTRACT" ] in
@@ -437,6 +435,7 @@ let () =
                          ([ ("rule", `String r.rule); ("kind", `String r.kind);
                            ("verdict", `String r.verdict);
                            ("detail", `List (List.map (fun d -> `String d) r.detail));
+                           ("detail_total", `Int r.detail_total);
                            ("note", (match r.note with Some n -> `String n | None -> `Null)) ]
                          @ (match (r.sizes, r.kind) with
                            | Some (sn, _), "exported" -> [ ("source_size", `Int sn) ]

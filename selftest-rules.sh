@@ -173,7 +173,31 @@ d=json.load(sys.stdin)
 r=d["results"][0]
 assert r["verdict"]=="UNKNOWN_NO_CONTRACT", r
 assert d["contract_ok"] is False, d          # top-level contract_ok must track the same fact
+assert d["verdict"] == "pass", d["verdict"]  # UNKNOWN_NO_CONTRACT is fail-open (--on-unknown warn) by default
 ' 2>/dev/null || note "an un-⊤-marked index must degrade PASS to UNKNOWN_NO_CONTRACT, never PASS, and report contract_ok:false"
+"$RULES" "$LEGACY" "$LF" >/dev/null 2>&1
+[ $? -eq 0 ] || note "verdict 'pass' above must correspond to exit code 0 (fail-open UNKNOWN_NO_CONTRACT, default policy)"
+
+# --- contract_ok is the STRICT check, not just "flag present": same malformed-⊤-marked fixture
+# as selftest-contract.sh's "ML" case and selftest-impact.sh's 4d — the flag is set, `kind`
+# exists, but a REAL edge has kind=NULL (invisible to SQL's 3-valued logic). Both arch-impact and
+# arch-rules must agree this index is NOT sound, from the exact same Arch_db.contract_ok helper.
+ML="$(mktemp --suffix=.db)"; rm -f "$ML"
+sqlite3 "$ML" <<'SQL'
+CREATE TABLE comment_db_meta(key TEXT, value TEXT); INSERT INTO comment_db_meta VALUES('callgraph_contract','v1');
+CREATE TABLE functions(name TEXT, file_path TEXT, exported INT, line_start INT, line_end INT); INSERT INTO functions VALUES('A','x',1,NULL,NULL),('mid','x',0,NULL,NULL),('sink','x',0,NULL,NULL);
+CREATE TABLE calls(caller_name TEXT, caller_file TEXT, callee_name TEXT, callee_file TEXT, call_site TEXT, kind TEXT);
+INSERT INTO calls VALUES ('A','x','mid','x','x:1','MUST'),('mid','x','sink','x','x:2',NULL);
+SQL
+MF="$(mktemp)"; printf 'rule "m"\n  forbid reach from fn:A to fn:sink\n' > "$MF"
+MLOUT="$("$RULES" "$ML" "$MF" --format json 2>/dev/null)"
+printf '%s' "$MLOUT" | python3 -c '
+import json,sys
+d=json.load(sys.stdin)
+assert d["contract_ok"] is False, d
+assert d["results"][0]["verdict"] != "PASS", d["results"][0]   # never a false-sound PASS through the NULL-kind edge
+' 2>/dev/null || note "a NULL-kind edge on a flag-stamped index must report contract_ok:false, same as arch-impact on the same DB"
+rm -f "$ML" "$MF"
 
 # --- a malformed rule file ABORTS ----------------------------------------------------------
 # A gate that silently skips the rule it could not parse is a gate that silently stops gating.

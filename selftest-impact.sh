@@ -140,6 +140,27 @@ assert r["findings"]["computed"] is False, r["findings"]    # no decisions table
 assert isinstance(r["findings"]["reason"], str) and r["findings"]["reason"], r["findings"]
 ' 2>/dev/null || note "computed/contract_ok/verdict/findings.computed+reason must be present and coherent"
 
+# --- 4d. contract_ok must be the STRICT check, not just "flag present" --------------------
+# Same malformed-⊤-marked fixture as selftest-contract.sh's "ML" case: the flag is set, the
+# `kind` column exists, but a REAL edge has kind=NULL — invisible to SQL's 3-valued logic, and
+# `t.contract <> None && t.kinded` alone would call this index sound. It is not: Arch_db.contract_ok
+# (require_contract's full check) must say false here, same as arch-rules reports for the same DB.
+ML="$(mktemp --suffix=.db)"; rm -f "$ML"
+sqlite3 "$ML" <<'SQL'
+CREATE TABLE comment_db_meta(key TEXT, value TEXT); INSERT INTO comment_db_meta VALUES('callgraph_contract','v1');
+CREATE TABLE functions(name TEXT, file_path TEXT, exported INT, line_start INT, line_end INT); INSERT INTO functions VALUES('A','x',1,NULL,NULL),('mid','x',0,NULL,NULL),('sink','x',0,NULL,NULL);
+CREATE TABLE calls(caller_name TEXT, caller_file TEXT, callee_name TEXT, callee_file TEXT, call_site TEXT, kind TEXT);
+INSERT INTO calls VALUES ('A','x','mid','x','x:1','MUST'),('mid','x','sink','x','x:2',NULL);
+SQL
+MLOUT="$("$IMPACT" "$ML" --diff HEAD~1..HEAD --repo "$REPO" --format json 2>/dev/null)"
+printf '%s' "$MLOUT" | python3 -c '
+import json,sys
+r=json.load(sys.stdin)
+assert r["contract_ok"] is False, r["contract_ok"]
+assert r["sound_reachability"] is False, r["sound_reachability"]
+' 2>/dev/null || note "a NULL-kind edge on a flag-stamped index must report contract_ok:false, not just t.contract<>None"
+rm -f "$ML"
+
 # --- 5. no-span index degrades to file granularity, LOUDLY --------------------------------
 NOSPAN="$(mktemp --suffix=.db)"; rm -f "$NOSPAN"
 "$LOAD" "$NOSPAN" <<'NDJSON' 2>/dev/null

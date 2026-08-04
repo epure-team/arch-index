@@ -300,6 +300,15 @@ let require_contract t cmd =
            (every edge must be MUST | MAY_ENUMERATED | MAY_TOP). Rebuild the index."
           bad
 
+(** [contract_ok t cmd] is the one true answer to "is this index sound", verified rather than
+    trusted: [true] iff {!require_contract} would accept [cmd] on [t] — the flag is set, [kind]
+    exists, and no edge has a NULL/invalid kind. Prefer this over checking [t.contract <> None]
+    directly: that weaker check is satisfied by a malformed index (flag set, but a NULL-kind edge
+    present) that this one correctly refuses — see {!require_contract}'s doc comment. Every
+    caller that reports index soundness (as text, as JSON, as an exit code) should derive it from
+    here, so two tools can never report two different answers for the same index. *)
+let contract_ok t cmd = try require_contract t cmd ; true with Refused _ -> false
+
 (** Present {b and non-empty}. Presence proves nothing: [arch-load] creates [decisions]
     unconditionally, so table-existence would let "the producer computed nothing" read as "there
     is nothing to report" — the same false-confidence shape that made [v_pure_functions] certify

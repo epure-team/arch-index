@@ -126,13 +126,15 @@ floats. Absence of data is stated, never implied.
 | field | type | meaning |
 |---|---|---|
 | `computed` | bool | the rule set was evaluated (always `true` when this object is printed) |
-| `contract_ok` | bool | is this index ⊤-marked (the same fact that degrades `PASS` to `UNKNOWN_NO_CONTRACT` per rule) |
+| `contract_ok` | bool | is this index ⊤-marked (the same fact that degrades `PASS` to `UNKNOWN_NO_CONTRACT` per rule). Computed by the same `Arch_db.contract_ok` helper `arch-impact` uses for its own `contract_ok` — the same index gets the same answer from both tools, never `t.contract <> None` alone (a flag set on an index with a NULL-kind edge is worse than no flag; see `Arch_db.require_contract`'s doc comment) |
 | `verdict` | `"pass"` \| `"fail"` | the same decision the exit code encodes — restated for a stdout-only consumer |
 | `failing` | int | `= len(failed)` — how many rules count as failing under the current `--on-*` policy |
 | `unknown` | int | rules verdicted `UNKNOWN` or `UNKNOWN_NO_CONTRACT` |
 | `vacuous` | int | rules verdicted `NO_SOURCE` or `NO_TARGET` (a selector matched nothing) |
 | `not_computed` | int | rules verdicted `NOT_COMPUTED` (the index lacks the data the rule form needs) |
 | `results[].verdict` | string | the per-rule verdict, unchanged (`VIOLATION`/`POSSIBLE`/`UNKNOWN`/`UNKNOWN_NO_CONTRACT`/`PASS`/`NO_SOURCE`/`NO_TARGET`/`NOT_COMPUTED`) |
+| `results[].detail` | array of string | the offending call paths / functions / dependencies, capped at 20 |
+| `results[].detail_total` | int | the untruncated count `detail` was capped from — equal to `len(detail)` when nothing was cut, so a consumer never has to guess whether "20 shown" means "20 total" or "20 of 200" |
 | `failed` | array of string | rule names counted failing — `failing` is its length, kept as a separate int field so a gate does not need to count an array |
 
 **`verdict` is only ever `"pass"` or `"fail"`, never `"refused"`.** Unlike `arch-impact`,

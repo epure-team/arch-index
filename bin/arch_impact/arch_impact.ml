@@ -246,7 +246,12 @@ let () =
       (SS.union downstream seeds) []
     |> List.sort (fun (a, x) (b, y) -> if x = y then compare a b else compare y x)
   in
-  let sound = t.contract <> None && t.kinded in
+  (* Not [t.contract <> None && t.kinded]: that weaker check is satisfied by a malformed index
+     (flag set, but a real edge has kind=NULL) that Arch_db.contract_ok correctly refuses — a
+     NULL kind is invisible to SQL's 3-valued logic and would silently under-count the closure.
+     Sharing this with arch-rules's `contract_ok` means the two tools can never disagree about
+     the same index. *)
+  let sound = Arch_db.contract_ok t "impact" in
   let decs = findings t changed repo in
   let touched_list =
     Hashtbl.fold (fun _ v acc -> v :: acc) touched []
@@ -307,6 +312,9 @@ let () =
                             [ ("file", `String p); ("line", `Int l); ("form", `String f);
                               ("verdict", `String v); ("snippet", `String s) ])
                         decs));
+                  (* Reserved for a future finding kind; always empty today — no producer emits
+                     dead-site data yet. Documented in docs/change-impact.md so a consumer does
+                     not read the empty list as "computed, zero found". *)
                   ("dead_sites", `List []) ]) ]))
   else (
     let md = fmt = "md" in
