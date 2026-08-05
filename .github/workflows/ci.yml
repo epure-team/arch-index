@@ -32,7 +32,7 @@ jobs:
       - name: Shell integration tests
         run: |
           chmod +x selftest-contract.sh selftest-load.sh selftest-effects.sh selftest-callgraph-ocaml.sh selftest-callgraph-soundness.sh selftest-callgraph-go.sh selftest-impact.sh
-          chmod +x selftest-rules.sh selftest-mutants.sh selftest-coverage.sh selftest-decision-lint.sh
+          chmod +x selftest-rules.sh selftest-mutants.sh selftest-coverage.sh selftest-decision-lint.sh selftest-pcc.sh
           ./selftest-contract.sh
           ./selftest-load.sh
           ./selftest-impact.sh
@@ -44,6 +44,7 @@ jobs:
           STRICT=1 ./selftest-callgraph-soundness.sh
           ./selftest-callgraph-go.sh
           ./selftest-decision-lint.sh
+          ./selftest-pcc.sh
       - name: Self-index smoke test
         run: |
           BIN="./_build/default/bin/arch_callgraph_ocaml/arch_callgraph_ocaml.exe"
