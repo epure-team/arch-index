@@ -31,6 +31,13 @@ jobs:
         run: opam exec -- dune test
       - name: Shell integration tests
         run: |
+          # selftest-pcc.sh (via pcc-index/pcc-preflight) runs `dune build`/`dune test` directly
+          # on OTHER OCaml projects at RUNTIME, not just at this repo's own build time — unlike
+          # the other selftests here, it genuinely needs `dune` resolvable via bare PATH in
+          # THIS shell, not just inside opam's own switch context. `opam exec --`-wrapping every
+          # single invocation below would be noisy; activating the switch once for the whole
+          # step is the same idiom selftest-callgraph-ocaml.sh already uses internally.
+          eval "$(opam env)"
           chmod +x selftest-contract.sh selftest-load.sh selftest-effects.sh selftest-callgraph-ocaml.sh selftest-callgraph-soundness.sh selftest-callgraph-go.sh selftest-impact.sh
           chmod +x selftest-rules.sh selftest-mutants.sh selftest-coverage.sh selftest-decision-lint.sh selftest-pcc.sh
           ./selftest-contract.sh
