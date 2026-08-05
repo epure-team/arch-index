@@ -1,0 +1,92 @@
+#!/usr/bin/env bash
+# pcc-dossier — human/agent-readable briefing for the CURRENT loop iteration of the
+# proof-carrying-change workflow. It informs, it does not gate: impact-final/rules-final are
+# what actually gate (see cabal-workflow-runner's docs/proof-carrying-change.md).
+#
+# Usage: pcc-dossier --db <path> --repo <dir> --diff <range> --rules <path> --out <path>
+#
+# Writes a markdown dossier to --out and ALWAYS exits 0 — even when arch-impact/arch-rules
+# report fail/refused/crashed underneath. Runs arch-impact/arch-rules with the EXACT same
+# flags the workflow's own impact/rules steps use, so the fixer sees the same verdict the
+# gates will check next, and --format md so the two never disagree with the JSON the gates
+# read (both come from the same tool run against the same just-reindexed DB).
+set -uo pipefail
+
+db="" repo="" diff="" rules="" out=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --db) db="$2"; shift 2 ;;
+    --repo) repo="$2"; shift 2 ;;
+    --diff) diff="$2"; shift 2 ;;
+    --rules) rules="$2"; shift 2 ;;
+    --out) out="$2"; shift 2 ;;
+    *) echo "pcc-dossier: unknown argument: $1" >&2; exit 2 ;;
+  esac
+done
+for name_val in "db:$db" "repo:$repo" "diff:$diff" "rules:$rules" "out:$out"; do
+  name="${name_val%%:*}"; val="${name_val#*:}"
+  [ -n "$val" ] || { echo "pcc-dossier: --$name is required" >&2; exit 2; }
+done
+
+impact_path="$(command -v arch-impact || true)"
+rules_path="$(command -v arch-rules || true)"
+if [ -z "$impact_path" ] || [ -z "$rules_path" ]; then
+  echo "pcc-dossier: arch-impact/arch-rules not found on PATH" >&2
+  exit 2
+fi
+
+mkdir -p "$(dirname "$out")"
+
+# Runs "$@", embedding its stdout verbatim under a "## $1" heading. arch-impact/arch-rules
+# both print their full body BEFORE deciding their exit code (a refusal/fail is printed, not
+# swallowed), so this captures the real verdict even on a nonzero exit. Only a genuine crash
+# (no stdout at all) falls back to a note + the captured stderr, so the dossier never goes
+# silent about a tool that produced nothing.
+section() {
+  local title="$1"; shift
+  local tmp_out tmp_err rc
+  tmp_out="$(mktemp)"; tmp_err="$(mktemp)"
+  echo "## $title"
+  echo
+  if "$@" >"$tmp_out" 2>"$tmp_err"; then
+    cat "$tmp_out"
+  else
+    rc=$?
+    if [ -s "$tmp_out" ]; then
+      cat "$tmp_out"
+    else
+      echo "_${title} produced no output (exit $rc) — see stderr below_"
+    fi
+    echo
+    echo "_exit code: ${rc}_"
+    if [ -s "$tmp_err" ]; then
+      echo
+      echo '```'
+      cat "$tmp_err"
+      echo '```'
+    fi
+  fi
+  rm -f "$tmp_out" "$tmp_err"
+  echo
+}
+
+{
+  echo "# proof-carrying-change dossier"
+  echo
+  echo "- db: \`$db\`"
+  echo "- repo: \`$repo\`"
+  echo "- diff: \`$diff\`"
+  echo "- rules: \`$rules\`"
+  echo
+  section "Change impact (arch-impact)" \
+    "$impact_path" "$db" --diff "$diff" --repo "$repo" --format md --fail-on-new-findings
+  section "Architecture rules (arch-rules)" \
+    "$rules_path" "$db" "$rules" --format md \
+    --on-unknown fail --on-possible fail --on-vacuous fail --on-not-computed fail
+} > "$out"
+
+# It informs, it does not gate: no matter what arch-impact/arch-rules reported above, pcc-dossier
+# itself always succeeds as long as it could WRITE the file. Only a failure to produce any
+# content at all propagates a nonzero exit.
+[ -s "$out" ] || { echo "pcc-dossier: produced an empty dossier at $out" >&2; exit 2; }
+exit 0

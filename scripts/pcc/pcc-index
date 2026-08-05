@@ -1,0 +1,106 @@
+#!/usr/bin/env bash
+# pcc-index — build/refresh the arch-index of the CURRENT repo (CWD) for the
+# proof-carrying-change workflow (see cabal-workflow-runner's
+# docs/proof-carrying-change.md, "The pcc-* convention").
+#
+# Usage: pcc-index --db <path>
+#
+# Prints exactly one JSON object on stdout: {"computed":bool,"functions":int,"contract_ok":bool}
+# Exit 0 on success. Exit 2 (no JSON printed) on an infra failure — the target repo's dune
+# build is broken, arch-index's own tools are not on PATH, etc. Never guesses contract_ok:
+# it reads the same Arch_db.contract_ok verdict arch-impact/arch-rules compute (§4.1).
+set -euo pipefail
+
+db=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --db) db="$2"; shift 2 ;;
+    *) echo "pcc-index: unknown argument: $1" >&2; exit 2 ;;
+  esac
+done
+[ -n "$db" ] || { echo "pcc-index: --db <path> is required" >&2; exit 2; }
+
+# Locate the arch-index checkout that this script's sibling tools live in. pcc-index runs
+# with CWD set to the TARGET repo (the workflow's working_dir), so it cannot assume anything
+# about its own $0 — arch-impact is the one binary the workflow contract guarantees is on
+# PATH alongside pcc-*, so resolve everything else relative to it.
+impact_path="$(command -v arch-impact || true)"
+[ -n "$impact_path" ] || { echo "pcc-index: arch-impact not found on PATH" >&2; exit 2; }
+arch_root="$(cd "$(dirname "$impact_path")" && pwd)"
+
+schema="$arch_root/architecture-schema.sql"
+[ -f "$schema" ] || { echo "pcc-index: architecture-schema.sql not found at $schema" >&2; exit 2; }
+
+cg_bin=""
+for cand in "$arch_root/bin/arch-callgraph-ocaml" \
+            "$arch_root/_build/default/bin/arch_callgraph_ocaml/arch_callgraph_ocaml.exe"; do
+  [ -x "$cand" ] && { cg_bin="$cand"; break; }
+done
+[ -n "$cg_bin" ] || {
+  echo "pcc-index: arch_callgraph_ocaml not built — run 'dune build' in $arch_root" >&2
+  exit 2
+}
+
+dl_bin="$arch_root/_build/default/poc/decision-lint/bin/decision_lint.exe"
+[ -x "$dl_bin" ] || {
+  echo "pcc-index: decision_lint not built — run 'dune build' in $arch_root" >&2
+  exit 2
+}
+
+command -v sqlite3 >/dev/null 2>&1 || { echo "pcc-index: sqlite3 required" >&2; exit 2; }
+
+mkdir -p "$(dirname "$db")"
+
+# 1. Build the target repo so .cmt files exist for the CMT-path producer.
+if ! dune build >/tmp/pcc-index-dune-build.$$ 2>&1; then
+  cat /tmp/pcc-index-dune-build.$$ >&2
+  rm -f /tmp/pcc-index-dune-build.$$
+  echo "pcc-index: 'dune build' failed in $(pwd)" >&2
+  exit 2
+fi
+rm -f /tmp/pcc-index-dune-build.$$
+
+# 2. Produce the sound, ⊤-marked call graph directly into the DB (same pipeline as
+#    arch-index's own CI "Self-index smoke test" step).
+if ! "$cg_bin" --build-dir=_build/default --db-path="$db" --schema-path="$schema" \
+     >/tmp/pcc-index-cg.$$ 2>&1; then
+  cat /tmp/pcc-index-cg.$$ >&2
+  rm -f /tmp/pcc-index-cg.$$
+  echo "pcc-index: arch_callgraph_ocaml failed to build the index" >&2
+  exit 2
+fi
+rm -f /tmp/pcc-index-cg.$$
+
+# 3. Populate decision analysis (dead-logic findings) so arch-impact's --fail-on-new-findings
+#    can distinguish "clean" from "never computed" instead of refusing every run. A hard
+#    failure here is infra, not a verdict — decision-lint finding 0 issues is a legitimate,
+#    successful result and must NOT abort the index.
+if ! "$dl_bin" . --db "$db" >/tmp/pcc-index-dl.$$ 2>&1; then
+  cat /tmp/pcc-index-dl.$$ >&2
+  rm -f /tmp/pcc-index-dl.$$
+  echo "pcc-index: decision-lint failed" >&2
+  exit 2
+fi
+rm -f /tmp/pcc-index-dl.$$
+
+[ -f "$db" ] || { echo "pcc-index: no database was produced at $db" >&2; exit 2; }
+
+functions="$(sqlite3 "$db" 'SELECT count(*) FROM functions;')"
+case "$functions" in
+  ''|*[!0-9]*) echo "pcc-index: could not read a function count from $db" >&2; exit 2 ;;
+esac
+
+# contract_ok: never recomputed here — read the SAME verdict arch-impact/arch-rules compute
+# (Arch_db.contract_ok), via a --fail-on-new-findings-free call so this step's own exit code
+# never depends on the diff/findings, only on whether the index itself could be built.
+impact_json="$("$impact_path" "$db" --diff HEAD --format json)" || {
+  echo "pcc-index: arch-impact could not read back the index it just built" >&2
+  exit 2
+}
+contract_ok="$(printf '%s' "$impact_json" | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+print("true" if d["contract_ok"] else "false")
+')" || { echo "pcc-index: could not parse arch-impact's JSON output" >&2; exit 2; }
+
+printf '{"computed": true, "functions": %d, "contract_ok": %s}\n' "$functions" "$contract_ok"
