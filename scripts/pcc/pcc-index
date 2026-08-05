@@ -48,40 +48,43 @@ dl_bin="$arch_root/_build/default/poc/decision-lint/bin/decision_lint.exe"
 }
 
 command -v sqlite3 >/dev/null 2>&1 || { echo "pcc-index: sqlite3 required" >&2; exit 2; }
+command -v python3 >/dev/null 2>&1 || { echo "pcc-index: python3 required" >&2; exit 2; }
 
 mkdir -p "$(dirname "$db")"
 
+# mktemp, not a predictable $$-suffixed name: /tmp is world-writable, and a predictable path
+# there is a symlink/TOCTOU surface. One trap covers all three regardless of which exit path is
+# taken (early failure, success, or a signal) — no per-step "rm -f" to remember or miss.
+dune_build_log="$(mktemp)"
+cg_log="$(mktemp)"
+dl_log="$(mktemp)"
+trap 'rm -f "$dune_build_log" "$cg_log" "$dl_log"' EXIT
+
 # 1. Build the target repo so .cmt files exist for the CMT-path producer.
-if ! dune build >/tmp/pcc-index-dune-build.$$ 2>&1; then
-  cat /tmp/pcc-index-dune-build.$$ >&2
-  rm -f /tmp/pcc-index-dune-build.$$
+if ! dune build >"$dune_build_log" 2>&1; then
+  cat "$dune_build_log" >&2
   echo "pcc-index: 'dune build' failed in $(pwd)" >&2
   exit 2
 fi
-rm -f /tmp/pcc-index-dune-build.$$
 
 # 2. Produce the sound, ⊤-marked call graph directly into the DB (same pipeline as
 #    arch-index's own CI "Self-index smoke test" step).
 if ! "$cg_bin" --build-dir=_build/default --db-path="$db" --schema-path="$schema" \
-     >/tmp/pcc-index-cg.$$ 2>&1; then
-  cat /tmp/pcc-index-cg.$$ >&2
-  rm -f /tmp/pcc-index-cg.$$
+     >"$cg_log" 2>&1; then
+  cat "$cg_log" >&2
   echo "pcc-index: arch_callgraph_ocaml failed to build the index" >&2
   exit 2
 fi
-rm -f /tmp/pcc-index-cg.$$
 
 # 3. Populate decision analysis (dead-logic findings) so arch-impact's --fail-on-new-findings
 #    can distinguish "clean" from "never computed" instead of refusing every run. A hard
 #    failure here is infra, not a verdict — decision-lint finding 0 issues is a legitimate,
 #    successful result and must NOT abort the index.
-if ! "$dl_bin" . --db "$db" >/tmp/pcc-index-dl.$$ 2>&1; then
-  cat /tmp/pcc-index-dl.$$ >&2
-  rm -f /tmp/pcc-index-dl.$$
+if ! "$dl_bin" . --db "$db" >"$dl_log" 2>&1; then
+  cat "$dl_log" >&2
   echo "pcc-index: decision-lint failed" >&2
   exit 2
 fi
-rm -f /tmp/pcc-index-dl.$$
 
 [ -f "$db" ] || { echo "pcc-index: no database was produced at $db" >&2; exit 2; }
 
@@ -93,7 +96,7 @@ esac
 # contract_ok: never recomputed here — read the SAME verdict arch-impact/arch-rules compute
 # (Arch_db.contract_ok), via a --fail-on-new-findings-free call so this step's own exit code
 # never depends on the diff/findings, only on whether the index itself could be built.
-impact_json="$("$impact_path" "$db" --diff HEAD --format json)" || {
+impact_json="$("$impact_path" "$db" --diff HEAD --repo . --format json)" || {
   echo "pcc-index: arch-impact could not read back the index it just built" >&2
   exit 2
 }
