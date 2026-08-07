@@ -22,3 +22,8 @@
  (name test_arch_tools)
  (modules test_arch_tools)
  (libraries arch_tools alcotest))
+
+(test
+ (name test_arch_index_compare)
+ (modules test_arch_index_compare)
+ (libraries arch_index alcotest sqlite3))
