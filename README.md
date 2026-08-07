@@ -75,4 +75,5 @@ arch-index makes call-graph reachability answerable as a SQL query:
 - [Architecture fitness functions](docs/fitness-functions.md)
 - [Edge-kind contract & soundness](docs/edge-kind-contract.md)
 - [DB schema reference](docs/schema.md)
+- [Curation workflow: measure → decide → ledger](docs/curation-workflow.md)
 - [Formal soundness spec](SPEC-sound-callgraph.md)

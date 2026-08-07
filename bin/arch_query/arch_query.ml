@@ -56,11 +56,17 @@ Subcommands:
   large-files      [N]         modules sorted by line count, top-N (MEASURE — no gate)
   large-functions  [N]         functions sorted by line count, top-N (MEASURE — no gate)
   god-modules      [N]         modules sorted by aggregate fan-in, top-N (MEASURE — no gate)
+  low-coverage     [N]         least-covered functions, latest snapshot per function, top-N
+  gardening        [open|log]  open gardening tasks, or the append-only log (default: open)
+  unsafe-params    [unfixed|fixed|all]  string-typed params tracked for a proper type (default: unfixed)
 
 A "MEASURE" command reports an exact number and sorts by it. It never fails the build and never
 takes a --fail-on-... threshold: "is this too big" is a human judgement, not something these
 commands decide. Record that judgement in the curation ledger instead of scripting a gate on the
 number.
+
+low-coverage/gardening/unsafe-params read the curation ledgers (coverage, gardening_tasks,
+gardening_log, unsafe_params) — see docs/curation-workflow.md for how they get written.
 
 ARCH_QUERY_FORMAT=box|list|json|csv|line|markdown selects the output mode (default box).
 Machine consumers should set `list` or `json`: -box wraps a one-line verdict in ~400
@@ -506,6 +512,71 @@ let () =
                   GROUP BY callee_id) fi JOIN functions f ON f.id=fi.callee_id JOIN modules m ON \
                   m.id=f.module_id GROUP BY m.id ORDER BY fan_in DESC LIMIT %d"
                  (limit_of a 25))
+              ()
+        (* ---- B2: read the curation ledgers written by arch-coverage-load / arch-curate. ---- *)
+        | "low-coverage" ->
+            if not (Arch_db.has_table t "coverage") then
+              die 3
+                "arch-query: low-coverage requires the main schema's coverage table (populate it \
+                 with arch-coverage-load)." ;
+            (* Only the LATEST snapshot per function — history-safe: arch-coverage-load APPENDS
+               one row per run, so without this the same function would show once per past
+               snapshot instead of once, as of now. *)
+            q ~h:[ "path"; "name"; "percentage"; "covered_lines"; "total_lines" ]
+              ~shape:Arch_db.Rows.cov_shape ~cells:Arch_db.Rows.cov_cells ~pty:unit_ty
+              (Printf.sprintf
+                 "SELECT m.path, f.name, c.percentage, c.covered_lines, c.total_lines FROM \
+                  coverage c JOIN functions f ON c.function_id=f.id JOIN modules m ON \
+                  f.module_id=m.id WHERE c.recorded_at = (SELECT MAX(c2.recorded_at) FROM \
+                  coverage c2 WHERE c2.function_id=c.function_id) ORDER BY c.percentage ASC \
+                  LIMIT %d"
+                 (limit_of a 25))
+              ()
+        | "gardening" -> (
+            match (if a = "" then "open" else a) with
+            | "open" ->
+                if not (Arch_db.has_table t "gardening_tasks") then
+                  die 3 "arch-query: gardening open requires the gardening_tasks table." ;
+                q
+                  ~h:[ "github_issue"; "category"; "title"; "module_path"; "function_name"; "status";
+                       "created_at" ]
+                  ~shape:Arch_db.Rows.task_shape ~cells:Arch_db.Rows.task_cells ~pty:unit_ty
+                  "SELECT t.github_issue, t.category, COALESCE(t.title,''), COALESCE(m.path,''), \
+                   COALESCE(f.name,''), t.status, t.created_at FROM gardening_tasks t LEFT JOIN \
+                   modules m ON t.target_module_id=m.id LEFT JOIN functions f ON \
+                   t.target_function_id=f.id WHERE t.status='open' ORDER BY t.created_at, t.id" ()
+            | "log" ->
+                if not (Arch_db.has_table t "gardening_log") then
+                  die 3 "arch-query: gardening log requires the gardening_log table." ;
+                q ~h:[ "date"; "contributor"; "category"; "description"; "pr_number"; "issue_number" ]
+                  ~shape:Arch_db.Rows.log_shape ~cells:Arch_db.Rows.log_cells ~pty:unit_ty
+                  "SELECT date, COALESCE(contributor,''), category, description, pr_number, \
+                   issue_number FROM gardening_log ORDER BY date DESC, id DESC" ()
+            | other ->
+                die 2
+                  (Printf.sprintf "arch-query: gardening: unknown mode '%s' (expected open|log)" other))
+        | "unsafe-params" ->
+            if not (Arch_db.has_table t "unsafe_params") then
+              die 3 "arch-query: unsafe-params requires the unsafe_params table." ;
+            let where =
+              match (if a = "" then "unfixed" else a) with
+              | "unfixed" -> "u.fixed = 0"
+              | "fixed" -> "u.fixed = 1"
+              | "all" -> "1=1"
+              | other ->
+                  die 2
+                    (Printf.sprintf
+                       "arch-query: unsafe-params: unknown filter '%s' (expected unfixed|fixed|all)"
+                       other)
+            in
+            q ~h:[ "path"; "name"; "param_name"; "current_type"; "target_type"; "github_issue"; "fixed" ]
+              ~shape:Arch_db.Rows.unsafe_shape ~cells:Arch_db.Rows.unsafe_cells ~pty:unit_ty
+              (Printf.sprintf
+                 "SELECT m.path, f.name, u.param_name, u.current_type, u.target_type, \
+                  u.github_issue, u.fixed FROM unsafe_params u JOIN functions f ON \
+                  u.function_id=f.id JOIN modules m ON f.module_id=m.id WHERE %s ORDER BY m.path, \
+                  f.name, u.param_name"
+                 where)
               ()
         | _ -> Arch_effects_queries.dispatch t fmt ~cmd ~a ~b ~flat ~usage) ;
         exit 0

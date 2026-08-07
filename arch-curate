@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# arch-curate — record a human curation decision, with provenance (write side of the curation
+# ledgers: gardening_tasks, gardening_log, unsafe_params). Read side: `arch-query low-coverage /
+# gardening / unsafe-params`. See docs/curation-workflow.md.
+# Thin wrapper over the OCaml binary; run `dune build bin/arch_curate` (or ./build.sh) first.
+HERE="$(cd "$(dirname "$0")" && pwd)"
+for cand in "$HERE/bin/arch-curate" "$HERE/_build/default/bin/arch_curate/arch_curate.exe"; do
+  [ -x "$cand" ] && exec "$cand" "$@"
+done
+echo "arch-curate: binary not found; run: dune build bin/arch_curate" >&2
+exit 2

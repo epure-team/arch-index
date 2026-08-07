@@ -1,0 +1,5 @@
+(executable
+ (name arch_coverage_load)
+ (public_name arch_coverage_load)
+ (flags (:standard -w +8+11+26+27 -warn-error +8+11))
+ (libraries sqlite3 yojson unix))
