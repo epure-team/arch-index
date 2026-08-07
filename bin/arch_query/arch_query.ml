@@ -50,6 +50,17 @@ Subcommands:
   removes-guard <guard>        gated actions and their unlockers
   actor-paths  <value-kind>    paths across >=2 distinct actor roles
   prune        <A> <B>         P13 pruning signal
+  missing-docs                 exported functions with no doc-comment (fact)
+  missing-mli                  modules with no .mli (fact)
+  type-search  <type>          functions whose signature mentions <type> (fact)
+  large-files      [N]         modules sorted by line count, top-N (MEASURE — no gate)
+  large-functions  [N]         functions sorted by line count, top-N (MEASURE — no gate)
+  god-modules      [N]         modules sorted by aggregate fan-in, top-N (MEASURE — no gate)
+
+A "MEASURE" command reports an exact number and sorts by it. It never fails the build and never
+takes a --fail-on-... threshold: "is this too big" is a human judgement, not something these
+commands decide. Record that judgement in the curation ledger instead of scripting a gate on the
+number.
 
 ARCH_QUERY_FORMAT=box|list|json|csv|line|markdown selects the output mode (default box).
 Machine consumers should set `list` or `json`: -box wraps a one-line verdict in ~400
@@ -412,6 +423,84 @@ let () =
               (Printf.sprintf
                  "SELECT module_path, function_name, mutation_sites, deref_sites, line_count, \
                   mutations_per_kloc FROM v_mutation_heavy LIMIT %d"
+                 (limit_of a 25))
+              ()
+        (* ---- A1: facts — exact, deterministic lookups; no judgement involved. ---- *)
+        | "missing-docs" ->
+            if not (Arch_db.has_table t "v_undocumented") then
+              die 3
+                "arch-query: missing-docs requires the main schema's v_undocumented view (this \
+                 index has no `intent`/`exposed` columns — not built from \
+                 architecture-schema.sql)." ;
+            q ~h:[ "file_path"; "name"; "exposed" ] ~shape:Arch_db.Rows.s_s_i ~cells:Arch_db.Rows.cssi
+              ~pty:unit_ty "SELECT path, name, exposed FROM v_undocumented" ()
+        | "missing-mli" ->
+            if (not (Arch_db.has_table t "modules")) || not (Arch_db.has_col t "modules" "has_mli")
+            then
+              die 3
+                "arch-query: missing-mli requires the main schema's modules.has_mli column (not \
+                 built from architecture-schema.sql)." ;
+            q ~h:[ "path"; "lines" ] ~shape:Arch_db.Rows.s_i ~cells:Arch_db.Rows.csi ~pty:unit_ty
+              "SELECT path, lines FROM modules WHERE has_mli=0 ORDER BY path" ()
+        | "type-search" ->
+            if not (Arch_db.has_col t "functions" "signature") then
+              die 3
+                "arch-query: type-search requires the main schema's functions.signature column \
+                 (not built from architecture-schema.sql)." ;
+            if a = "" then die 2 "arch-query: type-search requires a <type> argument." ;
+            q ~h:[ "path"; "name"; "signature" ] ~shape:Arch_db.Rows.t3' ~cells:Arch_db.Rows.c3
+              ~pty:str1
+              "SELECT m.path, f.name, f.signature FROM functions f JOIN modules m ON \
+               f.module_id=m.id WHERE f.signature LIKE ? ESCAPE '\\' ORDER BY m.path, f.name"
+              (Arch_db.like_contains a)
+        (* ---- A2: measures — an exact number, sorted; NEVER a gate (no --fail-on-...). ---- *)
+        | "large-files" ->
+            if not (Arch_db.has_table t "modules") then
+              die 3
+                "arch-query: large-files requires the main schema's modules table (not built \
+                 from architecture-schema.sql)." ;
+            preamble ~h:[ "note" ] ~cells:[ "measure only — sorted by size, no gate/threshold" ]
+              ~text:"measure only — sorted by size, no gate/threshold" ;
+            q ~h:[ "path"; "lines" ] ~shape:Arch_db.Rows.s_i ~cells:Arch_db.Rows.csi ~pty:unit_ty
+              (Printf.sprintf "SELECT path, lines FROM modules ORDER BY lines DESC LIMIT %d"
+                 (limit_of a 25))
+              ()
+        | "large-functions" ->
+            (* NOT `has_col t "functions" "line_count"`: line_count is a STORED GENERATED
+               column, and sqlite's `pragma_table_info` — what has_col queries — omits
+               generated columns entirely (only `pragma_table_xinfo` reports them). That check
+               would always refuse. `modules` existing is the same main-schema signal every
+               sibling command here already gates on. *)
+            if not (Arch_db.has_table t "modules") then
+              die 3
+                "arch-query: large-functions requires the main schema's functions.line_count \
+                 column (not built from architecture-schema.sql)." ;
+            preamble ~h:[ "note" ] ~cells:[ "measure only — sorted by size, no gate/threshold" ]
+              ~text:"measure only — sorted by size, no gate/threshold" ;
+            q ~h:[ "path"; "name"; "line_count" ] ~shape:Arch_db.Rows.s_s_i ~cells:Arch_db.Rows.cssi
+              ~pty:unit_ty
+              (Printf.sprintf
+                 "SELECT m.path, f.name, f.line_count FROM functions f JOIN modules m ON \
+                  f.module_id=m.id ORDER BY f.line_count DESC LIMIT %d"
+                 (limit_of a 25))
+              ()
+        | "god-modules" ->
+            if not (Arch_db.has_table t "modules") then
+              die 3
+                "arch-query: god-modules requires the main schema's modules table (not built \
+                 from architecture-schema.sql)." ;
+            (* Reuses the SAME measure as `fan-in` (count DISTINCT caller_id per callee), summed
+               up to the module a callee belongs to — a sort/threshold on that existing measure,
+               not a new calculation. *)
+            preamble ~h:[ "note" ]
+              ~cells:[ "measure only — aggregate fan-in per module, no gate/threshold" ]
+              ~text:"measure only — aggregate fan-in per module, no gate/threshold" ;
+            q ~h:[ "path"; "fan_in" ] ~shape:Arch_db.Rows.s_i ~cells:Arch_db.Rows.csi ~pty:unit_ty
+              (Printf.sprintf
+                 "SELECT m.path, SUM(fi.callers) AS fan_in FROM (SELECT callee_id, \
+                  count(DISTINCT caller_id) AS callers FROM calls WHERE callee_id IS NOT NULL \
+                  GROUP BY callee_id) fi JOIN functions f ON f.id=fi.callee_id JOIN modules m ON \
+                  m.id=f.module_id GROUP BY m.id ORDER BY fan_in DESC LIMIT %d"
                  (limit_of a 25))
               ()
         | _ -> Arch_effects_queries.dispatch t fmt ~cmd ~a ~b ~flat ~usage) ;

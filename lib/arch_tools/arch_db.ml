@@ -187,6 +187,21 @@ let rows t ~params_ty ~shape ~to_cells sql params =
 
 let quote_lit s = String.concat "''" (String.split_on_char '\'' s)
 
+(** Escape [%], [_] and the escape character itself so a caller-supplied substring cannot be
+    read as a LIKE wildcard — a search for the literal type name ["int_id"] must not also match
+    ["intXid"]. Pair with [~ESCAPE '\\'] in the SQL and wrap the result in ['%' ... '%'] for a
+    substring search. *)
+let like_escape s =
+  let buf = Buffer.create (String.length s) in
+  String.iter
+    (fun c ->
+      (match c with '%' | '_' | '\\' -> Buffer.add_char buf '\\' | _ -> ()) ;
+      Buffer.add_char buf c)
+    s ;
+  Buffer.contents buf
+
+let like_contains s = "%" ^ like_escape s ^ "%"
+
 let has_table_conn conn name =
   let module Db = (val conn : C.CONNECTION) in
   let req =
