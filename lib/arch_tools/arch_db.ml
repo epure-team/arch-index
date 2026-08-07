@@ -154,6 +154,18 @@ module Rows = struct
      The int column is declared, so -json renders it as a number rather than a quoted string. *)
   let ub_shape = t2 (t3 s i s) (t3 s s s)
 
+  (* low-coverage: path, name, percentage (REAL), covered_lines, total_lines. *)
+  let cov_shape = t2 (t3 s s f) (t2 i i)
+
+  (* unsafe-params: path, name, param_name, current_type, target_type, github_issue, fixed. *)
+  let unsafe_shape = t2 (t5 s s s s s) (t2 i i)
+
+  (* gardening open: github_issue, category, title, module_path, function_name, status, created_at. *)
+  let task_shape = t2 (t3 i s s) (t4 s s s s)
+
+  (* gardening log: date, contributor, category, description, pr_number, issue_number. *)
+  let log_shape = t2 (t4 s s s s) (t2 i i)
+
   let c1 a = [ text_cell a ]
   let c2 (a, b) = [ text_cell a; text_cell b ]
   let c3 (a, b, c) = [ text_cell a; text_cell b; text_cell c ]
@@ -172,6 +184,20 @@ module Rows = struct
 
   let node_cells ((k, n, p), (ex, ls, le)) =
     [ text_cell k; text_cell n; text_cell p; int_cell ex; int_cell ls; int_cell le ]
+
+  let cov_cells ((path, name, pct), (covered, total)) =
+    [ text_cell path; text_cell name; real_cell pct; int_cell covered; int_cell total ]
+
+  let unsafe_cells ((path, name, param, cur, tgt), (issue, fixed)) =
+    [ text_cell path; text_cell name; text_cell param; text_cell cur; text_cell tgt; int_cell issue;
+      int_cell fixed ]
+
+  let task_cells ((issue, cat, title), (mpath, fname, status, created)) =
+    [ int_cell issue; text_cell cat; text_cell title; text_cell mpath; text_cell fname;
+      text_cell status; text_cell created ]
+
+  let log_cells ((date, contrib, cat, desc), (pr, issue)) =
+    [ text_cell date; text_cell contrib; text_cell cat; text_cell desc; int_cell pr; int_cell issue ]
 end
 
 (** Run assembled SQL of a DECLARED row shape and return display cells.
