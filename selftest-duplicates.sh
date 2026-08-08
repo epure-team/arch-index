@@ -65,7 +65,11 @@ echo "$OUT" | grep -q 'DUPLICATE dup' || note "duplicates sweep must list 'dup' 
 echo "$OUT" | grep -q 'solo' && note "duplicates sweep must NOT mention solo (defined once, not a candidate)"
 
 OUT_JSON="$(ARCH_QUERY_FORMAT=json "$BC" "$DB" duplicates --repo "$REPO" --format json)"
-command -v python3 >/dev/null 2>&1 && printf '%s' "$OUT_JSON" | python3 -c '
+# Guarded by `if`, not `command -v python3 && ... || note`: that pattern's `&&`/`||` short-circuit
+# the SAME way whether python3 is absent or the python3 call itself fails, so an absent python3
+# would trip `note` as a false FAILURE instead of just skipping this JSON-shape check.
+if command -v python3 >/dev/null 2>&1; then
+  printf '%s' "$OUT_JSON" | python3 -c '
 import json,sys
 d=json.load(sys.stdin)
 assert d["candidates_with_multiple_definitions"] == 1, d
@@ -73,6 +77,7 @@ names=[x["name"] for x in d["proven_duplicates"]]
 assert names == ["dup"], names
 assert d["unverifiable_empty_body"] == [], d
 ' 2>/dev/null || note "duplicates --format json must report exactly one proven duplicate named dup"
+fi
 
 # ---- empty-body disambiguation: two unreadable occurrences must NOT be a proven duplicate ------
 GHOST_DB="$(mktemp --suffix=.db)"; rm -f "$GHOST_DB"
