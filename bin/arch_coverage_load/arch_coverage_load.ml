@@ -189,6 +189,13 @@ let () =
           ignore (Sqlite3.bind ins 4 (Sqlite3.Data.TEXT stamp)) ;
           match Sqlite3.step ins with
           | Sqlite3.Rc.DONE -> incr written
+          | Sqlite3.Rc.CONSTRAINT ->
+              ignore (Sqlite3.finalize ins) ;
+              exec "ROLLBACK" ;
+              die
+                "a coverage snapshot for %S already exists at this UTC second (%s) — run the \
+                 loader again in a moment, or once per second at most"
+                r.r_function stamp
           | rc ->
               ignore (Sqlite3.finalize ins) ;
               exec "ROLLBACK" ;

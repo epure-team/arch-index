@@ -528,8 +528,8 @@ let () =
                  "SELECT m.path, f.name, c.percentage, c.covered_lines, c.total_lines FROM \
                   coverage c JOIN functions f ON c.function_id=f.id JOIN modules m ON \
                   f.module_id=m.id WHERE c.recorded_at = (SELECT MAX(c2.recorded_at) FROM \
-                  coverage c2 WHERE c2.function_id=c.function_id) ORDER BY c.percentage ASC \
-                  LIMIT %d"
+                  coverage c2 WHERE c2.function_id=c.function_id) ORDER BY c.percentage ASC, \
+                  m.path ASC, f.name ASC LIMIT %d"
                  (limit_of a 25))
               ()
         | "gardening" -> (
