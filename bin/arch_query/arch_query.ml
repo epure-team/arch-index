@@ -432,8 +432,12 @@ let () =
                 "arch-query: missing-docs requires the main schema's v_undocumented view (this \
                  index has no `intent`/`exposed` columns — not built from \
                  architecture-schema.sql)." ;
+            (* Restate the ORDER BY explicitly rather than lean on v_undocumented's own — it
+               happens to sort the same way today, but every sibling command here states its
+               own order, and a future edit to the view's definition should not silently change
+               this command's determinism guarantee. *)
             q ~h:[ "file_path"; "name"; "exposed" ] ~shape:Arch_db.Rows.s_s_i ~cells:Arch_db.Rows.cssi
-              ~pty:unit_ty "SELECT path, name, exposed FROM v_undocumented" ()
+              ~pty:unit_ty "SELECT path, name, exposed FROM v_undocumented ORDER BY path, name" ()
         | "missing-mli" ->
             if (not (Arch_db.has_table t "modules")) || not (Arch_db.has_col t "modules" "has_mli")
             then
