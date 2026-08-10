@@ -44,6 +44,8 @@
     is exactly the ref-heaviness this project has been unwinding elsewhere — a reader cannot
     tell when a global is set, and every function silently depends on ambient state. The
     mutation stays confined to {!parse_args}. *)
+open Arch_tools
+
 type config = { db : string; repo : string; tools : string }
 
 (* ------------------------------------------------------------------------ *)
@@ -182,38 +184,21 @@ type provenance = {
   callgraph_contract : string option;
   decision_contract : string option;
   built_by : string option;
+  reachability_is_sound : bool;
 }
 
 let provenance cfg =
-  let get db key =
-    let stmt =
-      Sqlite3.prepare db "SELECT value FROM comment_db_meta WHERE key = ? LIMIT 1"
-    in
-    ignore (Sqlite3.bind_text stmt 1 key);
-    let v =
-      match Sqlite3.step stmt with
-      | Sqlite3.Rc.ROW -> (
-          match Sqlite3.column stmt 0 with Sqlite3.Data.TEXT s -> Some s | _ -> None)
-      | _ -> None
-    in
-    ignore (Sqlite3.finalize stmt);
-    v
-  in
-  match Sqlite3.db_open ~mode:`READONLY cfg.db with
-  | exception _ ->
-      { callgraph_contract = None; decision_contract = None; built_by = None }
-  | db ->
-      let p =
-        try
-          {
-            callgraph_contract = get db "callgraph_contract";
-            decision_contract = get db "decision_contract";
-            built_by = get db "built_by";
-          }
-        with _ -> { callgraph_contract = None; decision_contract = None; built_by = None }
-      in
-      ignore (Sqlite3.db_close db);
-      p
+  try
+    let db = Arch_db.open_ro cfg.db in
+    {
+      callgraph_contract = Arch_db.meta db "callgraph_contract";
+      decision_contract = Arch_db.meta db "decision_contract";
+      built_by = Arch_db.meta db "built_by";
+      reachability_is_sound = Arch_db.contract_ok db "mcp";
+    }
+  with Arch_db.Refused _ | Arch_db.Broken _ ->
+    { callgraph_contract = None; decision_contract = None; built_by = None;
+      reachability_is_sound = false }
 
 let opt_json = function None -> `Null | Some s -> `String s
 
@@ -228,15 +213,14 @@ let provenance_json cfg =
       ("decision_contract", opt_json p.decision_contract);
       ("built_by", opt_json p.built_by);
       ( "reachability_is_sound",
-        `Bool (match p.callgraph_contract with Some _ -> true | None -> false) );
+        `Bool p.reachability_is_sound );
       ( "caveat",
         `String
-          (match p.callgraph_contract with
-          | Some _ ->
+          (if p.reachability_is_sound then
               "This index is ⊤-marked: an UNREACHABLE verdict is a proof in a closed \
                universe, and UNKNOWN is reported explicitly wherever the analysis loses \
                track."
-          | None ->
+          else
               "This index is NOT ⊤-marked. A 'no path' answer may merely hide a \
                silently-dropped dynamic edge, so it is NOT evidence of unreachability. \
                Treat every negative as UNKNOWN.") );
@@ -363,7 +347,23 @@ let repo_relative cfg what p =
   let full = Filename.concat cfg.repo p in
   if not (Sys.file_exists full) then
     raise (Bad_argument (Printf.sprintf "%s: no such file under the repo root: %s" what p)) ;
-  full
+  let root =
+    try Unix.realpath cfg.repo
+    with Unix.Unix_error _ ->
+      raise (Bad_argument (Printf.sprintf "configured repo root is unavailable"))
+  in
+  let candidate =
+    try Unix.realpath full
+    with Unix.Unix_error _ ->
+      raise (Bad_argument (Printf.sprintf "%s cannot be resolved under the repo root" what))
+  in
+  let prefix = if root = "/" then "/" else root ^ "/" in
+  if candidate <> root
+     && (String.length candidate < String.length prefix
+        || String.sub candidate 0 (String.length prefix) <> prefix)
+  then
+    raise (Bad_argument (Printf.sprintf "%s resolves outside the repo root" what)) ;
+  candidate
 
 let simple_tool cfg name description ?(args = []) argv_of output_props =
   Mcp_kit.Tool.make ~description

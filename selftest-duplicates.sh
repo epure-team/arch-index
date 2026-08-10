@@ -13,7 +13,7 @@ command -v sqlite3 >/dev/null 2>&1 || { echo "selftest-duplicates: sqlite3 requi
 
 REPO="$(mktemp -d)"
 mkdir -p "$REPO/lib/a" "$REPO/lib/b" "$REPO/lib/c"
-# same_a and same_b: identical body (modulo whitespace) under different names AND as two
+# same_a and same_b: byte-identical canonical body under different names AND as two
 # occurrences of the SAME name `dup` — arch-body-compare works name-by-name, so the fixture below
 # puts the duplicate under one shared name `dup` in two modules.
 cat > "$REPO/lib/a/dup.ml" <<'EOF'
@@ -21,8 +21,8 @@ cat > "$REPO/lib/a/dup.ml" <<'EOF'
       1 + 1
 EOF
 cat > "$REPO/lib/b/dup.ml" <<'EOF'
-let run () =
-1 + 1
+  let run () =
+      1 + 1
 EOF
 cat > "$REPO/lib/c/dup.ml" <<'EOF'
 let run () =
@@ -46,7 +46,16 @@ SQL
 "$BC" "$DB" nope --repo "$REPO" | grep -q 'NOT FOUND' || note "an unknown name must report NOT FOUND"
 "$BC" "$DB" solo --repo "$REPO" | grep -q 'SINGLE'    || note "a name defined once must report SINGLE, not a duplicate"
 "$BC" "$DB" dup  --repo "$REPO" | grep -q 'DUPLICATE: 2 occurrence' \
-  || note "two whitespace-only-different occurrences of dup must be reported as a proven DUPLICATE"
+  || note "two byte-identical occurrences of dup must be reported as a proven DUPLICATE"
+
+# Language-independent whitespace folding is unsafe inside literals/comments.  Even an
+# indentation-only difference is conservatively DIFFERS until a language-aware canonicaliser can
+# prove it lexical, rather than source content.
+sed 's/^  //' "$REPO/lib/b/dup.ml" > "$REPO/lib/b/dup.ml.tmp"
+mv "$REPO/lib/b/dup.ml.tmp" "$REPO/lib/b/dup.ml"
+"$BC" "$DB" dup --repo "$REPO" | grep -q 'DIFFERS: 2 occurrence' \
+  || note "whitespace differences must conservatively report DIFFERS"
+cp "$REPO/lib/a/dup.ml" "$REPO/lib/b/dup.ml"
 
 # a genuinely different third occurrence flips the verdict to DIFFERS
 sqlite3 "$DB" "INSERT INTO modules(path, lines) VALUES ('lib/c/dup.ml', 2);

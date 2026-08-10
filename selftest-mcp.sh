@@ -42,13 +42,14 @@ NDJSON
 # One MCP session per invocation: initialize, notifications/initialized, then the request.
 # mcp-kit sessions reject normal requests before the handshake, so the handshake is not
 # optional scaffolding — it is part of what is being tested.
-call() {  # $1 = method, $2 = params JSON
+call_cfg() {  # $1 = db, $2 = repo, $3 = method, $4 = params JSON
   {
     printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"selftest","version":"0"}}}'
     printf '%s\n' '{"jsonrpc":"2.0","method":"notifications/initialized"}'
-    printf '{"jsonrpc":"2.0","id":2,"method":"%s","params":%s}\n' "$1" "$2"
-  } | "$BIN" --db "$DB" --repo "$HERE" --tools-dir "$HERE" 2>/dev/null
+    printf '{"jsonrpc":"2.0","id":2,"method":"%s","params":%s}\n' "$3" "$4"
+  } | "$BIN" --db "$1" --repo "$2" --tools-dir "$HERE" 2>/dev/null
 }
+call() { call_cfg "$DB" "$HERE" "$1" "$2"; }
 
 pick() {  # last JSON-RPC response on stdin -> .result
   python3 -c '
@@ -127,6 +128,27 @@ assert "provenance" in r and "reachability_is_sound" in r["provenance"], r
 ' 2>/dev/null || note "$t must carry provenance so its answer can be weighed"
 done
 
+# --- provenance validates the complete callgraph contract, not just a stamp ----------------
+for shape in unstamped missing_kind null_kind invalid_kind; do
+  BADDB="$(mktemp --suffix=.db)"; cp "$DB" "$BADDB"
+  case "$shape" in
+    unstamped) sqlite3 "$BADDB" "DELETE FROM comment_db_meta WHERE key='callgraph_contract'" ;;
+    missing_kind) sqlite3 "$BADDB" "ALTER TABLE calls DROP COLUMN kind" ;;
+    null_kind) sqlite3 "$BADDB" "UPDATE calls SET kind=NULL WHERE rowid=(SELECT min(rowid) FROM calls)" ;;
+    invalid_kind) sqlite3 "$BADDB" "UPDATE calls SET kind='BOGUS' WHERE rowid=(SELECT min(rowid) FROM calls)" ;;
+  esac
+  R="$(call_cfg "$BADDB" "$HERE" tools/call '{"name":"index_status","arguments":{}}' | pick | sc)"
+  printf '%s' "$R" | python3 -c '
+import json,sys
+p=json.load(sys.stdin)["provenance"]
+assert p["reachability_is_sound"] is False, p
+assert "NOT" in p["caveat"], p
+' 2>/dev/null || note "$shape callgraph evidence must produce unsound MCP provenance"
+  "$Q" "$BADDB" unreachable clean z >/dev/null 2>&1
+  [ $? -eq 3 ] || note "$shape fixture must be refused by the CLI contract validator too"
+  rm -f "$BADDB"
+done
+
 # --- the payload is machine-shaped, not table art --------------------------------------------
 # arch-query defaults to sqlite3 -box. Sending an agent a one-line verdict wrapped in ~400
 # box-drawing characters spends its context on borders, so the server asks for the plain form.
@@ -159,6 +181,27 @@ import json,sys; r=json.load(sys.stdin)
 assert r.get("isError") is True, ("the path was accepted instead of refused", r)
 ' 2>/dev/null || note "architecture_rules must REFUSE $badpath, not silently evaluate another file"
 done
+
+# Canonical containment also rejects file and directory symlink escapes and a
+# similarly prefixed sibling root without exposing the external file contents.
+PATH_ROOT="$(mktemp -d)"; PATH_SIBLING="${PATH_ROOT}-sibling"; mkdir -p "$PATH_SIBLING"
+cp "$HERE/arch-rules.txt" "$PATH_ROOT/valid-rules.txt"
+printf 'EXTERNAL_SECRET_SENTINEL\n' > "$PATH_SIBLING/external-rules.txt"
+ln -s "$PATH_SIBLING/external-rules.txt" "$PATH_ROOT/file-link.txt"
+ln -s "$PATH_SIBLING" "$PATH_ROOT/dir-link"
+for badpath in file-link.txt dir-link/external-rules.txt "../$(basename "$PATH_SIBLING")/external-rules.txt"; do
+  R="$(call_cfg "$DB" "$PATH_ROOT" tools/call "{\"name\":\"architecture_rules\",\"arguments\":{\"rules_file\":\"$badpath\"}}" | pick)"
+  printf '%s' "$R" | python3 -c '
+import json,sys
+r=json.load(sys.stdin)
+assert r.get("isError") is True, r
+assert "EXTERNAL_SECRET_SENTINEL" not in json.dumps(r), r
+' 2>/dev/null || note "canonical repo containment must refuse $badpath without leaking content"
+done
+R="$(call_cfg "$DB" "$PATH_ROOT" tools/call '{"name":"architecture_rules","arguments":{"rules_file":"valid-rules.txt"}}' | pick)"
+printf '%s' "$R" | python3 -c 'import json,sys; assert json.load(sys.stdin).get("isError") in (False,None)' \
+  2>/dev/null || note "canonical repo containment must accept a nested in-root regular file"
+rm -rf "$PATH_ROOT" "$PATH_SIBLING"
 # ...and a legitimate repo-relative path still works, so the guard is a check and not a ban.
 R="$(call tools/call '{"name":"architecture_rules","arguments":{"rules_file":"arch-rules.txt"}}' | pick)"
 printf '%s' "$R" | python3 -c '

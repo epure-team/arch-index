@@ -350,6 +350,119 @@ let require_contract t cmd =
     here, so two tools can never report two different answers for the same index. *)
 let contract_ok t cmd = try require_contract t cmd ; true with Refused _ -> false
 
+let digest_lines t sql =
+  let lines =
+    rows t ~params_ty:Ty.unit ~shape:Rows.t1 ~to_cells:Rows.c1 sql ()
+    |> List.map (function [ Text s ] -> s | _ -> "")
+  in
+  "md5:" ^ Digest.to_hex (Digest.string (String.concat "\n" lines))
+
+(** Validate a completed producer run by recomputing its canonical source,
+    index, universe, and result identities. Empty result tables remain valid;
+    arbitrary metadata and mixed/replayed run rows do not. *)
+let analysis_complete ?repo t prefix =
+  let key suffix = prefix ^ "_" ^ suffix in
+  let nonempty_meta suffix =
+    match meta t (key suffix) with Some s -> String.trim s <> "" | None -> false
+  in
+  let shape_ok = meta t (key "contract") = Some "v1"
+  && meta t (key "outcome") = Some "complete"
+  && meta t (key "failures") = Some "0"
+  && nonempty_meta "run_id"
+  && nonempty_meta "producer_version"
+  && nonempty_meta "source_digest"
+  && nonempty_meta "index_digest" && nonempty_meta "result_digest"
+  && (match meta t (key "universe") with
+     | Some n -> (match int_of_string_opt n with Some i -> i >= 0 | None -> false)
+     | None -> false)
+  in
+  if not shape_ok then false
+  else
+    let run_id = Option.get (meta t (key "run_id")) in
+    let q = quote_lit run_id in
+    let expected suffix = Option.get (meta t (key suffix)) in
+    try
+      let index_digest =
+        match t.schema with
+        | Main ->
+            digest_lines t
+              "SELECT hex(m.path)||':'||hex(f.name)||':'||f.id FROM functions f \
+               JOIN modules m ON m.id=f.module_id ORDER BY m.path,f.name,f.id"
+        | Flat ->
+            digest_lines t
+              "SELECT hex(file_path)||':'||hex(name) FROM functions ORDER BY file_path,name"
+      in
+      if prefix = "decision" then
+        has_table t "decision_analysis_files" && has_col t "decisions" "analysis_run_id"
+        && count t (Printf.sprintf "SELECT count(*) FROM decision_analysis_files WHERE run_id='%s'" q)
+           = int_of_string (Option.get (meta t (key "universe")))
+        && count t (Printf.sprintf "SELECT count(*) FROM decisions WHERE analysis_run_id<>'%s'" q) = 0
+        && expected "source_digest" = digest_lines t
+             (Printf.sprintf
+                "SELECT hex(file_path)||':'||content_digest||':'||file_mode FROM decision_analysis_files \
+                 WHERE run_id='%s' ORDER BY file_path" q)
+        && (match repo with
+           | None -> false
+           | Some repo ->
+               let root = Unix.realpath repo in
+               let prefix = if root = "/" then "/" else root ^ "/" in
+               rows t ~params_ty:Ty.unit ~shape:Rows.t3' ~to_cells:Rows.c3
+                 (Printf.sprintf
+                    "SELECT file_path,content_digest,file_mode FROM decision_analysis_files \
+                     WHERE run_id='%s' ORDER BY file_path" q) ()
+               |> List.for_all (function
+                    | [ Text path; Text content_digest; Text file_mode ] ->
+                        (try
+                           let candidate = Unix.realpath (Filename.concat root path) in
+                           let contained = candidate = root
+                             || (String.length candidate >= String.length prefix
+                                 && String.sub candidate 0 (String.length prefix) = prefix) in
+                           let st = Unix.stat candidate in
+                           let mode = Printf.sprintf "%03o" (st.Unix.st_perm land 0o777) in
+                           contained && st.Unix.st_kind = Unix.S_REG && mode = file_mode
+                           && "md5:" ^ Digest.to_hex (Digest.file candidate) = content_digest
+                         with _ -> false)
+                    | _ -> false))
+        && expected "index_digest" = index_digest
+        && expected "result_digest" = digest_lines t
+             (Printf.sprintf
+                "SELECT hex(file_path)||':'||line||':'||COALESCE(col,'')||':'||hex(form)||':'||arity||':'||\
+                 hex(verdict)||':'||hex(decided_by)||':'||hex(COALESCE(evidence,''))||':'||hex(COALESCE(snippet,'')) \
+                 FROM decisions WHERE analysis_run_id='%s' \
+                 ORDER BY file_path,line,col,form,verdict,evidence,snippet" q)
+      else if prefix = "effect" then
+        has_table t "effect_analysis_functions" && has_col t "function_effects" "analysis_run_id"
+        && count t (Printf.sprintf "SELECT count(*) FROM effect_analysis_functions WHERE run_id='%s'" q)
+           = int_of_string (Option.get (meta t (key "universe")))
+        && count t (Printf.sprintf "SELECT count(*) FROM function_effects WHERE analysis_run_id<>'%s'" q) = 0
+        && expected "index_digest" = index_digest
+        && expected "index_digest" = digest_lines t
+             (Printf.sprintf
+                "SELECT hex(module_path)||':'||hex(function_name)||':'||function_id \
+                 FROM effect_analysis_functions WHERE run_id='%s' \
+                 ORDER BY module_path,function_name,function_id" q)
+        && expected "result_digest" = digest_lines t
+             (Printf.sprintf
+                "SELECT hex(function_name)||':'||hex(COALESCE(file_path,''))||':'||hex(value_kind)||':'||\
+                 hex(COALESCE(target,''))||':'||hex(soundness)||':'||hex(COALESCE(producer,''))||':'||is_direct \
+                 FROM function_effects WHERE analysis_run_id='%s' \
+                 ORDER BY function_name,file_path,value_kind,target,producer,is_direct" q)
+        && expected "source_digest" = expected "result_digest"
+      else false
+    with _ -> false
+
+let effect_cone_complete t names =
+  if not (analysis_complete t "effect") || not (has_table t "effect_analysis_functions") then false
+  else
+    let names = List.sort_uniq String.compare names in
+    let json = Yojson.Safe.to_string (`List (List.map (fun n -> `String n) names)) in
+    count1 t
+      "SELECT count(DISTINCT function_name) FROM effect_analysis_functions \
+       WHERE run_id=(SELECT value FROM comment_db_meta WHERE key='effect_run_id') AND function_name IN \
+       (SELECT value FROM json_each(?))"
+      json
+    = List.length names
+
 (** Present {b and non-empty}. Presence proves nothing: [arch-load] creates [decisions]
     unconditionally, so table-existence would let "the producer computed nothing" read as "there
     is nothing to report" — the same false-confidence shape that made [v_pure_functions] certify

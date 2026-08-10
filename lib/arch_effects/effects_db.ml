@@ -95,7 +95,9 @@ let lookup_fn_id db name =
     ignore (Sqlite3.finalize st);
     result
 
-let write_effects ~db_path records =
+let write_effects ?(analysis_run_id = "") ?(replace_snapshot = false)
+    ?(before_commit = fun _ ~n_inserted:_ ~n_skipped:_ -> ())
+    ~db_path records =
   if not (Sys.file_exists db_path) then
     Error (Printf.sprintf "database not found: %s" db_path)
   else
@@ -114,6 +116,7 @@ let write_effects ~db_path records =
         is_direct BOOLEAN NOT NULL DEFAULT 1,\
         soundness TEXT NOT NULL DEFAULT 'candidate',\
         producer TEXT,\
+        analysis_run_id TEXT NOT NULL DEFAULT '',\
         created_at TEXT DEFAULT CURRENT_TIMESTAMP)";
       "CREATE INDEX IF NOT EXISTS idx_fn_effects_fname ON function_effects(function_name)";
       "CREATE INDEX IF NOT EXISTS idx_fn_effects_kind  ON function_effects(value_kind)";
@@ -124,15 +127,18 @@ let write_effects ~db_path records =
                             COALESCE(target,''), COALESCE(producer,''), is_direct)";
     ] in
     List.iter (fun s -> try exec_exn db s with Failure _ -> ()) guard_stmts;
+    (try exec_exn db "ALTER TABLE function_effects ADD COLUMN analysis_run_id TEXT NOT NULL DEFAULT ''"
+     with Failure _ -> ());
     let st = Sqlite3.prepare db
       "INSERT OR IGNORE INTO function_effects\
         (function_id, function_name, file_path, value_kind, target,\
-         is_direct, soundness, producer)\
-       VALUES (?,?,?,?,?,1,?,?)" in
+         is_direct, soundness, producer, analysis_run_id)\
+       VALUES (?,?,?,?,?,1,?,?,?)" in
     let n_inserted = ref 0 in
     let n_skipped  = ref 0 in
     (try
       exec_exn db "BEGIN";
+      if replace_snapshot then exec_exn db "DELETE FROM function_effects";
       List.iter (fun er ->
         try
           let fn_id = lookup_fn_id db er.er_function_name in
@@ -145,6 +151,7 @@ let write_effects ~db_path records =
           bind_opt  st 5 er.er_target;
           bind_text st 6 (soundness_to_string er.er_soundness);
           bind_text st 7 er.er_producer;
+          bind_text st 8 analysis_run_id;
           (match Sqlite3.step st with
            (* INSERT OR IGNORE returns DONE even on conflict; changes()=0 means
               the row already existed (idempotent re-load), so count it skipped. *)
@@ -154,12 +161,13 @@ let write_effects ~db_path records =
           ignore (Sqlite3.reset st)
         with Failure _ -> incr n_skipped
       ) records;
+      before_commit db ~n_inserted:!n_inserted ~n_skipped:!n_skipped;
       exec_exn db "COMMIT";
       ignore (Sqlite3.finalize st);
       ignore (Sqlite3.db_close db);
       Ok (!n_inserted, !n_skipped)
-    with Failure msg ->
+    with exn ->
       (try exec_exn db "ROLLBACK" with _ -> ());
       ignore (Sqlite3.finalize st);
       ignore (Sqlite3.db_close db);
-      Error msg)
+      Error (Printexc.to_string exn))

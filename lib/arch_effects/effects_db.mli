@@ -13,9 +13,14 @@ val migrate : db_path:string -> migration_sql_path:string -> (unit, string) resu
 
 (** [write_effects ~db_path effects] inserts the given [effect_record] list into
     [function_effects] (direct rows, [is_direct = 1]).  Resolves [function_id]
-    by joining on [functions.name] when available.
+    by joining on [functions.name] when available. [before_commit], when
+    supplied, runs inside the same transaction after all inserts and can bind a
+    completion record atomically to them.
     Returns [(n_inserted, n_skipped)] or raises [Failure] on a fatal DB error. *)
 val write_effects
-  :  db_path:string
+  :  ?analysis_run_id:string
+  -> ?replace_snapshot:bool
+  -> ?before_commit:(Sqlite3.db -> n_inserted:int -> n_skipped:int -> unit)
+  -> db_path:string
   -> Extractor_intf.effect_record list
   -> (int * int, string) result

@@ -86,7 +86,7 @@ let test_single_occurrence_is_identical () =
       check string "body" "let f x = x + 1" occ.body
   | _ -> fail "expected a single-occurrence Identical result"
 
-let test_identical_ignores_whitespace () =
+let test_whitespace_is_preserved () =
   let path = create_db () in
   let db = Sqlite3.db_open path in
   let src_a = write_source [ "  let f x ="; "    x + 1  " ] in
@@ -95,9 +95,27 @@ let test_identical_ignores_whitespace () =
   insert_function db ~module_id:ma ~name:"dup" ~line_start:1 ~line_end:2 ;
   insert_function db ~module_id:mb ~name:"dup" ~line_start:1 ~line_end:2 ;
   match C.compare_bodies db ~project_root:"" "dup" with
-  | C.Identical occs -> check int "two occurrences, one digest" 2 (List.length occs)
-  | C.Not_found -> fail "expected Identical, got Not_found"
-  | C.Differs _ -> fail "whitespace-only difference must still be Identical"
+  | C.Differs groups -> check int "two exact bodies" 2 (List.length groups)
+  | C.Not_found -> fail "expected Differs, got Not_found"
+  | C.Identical _ -> fail "language-independent whitespace folding is not a proof"
+
+let test_digest_collision_is_not_identity () =
+  let path = create_db () in
+  let db = Sqlite3.db_open path in
+  let src_a = write_source [ "let g x = x + 1" ] in
+  let src_b = write_source [ "let g x = x - 1" ] in
+  let ma = insert_module db src_a and mb = insert_module db src_b in
+  insert_function db ~module_id:ma ~name:"g" ~line_start:1 ~line_end:1 ;
+  insert_function db ~module_id:mb ~name:"g" ~line_start:1 ~line_end:1 ;
+  match
+    C.compare_bodies_with_digest
+      ~digest_of_body:(fun _ -> "forced-collision")
+      db
+      ~project_root:""
+      "g"
+  with
+  | C.Differs groups -> check int "bytes split collision" 2 (List.length groups)
+  | _ -> fail "equal digests over unequal canonical bytes must differ"
 
 let test_differing_bodies () =
   let path = create_db () in
@@ -136,7 +154,8 @@ let () =
     [ ( "compare_bodies",
         [ test_case "not_found" `Quick test_not_found;
           test_case "single_occurrence_is_identical" `Quick test_single_occurrence_is_identical;
-          test_case "identical_ignores_whitespace" `Quick test_identical_ignores_whitespace;
+          test_case "whitespace_is_preserved" `Quick test_whitespace_is_preserved;
+          test_case "digest_collision_is_not_identity" `Quick test_digest_collision_is_not_identity;
           test_case "differing_bodies" `Quick test_differing_bodies;
           test_case "empty_bodies_are_identical_but_not_evidence" `Quick
             test_empty_bodies_are_identical_but_not_evidence

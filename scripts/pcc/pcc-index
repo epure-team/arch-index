@@ -6,10 +6,15 @@
 # Usage: pcc-index --db <path>
 #
 # Prints exactly one JSON object on stdout: {"computed":bool,"functions":int,"contract_ok":bool}
-# Exit 0 on success. Exit 2 (no JSON printed) on an infra failure — the target repo's dune
-# build is broken, arch-index's own tools are not on PATH, etc. Never guesses contract_ok:
+# Exit 0 on success. After capture, infrastructure failures emit status:error/exit 2;
+# mutation takes precedence as status:refused/exit 3. Pre-capture inability may have no JSON.
+# Never guesses contract_ok:
 # it reads the same Arch_db.contract_ok verdict arch-impact/arch-rules compute (§4.1).
 set -euo pipefail
+
+script_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+manifest_tool="$script_dir/pcc-target-manifest"
+evidence_tool="$script_dir/pcc-evidence"
 
 db=""
 while [ $# -gt 0 ]; do
@@ -49,6 +54,51 @@ dl_bin="$arch_root/_build/default/poc/decision-lint/bin/decision_lint.exe"
 
 command -v sqlite3 >/dev/null 2>&1 || { echo "pcc-index: sqlite3 required" >&2; exit 2; }
 command -v python3 >/dev/null 2>&1 || { echo "pcc-index: python3 required" >&2; exit 2; }
+[ -x "$manifest_tool" ] || { echo "pcc-index: target manifest tool unavailable" >&2; exit 2; }
+
+before_file="$(mktemp)"; after_file="$(mktemp)"; capture_file="$(mktemp)"
+target_artifact=""; inputs_artifact=""; dune_build_log=""; cg_log=""; dl_log=""
+trap 'rm -f "$dune_build_log" "$cg_log" "$dl_log" "$before_file" "$after_file" "$capture_file" "$target_artifact" "$inputs_artifact"' EXIT
+set +e; "$evidence_tool" capture >"$capture_file"; capture_rc=$?; set -e
+[ "$capture_rc" -eq 2 ] && exit 2
+target_artifact="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["target_artifact"])' "$capture_file")"
+inputs_artifact="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["expected_inputs_artifact"])' "$capture_file")"
+if [ "$capture_rc" -eq 3 ]; then "$evidence_tool" refusal index "$capture_file" || true; exit 3; fi
+baseline_ref="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["actual"]["baseline_oid"].split(":",1)[1])' "$capture_file")"
+python3 - "$capture_file" "$before_file" <<'PY'
+import json,sys
+c=json.load(open(sys.argv[1])); json.dump(json.load(open(c["target_artifact"])),open(sys.argv[2],"w"),sort_keys=True,separators=(",",":"))
+PY
+
+finalize_failure() {
+  reason="$1"
+  if ! "$manifest_tool" >"$after_file"; then
+    echo "pcc-index: could not snapshot target after failure: $reason" >&2
+    exit 2
+  fi
+  set +e
+  python3 - "$before_file" "$after_file" "$capture_file" "$reason" <<'PY'
+import json,sys
+b=json.load(open(sys.argv[1])); a=json.load(open(sys.argv[2])); c=json.load(open(sys.argv[3]))
+mutated=b["target_digest"] != a["target_digest"]
+status="refused" if mutated else "error"
+d={"schema":"arch-index.pcc.index.v1","status":status,"ok":False,
+   "baseline_oid":b["manifest"]["base_oid"],"head_oid":a["manifest"]["base_oid"],
+   "head_unchanged":b["manifest"]["base_oid"]==a["manifest"]["base_oid"],
+   "target_digest":a["target_digest"],"target_digest_before":b["target_digest"],
+   "target_digest_after":a["target_digest"],"policy_digest":c["actual"]["policy_digest"],
+   "tool_bundle_digest":c["actual"]["tool_bundle_digest"],
+   "expected_inputs_digest":c["actual"]["expected_inputs_digest"],
+   "indexed_inputs_digest":"sha256:"+"0"*64,"files_unmatched":[],
+   "files_unmatched_count":0,"computed":False,"functions":0,"contract_ok":False,
+   "failure_stage":sys.argv[4],"mutation_detected":mutated,"caller_sandbox_required":True}
+print(json.dumps(d,sort_keys=True,separators=(",",":")))
+sys.exit(3 if mutated else 2)
+PY
+  rc=$?
+  set -e
+  exit "$rc"
+}
 
 mkdir -p "$(dirname "$db")"
 
@@ -58,13 +108,12 @@ mkdir -p "$(dirname "$db")"
 dune_build_log="$(mktemp)"
 cg_log="$(mktemp)"
 dl_log="$(mktemp)"
-trap 'rm -f "$dune_build_log" "$cg_log" "$dl_log"' EXIT
 
 # 1. Build the target repo so .cmt files exist for the CMT-path producer.
 if ! dune build >"$dune_build_log" 2>&1; then
   cat "$dune_build_log" >&2
   echo "pcc-index: 'dune build' failed in $(pwd)" >&2
-  exit 2
+  finalize_failure dune_build
 fi
 
 # 2. Produce the sound, ⊤-marked call graph directly into the DB (same pipeline as
@@ -73,7 +122,7 @@ if ! "$cg_bin" --build-dir=_build/default --db-path="$db" --schema-path="$schema
      >"$cg_log" 2>&1; then
   cat "$cg_log" >&2
   echo "pcc-index: arch_callgraph_ocaml failed to build the index" >&2
-  exit 2
+  finalize_failure callgraph
 fi
 
 # 3. Populate decision analysis (dead-logic findings) so arch-impact's --fail-on-new-findings
@@ -83,27 +132,59 @@ fi
 if ! "$dl_bin" . --db "$db" >"$dl_log" 2>&1; then
   cat "$dl_log" >&2
   echo "pcc-index: decision-lint failed" >&2
-  exit 2
+  finalize_failure decision_lint
 fi
 
-[ -f "$db" ] || { echo "pcc-index: no database was produced at $db" >&2; exit 2; }
+[ -f "$db" ] || { echo "pcc-index: no database was produced at $db" >&2; finalize_failure database_missing; }
 
 functions="$(sqlite3 "$db" 'SELECT count(*) FROM functions;')"
 case "$functions" in
-  ''|*[!0-9]*) echo "pcc-index: could not read a function count from $db" >&2; exit 2 ;;
+  ''|*[!0-9]*) echo "pcc-index: could not read a function count from $db" >&2; finalize_failure function_count ;;
 esac
 
 # contract_ok: never recomputed here — read the SAME verdict arch-impact/arch-rules compute
 # (Arch_db.contract_ok), via a --fail-on-new-findings-free call so this step's own exit code
 # never depends on the diff/findings, only on whether the index itself could be built.
-impact_json="$("$impact_path" "$db" --diff HEAD --repo . --format json)" || {
+impact_json="$("$impact_path" "$db" --diff "$baseline_ref" --repo . --format json)" || {
   echo "pcc-index: arch-impact could not read back the index it just built" >&2
-  exit 2
+  finalize_failure impact_readback
 }
 contract_ok="$(printf '%s' "$impact_json" | python3 -c '
 import json, sys
 d = json.load(sys.stdin)
 print("true" if d["contract_ok"] else "false")
-')" || { echo "pcc-index: could not parse arch-impact's JSON output" >&2; exit 2; }
+')" || { echo "pcc-index: could not parse arch-impact's JSON output" >&2; finalize_failure impact_json; }
 
-printf '{"computed": true, "functions": %d, "contract_ok": %s}\n' "$functions" "$contract_ok"
+"$manifest_tool" >"$after_file" || exit 2
+PCC_FUNCTIONS="$functions" PCC_CONTRACT_OK="$contract_ok" PCC_DB="$db" \
+PCC_POLICY_DIGEST="${PCC_POLICY_DIGEST:-}" PCC_TOOL_BUNDLE_DIGEST="${PCC_TOOL_BUNDLE_DIGEST:-}" \
+PCC_EXPECTED_INPUTS_DIGEST="${PCC_EXPECTED_INPUTS_DIGEST:-}" \
+python3 - "$before_file" "$after_file" "$capture_file" <<'PY'
+import hashlib,json,os,sys,sqlite3
+b=json.load(open(sys.argv[1])); a=json.load(open(sys.argv[2]))
+capture=json.load(open(sys.argv[3])); shared=capture["actual"]
+mutated=b["target_digest"] != a["target_digest"]
+complete=os.environ["PCC_CONTRACT_OK"]=="true"
+status="refused" if mutated or not complete or capture["request_mismatches"] else "pass"
+tool=shared["tool_bundle_digest"]; policy=shared["policy_digest"]; inputs=shared["expected_inputs_digest"]
+expected=set(json.load(open(capture["expected_inputs_artifact"])))
+db=sqlite3.connect(os.environ["PCC_DB"]); indexed={os.fsencode(r[0]).hex() for r in db.execute("SELECT path FROM modules")}; db.close()
+def covered(raw_hex):
+    raw=bytes.fromhex(raw_hex)
+    return raw_hex in indexed or (raw.endswith(b".mli") and (raw[:-1]).hex() in indexed)
+unmatched=sorted(p for p in expected if not covered(p))
+matched=sorted(p for p in expected if covered(p))
+indexed_digest="sha256:"+hashlib.sha256(b"arch-index.pcc.indexed-inputs.v1\0"+json.dumps(matched,separators=(",",":")).encode()).hexdigest()
+if unmatched: status="refused"
+d={"schema":"arch-index.pcc.index.v1","status":status,"ok":status=="pass",
+"baseline_oid":b["manifest"]["base_oid"],"head_oid":a["manifest"]["base_oid"],
+"head_unchanged":b["manifest"]["base_oid"]==a["manifest"]["base_oid"],
+"target_digest":a["target_digest"],"target_digest_before":b["target_digest"],
+"target_digest_after":a["target_digest"],"policy_digest":policy,
+"tool_bundle_digest":tool,"expected_inputs_digest":inputs,
+"indexed_inputs_digest":indexed_digest,"files_unmatched":unmatched,"files_unmatched_count":len(unmatched),
+"computed":True,"functions":int(os.environ["PCC_FUNCTIONS"]),"contract_ok":complete,
+"caller_sandbox_required":True}
+print(json.dumps(d,sort_keys=True,separators=(",",":")))
+sys.exit(3 if status=="refused" else 0)
+PY

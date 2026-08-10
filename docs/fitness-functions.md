@@ -144,3 +144,13 @@ index does not abort the whole run — it degrades the *individual rules that ne
 policies decide whether that counts as failing. A workflow gate consuming `arch-rules` output
 should treat `failing == 0` as the pass condition and never expect a third verdict value from this
 tool.
+# Effect Completeness
+
+An effect rule can pass only when `effect_contract=v1` is complete and every
+function in its evaluated cone is listed in `effect_analysis_functions`.
+Rows for another cone cannot authorize a pass. Missing or partial coverage is
+`NOT_COMPUTED` and follows `--on-not-computed`; an escaping sound cone remains
+`UNKNOWN`. `--allow-skip` loads partial data without a completion stamp.
+
+All policy options are singleton and strict. Typos, duplicates, missing values,
+invalid values, and extra positional arguments exit 2.

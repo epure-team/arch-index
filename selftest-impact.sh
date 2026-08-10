@@ -196,6 +196,28 @@ FDB="$(mktemp --suffix=.db)"; rm -f "$FDB"
 {"type":"decision","file_path":"src/app.src","line":6,"col":3,"form":"if","arity":2,"verdict":"DEAD_SUBTERM","decided_by":"enumeration","evidence":"e","snippet":"a && a"}
 {"type":"decision","file_path":"src/app.src","line":10,"col":3,"form":"if","arity":2,"verdict":"DEAD_SUBTERM","decided_by":"enumeration","evidence":"e","snippet":"b && b"}
 NDJSON
+DECISION_FIXTURE_REPO="$REPO" python3 - "$FDB" <<'PY'
+import hashlib,sqlite3,sys
+db=sqlite3.connect(sys.argv[1]); run="fixture-run"
+db.execute("ALTER TABLE decisions ADD COLUMN analysis_run_id TEXT NOT NULL DEFAULT ''")
+db.execute("UPDATE decisions SET analysis_run_id=?",(run,))
+db.execute("CREATE TABLE decision_analysis_files(run_id TEXT,file_path TEXT,content_digest TEXT,file_mode TEXT,PRIMARY KEY(run_id,file_path))")
+repo=__import__('os').environ["DECISION_FIXTURE_REPO"]
+content="md5:"+hashlib.md5(open(repo+"/src/app.src","rb").read()).hexdigest()
+mode=f"{__import__('os').stat(repo+'/src/app.src').st_mode & 0o777:03o}"
+db.execute("INSERT INTO decision_analysis_files VALUES(?,?,?,?)",(run,"src/app.src",content,mode))
+def digest(sql,args=()):
+    rows=[r[0] for r in db.execute(sql,args)]
+    return "md5:"+hashlib.md5("\n".join(rows).encode()).hexdigest()
+source=digest("SELECT hex(file_path)||':'||content_digest||':'||file_mode FROM decision_analysis_files WHERE run_id=? ORDER BY file_path",(run,))
+index=digest("SELECT hex(file_path)||':'||hex(name) FROM functions ORDER BY file_path,name")
+result=digest("""SELECT hex(file_path)||':'||line||':'||COALESCE(col,'')||':'||hex(form)||':'||arity||':'||hex(verdict)||':'||hex(decided_by)||':'||hex(COALESCE(evidence,''))||':'||hex(COALESCE(snippet,'')) FROM decisions WHERE analysis_run_id=? ORDER BY file_path,line,col,form,verdict,evidence,snippet""",(run,))
+meta={"decision_contract":"v1","decision_outcome":"complete","decision_failures":"0",
+      "decision_universe":"1","decision_run_id":run,"decision_producer_version":"fixture-v1",
+      "decision_source_digest":source,"decision_index_digest":index,"decision_result_digest":result}
+db.executemany("INSERT OR REPLACE INTO comment_db_meta(key,value) VALUES(?,?)",meta.items())
+db.commit(); db.close()
+PY
 "$IMPACT" "$FDB" --diff HEAD~1..HEAD --repo "$REPO" --fail-on-new-findings >/dev/null 2>&1
 [ $? -eq 1 ] || note "--fail-on-new-findings must exit 1: the diff touches line 6, which carries a finding"
 FOUT="$("$IMPACT" "$FDB" --diff HEAD~1..HEAD --repo "$REPO" --format json 2>/dev/null)"
@@ -203,6 +225,29 @@ printf '%s' "$FOUT" | python3 -c '
 import json,sys; r=json.load(sys.stdin)["findings"]["decisions"]
 assert [d["line"] for d in r]==[6], r      # line 10 is NOT in the diff and must not be reported
 ' 2>/dev/null || note "only the finding on a TOUCHED line may be reported (line 10 was untouched)"
+
+# Completion metadata is verified against source-universe, current index, run
+# identity, and result rows rather than accepted as arbitrary non-empty text.
+assert_decision_rejected() {
+  local out
+  out="$($IMPACT "$FDB" --diff HEAD~1..HEAD --repo "$REPO" --format json 2>/dev/null)"
+  printf '%s' "$out" | python3 -c 'import json,sys; assert json.load(sys.stdin)["findings"]["computed"] is False' \
+    || note "$1 must invalidate decision completion"
+}
+OLD_SOURCE="$(sqlite3 "$FDB" "SELECT value FROM comment_db_meta WHERE key='decision_source_digest'")"
+sqlite3 "$FDB" "UPDATE comment_db_meta SET value='md5:tampered' WHERE key='decision_source_digest'"
+assert_decision_rejected "arbitrary decision metadata"
+sqlite3 "$FDB" "UPDATE comment_db_meta SET value='$OLD_SOURCE' WHERE key='decision_source_digest'"
+sqlite3 "$FDB" "UPDATE decisions SET evidence='tampered-result' WHERE line=6"
+assert_decision_rejected "tampered decision result rows"
+sqlite3 "$FDB" "UPDATE decisions SET evidence='e' WHERE line=6"
+sqlite3 "$FDB" "UPDATE comment_db_meta SET value='replayed-old-run' WHERE key='decision_run_id'"
+assert_decision_rejected "replayed decision run identity"
+sqlite3 "$FDB" "UPDATE comment_db_meta SET value='fixture-run' WHERE key='decision_run_id'"
+OLD_FILE_CONTENT="$(sqlite3 "$FDB" 'SELECT content_digest FROM decision_analysis_files')"
+sqlite3 "$FDB" "UPDATE decision_analysis_files SET content_digest='md5:changed-input'"
+assert_decision_rejected "tampered decision source universe"
+sqlite3 "$FDB" "UPDATE decision_analysis_files SET content_digest='$OLD_FILE_CONTENT'"
 
 # exit code 1 <-> JSON verdict "fail": a consumer with only stdout must reach the same
 # conclusion as one with only the exit code
@@ -218,6 +263,18 @@ assert r["findings"]["computed"] is True, r["findings"]
 # an untouched-line-only diff must pass the gate
 sed -i '2s/.*/  call helper2/' "$REPO/src/app.src"
 git -C "$REPO" commit -qam "change entry"
+# Model a completed producer refresh over the new source bytes while retaining
+# the same two synthetic result rows used by this touched-line fixture.
+python3 - "$FDB" "$REPO/src/app.src" <<'PY'
+import hashlib,sqlite3,sys
+db=sqlite3.connect(sys.argv[1])
+content="md5:"+hashlib.md5(open(sys.argv[2],"rb").read()).hexdigest()
+db.execute("UPDATE decision_analysis_files SET content_digest=?",(content,))
+row=db.execute("SELECT hex(file_path)||':'||content_digest||':'||file_mode FROM decision_analysis_files ORDER BY file_path").fetchone()[0]
+source="md5:"+hashlib.md5(row.encode()).hexdigest()
+db.execute("UPDATE comment_db_meta SET value=? WHERE key='decision_source_digest'",(source,))
+db.commit()
+PY
 "$IMPACT" "$FDB" --diff HEAD~1..HEAD --repo "$REPO" --fail-on-new-findings >/dev/null 2>&1
 [ $? -eq 0 ] || note "--fail-on-new-findings must PASS when the diff touches no finding line"
 PFOUT="$("$IMPACT" "$FDB" --diff HEAD~1..HEAD --repo "$REPO" --format json --fail-on-new-findings 2>/dev/null)"
@@ -288,6 +345,40 @@ for ghost in ("/dev/null", "header comment"):
         ("a diff CONTENT line became a file: " + ghost, r)
 ' 2>/dev/null || note "diff parsing: content lines must not be read as headers, and a pure-deletion hunk must still mark its site"
 rm -rf "$DR"; rm -f "$DDB"
+
+# A zero-finding receipt is still bound to the exact live source bytes and
+# executable mode. Changing only a body while preserving symbol identity must
+# make findings unavailable until decision-lint runs again; reindex itself also
+# invalidates the old completion metadata.
+FRESH="$(mktemp -d)"; mkdir -p "$FRESH/src"
+printf '(lang dune 3.0)\n' >"$FRESH/dune-project"
+printf '(library (name fresh) (modules a))\n' >"$FRESH/src/dune"
+printf 'let f x = x + 1\n' >"$FRESH/src/a.ml"
+(cd "$FRESH" && git init -q && git config user.email t@t && git config user.name t && git add -A && git commit -qm init && dune build >/dev/null)
+FRESH_DB="$FRESH/index.db"
+CG="$HERE/_build/default/bin/arch_callgraph_ocaml/arch_callgraph_ocaml.exe"
+DL="$HERE/_build/default/poc/decision-lint/bin/decision_lint.exe"
+"$CG" --build-dir="$FRESH/_build/default" --db-path="$FRESH_DB" --schema-path="$HERE/architecture-schema.sql" >/dev/null
+(cd "$FRESH" && "$DL" . --db "$FRESH_DB" >/dev/null 2>&1)
+[ "$(sqlite3 "$FRESH_DB" 'SELECT count(*) FROM decisions')" -eq 0 ] \
+  || note "freshness fixture must begin with a valid zero-finding decision run"
+LIVE="$($IMPACT "$FRESH_DB" --files src/a.ml --repo "$FRESH" --format json 2>/dev/null)"
+printf '%s' "$LIVE" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["decision_analysis_available"] and d["findings"]["computed"]' \
+  || note "unchanged zero-finding source must have completed decision evidence"
+chmod 600 "$FRESH/src/a.ml"
+MODE_STALE="$($IMPACT "$FRESH_DB" --files src/a.ml --repo "$FRESH" --format json 2>/dev/null)"
+printf '%s' "$MODE_STALE" | python3 -c 'import json,sys; assert not json.load(sys.stdin)["decision_analysis_available"]' \
+  || note "source mode modification must invalidate decision evidence"
+chmod 644 "$FRESH/src/a.ml"
+printf 'let f x = if x > 0 then x + 1 else x - 1\n' >"$FRESH/src/a.ml"
+STALE="$($IMPACT "$FRESH_DB" --files src/a.ml --repo "$FRESH" --format json 2>/dev/null)"
+printf '%s' "$STALE" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert not d["decision_analysis_available"] and not d["findings"]["computed"]' \
+  || note "body-only source modification must invalidate zero-finding decision evidence"
+(cd "$FRESH" && dune build >/dev/null)
+"$CG" --build-dir="$FRESH/_build/default" --db-path="$FRESH_DB" --schema-path="$HERE/architecture-schema.sql" >/dev/null
+[ "$(sqlite3 "$FRESH_DB" "SELECT count(*) FROM comment_db_meta WHERE key LIKE 'decision_%' OR key LIKE 'effect_%'")" -eq 0 ] \
+  || note "reindex must invalidate prior decision/effect completion metadata"
+rm -rf "$FRESH"
 
 rm -f "$DB" "$NOSPAN" "$HALF" "$FDB"
 if [ "$fails" -eq 0 ]; then echo "selftest-impact: PASS"; else echo "selftest-impact: $fails FAILURE(S)"; exit 1; fi

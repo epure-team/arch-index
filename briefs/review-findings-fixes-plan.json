@@ -1,0 +1,16 @@
+{
+  "task": "review-findings-fixes",
+  "mode": "full",
+  "schema_version": "1.0",
+  "steps": [
+    {"id":"step-1","skill":"roster-implement","inputs":["briefs/review-findings-fixes-implementer.md"],"outputs":["briefs/review-findings-fixes-impl.md"],"hook":false},
+    {"id":"step-2","skill":"roster-review","inputs":["briefs/review-findings-fixes-impl.md"],"outputs":["briefs/review-findings-fixes-review.json"],"hook":false},
+    {"id":"step-3","skill":"roster-qa","inputs":["briefs/review-findings-fixes-qa-scope.md"],"outputs":["briefs/review-findings-fixes-qa.md"],"hook":false},
+    {"id":"step-4","skill":"roster-ship","inputs":["briefs/review-findings-fixes-review.json","briefs/review-findings-fixes-qa.md"],"outputs":[],"hook":false}
+  ],
+  "quality_gates": {
+    "build": "opam exec -- dune build",
+    "test": "opam exec -- dune test",
+    "lint": ""
+  }
+}

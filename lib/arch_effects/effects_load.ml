@@ -53,7 +53,9 @@ let parse_effect_line line_num line =
 
 (* ── main entry ─────────────────────────────────────────────────────────── *)
 
-let load ?(allow_skip = false) ~db_path ic =
+let load ?(allow_skip = false)
+    ?(analysis_run_id = "") ?(replace_snapshot = false)
+    ?(before_commit = fun _ ~n_inserted:_ ~n_skipped:_ -> ()) ~db_path ic =
   let records = ref [] in
   (* Parse failures are malformed input, distinct from DB-level skips (which are
      idempotent-reload no-ops). By default a malformed record is a hard error:
@@ -80,7 +82,7 @@ let load ?(allow_skip = false) ~db_path ic =
        pass --allow-skip to import the parseable records anyway"
       !n_parse_skipped)
   else
-    match Effects_db.write_effects ~db_path recs with
+    match Effects_db.write_effects ~analysis_run_id ~replace_snapshot ~before_commit ~db_path recs with
     | Ok (n_inserted, n_db_skipped) ->
       Ok { n_effects = n_inserted; n_skipped = !n_parse_skipped + n_db_skipped }
     | Error msg -> Error msg

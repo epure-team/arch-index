@@ -13,6 +13,7 @@
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
 LOAD="$HERE/arch-load"; COV="$HERE/arch-coverage"; MUT="$HERE/arch-mutants"
+SNAPLOAD="$HERE/arch-coverage-load"
 fails=0; note() { echo "FAIL: $*" >&2; fails=$((fails+1)); }
 command -v python3 >/dev/null 2>&1 || { echo "selftest-coverage: python3 required" >&2; exit 2; }
 
@@ -194,6 +195,31 @@ sqlite3 "$DB" "SELECT covered_lines||'/'||total_lines FROM coverage_by_name WHER
 "$COV" "$DB" "$LC" --write >/dev/null 2>&1
 n2=$(sqlite3 "$DB" "SELECT count(*) FROM coverage_by_name;" 2>/dev/null)
 [ "$n2" = "$n" ] || note "--write must replace, not accumulate ($n then $n2 rows)"
+
+# Main-schema writers share append-only history. Loader -> --write -> loader must preserve every
+# previous byte-queryable snapshot; only flat coverage_by_name remains replaceable.
+HIST="$(mktemp --suffix=.db)"; rm -f "$HIST"
+sqlite3 "$HIST" < "$HERE/architecture-schema.sql"
+sqlite3 "$HIST" <<'SQL'
+INSERT INTO modules(id,path) VALUES(1,'lib/api.ml'),(2,'lib/hot.ml');
+INSERT INTO functions(id,module_id,name,line_start,line_end,exposed)
+ VALUES(1,1,'api',1,8,1),(2,2,'hot',10,20,0);
+INSERT INTO calls(caller_id,callee_id,callee_name,call_site,kind)
+ VALUES(1,2,'hot','lib/api.ml:2','MUST');
+INSERT INTO comment_db_meta(key,value) VALUES('callgraph_contract','v1');
+SQL
+printf '%s\n' '{"function":"hot","covered_lines":1,"total_lines":2}' | "$SNAPLOAD" "$HIST" >/dev/null 2>&1
+OLD="$(sqlite3 "$HIST" "SELECT covered_lines||'/'||total_lines||'@'||recorded_at FROM coverage;")"
+"$COV" "$HIST" "$LC" --write >/dev/null 2>&1
+[ "$(sqlite3 "$HIST" 'SELECT count(*) FROM coverage WHERE function_id=2;')" -eq 2 ] \
+  || note "main-schema --write must append without deleting loader history"
+sqlite3 "$HIST" "SELECT covered_lines||'/'||total_lines||'@'||recorded_at FROM coverage ORDER BY id LIMIT 1;" \
+  | grep -Fxq "$OLD" || note "the original loader snapshot must remain byte-queryable after --write"
+sleep 1
+printf '%s\n' '{"function":"hot","covered_lines":2,"total_lines":2}' | "$SNAPLOAD" "$HIST" >/dev/null 2>&1
+[ "$(sqlite3 "$HIST" 'SELECT count(*) FROM coverage WHERE function_id=2;')" -eq 3 ] \
+  || note "loader after --write must append a third coherent snapshot"
+rm -f "$HIST"
 
 # --- 7. contract_ok is the STRICT check (round-2 review, F6): same malformed-⊤-marked fixture
 # as selftest-contract.sh's "ML" case, selftest-impact.sh's 4d, selftest-rules.sh's — the flag is

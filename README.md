@@ -77,3 +77,10 @@ arch-index makes call-graph reachability answerable as a SQL query:
 - [DB schema reference](docs/schema.md)
 - [Curation workflow: measure → decide → ledger](docs/curation-workflow.md)
 - [Formal soundness spec](SPEC-sound-callgraph.md)
+# Public release contents
+
+Each published platform tarball is inspected after creation for its exact member
+set and executable modes. Release archives contain every public command, including `arch-body-compare`,
+`arch-coverage-load`, and `arch-curate`. `arch-mcp` is intentionally excluded:
+it depends on the private `mcp-kit` package and is validated by the protected
+MCP CI job instead of the public release build.

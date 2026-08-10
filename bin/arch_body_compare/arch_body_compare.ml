@@ -1,4 +1,4 @@
-(** arch-body-compare — proof of syntactic duplication via body-hash.
+(** arch-body-compare — proof of syntactic duplication via verified canonical bytes.
 
     A2's measures (large-files, god-modules, ...) never claim a verdict — "too big" is a human
     judgement. Body-hash is different in kind: two occurrences whose normalised bodies hash
@@ -20,13 +20,16 @@ Usage:
 
   arch-body-compare <db> duplicates [N] [--repo DIR] [--format text|json]
       Sweep every name defined more than once; report the ones PROVEN identical (normalised
-      body-hash match) as duplicates, sorted by name, top-N (default 25).
+      canonical-byte match after digest candidate grouping) as duplicates, sorted by name,
+      top-N (default 25).
 
   --repo DIR      repository root prepended to indexed paths when reading source (default ".")
   --format FMT    text (default) | json  — duplicates mode only
 
-This is a PROOF (body-hash), not a heuristic: never "roughly similar", always "byte-identical
-after whitespace normalisation". An occurrence whose body could not be read (missing file, or an
+This is a PROOF, not a heuristic: never "roughly similar", always exact canonical bytes. The
+language-independent canonical form preserves whitespace because it may occur inside literals or
+comments. A digest only groups candidates and is followed by byte comparison. An occurrence whose
+body could not be read (missing file, or an
 empty line span) is EXCLUDED from the duplicate verdict and reported separately as unverifiable —
 two unreadable bodies hash the same as each other by construction, and that is not evidence of
 duplication, it is evidence of nothing.|}
@@ -51,7 +54,7 @@ let run_single db ~repo name =
   | Arch_index_compare.Identical occs -> (
       match List.filter (fun (o : Arch_index_compare.occurrence) -> o.body = "") occs with
       | [] ->
-          Printf.printf "DUPLICATE: %d occurrence(s) of %s share an identical body (proof, body-hash)\n"
+          Printf.printf "DUPLICATE: %d occurrence(s) of %s share exact canonical bytes (verified after digest)\n"
             (List.length occs) name ;
           List.iter (fun o -> Printf.printf "  %s\n" (format_occ o)) occs
       | empties ->
@@ -132,7 +135,7 @@ let run_duplicates db ~repo ~limit ~fmt =
              ("truncated", `Bool (List.length duplicates > limit)) ]))
   else (
     Printf.printf
-      "%d name(s) defined more than once; %d proven duplicate (body-hash), %d differ, %d \
+      "%d name(s) defined more than once; %d proven duplicate (verified canonical bytes), %d differ, %d \
        unverifiable (empty/unreadable body)\n"
       (List.length names) (List.length duplicates) !differs (List.length unverifiable) ;
     List.iter

@@ -29,4 +29,8 @@ type load_result = {
     are counted in [n_skipped].  DB-level skips (idempotent-reload duplicates)
     are always tolerated and counted in [n_skipped] regardless. *)
 val load :
-  ?allow_skip:bool -> db_path:string -> in_channel -> (load_result, string) result
+  ?allow_skip:bool ->
+  ?analysis_run_id:string ->
+  ?replace_snapshot:bool ->
+  ?before_commit:(Sqlite3.db -> n_inserted:int -> n_skipped:int -> unit) ->
+  db_path:string -> in_channel -> (load_result, string) result

@@ -1,0 +1,25 @@
+#!/usr/bin/env python3
+"""Verify exact public release members and executable modes in a directory or tar archive."""
+import os,sys,tarfile
+
+EXPECTED = "arch_body_compare arch_callgraph_ocaml arch_coverage arch_coverage_load arch_curate arch_impact arch_index_cli arch_load arch_mutants arch_query arch_rules arch_serve".split()
+if len(sys.argv) != 3:
+    print("usage: check-release-manifest DIST_OR_ARCHIVE SUFFIX",file=sys.stderr); sys.exit(2)
+path,suffix=sys.argv[1:]
+want={f"{name}-{suffix}":0o755 for name in EXPECTED}
+if os.path.isdir(path):
+    got={name:os.stat(os.path.join(path,name)).st_mode & 0o777 for name in os.listdir(path)
+         if os.path.isfile(os.path.join(path,name))}
+else:
+    try:
+        with tarfile.open(path,"r:gz") as tf:
+            members=tf.getmembers()
+            if any(not m.isfile() or "/" in m.name for m in members):
+                raise ValueError("archive contains a directory, non-file, or nested member")
+            got={m.name:m.mode & 0o777 for m in members}
+    except Exception as e:
+        print(f"invalid release archive: {e}",file=sys.stderr); sys.exit(1)
+if got != want:
+    print(f"release manifest mismatch\nwant={want}\ngot={got}",file=sys.stderr); sys.exit(1)
+if any("arch_mcp" in name for name in got):
+    print("private arch_mcp must not be in the public archive",file=sys.stderr); sys.exit(1)

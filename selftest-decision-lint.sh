@@ -197,4 +197,23 @@ else:
     raise AssertionError("no smt census line")
 ' 2>/dev/null || note "with no z3 on PATH the run must report solver=absent"
 
+# DB persistence normalises `./src/x.ml` to the same repository-relative path
+# used by the CMT index and propagates write failures through the process exit.
+CG="$HERE/_build/default/bin/arch_callgraph_ocaml/arch_callgraph_ocaml.exe"
+DBFX="$(mktemp -d)"; mkdir -p "$DBFX/src"
+printf '(lang dune 3.0)\n' >"$DBFX/dune-project"
+printf '(library (name dbfx) (modules x))\n' >"$DBFX/src/dune"
+printf 'let f a = if a && a then 1 else 0\n' >"$DBFX/src/x.ml"
+(cd "$DBFX" && dune build >/dev/null)
+DBFILE="$DBFX/index.db"
+"$CG" --build-dir="$DBFX/_build/default" --db-path="$DBFILE" --schema-path="$HERE/architecture-schema.sql" >/dev/null
+(cd "$DBFX" && "$BIN" . --db "$DBFILE" >/dev/null 2>&1)
+[ $? -eq 0 ] || note "decision-lint --db must persist a dot-root analysis successfully"
+sqlite3 "$DBFILE" "SELECT file_path FROM decisions UNION SELECT file_path FROM decision_analysis_files" | grep -q '^\./' \
+  && note "decision-lint DB paths must be normalized without a leading ./"
+BROKEN_DB="$DBFX/broken.db"; sqlite3 "$BROKEN_DB" 'CREATE TABLE nope(x);'
+(cd "$DBFX" && "$BIN" . --db "$BROKEN_DB" >/dev/null 2>&1)
+[ $? -eq 2 ] || note "decision-lint must exit 2 when --db persistence fails"
+rm -rf "$DBFX"
+
 if [ "$fails" -eq 0 ]; then echo "selftest-decision-lint: PASS"; else echo "selftest-decision-lint: $fails FAILURE(S)"; exit 1; fi

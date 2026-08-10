@@ -119,8 +119,13 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
         Sqlite3.db_open db_path
   in
 
-  (* Backup intents before wiping *)
+  (* One transaction covers preservation, destructive rebuild, remapping and
+     restoration. Closing the connection on any exception rolls it all back. *)
+  exec_exn db "BEGIN IMMEDIATE" ;
+  (* Backup intents and durable curation before wiping *)
   let backup = Arch_index_support.backup_intents db in
+  Arch_index_support.backup_curation db ;
+  Arch_index_support.invalidate_analysis db ;
   Arch_io.printf
     "Backed up %d module intents, %d function intents, %d type intents\n%!"
     (List.length backup.module_intents)
@@ -129,10 +134,10 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
 
   (* Drop views first (they reference the tables), then tables. *)
   List.iter
-    (fun view -> exec_exn db (Printf.sprintf "DROP VIEW IF EXISTS %s" view))
+    (fun view -> exec_exn db (Printf.sprintf "DROP VIEW IF EXISTS main.%s" view))
     Arch_index_support.schema_views_to_drop ;
   List.iter
-    (fun tbl -> exec_exn db (Printf.sprintf "DROP TABLE IF EXISTS %s" tbl))
+    (fun tbl -> exec_exn db (Printf.sprintf "DROP TABLE IF EXISTS main.%s" tbl))
     Arch_index_support.schema_tables_to_drop ;
 
   (* Re-create schema - handle missing file gracefully *)
@@ -213,7 +218,6 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
   in
 
   (* Process all .cmt files inside a transaction *)
-  exec_exn db "BEGIN TRANSACTION" ;
   let n_modules = ref 0 in
   let n_functions = ref 0 in
   let n_types = ref 0 in
@@ -251,13 +255,11 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
           path
           (Printexc.to_string exn))
     cmt_files ;
-  exec_exn db "COMMIT" ;
 
   (* Resolve and insert calls *)
   Arch_io.printf
     "Resolving %d pending calls...\n%!"
     (List.length !all_pending_calls) ;
-  exec_exn db "BEGIN TRANSACTION" ;
   let n_calls = ref 0 in
   let n_resolved = ref 0 in
   let n_dead_sites = ref 0 in
@@ -389,7 +391,6 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
     exec_exn db
       "INSERT OR REPLACE INTO comment_db_meta (key, value) VALUES \
        ('callgraph_contract', 'v1')" ;
-  exec_exn db "COMMIT" ;
   Arch_io.printf
     "Inserted %d calls (%d resolved to known functions)\n%!"
     !n_calls
@@ -399,7 +400,6 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
   Arch_io.printf
     "Resolving %d module dependencies...\n%!"
     (List.length !all_pending_deps) ;
-  exec_exn db "BEGIN TRANSACTION" ;
   let n_deps = ref 0 in
   let n_deps_resolved = ref 0 in
   let mod_path_to_id = Hashtbl.create 128 in
@@ -447,7 +447,6 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
             ~line_number:dep.line_number ;
           incr n_deps)
     !all_pending_deps ;
-  exec_exn db "COMMIT" ;
   Arch_io.printf
     "Inserted %d module deps (%d resolved to known modules)\n%!"
     !n_deps
@@ -457,7 +456,6 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
   Arch_io.printf
     "Resolving %d type usages...\n%!"
     (List.length !all_pending_type_usages) ;
-  exec_exn db "BEGIN TRANSACTION" ;
   let n_type_usages = ref 0 in
   let n_type_usages_resolved = ref 0 in
   let type_lookup = Hashtbl.create 256 in
@@ -513,7 +511,6 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
         ~position:usage.position ;
       incr n_type_usages)
     !all_pending_type_usages ;
-  exec_exn db "COMMIT" ;
   Arch_io.printf
     "Inserted %d type usages (%d resolved to known types)\n%!"
     !n_type_usages
@@ -538,6 +535,8 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
 
   (* Restore intents *)
   Arch_index_support.restore_intents db backup ;
+  Arch_index_support.restore_curation db ;
+  exec_exn db "COMMIT" ;
 
   (* Summary *)
   let n_fields = ref 0 in

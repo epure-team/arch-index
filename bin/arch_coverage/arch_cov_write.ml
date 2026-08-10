@@ -19,9 +19,8 @@ let exec conn sql =
       prerr_endline ("arch-coverage: " ^ Caqti_error.show e) ;
       exit 2
 
-(** [write ~db_path ~flat per_fn] replaces the coverage rows and returns how many were written.
-
-    REPLACES rather than accumulates: rerunning must not grow the table. *)
+(** [write ~db_path ~flat per_fn] appends an atomic snapshot to the main
+    schema.  The flat name-keyed compatibility schema remains current-state. *)
 let write ~db_path ~flat per_fn =
   let conn =
     match C.connect (Uri.make ~scheme:"sqlite3" ~path:db_path ()) with
@@ -56,22 +55,38 @@ let write ~db_path ~flat per_fn =
             exit 2)
       per_fn)
   else (
-    exec conn "DELETE FROM coverage" ;
-    let ins =
-      Ty.(t3 int int int) -->. Ty.unit
-      @:- "INSERT INTO coverage(function_id,covered_lines,total_lines) VALUES(?,?,?)"
+    let tm = Unix.gmtime (Unix.time ()) in
+    let stamp =
+      Printf.sprintf
+        "%04d-%02d-%02dT%02d:%02d:%02d.%06dZ"
+        (tm.Unix.tm_year + 1900)
+        (tm.Unix.tm_mon + 1)
+        tm.Unix.tm_mday
+        tm.Unix.tm_hour
+        tm.Unix.tm_min
+        tm.Unix.tm_sec
+        (Unix.getpid ())
     in
+    exec conn "BEGIN IMMEDIATE" ;
+    let ins =
+      Ty.(t4 int int int string) -->. Ty.unit
+      @:- "INSERT INTO coverage(function_id,covered_lines,total_lines,recorded_at) VALUES(?,?,?,?)"
+    in
+    let failure = ref None in
     Hashtbl.iter
       (fun key ((_ : Arch_tools.Arch_graph.node), _, total, covered) ->
-        (* Main-schema keys are "#<rowid>". *)
-        if String.length key > 1 && key.[0] = '#' then
+        if !failure = None && String.length key > 1 && key.[0] = '#' then
           match int_of_string_opt (String.sub key 1 (String.length key - 1)) with
           | Some id -> (
-              match Db.exec ins (id, covered, total) with
+              match Db.exec ins (id, covered, total, stamp) with
               | Ok () -> incr n
-              | Error e ->
-                  prerr_endline ("arch-coverage: " ^ Caqti_error.show e) ;
-                  exit 2)
-          | None -> ())
-      per_fn) ;
+              | Error e -> failure := Some (Caqti_error.show e))
+          | None -> failure := Some ("invalid main-schema function key " ^ key))
+      per_fn ;
+    match !failure with
+    | None -> exec conn "COMMIT"
+    | Some message ->
+        exec conn "ROLLBACK" ;
+        prerr_endline ("arch-coverage: " ^ message) ;
+        exit 2) ;
   !n

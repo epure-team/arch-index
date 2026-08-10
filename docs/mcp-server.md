@@ -128,3 +128,11 @@ CI does not rely on the build to catch rot: the `mcp` job sets `ARCH_MCP=yes`, t
 That job needs the private pin, so it runs only when `OCAML_MCP_TOKEN` is set; when it is not,
 CI emits a warning saying in as many words that a green run is **not** evidence the server still
 compiles.
+# Provenance And Paths
+
+MCP `reachability_is_sound` is derived from `Arch_db.contract_ok`, including
+the presence and validity of every `calls.kind`; a raw metadata stamp is not
+trusted. Repository file arguments are resolved canonically and accepted only
+when their real path remains within the canonical repository root on a path
+component boundary. Absolute paths, traversal, missing targets, and symlinks
+resolving outside the root are refused without reading external contents.

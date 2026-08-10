@@ -5,12 +5,16 @@
 #
 # Usage: pcc-dossier --db <path> --repo <dir> --diff <range> --rules <path> --out <path>
 #
-# Writes a markdown dossier to --out and ALWAYS exits 0 — even when arch-impact/arch-rules
+# Atomically writes a markdown dossier and succeeds even when arch-impact/arch-rules
 # report fail/refused/crashed underneath. Runs arch-impact/arch-rules with the EXACT same
 # flags the workflow's own impact/rules steps use, so the fixer sees the same verdict the
 # gates will check next, and --format md so the two never disagree with the JSON the gates
 # read (both come from the same tool run against the same just-reindexed DB).
 set -uo pipefail
+
+script_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+manifest_tool="$script_dir/pcc-target-manifest"
+evidence_tool="$script_dir/pcc-evidence"
 
 db="" repo="" diff="" rules="" out=""
 while [ $# -gt 0 ]; do
@@ -36,6 +40,20 @@ if [ -z "$impact_path" ] || [ -z "$rules_path" ]; then
 fi
 
 mkdir -p "$(dirname "$out")"
+publish_tmp="$(mktemp "$(dirname "$out")/.pcc-dossier.XXXXXX")"
+before_file="$(mktemp)"; after_file="$(mktemp)"; capture_file="$(mktemp)"
+target_artifact=""; inputs_artifact=""
+trap 'rm -f "$before_file" "$after_file" "$capture_file" "$publish_tmp" "$target_artifact" "$inputs_artifact"' EXIT
+"$evidence_tool" capture "$rules" >"$capture_file"; capture_rc=$?
+[ "$capture_rc" -eq 2 ] && exit 2
+target_artifact="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["target_artifact"])' "$capture_file")"
+inputs_artifact="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["expected_inputs_artifact"])' "$capture_file")"
+if [ "$capture_rc" -eq 3 ]; then "$evidence_tool" refusal dossier "$capture_file" || true; exit 3; fi
+diff="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["actual"]["baseline_oid"].split(":",1)[1])' "$capture_file")"
+python3 - "$capture_file" "$before_file" <<'PY'
+import json,sys
+c=json.load(open(sys.argv[1])); json.dump(json.load(open(c["target_artifact"])),open(sys.argv[2],"w"),sort_keys=True,separators=(",",":"))
+PY
 
 # Runs "$@", embedding its stdout verbatim under a "## $1" heading. arch-impact/arch-rules
 # both print their full body BEFORE deciding their exit code (a refusal/fail is printed, not
@@ -83,10 +101,26 @@ section() {
   section "Architecture rules (arch-rules)" \
     "$rules_path" "$db" "$rules" --format md \
     --on-unknown fail --on-possible fail --on-vacuous fail --on-not-computed fail
-} > "$out"
+} > "$publish_tmp"
+mv -f "$publish_tmp" "$out"
 
 # It informs, it does not gate: no matter what arch-impact/arch-rules reported above, pcc-dossier
 # itself always succeeds as long as it could WRITE the file. Only a failure to produce any
 # content at all propagates a nonzero exit.
 [ -s "$out" ] || { echo "pcc-dossier: produced an empty dossier at $out" >&2; exit 2; }
-exit 0
+"$manifest_tool" >"$after_file" || exit 2
+python3 - "$before_file" "$after_file" "$out" "$capture_file" <<'PY'
+import hashlib,json,os,sys
+b=json.load(open(sys.argv[1])); a=json.load(open(sys.argv[2])); body=open(sys.argv[3],"rb").read()
+capture=json.load(open(sys.argv[4])); shared=capture["actual"]; mutated=b["target_digest"]!=a["target_digest"]
+status="refused" if mutated or capture["request_mismatches"] else "pass"
+d={"schema":"arch-index.pcc.dossier.v1","status":status,"ok":status=="pass",
+"baseline_oid":b["manifest"]["base_oid"],"head_oid":a["manifest"]["base_oid"],
+"head_unchanged":b["manifest"]["base_oid"]==a["manifest"]["base_oid"],
+"target_digest":a["target_digest"],"expected_inputs_digest":shared["expected_inputs_digest"],
+"policy_digest":shared["policy_digest"],"tool_bundle_digest":shared["tool_bundle_digest"],
+"dossier_digest":"sha256:"+hashlib.sha256(b"arch-index.pcc.dossier.bytes.v1\0"+body).hexdigest(),
+"dossier_bytes":len(body),"dossier_content":body.decode("utf-8"),"published":True,"out":sys.argv[3]}
+print(json.dumps(d,sort_keys=True,separators=(",",":")))
+sys.exit(3 if status=="refused" else 0)
+PY

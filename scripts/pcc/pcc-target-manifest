@@ -1,0 +1,197 @@
+#!/usr/bin/env python3
+"""Canonical PCC v1 target manifest and SHA-256 digest.
+
+The JSON serializer is the deterministic stdlib subset needed here: UTF-8,
+sorted object keys, compact separators, and no NaN/float values.  Paths are
+represented by their raw Git bytes encoded as lowercase hex, avoiding locale
+and Unicode-normalisation ambiguity.
+"""
+
+import hashlib
+import json
+import os
+import stat
+import subprocess
+import sys
+
+DOMAIN = b"arch-index.pcc.target.v1\0"
+
+
+def git(*args):
+    p = subprocess.run(["git", *args], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    if p.returncode:
+        raise RuntimeError(p.stderr.decode("utf-8", "replace").strip())
+    return p.stdout
+
+
+def sha(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+def entry(path, tracked):
+    try:
+        st1 = os.lstat(path)
+        if stat.S_ISLNK(st1.st_mode):
+            data = os.readlink(path).encode("utf-8", "surrogateescape")
+            mode = "120000"
+        elif stat.S_ISREG(st1.st_mode):
+            resolved = os.path.realpath(path)
+            if os.path.commonpath([os.getcwd(), resolved]) != os.getcwd():
+                raise RuntimeError("path resolves outside repository: %r" % path)
+            fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+            try:
+                fst1 = os.fstat(fd)
+                chunks = []
+                while True:
+                    chunk = os.read(fd, 1024 * 1024)
+                    if not chunk: break
+                    chunks.append(chunk)
+                fst2 = os.fstat(fd)
+            finally:
+                os.close(fd)
+            if (fst1.st_dev, fst1.st_ino, fst1.st_size, fst1.st_mtime_ns) != (fst2.st_dev, fst2.st_ino, fst2.st_size, fst2.st_mtime_ns):
+                raise RuntimeError("path changed while reading: %r" % path)
+            data = b"".join(chunks)
+            mode = "100755" if fst2.st_mode & stat.S_IXUSR else "100644"
+        else:
+            kinds = [(stat.S_ISFIFO, "fifo"), (stat.S_ISSOCK, "socket"),
+                     (stat.S_ISCHR, "char-device"), (stat.S_ISBLK, "block-device")]
+            kind = next((name for pred, name in kinds if pred(st1.st_mode)), "other")
+            st2 = os.lstat(path)
+            if (st1.st_dev, st1.st_ino, st1.st_mode, st1.st_mtime_ns) != \
+               (st2.st_dev, st2.st_ino, st2.st_mode, st2.st_mtime_ns):
+                raise RuntimeError("special path changed while snapshotting: %r" % path)
+            return {"mode": "special:" + kind, "path_raw_hex": os.fsencode(path).hex(),
+                    "special": True, "tracked": tracked}
+        st2 = os.lstat(path)
+    except (OSError, ValueError) as e:
+        raise RuntimeError("unreadable path: %r: %s" % (path, e))
+    if (st1.st_mode, st1.st_size, st1.st_mtime_ns) != (st2.st_mode, st2.st_size, st2.st_mtime_ns):
+        raise RuntimeError("path changed while snapshotting: %r" % (path,))
+    if stat.S_ISREG(st2.st_mode) and (st2.st_dev, st2.st_ino) != (fst2.st_dev, fst2.st_ino):
+        raise RuntimeError("path was replaced while snapshotting: %r" % (path,))
+    if stat.S_ISLNK(st2.st_mode) and os.readlink(path).encode("utf-8", "surrogateescape") != data:
+        raise RuntimeError("symlink changed while snapshotting: %r" % (path,))
+    return {
+        "content_sha256": "sha256:" + sha(data),
+        "mode": mode,
+        "path_raw_hex": os.fsencode(path).hex(),
+        "symlink": stat.S_ISLNK(st1.st_mode),
+        "tracked": tracked,
+    }
+
+
+def snapshot():
+    if len(sys.argv) != 1:
+        raise RuntimeError("pcc-target-manifest takes no arguments")
+    root = git("rev-parse", "--show-toplevel").rstrip(b"\n")
+    os.chdir(os.fsdecode(root))
+    object_format = git("rev-parse", "--show-object-format").decode().strip()
+    head = object_format + ":" + git("rev-parse", "HEAD").decode().strip()
+    staged = git("ls-files", "--stage", "-z").split(b"\0")
+    tracked = []
+    for row in staged:
+        if not row:
+            continue
+        meta, raw = row.split(b"\t", 1)
+        mode, oid, stage = meta.split(b" ")
+        if stage != b"0":
+            raise RuntimeError("unmerged index stages are unsupported")
+        path = os.fsdecode(raw)
+        if path.startswith(".pcc/"):
+            continue
+        tracked.append((path, mode.decode(), oid.decode()))
+    flags = git("ls-files", "-v", "-z").split(b"\0")
+    for row in flags:
+        if not row:
+            continue
+        flag = chr(row[0])
+        if flag == "S" or flag.islower():
+            raise RuntimeError("skip-worktree/assume-unchanged paths are unsupported")
+    # Git omits FIFOs/sockets/devices from `ls-files --others`. Walk without
+    # following symlinks, prune ignored directories, then apply Git's ignore
+    # policy in one batch. No candidate is opened here.
+    tracked_raw = {os.fsencode(path) for path, _, _ in tracked}
+    gitlinks_raw = {os.fsencode(path) for path, mode, _ in tracked if mode == "160000"}
+    candidates = []
+    def walk(raw_dir=b"."):
+        for dent in os.scandir(raw_dir):
+            raw = dent.name if raw_dir == b"." else raw_dir[2:] + b"/" + dent.name
+            if raw in (b".git", b"_build", b".pcc") or raw.startswith((b".git/", b"_build/", b".pcc/")):
+                continue
+            if raw in gitlinks_raw:
+                continue
+            st = dent.stat(follow_symlinks=False)
+            if stat.S_ISDIR(st.st_mode):
+                ignored = subprocess.run(["git", "check-ignore", "-q", "--", raw + b"/"],
+                                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
+                if not ignored: walk(b"./" + raw)
+            elif raw not in tracked_raw:
+                candidates.append(raw)
+    walk()
+    ignored = set()
+    if candidates:
+        p = subprocess.run(["git", "check-ignore", "--stdin", "-z"],
+                           input=b"\0".join(candidates) + b"\0", stdout=subprocess.PIPE)
+        if p.returncode not in (0, 1):
+            raise RuntimeError("git check-ignore failed while enumerating worktree")
+        ignored = {raw for raw in p.stdout.split(b"\0") if raw}
+    untracked = [os.fsdecode(raw) for raw in candidates if raw not in ignored]
+    worktree = []
+    present = set()
+    index = []
+    for path, mode, oid in tracked:
+        index.append({"mode": mode, "oid": oid, "path_raw_hex": os.fsencode(path).hex()})
+        if mode == "160000":
+            sub = {"index_oid": object_format + ":" + oid, "initialized": os.path.isdir(path),
+                   "mode": "160000", "path_raw_hex": os.fsencode(path).hex(), "tracked": True}
+            if sub["initialized"]:
+                nested = subprocess.run([sys.executable, os.path.abspath(__file__)], cwd=path,
+                                        stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                if nested.returncode:
+                    raise RuntimeError("cannot snapshot submodule %r: %s" % (path, nested.stderr.decode("utf-8", "replace")))
+                nested_json = json.loads(nested.stdout)
+                sub["submodule_head_oid"] = nested_json["manifest"]["base_oid"]
+                sub["submodule_target_digest"] = nested_json["target_digest"]
+            worktree.append(sub)
+            present.add(path)
+        elif os.path.lexists(path):
+            worktree.append(entry(path, True))
+            present.add(path)
+    for path in untracked:
+        worktree.append(entry(path, False))
+    index = sorted(index, key=lambda x: x["path_raw_hex"])
+    protected = [{"name": "index", "sha256": "sha256:" + sha(json.dumps(index, sort_keys=True, separators=(",", ":")).encode())}]
+    git_dir = os.fsdecode(git("rev-parse", "--git-dir").rstrip(b"\n"))
+    for name in ("HEAD",):
+        path = os.path.join(git_dir, name)
+        protected.append({"name": name, "sha256": "sha256:" + sha(open(path, "rb").read())})
+    task = os.path.join(".pcc", "task.md")
+    if os.path.isfile(task):
+        protected.append({"name": ".pcc/task.md", "sha256": "sha256:" + sha(open(task, "rb").read())})
+    manifest = {
+        "base_oid": head,
+        "index": index,
+        "protected_metadata": protected,
+        "schema": "arch-index.pcc.target-manifest.v1",
+        "worktree": sorted(worktree, key=lambda x: x["path_raw_hex"]),
+    }
+    canonical = json.dumps(manifest, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode()
+    return {"manifest": manifest, "target_digest": "sha256:" + sha(DOMAIN + canonical)}
+
+
+def main():
+    first = snapshot()
+    second = snapshot()
+    if json.dumps(first, sort_keys=True, separators=(",", ":"), ensure_ascii=True) != \
+       json.dumps(second, sort_keys=True, separators=(",", ":"), ensure_ascii=True):
+        raise RuntimeError("repository changed between complete manifest passes")
+    print(json.dumps(first, sort_keys=True, separators=(",", ":")))
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception as e:
+        print("pcc-target-manifest: %s" % e, file=sys.stderr)
+        sys.exit(2)

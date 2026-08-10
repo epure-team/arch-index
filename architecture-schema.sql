@@ -124,6 +124,22 @@ CREATE TABLE IF NOT EXISTS comment_db_meta (
     value TEXT
 );
 
+CREATE TABLE IF NOT EXISTS effect_analysis_functions (
+    run_id TEXT NOT NULL,
+    function_id INTEGER NOT NULL,
+    function_name TEXT NOT NULL,
+    module_path TEXT NOT NULL,
+    PRIMARY KEY(run_id, function_id)
+);
+
+CREATE TABLE IF NOT EXISTS decision_analysis_files (
+    run_id TEXT NOT NULL,
+    file_path TEXT NOT NULL,
+    content_digest TEXT NOT NULL,
+    file_mode TEXT NOT NULL,
+    PRIMARY KEY(run_id, file_path)
+);
+
 -- Module dependencies (open, include, alias, local_open)
 CREATE TABLE IF NOT EXISTS module_deps (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -158,14 +174,17 @@ CREATE INDEX IF NOT EXISTS idx_type_usage_role ON type_usage(usage_role);
 -- Unsafe parameters (type safety tracking)
 CREATE TABLE IF NOT EXISTS unsafe_params (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    function_id INTEGER NOT NULL REFERENCES functions(id) ON DELETE CASCADE,
+    function_id INTEGER REFERENCES functions(id) ON DELETE SET NULL,
+    target_module_path TEXT,
+    target_function_name TEXT,
     param_name TEXT NOT NULL,               -- 'instance'
     current_type TEXT NOT NULL,             -- 'string'
     target_type TEXT,                       -- 'Instance_name.t'
     fixed BOOLEAN DEFAULT 0,
     fixed_at TEXT,
     github_issue INTEGER,                   -- tracking issue number
-    UNIQUE(function_id, param_name)
+    UNIQUE(function_id, param_name),
+    UNIQUE(target_module_path, target_function_name, param_name)
 );
 
 CREATE INDEX IF NOT EXISTS idx_unsafe_unfixed ON unsafe_params(fixed) WHERE fixed = 0;
@@ -192,6 +211,7 @@ CREATE TABLE IF NOT EXISTS decisions (
     decided_by TEXT NOT NULL,               -- enumeration | smt | budget_exhausted | no_solver
     evidence TEXT,                          -- removable atoms, or the settling guards
     snippet TEXT,
+    analysis_run_id TEXT NOT NULL,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -263,14 +283,17 @@ ORDER BY m.path, f.name, d.call_site;
 -- Test coverage tracking
 CREATE TABLE IF NOT EXISTS coverage (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    function_id INTEGER NOT NULL REFERENCES functions(id) ON DELETE CASCADE,
+    function_id INTEGER REFERENCES functions(id) ON DELETE SET NULL,
+    target_module_path TEXT,
+    target_function_name TEXT,
     covered_lines INTEGER NOT NULL DEFAULT 0,
     total_lines INTEGER NOT NULL DEFAULT 0,
     percentage REAL GENERATED ALWAYS AS (
         CASE WHEN total_lines > 0 THEN (covered_lines * 100.0 / total_lines) ELSE 0 END
     ) STORED,
     recorded_at TEXT DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(function_id, recorded_at)
+    UNIQUE(function_id, recorded_at),
+    UNIQUE(target_module_path, target_function_name, recorded_at)
 );
 
 CREATE INDEX IF NOT EXISTS idx_coverage_low ON coverage(percentage) WHERE percentage < 50;
@@ -283,6 +306,9 @@ CREATE TABLE IF NOT EXISTS gardening_tasks (
     title TEXT,
     target_module_id INTEGER REFERENCES modules(id) ON DELETE SET NULL,
     target_function_id INTEGER REFERENCES functions(id) ON DELETE SET NULL,
+    target_module_path TEXT,
+    target_function_module_path TEXT,
+    target_function_name TEXT,
     status TEXT DEFAULT 'open',             -- 'open', 'in_progress', 'done'
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     completed_at TEXT

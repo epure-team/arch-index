@@ -31,8 +31,9 @@ type result =
 (** Compare all occurrences of [fn_name] in the architecture DB.
 
     Looks up every function whose name exactly matches [fn_name], reads the
-    corresponding source lines, normalises whitespace, and groups by content
-    hash.
+    corresponding source lines and verifies exact canonical bytes after digest
+    candidate grouping.  The language-independent canonical form preserves all
+    whitespace.
 
     @param db          Open SQLite handle to [docs/architecture.db].
     @param project_root  Absolute path to the repository root, prepended to
@@ -51,3 +52,11 @@ type result =
     {violates}
     (none) *)
 val compare_bodies : Sqlite3.db -> project_root:string -> string -> result
+
+(** Test seam for proving that a digest collision cannot establish identity. *)
+val compare_bodies_with_digest :
+  digest_of_body:(string -> string) ->
+  Sqlite3.db ->
+  project_root:string ->
+  string ->
+  result

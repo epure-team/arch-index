@@ -1,0 +1,129 @@
+{
+  "task": "review-findings-fixes",
+  "date": "2026-08-10",
+  "status": "GO",
+  "auto_fixes_applied": [],
+  "findings": [
+    {
+      "severity": "CRITICAL",
+      "confidence": 5,
+      "path": "lib/arch_tools/arch_db.ml",
+      "line": 363,
+      "category": "correctness",
+      "summary": "Completion receipts are internally consistent but remain valid after the analyzed source changes",
+      "evidence": "Resolved. decision_analysis_files stores repository-relative path, content digest, and permission mode, and analysis_complete recomputes all three against the canonical live path (lib/arch_tools/arch_db.ml:395-425). The clean isolated selftest-impact fixture produced valid zero-finding evidence while unchanged, rejected it after chmod 0600, rejected it after a body-only conditional replacement with stable symbol identity, and confirmed reindex removed all decision/effect completion keys. selftest-effects independently confirmed a complete effect receipt becomes NOT_COMPUTED after rebuild/reindex.",
+      "fix": "Implemented and reproduced.",
+      "implementation_evidence": "Arch_index_support.invalidate_analysis deletes decision/effect results, analysis universes, and completion metadata inside the destructive rebuild transaction (lib/arch_index/arch_index_support.ml:101-110; lib/arch_index/arch_index.ml:124-128).",
+      "fingerprint": "lib/arch_tools/arch_db.ml:363:correctness",
+      "specialist": "reviewer",
+      "status": "RESOLVED"
+    },
+    {
+      "severity": "MEDIUM",
+      "confidence": 5,
+      "path": "scripts/pcc/pcc-target-manifest",
+      "line": 80,
+      "category": "security",
+      "summary": "Untracked special-file mutations are invisible to the PCC target manifest",
+      "evidence": "Resolved. pcc-target-manifest now performs an ignore-aware filesystem walk and records special paths from lstat metadata without opening them. Exact pre-existing FIFO reproduction returned exit 3, status=refused, ok=false, request_mismatches=[special_file_unsupported], and left the FIFO present. The clean selftest-pcc failing-build fixture created an untracked FIFO and returned refusal/3 with mutation_detected=true and failure_stage=dune_build.",
+      "fix": "Implemented and reproduced.",
+      "implementation_evidence": "pcc-evidence explicitly converts special manifest entries into special_file_unsupported refusals (scripts/pcc/pcc-evidence:66-69,112-115), while every post-capture pcc-index failure takes a final manifest and gives mutation precedence.",
+      "fingerprint": "scripts/pcc/pcc-target-manifest:80:security",
+      "specialist": "reviewer",
+      "status": "RESOLVED"
+    },
+    {
+      "severity": "CRITICAL",
+      "confidence": 5,
+      "path": "lib/arch_tools/arch_db.ml",
+      "line": 356,
+      "category": "correctness",
+      "summary": "Completion metadata was shape-checked but not bound to source, index, universe, or result rows",
+      "evidence": "Resolved by run-scoped decision_analysis_files/analysis_run_id data and consumer recomputation of universe, index, and result digests. selftest-impact.sh, selftest-decision-lint.sh, and selftest-effects.sh reject metadata, result-row, universe, and run-ID tampering.",
+      "fix": "Implemented; the remaining live-input freshness gap is tracked separately.",
+      "fingerprint": "lib/arch_tools/arch_db.ml:356:correctness",
+      "specialist": "reviewer",
+      "status": "RESOLVED"
+    },
+    {
+      "severity": "CRITICAL",
+      "confidence": 5,
+      "path": "bin/arch_rules/arch_rules.ml",
+      "line": 273,
+      "category": "correctness",
+      "summary": "Effect consumers queried a column absent from the shipped schema",
+      "evidence": "Resolved: arch-rules now selects function_name/value_kind/target and arch-impact selects value_kind/target. selftest-effects.sh passes shipped-schema clean, violation, partial, tamper, and replay paths.",
+      "fix": "Implemented.",
+      "fingerprint": "bin/arch_rules/arch_rules.ml:273:correctness",
+      "specialist": "reviewer",
+      "status": "RESOLVED"
+    },
+    {
+      "severity": "CRITICAL",
+      "confidence": 5,
+      "path": "scripts/pcc/pcc-index",
+      "line": 82,
+      "category": "security",
+      "summary": "pcc-index skipped mutation comparison on failing build and analyzer paths",
+      "evidence": "Resolved for manifestable mutations: all post-capture failure stages route through finalize_failure. Exact former reproduction now returns exit 3, status=refused, mutation_detected=true, failure_stage=dune_build. selftest-pcc adds build, callgraph, and decision-lint failure fixtures.",
+      "fix": "Implemented; the special-file visibility limitation is tracked separately.",
+      "fingerprint": "scripts/pcc/pcc-index:82:security",
+      "specialist": "reviewer",
+      "status": "RESOLVED"
+    },
+    {
+      "severity": "HIGH",
+      "confidence": 5,
+      "path": ".github/workflows/ci.yml",
+      "line": 204,
+      "category": "correctness",
+      "summary": "Release verification checked staging instead of the final archive",
+      "evidence": "Resolved: scripts/package-release creates and then validates the final tar.gz; the release job uploads that archive, the tag-free matrix runs the same path, and selftest-release-manifest.sh passes missing/extra/wrong-mode/private-MCP negative archives.",
+      "fix": "Implemented.",
+      "fingerprint": ".github/workflows/ci.yml:204:correctness",
+      "specialist": "reviewer",
+      "status": "RESOLVED"
+    }
+  ],
+  "verification": {
+    "private_mcp": {
+      "status": "PASS",
+      "dependency": "mcp-kit.dev pinned to git+file:///home/mathias/dev/ocaml-mcp#main at 36df9f8da69afc01da6397aa3dcdb2660039944f",
+      "gates": [
+        "Clean isolated OCaml 5.3 ARCH_MCP=yes dune build produced bin/arch_mcp/arch_mcp.exe",
+        "selftest-mcp.sh passed real JSON-RPC fixtures for valid, unstamped, missing-kind, NULL-kind, and invalid-kind databases",
+        "selftest-mcp.sh passed absolute, traversal, file-symlink, directory-symlink, sibling-prefix, missing-path, and valid in-root path fixtures without external-content disclosure",
+        "A persistent 500-request index_status session remained operational and did not show unbounded descriptor growth"
+      ]
+    },
+    "prior_go_regressions": {
+      "status": "PASS",
+      "gates": [
+        "dune test",
+        "selftest-impact.sh",
+        "selftest-effects.sh",
+        "selftest-pcc.sh"
+      ]
+    }
+  },
+  "summary": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "auto_fixed": 0
+  },
+  "no_go_reason": {
+    "type": null,
+    "failed_acs": []
+  },
+  "mode": "full",
+  "private_mcp_gate": {
+    "status": "PASS",
+    "build": "ARCH_MCP=yes dune build bin/arch_mcp/arch_mcp.exe bin/arch_load bin/arch_query",
+    "protocol": "selftest-mcp.sh PASS without skip",
+    "evidence": "bin/arch_mcp now links and opens wrapped arch_tools; valid, unstamped, missing-kind, NULL-kind, invalid-kind, canonical containment, protocol, and subprocess fixtures executed in the isolated OCaml 5.3 switch."
+  },
+  "escalation_needed": false,
+  "escalation_reason": null
+}

@@ -190,7 +190,8 @@ jobs:
           # shape this pipeline refuses everywhere else.
           missing=""
           for bin in arch_index_cli arch_serve arch_callgraph_ocaml \
-                     arch_query arch_load arch_rules arch_impact arch_mutants arch_coverage; do
+                     arch_query arch_load arch_rules arch_impact arch_mutants arch_coverage \
+                     arch_body_compare arch_coverage_load arch_curate; do
             src=$(find _build -name "${bin}.exe" | head -1)
             if [ -z "$src" ]; then missing="$missing $bin"; continue; fi
             cp "$src" "dist/${bin}-${{ matrix.suffix }}"
@@ -200,10 +201,51 @@ jobs:
             echo "::error::release build produced no binary for:$missing — refusing to publish a partial release"
             exit 1
           fi
-          ls -la dist/
+          archive="arch-index-${{ matrix.suffix }}.tar.gz"
+          ./scripts/package-release dist "${{ matrix.suffix }}" "$archive"
       - name: Upload to release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/*
+          files: arch-index-${{ matrix.suffix }}.tar.gz
           generate_release_notes: false
           body_path: CHANGELOG.md
+
+  release-manifest:
+    name: Release manifest (${{ matrix.suffix }})
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            suffix: linux-x86_64
+            profile: static
+            extra_setup: sudo apt-get install -y libsqlite3-dev libgmp-dev zlib1g-dev
+          - os: macos-latest
+            suffix: macos-arm64
+            profile: release
+            extra_setup: ""
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ocaml/setup-ocaml@v3
+        with:
+          ocaml-compiler: '5.3'
+      - name: Platform setup
+        if: matrix.extra_setup != ''
+        run: ${{ matrix.extra_setup }}
+      - name: Build and verify exact public executable manifest
+        run: |
+          opam install --deps-only --yes .
+          opam exec -- dune build --profile=${{ matrix.profile }}
+          mkdir -p dist
+          for bin in arch_index_cli arch_serve arch_callgraph_ocaml \
+                     arch_query arch_load arch_rules arch_impact arch_mutants arch_coverage \
+                     arch_body_compare arch_coverage_load arch_curate; do
+            src=$(find _build -name "${bin}.exe" | head -1)
+            test -n "$src" || { echo "missing release binary: $bin" >&2; exit 1; }
+            cp "$src" "dist/${bin}-${{ matrix.suffix }}"
+            chmod +x "dist/${bin}-${{ matrix.suffix }}"
+          done
+          archive="arch-index-${{ matrix.suffix }}.tar.gz"
+          ./scripts/package-release dist "${{ matrix.suffix }}" "$archive"
+          ./scripts/check-release-manifest "$archive" "${{ matrix.suffix }}"
+          ./selftest-release-manifest.sh

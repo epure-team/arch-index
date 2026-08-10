@@ -17,6 +17,8 @@ set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
 Q="$HERE/arch-query"
 LOAD="$HERE/arch-load"
+RULES="$HERE/arch-rules"
+IMPACT="$HERE/arch-impact"
 SCHEMA="$HERE/architecture-schema.sql"
 MIGRATION="$HERE/effects-schema-migration.sql"
 
@@ -102,6 +104,7 @@ let exported_entry (b : box) (a : int array) (h : (string, int) Hashtbl.t) =
   array_mutator a;
   hashtbl_mutator h
 OCAML
+(cd "$OCaml_MOD" && git init -q && git config user.email t@t && git config user.name t && git add -A && git commit -qm init)
 
 ( cd "$OCaml_MOD" && dune build 2>/tmp/efx-dune-err.txt ) \
   || { cat /tmp/efx-dune-err.txt >&2; note "OCaml dune build failed"; }
@@ -176,6 +179,60 @@ if [ -n "$BIN_OCaml" ] && [ -d "$CMT_DIR" ]; then
   else
     note "OCaml: exported_entry function not found in DB"
   fi
+
+  # A completed snapshot is consumed end-to-end by rules and impact using the
+  # shipped schema. Clean, violating, partial, tampered, and replayed evidence
+  # must remain distinguishable.
+  fn_record=$(sqlite3 "$DB_OCaml" "SELECT name FROM functions WHERE name LIKE '%record_mutator%' LIMIT 1;")
+  fn_pure=$(sqlite3 "$DB_OCaml" "SELECT name FROM functions WHERE name LIKE '%pure_fn%' LIMIT 1;")
+  printf '{"type":"effect","function_name":"%s","value_kind":"FieldAccess","soundness":"sound","producer":"complete-fixture"}\n' "$fn_record" >"$TMPDIR_ROOT/complete.ndjson"
+  "$EFF_LOAD" "$DB_OCaml" --complete <"$TMPDIR_ROOT/complete.ndjson" >/dev/null 2>&1 \
+    || note "complete effects snapshot failed"
+  COMPLETE_RULES="$TMPDIR_ROOT/complete-rules.txt"
+  printf 'rule "violation"\n  forbid effect from fn:%s kind:FieldAccess\nrule "clean"\n  forbid effect from fn:%s kind:FieldAccess\n' "$fn_record" "$fn_pure" >"$COMPLETE_RULES"
+  ROUT="$($RULES "$DB_OCaml" "$COMPLETE_RULES" --format json 2>/dev/null)"
+  printf '%s' "$ROUT" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert [r["verdict"] for r in d["results"]]==["VIOLATION","PASS"],d' \
+    || note "complete effects must yield one real violation and one clean PASS"
+  "$RULES" "$DB_OCaml" "$COMPLETE_RULES" >/tmp/efx-rules-text.txt 2>&1
+  [ $? -eq 1 ] || note "a completed violating effect rule must exit 1"
+  grep -q '\[ FAIL  \] violation' /tmp/efx-rules-text.txt || note "text output must expose the effect violation"
+  printf 'rule "clean"\n  forbid effect from fn:%s kind:FieldAccess\n' "$fn_pure" >"$TMPDIR_ROOT/clean-rules.txt"
+  "$RULES" "$DB_OCaml" "$TMPDIR_ROOT/clean-rules.txt" >/dev/null 2>&1
+  [ $? -eq 0 ] || note "a completed clean closed effect cone must exit 0"
+  sed -i 's/b.value <- 42/b.value <- 43/' "$OCaml_MOD/efxtest.ml"
+  "$IMPACT" "$DB_OCaml" --diff HEAD --repo "$OCaml_MOD" >/tmp/efx-impact.txt 2>&1 \
+    || note "arch-impact must consume the shipped effect schema"
+  grep -q 'FieldAccess' /tmp/efx-impact.txt || note "arch-impact must render the completed cone effect"
+
+  # Any partial load invalidates the prior completion stamp even if old result
+  # rows remain queryable for advisory commands.
+  printf 'not-json\n' | "$EFF_LOAD" "$DB_OCaml" --allow-skip >/dev/null 2>&1
+  POUT="$($RULES "$DB_OCaml" "$COMPLETE_RULES" --format json 2>/dev/null)"
+  printf '%s' "$POUT" | python3 -c 'import json,sys; assert all(r["verdict"]=="NOT_COMPUTED" for r in json.load(sys.stdin)["results"])' \
+    || note "partial effects load must invalidate completion rather than reuse stale proof"
+  "$RULES" "$DB_OCaml" "$TMPDIR_ROOT/clean-rules.txt" >/dev/null 2>&1
+  [ $? -eq 1 ] || note "partial effect evidence must fail the rule gate as NOT_COMPUTED"
+
+  # Restore, then prove arbitrary metadata, result tampering, and replayed run
+  # identity are all rejected by relational digest verification.
+  "$EFF_LOAD" "$DB_OCaml" --complete <"$TMPDIR_ROOT/complete.ndjson" >/dev/null 2>&1
+  sqlite3 "$DB_OCaml" "UPDATE comment_db_meta SET value='md5:tampered' WHERE key='effect_source_digest'"
+  "$RULES" "$DB_OCaml" "$COMPLETE_RULES" --format json 2>/dev/null | grep -q 'NOT_COMPUTED' \
+    || note "tampered effect source digest must invalidate completion"
+  "$EFF_LOAD" "$DB_OCaml" --complete <"$TMPDIR_ROOT/complete.ndjson" >/dev/null 2>&1
+  sqlite3 "$DB_OCaml" "UPDATE function_effects SET target='tampered-result'"
+  "$RULES" "$DB_OCaml" "$COMPLETE_RULES" --format json 2>/dev/null | grep -q 'NOT_COMPUTED' \
+    || note "tampered effect result row must invalidate completion"
+  "$EFF_LOAD" "$DB_OCaml" --complete <"$TMPDIR_ROOT/complete.ndjson" >/dev/null 2>&1
+  sqlite3 "$DB_OCaml" "UPDATE comment_db_meta SET value='replayed-old-run' WHERE key='effect_run_id'"
+  "$RULES" "$DB_OCaml" "$COMPLETE_RULES" --format json 2>/dev/null | grep -q 'NOT_COMPUTED' \
+    || note "replayed effect run identity must invalidate completion"
+  "$EFF_LOAD" "$DB_OCaml" --complete <"$TMPDIR_ROOT/complete.ndjson" >/dev/null 2>&1
+  (cd "$OCaml_MOD" && dune build >/dev/null)
+  "$BIN_OCaml" --build-dir "$CMT_DIR" --db-path "$DB_OCaml" --schema-path "$SCHEMA" >/dev/null 2>&1 \
+    || note "effect freshness reindex failed"
+  "$RULES" "$DB_OCaml" "$COMPLETE_RULES" --format json 2>/dev/null | grep -q 'NOT_COMPUTED' \
+    || note "source reindex must invalidate an old complete effect receipt"
 
   # ── assert pure-fns includes pure_fn ──
   say "$DB_OCaml" pure-fns \

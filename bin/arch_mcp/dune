@@ -17,4 +17,4 @@
  (public_name arch_mcp)
  (enabled_if
   (= %{env:ARCH_MCP=no} yes))
- (libraries mcp-kit mcp-kit.stdio sqlite3 unix))
+ (libraries arch_tools mcp-kit mcp-kit.stdio sqlite3 unix))

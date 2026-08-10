@@ -8,7 +8,8 @@ what that rule looks like applied to code health.
   large-functions`, `arch-query god-modules`. The number is true; "too big" is a judgement call.
   None of these commands can fail a build — there is no `--fail-on-...` flag to reach for.
 - **Proof** (A3) — a verdict a machine can actually stand behind. `arch-body-compare duplicates`
-  proves two function bodies hash identical after whitespace normalisation; it never reports an
+  proves two function bodies have identical canonical bytes after digest candidate grouping; the
+  language-independent canonical form preserves whitespace, and it never reports an
   "approximate" duplicate.
 - **Human judgement, recorded** (B) — what A can only measure or prove, a human decides. That
   decision is written to a ledger with provenance (who, when, which issue/PR), not left as a
@@ -154,3 +155,14 @@ VALUES ('2026-08-07', 'jdoe', 'type-safety',
 - Nothing in Livrable A (facts, measures, proofs) gates a build. A threshold with a consequence
   is either a proof (A3) or a decision recorded here — never a `--fail-on-...` flag bolted onto a
   measure.
+# Reindex Preservation
+
+The corrected indexer preserves `coverage`, `unsafe_params`,
+`gardening_tasks`, and `gardening_log` in the same transaction as its
+destructive schema rebuild. Surviving targets are remapped by module path and
+function name. Removed targets keep that durable identity with a null live ID;
+they are historical curation, not silently deleted index facts.
+
+Both main-schema coverage writers append coherent timestamped snapshots.
+`arch-query low-coverage` selects the latest snapshot per function. Only the
+flat compatibility table `coverage_by_name` is replaceable current state.

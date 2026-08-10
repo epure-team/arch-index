@@ -58,9 +58,10 @@ Key/value store for index metadata.
 | `decision_contract` | `v1` when a producer actually ran the decision analysis |
 | `built_by` | the producing tool, e.g. `arch-load` |
 
-`decision_contract` is stamped only when decisions were supplied, so a consumer can tell
-"computed nothing" from "computed nothing to report". The `decisions` table exists either way —
-presence proves nothing, which is why every consumer checks whether it is **non-empty**.
+`decision_contract` is stamped for a completed run even when it produces zero findings.
+Presence and non-emptiness prove nothing: consumers recompute canonical source-universe,
+current-index, and result-row digests, require every result row to carry the current run ID,
+and reject stale, mixed, replayed, or edited evidence.
 
 ## Additional tables
 
@@ -89,3 +90,32 @@ the flat one, behind one node type.
 mis-map every hunk in the file, which is worse than having no span at all.
 
 See [`architecture-schema.sql`](../architecture-schema.sql) for full column definitions, indices, and triggers.
+# Completed Analysis Contracts
+
+Decision and effect rows authorize a clean gate only with the corresponding
+`*_contract=v1` metadata plus `outcome=complete`, `failures=0`, a non-negative
+analyzed `universe`, and non-empty run, producer, source-digest, index-digest,
+and result-digest fields. Legacy `decision_analysis` metadata and table non-emptiness are not
+completion evidence. A complete run may produce zero result rows.
+
+Decision runs populate `decision_analysis_files` and bind `decisions.analysis_run_id`.
+Each analyzed file record contains its repository-relative path, content digest,
+and permission mode. `arch-impact --repo` recomputes those values from the live
+repository before treating even a zero-finding run as available.
+Effect runs bind `function_effects.analysis_run_id` and populate
+`effect_analysis_functions` with run ID, function ID, name, and module path; an effect rule is
+computed only when every function in its evaluated cone is present there.
+`arch-effects-load --complete` creates this evidence, while `--allow-skip` is
+incompatible with completion and never stamps a complete run.
+Every main-schema reindex deletes decision/effect results, universes, and
+completion metadata in the rebuild transaction; producers must restamp against
+the new index.
+
+# Curation Identity
+
+`coverage` and `unsafe_params` retain stable module-path/function-name identity
+alongside nullable live IDs. Gardening targets retain the same durable identity.
+Reindex snapshots all four ledgers inside the rebuild transaction, remaps
+surviving symbols, and preserves removed symbols with a null live ID. Existing
+databases are migrated by the corrected rebuild, which recreates the ledger
+tables from their transactional snapshots.

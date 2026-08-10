@@ -67,7 +67,16 @@ CREATE TABLE IF NOT EXISTS function_effects (
 
     -- Producer provenance: which tool/extractor populated this row
     producer TEXT,                 -- e.g. 'arch-effects-ocaml', 'arch-effects-go', 'arch-effects-rust'
+    analysis_run_id TEXT NOT NULL DEFAULT '',
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS effect_analysis_functions (
+    run_id TEXT NOT NULL,
+    function_id INTEGER NOT NULL,
+    function_name TEXT NOT NULL,
+    module_path TEXT NOT NULL,
+    PRIMARY KEY(run_id, function_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_fn_effects_fname  ON function_effects(function_name);

@@ -139,3 +139,10 @@ untrustworthy:
   as UNKNOWN impact, per file.
 - **"no test found" ≠ "untested".** If the test binary was not indexed, no test can be found; the
   report says to check what was indexed before concluding.
+# Decision Completion
+
+`--fail-on-new-findings` accepts only a validated `decision_contract=v1`
+completed run. A complete zero-finding run passes. Missing, stale, malformed,
+or partial evidence produces JSON `verdict:"refused"` and exit 3; a new finding
+produces `fail`/1 and a complete clean run produces `pass`/0. Unknown,
+duplicate, missing-value, invalid-enum, and surplus CLI arguments exit 2.

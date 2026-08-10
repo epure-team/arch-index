@@ -134,7 +134,7 @@ let analyse (t : Arch_db.t) (g : Arch_graph.t) changed repo =
 
 let findings (t : Arch_db.t) changed repo =
   let decisions =
-    if not (Arch_db.nonempty t "decisions") then []
+    if not (Arch_db.analysis_complete ~repo t "decision") then []
     else
       let rows =
         Arch_db.rows t ~params_ty:Arch_db.Ty.unit ~shape:Arch_db.Rows.ub_shape
@@ -179,23 +179,44 @@ let findings (t : Arch_db.t) changed repo =
 
 let () =
   let args = List.tl (Array.to_list Sys.argv) in
-  let opt name default =
-    let rec go = function a :: v :: _ when a = name -> v | _ :: tl -> go tl | [] -> default in
-    go args
+  let values = Hashtbl.create 8 and positionals = ref [] and fail_on = ref false in
+  let value_options = [ "--diff"; "--files"; "--repo"; "--format"; "--max-list" ] in
+  let rec parse = function
+    | [] -> ()
+    | "--fail-on-new-findings" :: tl ->
+        if !fail_on then die "arch-impact: duplicate option --fail-on-new-findings" ;
+        fail_on := true ;
+        parse tl
+    | a :: tl when List.mem a value_options -> (
+        if Hashtbl.mem values a then die ("arch-impact: duplicate option " ^ a) ;
+        match tl with
+        | [] -> die ("arch-impact: missing value for " ^ a)
+        | v :: _ when String.length v >= 2 && String.sub v 0 2 = "--" ->
+            die ("arch-impact: missing value for " ^ a)
+        | v :: rest -> Hashtbl.add values a v ; parse rest)
+    | a :: _ when String.length a >= 2 && String.sub a 0 2 = "--" ->
+        die ("arch-impact: unknown option " ^ a)
+    | a :: tl -> positionals := a :: !positionals ; parse tl
   in
-  let has_flag f = List.mem f args in
-  let positional =
-    List.filteri
-      (fun i a ->
-        String.length a < 2
-        || String.sub a 0 2 <> "--"
-           && (i = 0 || not (List.mem (List.nth args (i - 1)) [ "--diff"; "--files"; "--repo"; "--format"; "--max-list" ])))
-      args
+  parse args ;
+  let positionals = List.rev !positionals in
+  let db_path =
+    match positionals with
+    | [ d ] -> d
+    | [] -> prerr_endline usage ; exit 2
+    | _ -> die "arch-impact: unexpected extra positional argument"
   in
-  let db_path = match positional with d :: _ -> d | [] -> (prerr_endline usage ; exit 2) in
+  let opt name default = Option.value ~default (Hashtbl.find_opt values name) in
+  let has_flag f = f = "--fail-on-new-findings" && !fail_on in
   let repo = opt "--repo" "." in
   let fmt = opt "--format" "text" in
-  let maxlist = match int_of_string_opt (opt "--max-list" "20") with Some n -> n | None -> 20 in
+  if not (List.mem fmt [ "text"; "md"; "json" ]) then
+    die (Printf.sprintf "arch-impact: --format takes text, md, or json, got %S" fmt) ;
+  let maxlist =
+    match int_of_string_opt (opt "--max-list" "20") with
+    | Some n when n >= 0 -> n
+    | _ -> die "arch-impact: --max-list requires a non-negative integer"
+  in
   let t =
     try Arch_db.open_ro db_path
     with Arch_db.Refused m | Arch_db.Broken m -> die ("arch-impact: " ^ m)
@@ -259,7 +280,7 @@ let () =
   in
   (* Mirrors the --fail-on-new-findings decision made below (line ~443) so the JSON `verdict`
      and the exit code always agree — a consumer with only one of the two can still conclude. *)
-  let decision_analysis_available = Arch_db.nonempty t "decisions" in
+  let decision_analysis_available = Arch_db.analysis_complete ~repo t "decision" in
   let new_findings = List.length decs in
   let verdict =
     if not (has_flag "--fail-on-new-findings") then `Pass
@@ -416,23 +437,21 @@ let () =
       List.iter (fun n -> print_endline ("    " ^ n)) (cap maxlist may_tests)) ;
     print_endline "" ;
     print_endline (h2 ^ "Effects crossed") ;
-    (if not (Arch_db.nonempty t "function_effects") then
-       print_endline
-         (b ^ "not available on this index (no effects tables) — this is 'not computed', not 'no \
-               effects'")
-     else
-       let cone = SS.union downstream seeds in
-       let names =
+    (let cone = SS.union downstream seeds in
+     let names =
          SS.fold
            (fun k acc ->
              match SM.find_opt k g.nodes with Some (n : Arch_graph.node) -> n.name :: acc | None -> acc)
-           cone []
-       in
+           cone [] in
+     if not (Arch_db.effect_cone_complete t names) then
+       print_endline
+         (b ^ "not available for this cone — effect analysis is incomplete or stale, not 'no effects'")
+     else
        let json = Yojson.Safe.to_string (`List (List.map (fun n -> `String n) names)) in
        let hits =
          Arch_db.rows t ~params_ty:Arch_db.Ty.string ~shape:Arch_db.Rows.t2'
            ~to_cells:Arch_db.Rows.c2
-           "SELECT DISTINCT effect_kind, value_kind FROM function_effects WHERE function_name IN \
+           "SELECT DISTINCT value_kind, COALESCE(target,'') FROM function_effects WHERE function_name IN \
             (SELECT value FROM json_each(?))"
            json
        in
@@ -445,7 +464,7 @@ let () =
                  hits))) ;
     print_endline "" ;
     print_endline (h2 ^ "Findings introduced by this diff") ;
-    if not (Arch_db.nonempty t "decisions") then
+    if not (Arch_db.analysis_complete ~repo t "decision") then
       print_endline (b ^ "decision analysis not present in this index — not computed")
     else if decs = [] then print_endline (b ^ "none")
     else
@@ -453,7 +472,7 @@ let () =
         (cap maxlist
            (List.map (fun (p, l, f, v, s) -> Printf.sprintf "%s%s at %s:%d (%s) %s" b v p l f s) decs))) ;
   if has_flag "--fail-on-new-findings" then
-    if not (Arch_db.nonempty t "decisions") then (
+    if not (Arch_db.analysis_complete ~repo t "decision") then (
       (* A gate whose input was never computed must not report "clean". The text already said
          "not computed"; the EXIT CODE is the only thing CI reads, and it was saying "no
          findings". *)

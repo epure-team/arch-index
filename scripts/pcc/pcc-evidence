@@ -1,0 +1,138 @@
+#!/usr/bin/env python3
+"""Shared PCC v1 request, policy, tool-bundle, and expected-input capture."""
+
+import hashlib
+import json
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+
+
+def digest(domain, data):
+    return "sha256:" + hashlib.sha256(domain + b"\0" + data).hexdigest()
+
+
+def canonical(value):
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode()
+
+
+def file_record(name, path):
+    data = open(path, "rb").read()
+    return {"name": name, "digest": digest(b"arch-index.pcc.tool.v1", data), "bytes": len(data)}
+
+
+def main():
+    if len(sys.argv) == 4 and sys.argv[1] == "refusal":
+        kind, capture_path = sys.argv[2], sys.argv[3]
+        capture = json.load(open(capture_path)); shared = capture["actual"]
+        target = json.load(open(capture["target_artifact"]))
+        result = {"schema": "arch-index.pcc.%s.v1" % kind, "status": "refused", "ok": False,
+                  "baseline_oid": shared["baseline_oid"], "head_oid": target["manifest"]["base_oid"],
+                  "head_unchanged": "baseline_oid" not in capture["request_mismatches"],
+                  "target_digest": shared["target_digest"],
+                  "policy_digest": shared["policy_digest"],
+                  "tool_bundle_digest": shared["tool_bundle_digest"],
+                  "expected_inputs_digest": shared["expected_inputs_digest"],
+                  "refusal_reasons": capture["request_mismatches"]}
+        if kind == "index": result.update(computed=False, functions=0, contract_ok=False,
+                                           files_unmatched=[], files_unmatched_count=0,
+                                           indexed_inputs_digest="sha256:" + "0"*64)
+        elif kind == "dossier": result.update(published=False, dossier_content="", dossier_bytes=0,
+                                               dossier_digest="sha256:" + "0"*64)
+        elif kind == "preflight": result.update(tests=0)
+        print(json.dumps(result, sort_keys=True, separators=(",", ":")))
+        sys.exit(3)
+    if len(sys.argv) not in (2, 3) or sys.argv[1] != "capture":
+        raise RuntimeError("usage: pcc-evidence capture [POLICY] | refusal KIND CAPTURE")
+    here = os.path.dirname(os.path.abspath(__file__))
+    raw = "" if sys.stdin.isatty() else sys.stdin.read()
+    request = {} if not raw.strip() else json.loads(raw)
+    if not isinstance(request, dict):
+        raise RuntimeError("canonical stdin request must be an object")
+    identity_keys = {"baseline_oid", "target_digest", "policy_digest", "tool_bundle_digest", "expected_inputs_digest"}
+    ancillary = {"reviewer_verdict", "cwr.commit_lock", "outputs.reviewer.verdict"}
+    unknown = sorted(set(request) - identity_keys - ancillary)
+    if unknown:
+        raise RuntimeError("unknown canonical request key(s): " + ", ".join(unknown))
+    supplied_identity = set(request) & identity_keys
+    if supplied_identity and supplied_identity != identity_keys:
+        missing = sorted(identity_keys - supplied_identity)
+        raise RuntimeError("canonical identity request is incomplete; missing: " + ", ".join(missing))
+    for key in set(request) & identity_keys:
+        if not isinstance(request[key], str) or not request[key]:
+            raise RuntimeError("request %s must be a non-empty string" % key)
+    manifest = json.loads(subprocess.check_output([os.path.join(here, "pcc-target-manifest")]))
+    unsupported_submodules = any(e.get("mode") == "160000" for e in manifest["manifest"]["worktree"])
+    unsupported_special = any(str(e.get("mode", "")).startswith("special:")
+                              for e in manifest["manifest"]["worktree"])
+    policy_path = sys.argv[2] if len(sys.argv) == 3 else "arch-rules.txt"
+    if not os.path.isfile(policy_path):
+        raise RuntimeError("required policy file is missing: " + policy_path)
+    policy_records = [{"name": os.path.basename(policy_path),
+                       "digest": digest(b"arch-index.pcc.policy-file.v1", open(policy_path, "rb").read())}]
+    task_path = os.path.join(".pcc", "task.md")
+    if os.path.isfile(task_path):
+        policy_records.append({"name": ".pcc/task.md",
+                               "digest": digest(b"arch-index.pcc.policy-file.v1", open(task_path, "rb").read())})
+    arch_impact = shutil.which("arch-impact")
+    arch_root = os.path.dirname(arch_impact) if arch_impact else os.path.abspath(os.path.join(here, "../.."))
+    candidates = [(n, os.path.join(here, n)) for n in os.listdir(here) if n.startswith("pcc-")]
+    candidates += [
+        ("arch-impact", os.path.join(arch_root, "arch-impact")),
+        ("arch-rules", os.path.join(arch_root, "arch-rules")),
+        ("architecture-schema.sql", os.path.join(arch_root, "architecture-schema.sql")),
+        ("arch-callgraph-ocaml", os.path.join(arch_root, "_build/default/bin/arch_callgraph_ocaml/arch_callgraph_ocaml.exe")),
+        ("decision-lint", os.path.join(arch_root, "_build/default/poc/decision-lint/bin/decision_lint.exe")),
+    ]
+    missing = sorted(name for name, path in candidates if not os.path.isfile(path))
+    if missing:
+        raise RuntimeError("required PCC tool/config missing: " + ", ".join(missing))
+    tools = sorted((file_record(name, path) for name, path in candidates), key=lambda x: x["name"])
+    # pcc-index currently invokes the OCaml CMT producer; interface files are
+    # evidence for the same module, while non-OCaml backends are out of scope.
+    source_ext = (".ml", ".mli")
+    paths = {e["path_raw_hex"] for e in manifest["manifest"]["worktree"]}
+    paths.update(e["path_raw_hex"] for e in manifest["manifest"]["index"])
+    expected = sorted(p for p in paths
+                      if bytes.fromhex(p).decode("utf-8", "surrogateescape").endswith(source_ext))
+    actual = {
+        "baseline_oid": manifest["manifest"]["base_oid"],
+        "target_digest": manifest["target_digest"],
+        "policy_digest": digest(b"arch-index.pcc.policy.v1", canonical(policy_records)),
+        "tool_bundle_digest": digest(b"arch-index.pcc.tool-bundle.v1", canonical(tools)),
+        "expected_inputs_digest": digest(b"arch-index.pcc.expected-inputs.v1", canonical(expected)),
+    }
+    mismatches = []
+    for key, value in actual.items():
+        expected_value = request.get(key)
+        if expected_value is not None and expected_value != value:
+            mismatches.append(key)
+    if unsupported_submodules:
+        mismatches.append("submodule_source_universe_unsupported")
+    if unsupported_special:
+        mismatches.append("special_file_unsupported")
+    def artifact(prefix, value):
+        fd, path = tempfile.mkstemp(prefix=prefix, suffix=".json")
+        with os.fdopen(fd, "wb") as f:
+            f.write(canonical(value))
+        os.chmod(path, 0o600)
+        return path
+    target_path = artifact("arch-pcc-target-", manifest)
+    expected_path = artifact("arch-pcc-inputs-", expected)
+    result = {"schema": "arch-index.pcc.capture.v1", "status": "refused" if mismatches else "pass",
+              "ok": not mismatches, "actual": actual, "request_mismatches": mismatches,
+              "expected_inputs_count": len(expected), "target_artifact": target_path,
+              "expected_inputs_artifact": expected_path, "tool_count": len(tools)}
+    print(json.dumps(result, sort_keys=True, separators=(",", ":")))
+    if mismatches:
+        sys.exit(3)
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception as e:
+        print("pcc-evidence: %s" % e, file=sys.stderr)
+        sys.exit(2)

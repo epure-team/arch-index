@@ -144,5 +144,62 @@ say "$DB" gardening log | grep -q 'bob'   || note "the second log entry (bob) mu
 "$CUR" "$FLAT" log --contributor alice --category x --description y --pr 1 >/dev/null 2>&1
 [ $? -eq 3 ] || note "arch-curate log on a flat index must REFUSE with exit 3 (no gardening_log table)"
 
+# ---- corrected indexer preserves all curation through two rebuilds and removal -----------------
+CG="$HERE/_build/default/bin/arch_callgraph_ocaml/arch_callgraph_ocaml.exe"
+if [ -x "$CG" ]; then
+  RX="$(mktemp -d)"
+  mkdir -p "$RX/src"
+  printf '(lang dune 3.0)\n' > "$RX/dune-project"
+  printf '(library (name reidx) (modules reidx))\n' > "$RX/src/dune"
+  printf 'let kept x = x + 1\nlet removed x = x - 1\n' > "$RX/src/reidx.ml"
+  (cd "$RX" && dune build >/dev/null)
+  RDB="$RX/index.db"
+  "$CG" --build-dir="$RX/_build/default" --db-path="$RDB" --schema-path="$HERE/architecture-schema.sql" >/dev/null
+  sqlite3 "$RDB" <<'SQL'
+INSERT INTO coverage(function_id,covered_lines,total_lines,recorded_at)
+ SELECT id,7,9,'2025-01-02T03:04:05Z' FROM functions WHERE name='removed';
+INSERT INTO unsafe_params(function_id,param_name,current_type,target_type,fixed,fixed_at,github_issue)
+ SELECT id,'raw','string','Safe.t',1,'2025-02-03T04:05:06Z',4321 FROM functions WHERE name='removed';
+INSERT INTO gardening_tasks(github_issue,category,title,target_function_id,status,created_at,completed_at)
+ SELECT 7654,'safety','retain me',id,'done','2025-03-04T05:06:07Z','2025-03-05T05:06:07Z'
+ FROM functions WHERE name='removed';
+INSERT INTO gardening_log(date,contributor,category,description,pr_number,issue_number,created_at)
+ VALUES('2025-04-05','alice','safety','retained log',99,7654,'2025-04-05T06:07:08Z');
+SQL
+  SNAP="$(sqlite3 "$RDB" "SELECT covered_lines,total_lines,recorded_at FROM coverage; SELECT param_name,current_type,target_type,fixed,fixed_at,github_issue FROM unsafe_params; SELECT github_issue,category,title,status,created_at,completed_at FROM gardening_tasks; SELECT date,contributor,category,description,pr_number,issue_number,created_at FROM gardening_log;")"
+  "$CG" --build-dir="$RX/_build/default" --db-path="$RDB" --schema-path="$HERE/architecture-schema.sql" >/dev/null
+  "$CG" --build-dir="$RX/_build/default" --db-path="$RDB" --schema-path="$HERE/architecture-schema.sql" >/dev/null
+  SNAP2="$(sqlite3 "$RDB" "SELECT covered_lines,total_lines,recorded_at FROM coverage; SELECT param_name,current_type,target_type,fixed,fixed_at,github_issue FROM unsafe_params; SELECT github_issue,category,title,status,created_at,completed_at FROM gardening_tasks; SELECT date,contributor,category,description,pr_number,issue_number,created_at FROM gardening_log;")"
+  [ "$SNAP" = "$SNAP2" ] || note "two reindexes must preserve every curation value and timestamp exactly"
+  printf 'let kept x = x + 1\n' > "$RX/src/reidx.ml"
+  (cd "$RX" && dune build >/dev/null)
+  "$CG" --build-dir="$RX/_build/default" --db-path="$RDB" --schema-path="$HERE/architecture-schema.sql" >/dev/null
+  ORPHAN="$(sqlite3 "$RDB" "SELECT function_id IS NULL,target_module_path,target_function_name FROM coverage;")"
+  [ "$ORPHAN" = "1|src/reidx.ml|removed" ] \
+    || note "removed coverage target must survive with durable path/name and NULL live id (got $ORPHAN)"
+  [ "$(sqlite3 "$RDB" 'SELECT count(*) FROM unsafe_params; SELECT count(*) FROM gardening_tasks; SELECT count(*) FROM gardening_log;')" = $'1\n1\n1' ] \
+    || note "removed targets must not delete unsafe/task/log ledger rows"
+  ORPHAN_SNAPSHOT="$(sqlite3 "$RDB" "
+    SELECT id,function_id IS NULL,target_module_path,target_function_name,covered_lines,total_lines,recorded_at FROM coverage;
+    SELECT id,function_id IS NULL,target_module_path,target_function_name,param_name,current_type,target_type,fixed,fixed_at,github_issue FROM unsafe_params;
+    SELECT id,target_module_id IS NULL,target_function_id IS NULL,target_module_path,target_function_module_path,target_function_name,github_issue,category,title,status,created_at,completed_at FROM gardening_tasks;
+    SELECT id,date,contributor,category,description,pr_number,issue_number,created_at FROM gardening_log;")"
+  [ "$(sqlite3 "$RDB" "SELECT target_module_path,target_function_name FROM unsafe_params; SELECT target_function_module_path,target_function_name FROM gardening_tasks;")" = $'src/reidx.ml|removed\nsrc/reidx.ml|removed' ] \
+    || note "every removed function ledger must retain its durable module/function identity"
+  # Once live IDs are NULL, subsequent backups must use durable identity rather
+  # than inner-joining the now-absent function. Exercise two more rebuilds so a
+  # one-generation orphan implementation cannot pass.
+  "$CG" --build-dir="$RX/_build/default" --db-path="$RDB" --schema-path="$HERE/architecture-schema.sql" >/dev/null
+  "$CG" --build-dir="$RX/_build/default" --db-path="$RDB" --schema-path="$HERE/architecture-schema.sql" >/dev/null
+  ORPHAN_SNAPSHOT_AFTER="$(sqlite3 "$RDB" "
+    SELECT id,function_id IS NULL,target_module_path,target_function_name,covered_lines,total_lines,recorded_at FROM coverage;
+    SELECT id,function_id IS NULL,target_module_path,target_function_name,param_name,current_type,target_type,fixed,fixed_at,github_issue FROM unsafe_params;
+    SELECT id,target_module_id IS NULL,target_function_id IS NULL,target_module_path,target_function_module_path,target_function_name,github_issue,category,title,status,created_at,completed_at FROM gardening_tasks;
+    SELECT id,date,contributor,category,description,pr_number,issue_number,created_at FROM gardening_log;")"
+  [ "$ORPHAN_SNAPSHOT" = "$ORPHAN_SNAPSHOT_AFTER" ] \
+    || note "orphan ledger rows and durable identity must survive every later reindex exactly"
+  rm -rf "$RX"
+fi
+
 rm -f "$DB" "$FLAT"
 if [ "$fails" -eq 0 ]; then echo "selftest-curation: PASS"; else echo "selftest-curation: $fails FAILURE(S)"; exit 1; fi

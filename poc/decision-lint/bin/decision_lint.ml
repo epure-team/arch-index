@@ -686,6 +686,7 @@ let n_decisions = ref 0
 let n_multi = ref 0
 let n_unknown = ref 0
 let n_files = ref 0
+let analyzed_inputs : (string * string * string) list ref = ref []
 let n_parse_fail = ref 0
 
 (* A file that PARSED but whose analysis raised. It used to be swallowed by `with _ -> ()`, so
@@ -2276,6 +2277,23 @@ let db_exec db sql =
 
 let sq s = "'" ^ String.concat "''" (String.split_on_char '\'' s) ^ "'"
 
+let db_path_normalise p =
+  let cwd = Sys.getcwd () in
+  let prefix = cwd ^ Filename.dir_sep in
+  let p =
+    if Filename.is_relative p then p
+    else if String.length p > String.length prefix
+            && String.sub p 0 (String.length prefix) = prefix
+    then String.sub p (String.length prefix) (String.length p - String.length prefix)
+    else p
+  in
+  let rec strip s =
+    if String.length s >= 2 && String.sub s 0 2 = "./" then
+      strip (String.sub s 2 (String.length s - 2))
+    else s
+  in
+  strip p
+
 (* module path -> (function_id, name, line_start, line_end) list *)
 let load_functions db =
   let tbl : (string, (int * string * int * int) list) Hashtbl.t = Hashtbl.create 64 in
@@ -2395,9 +2413,31 @@ let write_db path (armed : string) (frontend : string) (solver : string) =
     ~finally:(fun () -> ignore (Sqlite3.db_close db))
     (fun () ->
       let tbl = load_functions db in
+      let run_id = Printf.sprintf "%d-%d" (int_of_float (Unix.time ())) (Unix.getpid ()) in
+      let digest_query sql =
+        let rows = ref [] in
+        let rc = Sqlite3.exec_not_null db ~cb:(fun row _ -> rows := row.(0) :: !rows) sql in
+        if rc <> Sqlite3.Rc.OK then failwith (Sqlite3.errmsg db) ;
+        "md5:" ^ Digest.to_hex (Digest.string (String.concat "\n" (List.rev !rows)))
+      in
       db_exec db "BEGIN" ;
+      (try db_exec db "ALTER TABLE decisions ADD COLUMN analysis_run_id TEXT NOT NULL DEFAULT ''"
+       with _ -> ()) ;
       db_exec db "DELETE FROM conditions" ;
       db_exec db "DELETE FROM decisions" ;
+      db_exec db "CREATE TABLE IF NOT EXISTS decision_analysis_files(\
+                  run_id TEXT NOT NULL,file_path TEXT NOT NULL,content_digest TEXT NOT NULL,\
+                  file_mode TEXT NOT NULL,\
+                  PRIMARY KEY(run_id,file_path))" ;
+      db_exec db "DELETE FROM decision_analysis_files" ;
+      List.iter
+        (fun (file, content_digest, file_mode) ->
+          db_exec db
+            (Printf.sprintf
+               "INSERT INTO decision_analysis_files(run_id,file_path,content_digest,file_mode) \
+                VALUES(%s,%s,%s,%s)"
+               (sq run_id) (sq (db_path_normalise file)) (sq content_digest) (sq file_mode)))
+        !analyzed_inputs ;
       List.iter
         (fun f ->
           let fid =
@@ -2413,10 +2453,31 @@ let write_db path (armed : string) (frontend : string) (solver : string) =
           db_exec db
             (Printf.sprintf
                "INSERT INTO decisions (function_id, file_path, line, col, form, arity, \
-                verdict, decided_by, evidence, snippet) VALUES (%s,%s,%d,%d,%s,%d,%s,%s,%s,%s)"
-               fid (sq f.f_file) f.f_line f.f_col (sq f.f_form) f.f_arity (sq f.f_kind)
-               (sq decided_by) (sq f.f_evidence) (sq f.f_snippet)))
+                verdict, decided_by, evidence, snippet, analysis_run_id) \
+                VALUES (%s,%s,%d,%d,%s,%d,%s,%s,%s,%s,%s)"
+               fid (sq (db_path_normalise f.f_file)) f.f_line f.f_col (sq f.f_form) f.f_arity (sq f.f_kind)
+               (sq decided_by) (sq f.f_evidence) (sq f.f_snippet) (sq run_id)))
         (List.rev !findings) ;
+      let failures = !n_parse_fail + !n_walk_fail in
+      let outcome = if failures = 0 then "complete" else "partial" in
+      let source_digest =
+        digest_query
+          "SELECT hex(file_path)||':'||content_digest||':'||file_mode FROM decision_analysis_files \
+           ORDER BY file_path"
+      in
+      let index_digest =
+        digest_query
+          "SELECT hex(m.path)||':'||hex(f.name)||':'||f.id FROM functions f \
+           JOIN modules m ON m.id=f.module_id ORDER BY m.path,f.name,f.id"
+      in
+      let result_digest =
+        digest_query
+          (Printf.sprintf
+             "SELECT hex(file_path)||':'||line||':'||COALESCE(col,'')||':'||hex(form)||':'||arity||':'||\
+              hex(verdict)||':'||hex(decided_by)||':'||hex(COALESCE(evidence,''))||':'||hex(COALESCE(snippet,'')) \
+              FROM decisions WHERE analysis_run_id=%s ORDER BY file_path,line,col,form,verdict,evidence,snippet"
+             (sq run_id))
+      in
       (* Degradation must be visible (§8.4): a clean result on a run where the
          solver was absent must not look like a clean result on one where it
          ran. *)
@@ -2427,7 +2488,15 @@ let write_db path (armed : string) (frontend : string) (solver : string) =
                "INSERT OR REPLACE INTO comment_db_meta (key, value) VALUES (%s,%s)"
                (sq k) (sq v)))
         [
-          ("decision_analysis", "v1");
+          ("decision_contract", "v1");
+          ("decision_outcome", outcome);
+          ("decision_failures", string_of_int failures);
+          ("decision_universe", string_of_int (List.length !analyzed_inputs));
+          ("decision_run_id", run_id);
+          ("decision_producer_version", "decision-lint-v1");
+          ("decision_source_digest", source_digest);
+          ("decision_index_digest", index_digest);
+          ("decision_result_digest", result_digest);
           ("decision_armed_rungs", armed);
           ("decision_frontend", frontend);
           ("decision_solver", solver);
@@ -2515,9 +2584,15 @@ let () =
      let cmts =
        List.sort compare (List.fold_left (fun a r -> collect_ext ".cmt" r a) [] roots)
      in
+     analyzed_inputs := List.map (fun f ->
+       let mode = Printf.sprintf "%03o" ((Unix.stat f).st_perm land 0o777) in
+       (f, "md5:" ^ Digest.to_hex (Digest.file f), mode)) cmts ;
      List.iter Tt.run_cmt cmts
    else
      let files = List.sort compare (List.fold_left (fun acc r -> collect_ml r acc) [] roots) in
+     analyzed_inputs := List.map (fun f ->
+       let mode = Printf.sprintf "%03o" ((Unix.stat f).st_perm land 0o777) in
+       (f, "md5:" ^ Digest.to_hex (Digest.file f), mode)) files ;
      List.iter
     (fun f ->
       incr n_files ;
@@ -2547,7 +2622,9 @@ let () =
   (match db_path with
   | Some p -> (
       try write_db p armed frontend solver
-      with e -> Printf.eprintf "decision-lint: --db failed: %s\n" (Printexc.to_string e))
+      with e ->
+        Printf.eprintf "decision-lint: --db failed: %s\n" (Printexc.to_string e) ;
+        exit 2)
   | None -> ()) ;
   List.iter
     (fun x ->

@@ -71,6 +71,18 @@ val backup_intents : Sqlite3.db -> intent_backup
     (none) *)
 val restore_intents : Sqlite3.db -> intent_backup -> unit
 
+(** Snapshot every human curation ledger into transaction-local temporary
+    tables, carrying stable module/function identity across destructive IDs. *)
+val backup_curation : Sqlite3.db -> unit
+
+(** Remove decision/effect results, universes, and completion metadata inside
+    the rebuild transaction. A producer must restamp against the new index. *)
+val invalidate_analysis : Sqlite3.db -> unit
+
+(** Restore curation snapshots, remapping surviving identities and retaining
+    durable identity with a NULL live ID for removed targets. *)
+val restore_curation : Sqlite3.db -> unit
+
 (** Resolve source path for a [.cmt], including [.pp.ml] original files.
 
     {pre}

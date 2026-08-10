@@ -55,14 +55,10 @@ let read_lines path line_start line_end =
     close_in ic ;
     List.rev !lines
 
-(** Strip leading/trailing whitespace from each line, drop blank lines, and
-    rejoin.  This is intentionally lightweight — good enough to paper over
-    indentation and trailing-space differences without requiring an external
-    formatter process. *)
-let normalise lines =
-  lines |> List.map String.trim
-  |> List.filter (fun s -> s <> "")
-  |> String.concat "\n"
+(** Conservative, language-independent canonicalisation.  Without a lexer for
+    the source language, whitespace may be part of a literal or comment, so no
+    whitespace transformation is sound. *)
+let normalise lines = String.concat "\n" lines
 
 (* -------------------------------------------------------------------------- *)
 (* DB query                                                                   *)
@@ -116,7 +112,7 @@ let fetch_rows db ~project_root fn_name =
     @param project_root  Absolute path to the repository root (prepended to
                          module paths when reading source files).
     @param fn_name  The function name to look up (exact match). *)
-let compare_bodies db ~project_root fn_name =
+let compare_bodies_with_digest ~digest_of_body db ~project_root fn_name =
   let rows = fetch_rows db ~project_root fn_name in
   match rows with
   | [] -> Not_found
@@ -126,22 +122,32 @@ let compare_bodies db ~project_root fn_name =
           (fun (abs_path, rel_path, line_start, line_end) ->
             let lines = read_lines abs_path line_start line_end in
             let body = normalise lines in
-            let digest = Digest.to_hex (Digest.string body) in
+            let digest = digest_of_body body in
             {path = rel_path; line_start; line_end; body; digest})
           rows
       in
-      (* Group by digest *)
+      (* A digest only indexes candidates.  Canonical bytes, not the digest,
+         establish equality, including when a digest collision is forced. *)
       let tbl : (string, occurrence list) Hashtbl.t = Hashtbl.create 4 in
       List.iter
         (fun occ ->
+          let key = occ.body in
           let existing =
-            match Hashtbl.find_opt tbl occ.digest with
+            match Hashtbl.find_opt tbl key with
             | Some lst -> lst
             | None -> []
           in
-          Hashtbl.replace tbl occ.digest (existing @ [occ]))
+          Hashtbl.replace tbl key (existing @ [occ]))
         occurrences ;
       if Hashtbl.length tbl = 1 then Identical occurrences
       else
         Differs
-          (Hashtbl.fold (fun digest occs acc -> (digest, occs) :: acc) tbl [])
+          (Hashtbl.fold
+             (fun _ occs acc ->
+               match occs with [] -> acc | occ :: _ -> (occ.digest, occs) :: acc)
+             tbl
+             [])
+
+let compare_bodies =
+  compare_bodies_with_digest ~digest_of_body:(fun body ->
+      Digest.to_hex (Digest.string body))

@@ -1,4 +1,4 @@
 (executable
  (name main)
  (public_name arch_effects_load)
- (libraries arch_effects cmdliner sqlite3))
+ (libraries arch_effects cmdliner sqlite3 unix))

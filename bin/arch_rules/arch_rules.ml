@@ -247,7 +247,17 @@ let eval (t : Arch_db.t) (g : Arch_graph.t) ~sound r =
                   (Arch_sel.to_string s))
            else None) }
   | Effect (s, kind) ->
-      if not (Arch_db.nonempty t "function_effects") then
+      let src = Arch_sel.select g s in
+      let cone = SS.union src (Arch_graph.closure src g.fwd) in
+      let names =
+        SS.fold
+          (fun k acc ->
+            match Arch_graph.SM.find_opt k g.nodes with
+            | Some (n : Arch_graph.node) -> n.name :: acc
+            | None -> acc)
+          cone []
+      in
+      if not (Arch_db.effect_cone_complete t names) then
         { rule = r.name; kind = kind_of r.body; exact = false; verdict = "NOT_COMPUTED"; detail = [];
           detail_total = 0; sizes = None;
           note =
@@ -255,22 +265,12 @@ let eval (t : Arch_db.t) (g : Arch_graph.t) ~sound r =
               "this index has no effects data — 'no effect found' would be a lie. Effects are \
                produced by the OCaml .cmt backend (effects-schema-migration.sql + arch-effects-load)." }
       else
-        let src = Arch_sel.select g s in
-        let cone = SS.union src (Arch_graph.closure src g.fwd) in
-        let names =
-          SS.fold
-            (fun k acc ->
-              match Arch_graph.SM.find_opt k g.nodes with
-              | Some (n : Arch_graph.node) -> n.name :: acc
-              | None -> acc)
-            cone []
-        in
         let json = Yojson.Safe.to_string (`List (List.map (fun n -> `String n) names)) in
         let hits =
           Arch_db.rows t
             ~params_ty:Arch_db.Ty.(t2 string string)
             ~shape:Arch_db.Rows.t3' ~to_cells:Arch_db.Rows.c3
-            "SELECT DISTINCT function_name, effect_kind, value_kind FROM function_effects WHERE \
+            "SELECT DISTINCT function_name, value_kind, COALESCE(target,'') FROM function_effects WHERE \
              function_name IN (SELECT value FROM json_each(?)) AND value_kind = ?"
             (json, kind)
         in
@@ -343,33 +343,39 @@ let symbol = function
 
 let () =
   let args = List.tl (Array.to_list Sys.argv) in
-  let opt name default =
-    let rec go = function
-      | a :: v :: _ when a = name -> v
-      | _ :: tl -> go tl
-      | [] -> default
-    in
-    go args
+  let values = Hashtbl.create 8 and positional = ref [] in
+  let value_options =
+    [ "--format"; "--on-unknown"; "--on-possible"; "--on-vacuous";
+      "--on-not-computed" ]
   in
-  let positional = ref [] in
-  let rec strip = function
-    | a :: _ :: tl when String.length a > 2 && String.sub a 0 2 = "--" -> strip tl
-    | a :: tl ->
-        positional := a :: !positional ;
-        strip tl
+  let rec parse = function
     | [] -> ()
+    | a :: tl when List.mem a value_options -> (
+        if Hashtbl.mem values a then die ("arch-rules: duplicate option " ^ a) ;
+        match tl with
+        | [] -> die ("arch-rules: missing value for " ^ a)
+        | v :: _ when String.length v >= 2 && String.sub v 0 2 = "--" ->
+            die ("arch-rules: missing value for " ^ a)
+        | v :: rest -> Hashtbl.add values a v ; parse rest)
+    | a :: _ when String.length a >= 2 && String.sub a 0 2 = "--" ->
+        die ("arch-rules: unknown option " ^ a)
+    | a :: tl -> positional := a :: !positional ; parse tl
   in
-  strip args ;
+  parse args ;
   let positional = List.rev !positional in
   let db_path, rules_path =
     match positional with
     | [ d ] -> (d, "arch-rules.txt")
-    | d :: r :: _ -> (d, r)
+    | [ d; r ] -> (d, r)
+    | _ :: _ :: _ -> die "arch-rules: unexpected extra positional argument"
     | [] ->
         prerr_endline usage ;
         exit 2
   in
+  let opt name default = Option.value ~default (Hashtbl.find_opt values name) in
   let fmt = opt "--format" "text" in
+  if not (List.mem fmt [ "text"; "md"; "json" ]) then
+    die (Printf.sprintf "arch-rules: --format takes text, md, or json, got %S" fmt) ;
   (* A misspelled policy used to be read as "not fail" and silently disabled the gate:
      `--on-possible fial` turned a failing rule green. A policy flag that can be typo'd into
      permissiveness is worse than no flag. *)

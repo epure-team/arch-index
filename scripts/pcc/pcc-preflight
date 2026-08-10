@@ -5,27 +5,76 @@
 #
 # Usage: pcc-preflight
 #
-# Prints {"ok":bool,"tests":int} on stdout. The engine gates on the EXIT CODE alone (per
+# Prints one arch-index.pcc.preflight.v1 JSON envelope whose status/ok agree with its exit code.
 # round-2 review finding F7 in docs/proof-carrying-change.md) — "ok"/"tests" are receipt data
 # for a human reading the ledger, never evaluated as the gate condition. So the exit code MUST
 # track the test suite's real pass/fail, and "ok" is kept consistent with it only as a matter
 # of not lying in the receipt.
 set -uo pipefail
 
+script_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+manifest_tool="$script_dir/pcc-target-manifest"
+evidence_tool="$script_dir/pcc-evidence"
+
+emit() {
+  PCC_STATUS="$1" PCC_OK="$2" PCC_TESTS="$3" \
+  python3 - "$before_file" "$after_file" "$capture_file" <<'PY'
+import json,os
+b=json.load(open(__import__('sys').argv[1])); a=json.load(open(__import__('sys').argv[2]))
+capture=json.load(open(__import__('sys').argv[3])); shared=capture["actual"]
+same_head=b["manifest"]["base_oid"]==a["manifest"]["base_oid"]
+actual_tools=shared["tool_bundle_digest"]
+expected_baseline=shared["baseline_oid"]
+expected_target=shared["target_digest"]
+expected_policy=shared["policy_digest"]
+expected_tools=actual_tools
+expected_inputs=shared["expected_inputs_digest"]
+if capture["request_mismatches"]: os.environ["PCC_STATUS"]="refused"; os.environ["PCC_OK"]="false"
+d={"schema":"arch-index.pcc.preflight.v1","status":os.environ["PCC_STATUS"],
+"ok":os.environ["PCC_OK"]=="true","baseline_oid":b["manifest"]["base_oid"],
+"head_oid":a["manifest"]["base_oid"],"head_unchanged":same_head,
+"target_digest":a["target_digest"],"target_digest_before":b["target_digest"],
+"target_digest_after":a["target_digest"],"expected_inputs_digest":expected_inputs,
+"expected_target_digest":expected_target,
+"policy_digest":expected_policy,"tool_bundle_digest":actual_tools,
+"tests":int(os.environ["PCC_TESTS"]),"caller_sandbox_required":True,
+"read_only_source_enforced":False,"network_isolated":False,
+"ambient_secrets_blocked":False}
+print(json.dumps(d,sort_keys=True,separators=(",",":")))
+PY
+}
+
 if ! command -v dune >/dev/null 2>&1; then
   echo "pcc-preflight: dune not found on PATH" >&2
   exit 2
 fi
+command -v python3 >/dev/null 2>&1 || { echo "pcc-preflight: python3 not found on PATH" >&2; exit 2; }
+[ -x "$manifest_tool" ] || { echo "pcc-preflight: target manifest tool is unavailable" >&2; exit 2; }
+before_file="$(mktemp)"; after_file="$(mktemp)"; capture_file="$(mktemp)"
+target_artifact=""; inputs_artifact=""; build_log=""; test_log=""
+trap 'rm -f "$build_log" "$test_log" "$before_file" "$after_file" "$capture_file" "$target_artifact" "$inputs_artifact"' EXIT
+"$evidence_tool" capture >"$capture_file"; capture_rc=$?
+[ "$capture_rc" -eq 2 ] && exit 2
+target_artifact="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["target_artifact"])' "$capture_file")"
+inputs_artifact="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["expected_inputs_artifact"])' "$capture_file")"
+if [ "$capture_rc" -eq 3 ]; then "$evidence_tool" refusal preflight "$capture_file" || true; exit 3; fi
+python3 - "$capture_file" "$before_file" <<'PY'
+import json,sys
+c=json.load(open(sys.argv[1])); json.dump(json.load(open(c["target_artifact"])),open(sys.argv[2],"w"),sort_keys=True,separators=(",",":"))
+PY
+before="$(cat "$before_file")"
 
 build_log="$(mktemp)"
 test_log="$(mktemp)"
-trap 'rm -f "$build_log" "$test_log"' EXIT
 
 if ! dune build >"$build_log" 2>&1; then
   cat "$build_log" >&2
   echo "pcc-preflight: dune build failed" >&2
-  printf '{"ok": false, "tests": 0}\n'
-  exit 1
+  "$manifest_tool" >"$after_file" || exit 2; after="$(cat "$after_file")"
+  if [ "$(printf '%s\n%s' "$before" "$after" | python3 -c 'import json,sys; a=json.loads(sys.stdin.readline()); b=json.loads(sys.stdin.readline()); print(a["target_digest"]==b["target_digest"])')" != True ]; then
+    emit refused false 0; exit 3
+  fi
+  emit fail false 0; exit 1
 fi
 
 dune test >"$test_log" 2>&1
@@ -40,9 +89,17 @@ tests="$(grep -oE '[0-9]+ tests? run' "$test_log" | grep -oE '^[0-9]+' | \
   awk '{s+=$1} END {print s+0}')"
 
 if [ "$rc" -eq 0 ]; then
-  printf '{"ok": true, "tests": %d}\n' "$tests"
+  "$manifest_tool" >"$after_file" || exit 2; after="$(cat "$after_file")"
+  if [ "$(printf '%s\n%s' "$before" "$after" | python3 -c 'import json,sys; a=json.loads(sys.stdin.readline()); b=json.loads(sys.stdin.readline()); print(a["target_digest"]==b["target_digest"])')" != True ]; then
+    emit refused false "$tests"; exit 3
+  fi
+  emit pass true "$tests"
   exit 0
 else
-  printf '{"ok": false, "tests": %d}\n' "$tests"
+  "$manifest_tool" >"$after_file" || exit 2; after="$(cat "$after_file")"
+  if [ "$(printf '%s\n%s' "$before" "$after" | python3 -c 'import json,sys; a=json.loads(sys.stdin.readline()); b=json.loads(sys.stdin.readline()); print(a["target_digest"]==b["target_digest"])')" != True ]; then
+    emit refused false "$tests"; exit 3
+  fi
+  emit fail false "$tests"
   exit 1
 fi
