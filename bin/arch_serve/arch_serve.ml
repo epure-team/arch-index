@@ -436,6 +436,36 @@ let serve db_path port =
         Printf.eprintf "arch-serve: cannot open database: %s: No such file or directory\n%!" db_path;
         exit 1
     in
+    (* Every query below reads `functions.file_path`, which exists on the FLAT
+       schema (the LSP/arch-load shape) and not on the MAIN one, where a
+       function points at a module row instead. Opening a main-schema index
+       used to reach the first prepare and die with an uncaught
+       Sqlite3.Error("no such column: file_path") — an internal error where the
+       honest answer is "this tool does not read that shape yet".
+
+       Checked once, up front, rather than per endpoint: a server that starts
+       and then 500s on every request is worse than one that refuses to start. *)
+    let has_file_path =
+      let stmt = Sqlite3.prepare db "PRAGMA table_info(functions)" in
+      let found = ref false in
+      (try
+         while Sqlite3.step stmt = Sqlite3.Rc.ROW do
+           if col_text stmt 1 = "file_path" then found := true
+         done
+       with _ -> ()) ;
+      (try Sqlite3.finalize stmt |> ignore with _ -> ()) ;
+      !found
+    in
+    if not has_file_path then begin
+      Printf.eprintf
+        "arch-serve: %s uses the MAIN schema (functions.module_id), which this \
+         server does not read yet.\n\
+         arch-serve: it serves the FLAT schema produced by `arch-index` (LSP) \
+         and `arch-load`.\n\
+         arch-serve: use `arch-query` for a main-schema index.\n%!"
+        db_path ;
+      exit 2
+    end ;
     let fp_arr = build_file_path_array db in
     let stop_p, stop_r = Eio.Promise.create () in
     let resolve_stop () =

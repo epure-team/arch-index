@@ -63,6 +63,7 @@ arch-index makes call-graph reachability answerable as a SQL query:
 - **Targeted mutation testing** — `./arch-mutants plan` decides what is worth mutating (test-reachable code only) and which tests must rerun for each target; `./arch-mutants report` attributes each surviving mutant to the tests that should have killed it. No engine of its own — it drives Mutaml, cargo-mutants, go-mutesting and friends. See [mutation testing](docs/mutation-testing.md).
 - **Reachability-weighted coverage** — `./arch-coverage /tmp/repo.db coverage.lcov` answers which API-reachable functions are never exercised, which covered functions are only ⊤-reachable, and — crossed with `arch-mutants` — which are covered by tests that check nothing. LCOV in, so it works for every language. See [coverage](docs/coverage.md).
 - **Agent access over MCP** — `arch_mcp` serves these verdicts to an agent, with a `provenance` block on every answer so it can tell "UNREACHABLE, proved over a ⊤-marked index" from "UNREACHABLE on an index that never marked ⊤". See [MCP server](docs/mcp-server.md).
+- **Browsable index** — `./arch-serve /tmp/repo.db` serves the call graph as a local SPA on `http://localhost:7371` (loopback only), for the questions that are faster to answer by looking than by querying. Reads the flat schema produced by `arch-index` and `arch-load`; a main-schema index (from `arch-callgraph-ocaml`) is declined with a pointer to `arch-query`. See [arch-serve](docs/arch-serve.md).
 - **Architecture fitness functions** — `./arch-rules /tmp/repo.db arch-rules.txt` enforces layering, export-surface and effect rules over the *sound* graph. Unlike ArchUnit/deptrac/import-linter, which check declared imports, it answers whether a call can actually reach — and says `UNKNOWN` instead of a green tick when it cannot tell. See [fitness functions](docs/fitness-functions.md).
 
 ## Documentation
@@ -71,6 +72,7 @@ arch-index makes call-graph reachability answerable as a SQL query:
 - [Mutation testing, targeted by the call graph](docs/mutation-testing.md)
 - [Reachability-weighted coverage](docs/coverage.md)
 - [MCP server for agents](docs/mcp-server.md)
+- [Browsing the index with arch-serve](docs/arch-serve.md)
 - [Change impact for reviewers and agents](docs/change-impact.md)
 - [Architecture fitness functions](docs/fitness-functions.md)
 - [Edge-kind contract & soundness](docs/edge-kind-contract.md)

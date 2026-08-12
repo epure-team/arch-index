@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# arch-serve — browse an arch-index comment_db (SQLite) in a browser.
+#
+# Thin wrapper over the OCaml binary, matching the arch-query pattern. The
+# implementation lives in bin/arch_serve/; run `dune build bin/arch_serve` (or ./build.sh) first.
+#
+# Usage: ./arch-serve DB [--port PORT]   (default port 7371, loopback only)
+HERE="$(cd "$(dirname "$0")" && pwd)"
+for cand in "$HERE/bin/arch-serve" "$HERE/_build/default/bin/arch_serve/arch_serve.exe"; do
+  [ -x "$cand" ] && exec "$cand" "$@"
+done
+echo "arch-serve: binary not found; run: dune build bin/arch_serve" >&2
+exit 2

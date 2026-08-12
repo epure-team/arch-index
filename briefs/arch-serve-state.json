@@ -1,13 +1,50 @@
 {
   "task": "arch-serve",
   "mode": "full",
-  "current_phase": "qa",
+  "current_phase": "ship",
   "events": [
-    { "phase": "intake", "outcome": "VALIDATED", "at": "2026-06-25T00:00:00Z", "by": "roster-intake" },
-    { "phase": "spec", "outcome": "VALIDATED", "at": "2026-06-25T00:00:00Z", "by": "roster-spec" },
-    { "phase": "plan", "outcome": "COMPLETED", "at": "2026-06-25T00:00:00Z", "by": "roster-plan" },
-    { "phase": "implement", "outcome": "COMPLETED", "at": "2026-06-25T00:00:00Z", "by": "roster-implement" },
-    { "phase": "review", "outcome": "GO", "at": "2026-06-25T00:00:00Z", "by": "roster-review" },
-    { "phase": "qa", "outcome": "GO", "at": "2026-06-25T00:00:00Z", "by": "roster-qa" }
+    {
+      "phase": "intake",
+      "outcome": "VALIDATED",
+      "at": "2026-06-25T00:00:00Z",
+      "by": "roster-intake"
+    },
+    {
+      "phase": "spec",
+      "outcome": "VALIDATED",
+      "at": "2026-06-25T00:00:00Z",
+      "by": "roster-spec"
+    },
+    {
+      "phase": "plan",
+      "outcome": "COMPLETED",
+      "at": "2026-06-25T00:00:00Z",
+      "by": "roster-plan"
+    },
+    {
+      "phase": "implement",
+      "outcome": "COMPLETED",
+      "at": "2026-06-25T00:00:00Z",
+      "by": "roster-implement"
+    },
+    {
+      "phase": "review",
+      "outcome": "GO",
+      "at": "2026-06-25T00:00:00Z",
+      "by": "roster-review"
+    },
+    {
+      "phase": "qa",
+      "outcome": "GO",
+      "at": "2026-06-25T00:00:00Z",
+      "by": "roster-qa"
+    },
+    {
+      "phase": "ship",
+      "outcome": "COMPLETED",
+      "at": "2026-08-12T00:00:00Z",
+      "by": "roster-ship",
+      "note": "Root wrapper, docs/arch-serve.md, README entries, selftest-serve.sh, CI wiring. Shipping surfaced that the server only reads the FLAT schema: a main-schema index died with an uncaught Sqlite3.Error(no such column: file_path) and now exits 2 with a pointer to arch-query. Main-schema support remains UNIMPLEMENTED and is documented as a gap, not a decision."
+    }
   ]
 }
