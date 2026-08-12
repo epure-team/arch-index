@@ -179,7 +179,7 @@ assert d["verdict"] == "pass", d["verdict"]  # UNKNOWN_NO_CONTRACT is fail-open 
 [ $? -eq 0 ] || note "verdict 'pass' above must correspond to exit code 0 (fail-open UNKNOWN_NO_CONTRACT, default policy)"
 
 # --- contract_ok is the STRICT check, not just "flag present": same malformed-⊤-marked fixture
-# as selftest-contract.sh's "ML" case and selftest-impact.sh's 4d — the flag is set, `kind`
+# as tezt/tests/contract.ml's malformed fixture and selftest-impact.sh's 4d — the flag is set, `kind`
 # exists, but a REAL edge has kind=NULL (invisible to SQL's 3-valued logic). Both arch-impact and
 # arch-rules must agree this index is NOT sound, from the exact same Arch_db.contract_ok helper.
 ML="$(mktemp --suffix=.db)"; rm -f "$ML"
