@@ -16,6 +16,9 @@ jobs:
     # nothing, which is the failure mode the Tezt port exists to remove.
     env:
       ARCH_TEZT_REQUIRE_SERVERS: '1'
+      # The shell suite ran the soundness corpus under STRICT=1; this is the same
+      # switch, so a P2 target that regresses is red rather than a logged xfail.
+      ARCH_TEZT_STRICT_P2: '1'
     steps:
       - uses: actions/checkout@v4
         with:
@@ -33,7 +36,7 @@ jobs:
         with:
           node-version: '22'
       # The LSP-path tests drive REAL language servers: tezt/tests/multilang.ml
-      # and selftest-lsp-languages.sh both report "not exercised" without them
+      # and both report "not exercised" without them
       # and cover precisely nothing, which is what they did here until now.
       #
       # Versions are pinned so that a regression on the server side arrives as a
@@ -59,27 +62,13 @@ jobs:
       # indexer's module-language shapes and, now that the servers above are
       # installed, the polyglot indexing path for real.
       - name: Unit and integration tests
-        run: opam exec -- dune test
-      - name: Shell integration tests
         run: |
-          # selftest-pcc.sh (via pcc-index/pcc-preflight) runs `dune build`/`dune test` directly
-          # on OTHER OCaml projects at RUNTIME, not just at this repo's own build time — unlike
-          # the other selftests here, it genuinely needs `dune` resolvable via bare PATH in
-          # THIS shell, not just inside opam's own switch context. `opam exec --`-wrapping every
-          # single invocation below would be noisy; activating the switch once for the whole
-          # step is the same idiom selftest-callgraph-ocaml.sh already uses internally.
+          # `eval opam env`, not just `opam exec --`: the Tezt suite drives `dune`
+          # and `go` against OTHER projects at RUNTIME (the pcc and callgraph-go
+          # tests build throwaway repos), so they need to be resolvable via bare
+          # PATH in this shell, not only inside opam exec's child.
           eval "$(opam env)"
-          chmod +x selftest-effects.sh selftest-callgraph-ocaml.sh selftest-callgraph-soundness.sh selftest-callgraph-go.sh selftest-impact.sh
-          chmod +x selftest-rules.sh selftest-pcc.sh selftest-callgraph-nested.sh selftest-lsp-languages.sh
-          ./selftest-impact.sh
-          ./selftest-rules.sh
-          ./selftest-effects.sh
-          ./selftest-callgraph-ocaml.sh
-          ./selftest-callgraph-nested.sh
-          ./selftest-lsp-languages.sh
-          STRICT=1 ./selftest-callgraph-soundness.sh
-          ./selftest-callgraph-go.sh
-          ./selftest-pcc.sh
+          dune test
       - name: Self-index smoke test
         run: |
           BIN="./_build/default/bin/arch_callgraph_ocaml/arch_callgraph_ocaml.exe"

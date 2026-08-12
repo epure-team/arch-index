@@ -17,10 +17,7 @@
 
 open Arch_tezt
 
-let build name sql =
-  let db = temp_db name in
-  Db.with_db_rw db (fun conn -> Db.exec conn sql) ;
-  db
+let build name sql = Fixture.raw ~name sql
 
 (* clean --MUST--> a --MAY_ENUMERATED--> b ; dirty --MUST--> t --MAY_TOP--> *TOP* ; z isolated *)
 let marked () =
