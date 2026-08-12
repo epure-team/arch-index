@@ -141,7 +141,7 @@ assert isinstance(r["findings"]["reason"], str) and r["findings"]["reason"], r["
 ' 2>/dev/null || note "computed/contract_ok/verdict/findings.computed+reason must be present and coherent"
 
 # --- 4d. contract_ok must be the STRICT check, not just "flag present" --------------------
-# Same malformed-⊤-marked fixture as selftest-contract.sh's "ML" case: the flag is set, the
+# Same malformed-⊤-marked fixture as tezt/tests/contract.ml's: the flag is set, the
 # `kind` column exists, but a REAL edge has kind=NULL — invisible to SQL's 3-valued logic, and
 # `t.contract <> None && t.kinded` alone would call this index sound. It is not: Arch_db.contract_ok
 # (require_contract's full check) must say false here, same as arch-rules reports for the same DB.

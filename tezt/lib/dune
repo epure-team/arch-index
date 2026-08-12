@@ -1,3 +1,3 @@
 (library
  (name arch_tezt)
- (libraries tezt sqlite3 unix))
+ (libraries tezt sqlite3 unix yojson))

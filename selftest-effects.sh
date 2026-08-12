@@ -295,8 +295,15 @@ GOCODE
       fi
 
       # ── edge-kind integrity ──
-      bad_go=$(sqlite3 "$DB_Go" "SELECT count(*) FROM calls WHERE kind IS NULL OR kind NOT IN ('MUST','MAY_ENUMERATED','MAY_TOP');")
-      [ "${bad_go:-0}" -eq 0 ] || note "Go: $bad_go edges with invalid kind"
+      # Not `${bad_go:-0}`: this assertion expects ABSENCE, so defaulting an
+      # empty capture to 0 turns a query that failed to run into a pass. A
+      # broken column name here would have reported clean edge kinds forever.
+      bad_go=$(sqlite3 "$DB_Go" "SELECT count(*) FROM calls WHERE kind IS NULL OR kind NOT IN ('MUST','MAY_ENUMERATED','MAY_TOP');" 2>&1)
+      case "$bad_go" in
+        0)          : ;;
+        ''|*[!0-9]*) note "Go: edge-kind integrity query did not return a count: ${bad_go:-<empty>}" ;;
+        *)          note "Go: $bad_go edges with invalid kind" ;;
+      esac
     fi
   fi
 fi

@@ -69,29 +69,17 @@ jobs:
           # single invocation below would be noisy; activating the switch once for the whole
           # step is the same idiom selftest-callgraph-ocaml.sh already uses internally.
           eval "$(opam env)"
-          chmod +x selftest-contract.sh selftest-load.sh selftest-effects.sh selftest-callgraph-ocaml.sh selftest-callgraph-soundness.sh selftest-callgraph-go.sh selftest-impact.sh
-          chmod +x selftest-rules.sh selftest-mutants.sh selftest-coverage.sh selftest-decision-lint.sh selftest-pcc.sh
-          chmod +x selftest-health.sh selftest-duplicates.sh selftest-curation.sh selftest-curation-doc.sh
-          chmod +x selftest-callgraph-nested.sh selftest-lsp-languages.sh selftest-serve.sh
-          ./selftest-contract.sh
-          ./selftest-load.sh
+          chmod +x selftest-effects.sh selftest-callgraph-ocaml.sh selftest-callgraph-soundness.sh selftest-callgraph-go.sh selftest-impact.sh
+          chmod +x selftest-rules.sh selftest-pcc.sh selftest-callgraph-nested.sh selftest-lsp-languages.sh
           ./selftest-impact.sh
           ./selftest-rules.sh
-          ./selftest-mutants.sh
-          ./selftest-coverage.sh
           ./selftest-effects.sh
-          ./selftest-health.sh
-          ./selftest-duplicates.sh
-          ./selftest-curation.sh
-          ./selftest-curation-doc.sh
           ./selftest-callgraph-ocaml.sh
           ./selftest-callgraph-nested.sh
           ./selftest-lsp-languages.sh
           STRICT=1 ./selftest-callgraph-soundness.sh
           ./selftest-callgraph-go.sh
-          ./selftest-decision-lint.sh
           ./selftest-pcc.sh
-          ./selftest-serve.sh
       - name: Self-index smoke test
         run: |
           BIN="./_build/default/bin/arch_callgraph_ocaml/arch_callgraph_ocaml.exe"

@@ -31,5 +31,13 @@
   %{exe:../../bin/arch_callgraph_ocaml/arch_callgraph_ocaml.exe}
   %{exe:../../bin/arch_query/arch_query.exe}
   %{exe:../../bin/arch_index_cli/arch_index_cli.exe}
+  %{exe:../../bin/arch_load/arch_load.exe}
+  %{exe:../../bin/arch_body_compare/arch_body_compare.exe}
+  %{exe:../../bin/arch_coverage_load/arch_coverage_load.exe}
+  %{exe:../../bin/arch_curate/arch_curate.exe}
+  %{exe:../../bin/arch_coverage/arch_coverage.exe}
+  %{exe:../../bin/arch_serve/arch_serve.exe}
+  %{exe:../../bin/arch_mutants/arch_mutants.exe}
+  %{exe:../../poc/decision-lint/bin/decision_lint.exe}
   ../../architecture-schema.sql
   servers.version))
