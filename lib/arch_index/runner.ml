@@ -272,6 +272,28 @@ let run ~sw ~env ~project_dir ~language ~output ?(no_enrich = false)
                 if verbose then
                   Arch_io.eprintf "arch_index_lsp: LSP start failed: %s\n%!" msg
             | Ok client ->
+                (* Wait for the server's own "I am done indexing" signal before
+                   asking it anything. Bounded on both sides, and a false here
+                   only means we learned nothing — the extractor's retry sweep
+                   is still behind us.
+
+                   The budget is a FRACTION of the pipeline timeout, never a
+                   constant: a fixed wait longer than [timeout_s] would spend
+                   the entire run waiting to start and report "0 functions, 0
+                   calls" — the readiness fix causing the very emptiness it
+                   exists to prevent. Half leaves the other half for the work
+                   itself. *)
+                let ready =
+                  Lsp_client.await_ready
+                    client
+                    ~timeout:(timeout_s /. 2.)
+                    ~grace:(Float.min 5.0 (timeout_s /. 6.))
+                in
+                if verbose then
+                  Arch_io.printf
+                    "arch_index_lsp: server readiness: %s\n%!"
+                    (if ready then "reported complete"
+                     else "not reported (falling back to bounded retry)") ;
                 if verbose then
                   Arch_io.printf "arch_index_lsp: extracting symbols...\n%!" ;
                 let fn_rows =

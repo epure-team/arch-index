@@ -15,6 +15,8 @@ type t = {
   send_notify : string -> unit;
       (** Send a notification (fire-and-forget: writes only, no read). *)
   await_proc : unit -> Eio.Process.exit_status;
+  await_ready : timeout:float -> grace:float -> bool;
+      (** Block until the server reports its background work finished. *)
 }
 
 (* --- LSP Content-Length framing ------------------------------------------ *)
@@ -74,7 +76,7 @@ let start ~sw ~env ~command ~args ~project_dir ?(init_options = `Null) () =
   let clock = Eio.Stdenv.clock env in
   let stdin_r, stdin_w = Eio.Process.pipe ~sw proc_mgr in
   let stdout_r, stdout_w = Eio.Process.pipe ~sw proc_mgr in
-  let await_proc, transport, send_notify =
+  let await_proc, transport, send_notify, await_ready =
     match
       Eio.Process.spawn
         ~sw
@@ -94,31 +96,50 @@ let start ~sw ~env ~command ~args ~project_dir ?(init_options = `Null) () =
         in
         let mutex = Eio.Mutex.create () in
         let write_mutex = Eio.Mutex.create () in
-        (* [is_notification raw] returns true when [raw] is a JSON-RPC
-           notification (has "method" but no numeric "id").  LSP servers may
-           send notifications (e.g. window/logMessage, $/progress) before or
-           between responses; we must skip them when waiting for a reply. *)
-        let is_notification raw =
+        (* An incoming frame is one of three things, and conflating the last two
+           is a bug: a server-to-client REQUEST carries both "method" and a
+           non-null "id", so a predicate that only asks "is there an id?" hands
+           it back to the caller as if it were the reply to their own call. *)
+        let classify raw =
           match Yojson.Safe.from_string raw with
-          | `Assoc fields ->
-              List.mem_assoc "method" fields
-              && ((not (List.mem_assoc "id" fields))
-                 ||
-                 match List.assoc_opt "id" fields with
-                 | Some `Null -> true
-                 | _ -> false)
-          | _ -> false
-          | exception _ -> false
+          | `Assoc fields -> (
+              let has_method = List.mem_assoc "method" fields in
+              match (has_method, List.assoc_opt "id" fields) with
+              | false, _ -> `Response
+              | true, (None | Some `Null) -> `Notification fields
+              | true, Some id -> `Server_request (id, fields))
+          | _ -> `Response
+          | exception _ -> `Response
+        in
+        (* A server-to-client request must be answered or the server can block
+           waiting on it.  `window/workDoneProgress/create` is the one that
+           matters here: rust-analyzer sends it before every progress token, and
+           progress is exactly what we came for. *)
+        let answer_server_request id =
+          let reply =
+            Yojson.Safe.to_string
+              (`Assoc
+                [("jsonrpc", `String "2.0"); ("id", id); ("result", `Null)])
+          in
+          Eio.Mutex.use_rw ~protect:true write_mutex (fun () ->
+              send_lsp reply stdin_w)
         in
         let transport payload =
           match
             Eio.Mutex.use_rw ~protect:true mutex (fun () ->
                 Eio.Time.with_timeout_exn clock 30.0 (fun () ->
                     send_lsp payload stdin_w ;
-                    (* Skip any interleaved notifications before the response. *)
+                    (* Skip any interleaved notifications before the response,
+                       and answer any interleaved server request rather than
+                       mistaking it for the reply. *)
                     let rec read_response () =
                       let raw = recv_lsp reader in
-                      if is_notification raw then read_response () else raw
+                      match classify raw with
+                      | `Notification _ -> read_response ()
+                      | `Server_request (id, _) ->
+                          answer_server_request id ;
+                          read_response ()
+                      | `Response -> raw
                     in
                     read_response ()))
           with
@@ -134,7 +155,154 @@ let start ~sw ~env ~command ~args ~project_dir ?(init_options = `Null) () =
           Eio.Mutex.use_rw ~protect:true write_mutex (fun () ->
               send_lsp payload stdin_w)
         in
-        ((fun () -> Eio.Process.await proc), transport, send_notify)
+        (* Wait for the server to finish its background work, by listening to
+           the work-done progress it already reports, instead of sweeping and
+           hoping.
+
+           rust-analyzer answers prepareCallHierarchy with an empty list — not
+           an error — while cargo metadata and the initial index are still
+           running, so an empty sweep is indistinguishable from a call-free
+           program.  Progress tokens make the difference observable: [begin]
+           opens one, [end] closes it, and the server is ready once every token
+           it opened has closed.
+
+           Two bounds, because neither alone is safe:
+           - [grace] caps the wait for the FIRST [begin].  A server with nothing
+             to do (gopls on a warm module) never opens a token, and blocking
+             for the full timeout on it would be a self-inflicted stall.
+           - [timeout] caps the total wait, so a server that opens a token and
+             dies, or reports progress forever, cannot hang the run.
+
+           Returns true if the server actually reported quiescence; false if a
+           bound was hit.  A false is NOT fatal — the caller falls back to the
+           bounded-sweep behaviour — so a server that reports no progress at all
+           is no worse off than before this existed. *)
+        let await_ready ~timeout ~grace =
+          let active = ref 0 in
+          let saw_begin = ref false in
+          let deadline_first = Eio.Time.now clock +. grace in
+          (* token -> title, remembered at [begin] because [end] carries neither. *)
+          let titles : (string, string) Hashtbl.t = Hashtbl.create 8 in
+          let progress_of fields =
+            match List.assoc_opt "params" fields with
+            | Some (`Assoc p) ->
+                let token =
+                  match List.assoc_opt "token" p with
+                  | Some (`String s) -> s
+                  | Some (`Int i) -> string_of_int i
+                  | _ -> ""
+                in
+                let kind, title =
+                  match List.assoc_opt "value" p with
+                  | Some (`Assoc v) ->
+                      ( (match List.assoc_opt "kind" v with
+                        | Some (`String k) -> Some k
+                        | _ -> None),
+                        match List.assoc_opt "title" v with
+                        | Some (`String t) -> Some t
+                        | _ -> None )
+                  | _ -> (None, None)
+                in
+                Some (token, kind, title)
+            | _ -> None
+          in
+          (* The indexing phase announces itself. rust-analyzer opens
+             `rustAnalyzer/cachePriming` with the title "Indexing", and its
+             [end] is the moment the symbol index is actually usable — which is
+             the fact we need and the only one that answers the original race.
+
+             This is checked by TITLE rather than token name so it is not tied
+             to one server's private token namespace. *)
+          let is_index_title = function
+            | Some t -> String.lowercase_ascii t = "indexing"
+            | None -> false
+          in
+          let trace = Sys.getenv_opt "ARCH_LSP_TRACE" <> None in
+          (* "All open tokens closed" is NOT readiness. rust-analyzer runs its
+             startup as a SEQUENCE of tokens — Fetching, Building CrateGraph,
+             Roots Scanned, Building compile-time-deps, Indexing — and closes
+             each one before opening the next, so the open count returns to zero
+             between every phase. Treating the first of those zeros as "ready"
+             releases the client at the end of `cargo metadata`, before a single
+             file has been indexed, which is the original race with extra steps.
+
+             Readiness is therefore quiescence: no tokens open AND nothing more
+             arriving for [quiet] seconds. *)
+          let quiet = Float.min 2.0 grace in
+          (* Cancelling a read mid-frame would desynchronise the stream, so the
+             timed read is only ever taken when the buffer is empty — i.e. at a
+             frame boundary with nothing pending, where a cancellation consumes
+             nothing. With bytes buffered, the next frame is already on its way
+             and is read normally. *)
+          let next_frame_opt () =
+            if Cstruct.length (Eio.Buf_read.peek reader) > 0 then
+              Some (recv_lsp reader)
+            else
+              match
+                Eio.Time.with_timeout clock quiet (fun () ->
+                    Ok (recv_lsp reader))
+              with
+              | Ok raw -> Some raw
+              | Error `Timeout -> None
+          in
+          let rec loop () =
+            (* Bail out before blocking on a read that may never come. *)
+            if (not !saw_begin) && Eio.Time.now clock > deadline_first then false
+            else
+              match next_frame_opt () with
+              | None ->
+                  (* Quiet window elapsed: ready iff the server actually did
+                     something and has nothing outstanding. *)
+                  !saw_begin && !active <= 0
+              | Some raw -> (
+                  if trace then
+                    prerr_endline
+                      ("[lsp-trace] "
+                      ^ String.sub raw 0 (Stdlib.min 200 (String.length raw))) ;
+                  match classify raw with
+                  | `Server_request (id, _) ->
+                      answer_server_request id ;
+                      loop ()
+                  | `Response -> loop ()
+                  | `Notification fields -> (
+                      match
+                        ( List.assoc_opt "method" fields,
+                          progress_of fields )
+                      with
+                      | Some (`String "$/progress"), Some (token, kind, title)
+                        -> (
+                          match kind with
+                          | Some "begin" ->
+                              saw_begin := true ;
+                              incr active ;
+                              Option.iter
+                                (fun t -> Hashtbl.replace titles token t)
+                                title ;
+                              loop ()
+                          | Some "end" ->
+                              (* Clamp: rust-analyzer emits `end` for tokens it
+                                 never opened on this connection (and repeats
+                                 some), so an unclamped counter drifts negative
+                                 and every later quiescence check reads as
+                                 satisfied regardless of real work in flight. *)
+                              if !active > 0 then decr active ;
+                              if is_index_title (Hashtbl.find_opt titles token)
+                              then true
+                              else loop ()
+                          | _ -> loop ())
+                      | _ -> loop ()))
+          in
+          (* protect:false, deliberately: [~protect:true] would make the section
+             uncancellable and the timeout above could never fire. *)
+          match
+            Eio.Time.with_timeout clock timeout (fun () ->
+                Ok (Eio.Mutex.use_rw ~protect:false mutex (fun () -> loop ())))
+          with
+          | Ok ready -> ready
+          | Error `Timeout -> false
+          | exception End_of_file -> false
+        in
+        ((fun () -> Eio.Process.await proc), transport, send_notify, await_ready)
     | exception exn ->
         Eio.Flow.close stdin_r ;
         Eio.Flow.close stdin_w ;
@@ -168,6 +336,10 @@ let start ~sw ~env ~command ~args ~project_dir ?(init_options = `Null) () =
                       `Assoc [("dynamicRegistration", `Bool true)] );
                   ] );
               ("workspace", `Assoc [("symbol", `Assoc [])]);
+              (* Without this the server is entitled to send no $/progress at
+                 all — rust-analyzer does exactly that — and [await_ready] would
+                 have nothing to wait on. *)
+              ("window", `Assoc [("workDoneProgress", `Bool true)]);
             ] );
         ("initializationOptions", init_options);
       ]
@@ -186,7 +358,9 @@ let start ~sw ~env ~command ~args ~project_dir ?(init_options = `Null) () =
       (Jc.encode_request ~method_:"initialized" ~params:(Jc.Named []) ())
   in
   send_notify notif ;
-  Ok {config = jcfg; send_notify; await_proc}
+  Ok {config = jcfg; send_notify; await_proc; await_ready}
+
+let await_ready t ~timeout ~grace = t.await_ready ~timeout ~grace
 
 let request t ~method_ ?params () =
   let jparams =

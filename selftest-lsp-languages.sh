@@ -157,25 +157,34 @@ RUSTSRC
   # it has loaded the workspace, and a never-compiled crate makes that slow
   # enough to be flaky.
   ( cd "$P" && cargo check -q >/dev/null 2>&1 ) || true
-  "$CLI" --project "$P" --language rust --output "$TMPDIR_ROOT/rust.db" >/dev/null 2>&1
+  "$CLI" --project "$P" --language rust --output "$TMPDIR_ROOT/rust.db" \
+    --verbose >"$TMPDIR_ROOT/rust-index.log" 2>&1
   check_language "Rust" "$TMPDIR_ROOT/rust.db" "entry" "helper" "island"
 
   # Rust modules are a nesting the indexer must not flatten away.
   n=$(sqlite3 "$TMPDIR_ROOT/rust.db" "SELECT count(*) FROM functions WHERE name LIKE '%nested%';")
   [ "${n:-0}" -ge 1 ] || note "Rust: 'inner::nested' not indexed"
 
-  # Call edges are reported, but not reliably: rust-analyzer answers no call
-  # hierarchy at all while it is still loading, and signals readiness only
-  # through $/progress notifications the client does not consume, so the
-  # extractor polls instead. Polling wins the race often enough to be worth
-  # having and not often enough to assert -- a flaky CI check would be worse
-  # than none. Reported, never failed, until the client waits on the indexing
-  # token instead of the clock.
+  # Call edges used to be reported and never asserted: rust-analyzer answers no
+  # call hierarchy at all while it is still loading, so an empty result was
+  # indistinguishable from a call-free crate and a strict check would have been
+  # flaky. The client now waits for the server's own indexing token to close
+  # (Lsp_client.await_ready) instead of polling the clock, so the empty case is
+  # no longer luck -- but only when the server actually reported readiness.
+  #
+  # The assertion is therefore tied to that precondition rather than made
+  # unconditional: where readiness was observed, zero edges is a real failure;
+  # where it was not (an old server that sends no $/progress, or a machine slow
+  # enough to blow the budget), we are back to the previous state and say so
+  # rather than inventing a flake.
   rust_calls=$(sqlite3 "$TMPDIR_ROOT/rust.db" "SELECT count(*) FROM calls;")
-  if [ "${rust_calls:-0}" -ge 1 ]; then
-    echo "INFO: Rust: $rust_calls call edge(s) extracted this run" >&2
+  if grep -q "readiness: reported complete" "$TMPDIR_ROOT/rust-index.log"; then
+    [ "${rust_calls:-0}" -ge 1 ] \
+      || note "Rust: server reported indexing complete, yet no call edges were extracted"
+  elif [ "${rust_calls:-0}" -ge 1 ]; then
+    echo "INFO: Rust: $rust_calls call edge(s), readiness not reported" >&2
   else
-    echo "INFO: Rust: no call edges this run (rust-analyzer readiness race, not asserted)" >&2
+    echo "INFO: Rust: no call edges and no readiness signal (not asserted)" >&2
   fi
 else
   skip "Rust: rust-analyzer not runnable (absent, or a rustup shim whose component is not installed)"
