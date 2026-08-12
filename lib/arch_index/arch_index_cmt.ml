@@ -19,6 +19,141 @@ open Arch_index_db
 let type_to_string ty = Format.asprintf "%a" Printtyp.type_expr ty
 
 (* -------------------------------------------------------------------------- *)
+(* Nested-module indexing policy (issue #16)                                  *)
+(* -------------------------------------------------------------------------- *)
+
+(** [qualify ~prefix name] is the definition path a binding is indexed under.
+    The toplevel of a compilation unit carries no prefix, so existing rows keep
+    their bare names. *)
+let qualify ~prefix name = prefix ^ name
+
+(** [nested_prefix ~prefix module_name] is the prefix in force inside
+    [module_name]'s body.  Nesting composes, so a binding two modules deep is
+    indexed as [Outer.Inner.f]. *)
+let nested_prefix ~prefix module_name = prefix ^ module_name ^ "."
+
+(** [iter_structure_items ~f structure] applies [f ~prefix item] to every
+    structure item of a compilation unit, including those nested in modules,
+    recursive modules and functor bodies, with [prefix] the enclosing module
+    path ([""] at the toplevel, ["Make."] inside [module Make (P : S) = ...]).
+
+    Every walk over a structure goes through this one function -- the indexer,
+    the call-graph's local-binding table, and anything added later -- so the
+    definition path a binding is indexed under and the path its call sites are
+    attributed to cannot drift apart.
+
+    It does not descend into an application ([Make (X)]), an alias
+    ([module A = B]) or an unpacked first-class module: those name definitions
+    written elsewhere, and indexing them here would produce one set of rows per
+    instance instead of one per definition.  [include] is different: its items
+    land in the enclosing scope, so they are walked under the {i enclosing}
+    prefix rather than a new one. *)
+let iter_structure_items ~f (structure : Typedtree.structure) =
+  let rec item ~prefix (it : Typedtree.structure_item) =
+    f ~prefix it ;
+    match it.str_desc with
+    | Tstr_module mb -> binding ~prefix mb
+    | Tstr_recmodule mbs -> List.iter (binding ~prefix) mbs
+    | Tstr_include incl -> module_expr ~prefix incl.incl_mod
+    | _ -> ()
+  and binding ~prefix (mb : Typedtree.module_binding) =
+    match mb.mb_id with
+    | Some id ->
+        module_expr ~prefix:(nested_prefix ~prefix (Ident.name id)) mb.mb_expr
+    | None -> ()
+  and module_expr ~prefix (me : Typedtree.module_expr) =
+    match me.mod_desc with
+    | Tmod_structure s -> List.iter (item ~prefix) s.str_items
+    | Tmod_functor (_, body) -> module_expr ~prefix body
+    | Tmod_constraint (inner, _, _, _) -> module_expr ~prefix inner
+    | Tmod_apply _ | Tmod_apply_unit _ | Tmod_ident _ | Tmod_unpack _ -> ()
+  in
+  List.iter (item ~prefix:"") structure.str_items
+
+(** The signature counterpart of {!iter_structure_items}: applies [f ~prefix
+    item] to every signature item of an interface, including those nested in
+    modules and in a functor's result signature, under the same definition
+    paths the implementation registers.  The two must agree, or a value ends up
+    indexed but not exposed, or exposed with no row.
+
+    A named signature ([module M : S]) is walked by expanding [S] from the
+    unit's own [module type] declarations, since that spelling -- not the
+    inline [sig ... end] one -- is what most interfaces use.  Expansion is
+    guarded against a signature that names itself. *)
+let iter_signature_items ~f (sg : Typedtree.signature) =
+  let modtypes : (string, Typedtree.module_type) Hashtbl.t = Hashtbl.create 8 in
+  let rec collect (items : Typedtree.signature_item list) =
+    List.iter
+      (fun (it : Typedtree.signature_item) ->
+        match it.sig_desc with
+        | Tsig_modtype {mtd_id; mtd_type = Some mty; _} ->
+            Hashtbl.replace modtypes (Ident.name mtd_id) mty ;
+            collect_mty mty
+        | Tsig_module {md_type; _} -> collect_mty md_type
+        | Tsig_recmodule mds ->
+            List.iter (fun (md : Typedtree.module_declaration) -> collect_mty md.md_type) mds
+        | _ -> ())
+      items
+  and collect_mty (m : Typedtree.module_type) =
+    match m.mty_desc with
+    | Tmty_signature s -> collect s.sig_items
+    | Tmty_functor (_, body) -> collect_mty body
+    | Tmty_with (inner, _) -> collect_mty inner
+    | Tmty_ident _ | Tmty_alias _ | Tmty_typeof _ -> ()
+  in
+  collect sg.sig_items ;
+  let rec item ~prefix ~expanding (it : Typedtree.signature_item) =
+    f ~prefix it ;
+    match it.sig_desc with
+    | Tsig_module md -> (
+        match md.md_id with
+        | Some id ->
+            mty
+              ~prefix:(nested_prefix ~prefix (Ident.name id))
+              ~expanding md.md_type
+        | None -> ())
+    | Tsig_recmodule mds ->
+        List.iter
+          (fun (md : Typedtree.module_declaration) ->
+            match md.md_id with
+            | Some id ->
+                mty
+                  ~prefix:(nested_prefix ~prefix (Ident.name id))
+                  ~expanding md.md_type
+            | None -> ())
+          mds
+    (* [include S] brings S's items into the enclosing scope, so they keep the
+       enclosing prefix. *)
+    | Tsig_include incl -> mty ~prefix ~expanding incl.incl_mod
+    | _ -> ()
+  and mty ~prefix ~expanding (m : Typedtree.module_type) =
+    match m.mty_desc with
+    | Tmty_signature s -> List.iter (item ~prefix ~expanding) s.sig_items
+    | Tmty_functor (_, body) -> mty ~prefix ~expanding body
+    | Tmty_with (inner, _) -> mty ~prefix ~expanding inner
+    | Tmty_ident (path, _) -> (
+        let name = Path.last path in
+        if List.mem name expanding then ()
+        else
+          match Hashtbl.find_opt modtypes name with
+          | Some m' -> mty ~prefix ~expanding:(name :: expanding) m'
+          | None -> ())
+    | Tmty_alias _ | Tmty_typeof _ -> ()
+  in
+  List.iter (item ~prefix:"" ~expanding:[]) sg.sig_items
+
+let%test "qualify: a toplevel binding keeps its bare name" =
+  qualify ~prefix:"" "f" = "f"
+
+let%test "qualify: a nested binding carries its module path" =
+  qualify ~prefix:"Make." "spawn" = "Make.spawn"
+
+let%test "nested_prefix: nesting composes" =
+  let p = nested_prefix ~prefix:"" "Outer" in
+  let p = nested_prefix ~prefix:p "Inner" in
+  qualify ~prefix:p "f" = "Outer.Inner.f"
+
+(* -------------------------------------------------------------------------- *)
 (* Doc-comment extraction                                                     *)
 (* -------------------------------------------------------------------------- *)
 
@@ -96,11 +231,15 @@ let collect_exposed cmti_files =
             let modname = info.cmt_modname in
             match info.cmt_annots with
             | Interface sg ->
-                List.iter
-                  (fun (item : Typedtree.signature_item) ->
+                (* Mirrors the structure walk in [process_cmt]: a value exposed
+                   through a nested module or a functor's result signature is
+                   recorded under the same definition path the implementation
+                   registers it under, so the two sides meet. *)
+                let process_sig_item ~prefix
+                    (item : Typedtree.signature_item) =
                     match item.sig_desc with
                     | Tsig_value vd -> (
-                        let name = Ident.name vd.val_id in
+                        let name = qualify ~prefix (Ident.name vd.val_id) in
                         Hashtbl.replace exposed_tbl (modname, name) true ;
                         match extract_doc vd.val_attributes with
                         | Some doc ->
@@ -109,7 +248,7 @@ let collect_exposed cmti_files =
                     | Tsig_type (_, tds) ->
                         List.iter
                           (fun (td : Typedtree.type_declaration) ->
-                            let name = Ident.name td.typ_id in
+                            let name = qualify ~prefix (Ident.name td.typ_id) in
                             Hashtbl.replace exposed_tbl (modname, name) true ;
                             match extract_doc td.typ_attributes with
                             | Some doc ->
@@ -156,8 +295,9 @@ let collect_exposed cmti_files =
                                           body)
                               | _ -> ())
                           | _ -> ())
-                    | _ -> ())
-                  sg.sig_items
+                    | _ -> ()
+                in
+                iter_signature_items sg ~f:process_sig_item
             | _ -> ())
         | _ -> ()
       with exn ->
@@ -507,10 +647,14 @@ let rec fn_arity (e : Typedtree.expression) =
     table; everything else (parameters, locals, function-typed values with
     non-function RHS) is unknowable. Whole-structure pass so forward references
     and [let rec … and …] groups are all covered. *)
+(* Maps a binding's [Ident.unique_name] to the definition path it is indexed
+   under and its arity.  Carrying the path here is what lets a call site name
+   its target the way the target is registered: a sibling call inside a functor
+   records [Make.spawn], which is the row's name, instead of the bare [spawn],
+   which is nothing's name. *)
 let build_local_fn_stamps (structure : Typedtree.structure) =
   let local_fn_stamps = Hashtbl.create 64 in
-  List.iter
-    (fun (it : Typedtree.structure_item) ->
+  iter_structure_items structure ~f:(fun ~prefix (it : Typedtree.structure_item) ->
       match it.str_desc with
       | Tstr_value (_, vbs) ->
           List.iter
@@ -520,11 +664,10 @@ let build_local_fn_stamps (structure : Typedtree.structure) =
                   Hashtbl.replace
                     local_fn_stamps
                     (Ident.unique_name id)
-                    (fn_arity vb.vb_expr)
+                    (qualify ~prefix (Ident.name id), fn_arity vb.vb_expr)
               | _ -> ())
             vbs
-      | _ -> ())
-    structure.str_items ;
+      | _ -> ()) ;
   local_fn_stamps
 
 (** Walk a value binding expression to collect all function calls.
@@ -624,7 +767,16 @@ let collect_calls_from_expr ~src_path ~caller_module ~caller_name
      same-module top-level function body; otherwise it is a parameter / local
      closure with an unknowable target → MAY_TOP. *)
   let ident_is_local_fn id = Hashtbl.mem local_fn_stamps (Ident.unique_name id) in
-  let local_fn_arity id = Hashtbl.find_opt local_fn_stamps (Ident.unique_name id) in
+  let local_fn_arity id =
+    Option.map snd (Hashtbl.find_opt local_fn_stamps (Ident.unique_name id))
+  in
+  (* The definition path the target is indexed under: what a call site must
+     record for the edge to resolve. *)
+  let local_fn_name id =
+    match Hashtbl.find_opt local_fn_stamps (Ident.unique_name id) with
+    | Some (name, _) -> name
+    | None -> Ident.name id
+  in
   (* True iff [ty] is SYNTACTICALLY a function type. No alias expansion:
      .cmt-restored environments do not carry manifest type declarations, so
      [type unary = int -> int] cannot be expanded here. Same-module partial
@@ -693,7 +845,7 @@ let collect_calls_from_expr ~src_path ~caller_module ~caller_name
   let add_path_call (path : Path.t) loc =
     match path with
     | Path.Pident id when ident_is_local_fn id ->
-        add_call (Head_local (Ident.name id)) loc
+        add_call (Head_local (local_fn_name id)) loc
     | Path.Pident id -> add_call (Head_unknown (Ident.name id)) loc
     | _ ->
         let callee_module, callee_name = path_to_module_name path in
@@ -1049,7 +1201,7 @@ let collect_calls_from_expr ~src_path ~caller_module ~caller_name
                 | Texp_ident (Path.Pident id, _, _) when ident_is_local_fn id ->
                     (* Same-module top-level function — MUST candidate; [cond]
                        and [partial] decide the final kind at resolution. *)
-                    add_call ~partial (Head_local (Ident.name id)) expr.exp_loc
+                    add_call ~partial (Head_local (local_fn_name id)) expr.exp_loc
                 | Texp_ident (Path.Pident id, _, _) -> (
                     match lam_stamp id with
                     | Some (node_name, _) ->
@@ -1307,9 +1459,21 @@ let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
                   }
                   :: !pending_deps
               in
-              (* Process structure items *)
-              List.iter
-                (fun (item : Typedtree.structure_item) ->
+              (* Process structure items.
+                 [prefix] is the enclosing module path ("Make." inside
+                 [module Make (P : S) = struct ... end]), so a function defined
+                 in a nested structure is registered under its definition path
+                 rather than being dropped.  Qualifying by definition means a
+                 functor applied twice still yields one row per definition,
+                 which is what the CMT records. *)
+              let process_item ~prefix (item : Typedtree.structure_item) =
+                  (* Module dependencies are a property of the file, so only the
+                     toplevel contributes: an [open] or an alias local to a
+                     nested module is not a dependency of the compilation
+                     unit. *)
+                  let add_dep path kind alias line =
+                    if prefix = "" then add_dep path kind alias line
+                  in
                   match item.str_desc with
                   | Tstr_open od -> (
                       (* open Module *)
@@ -1331,9 +1495,9 @@ let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
                             None
                             id.incl_loc.loc_start.pos_lnum
                       | None -> ())
-                  | Tstr_module mb -> (
+                  | Tstr_module mb ->
                       (* module M = SomeModule (alias) *)
-                      match mb.mb_id with
+                      (match mb.mb_id with
                       | Some id -> (
                           match module_path_of_expr mb.mb_expr with
                           | Some path ->
@@ -1344,12 +1508,14 @@ let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
                                 mb.mb_expr.mod_loc.loc_start.pos_lnum
                           | None -> ())
                       | None -> ())
+                      (* What the module itself defines is reached by
+                         [iter_structure_items], which walks into it. *)
                   | Tstr_value (_, vbs) ->
                       List.iter
                         (fun (vb : Typedtree.value_binding) ->
                           match vb.vb_pat.pat_desc with
                           | Tpat_var (id, _, _) ->
-                              let name = Ident.name id in
+                              let name = qualify ~prefix (Ident.name id) in
                               let signature =
                                 Some (type_to_string vb.vb_pat.pat_type)
                               in
@@ -1573,7 +1739,7 @@ let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
                   | Tstr_type (_, tds) ->
                       List.iter
                         (fun (td : Typedtree.type_declaration) ->
-                          let name = Ident.name td.typ_id in
+                          let name = qualify ~prefix (Ident.name td.typ_id) in
                           let line_start = td.typ_loc.loc_start.pos_lnum in
                           let line_end = td.typ_loc.loc_end.pos_lnum in
                           let exposed =
@@ -1660,7 +1826,8 @@ let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
                                 constrs
                           | _ -> ())
                         tds
-                  | _ -> ())
-                structure.str_items ;
+                  | _ -> ()
+              in
+              iter_structure_items structure ~f:process_item ;
               (!pending_calls, !pending_deps, !pending_type_usages))
       | _ -> ([], [], []))
