@@ -15,8 +15,8 @@ type t = {
   send_notify : string -> unit;
       (** Send a notification (fire-and-forget: writes only, no read). *)
   await_proc : unit -> Eio.Process.exit_status;
-  await_ready : timeout:float -> grace:float -> bool;
-      (** Block until the server reports its background work finished. *)
+  ready_reported : bool;
+      (** Did the server actually report its background work finished? *)
 }
 
 (* --- LSP Content-Length framing ------------------------------------------ *)
@@ -70,7 +70,8 @@ let error_to_string = function
   | Jc.Parse_error msg -> Printf.sprintf "parse error: %s" msg
   | Jc.Protocol_error msg -> Printf.sprintf "protocol error: %s" msg
 
-let start ~sw ~env ~command ~args ~project_dir ?(init_options = `Null) () =
+let start ~sw ~env ~command ~args ~project_dir ?(init_options = `Null)
+    ?(ready_timeout = 60.) ?(ready_grace = 5.) () =
   let ( let* ) = Result.bind in
   let proc_mgr = Eio.Stdenv.process_mgr env in
   let clock = Eio.Stdenv.clock env in
@@ -229,32 +230,48 @@ let start ~sw ~env ~command ~args ~project_dir ?(init_options = `Null) () =
              Readiness is therefore quiescence: no tokens open AND nothing more
              arriving for [quiet] seconds. *)
           let quiet = Float.min 2.0 grace in
-          (* Cancelling a read mid-frame would desynchronise the stream, so the
-             timed read is only ever taken when the buffer is empty — i.e. at a
-             frame boundary with nothing pending, where a cancellation consumes
-             nothing. With bytes buffered, the next frame is already on its way
-             and is read normally. *)
+          let deadline = Eio.Time.now clock +. timeout in
+          (* No cancellation is ever allowed to land INSIDE a frame.
+             [Buf_read] consumes as it parses, so a read interrupted between the
+             Content-Length header and the body leaves the body in the buffer
+             and desynchronises the stream permanently — every later request
+             would then read the wrong reply, which is the failure this whole
+             function exists to prevent, arrived at from the other side.
+
+             So the only thing under a timeout is [ensure], which FILLS the
+             buffer without consuming from it: cancelling it is a no-op on the
+             stream. Once at least one byte is buffered, the frame is read
+             without a deadline. A server that emits a partial frame and then
+             stalls is left to the pipeline-level timeout in the runner, which
+             abandons the whole connection rather than reusing a desynced one. *)
           let next_frame_opt () =
-            if Cstruct.length (Eio.Buf_read.peek reader) > 0 then
-              Some (recv_lsp reader)
+            let remaining = deadline -. Eio.Time.now clock in
+            if remaining <= 0. then `Deadline
             else
               match
-                Eio.Time.with_timeout clock quiet (fun () ->
-                    Ok (recv_lsp reader))
+                Eio.Time.with_timeout clock (Float.min quiet remaining) (fun () ->
+                    Eio.Buf_read.ensure reader 1 ;
+                    Ok ())
               with
-              | Ok raw -> Some raw
-              | Error `Timeout -> None
+              | Ok () -> `Frame (recv_lsp reader)
+              | Error `Timeout -> `Quiet
+              | exception End_of_file -> `Eof
           in
           let rec loop () =
-            (* Bail out before blocking on a read that may never come. *)
+            (* Nothing has started and nothing is going to: give up early rather
+               than spend the whole budget on a server with no work to report. *)
             if (not !saw_begin) && Eio.Time.now clock > deadline_first then false
             else
               match next_frame_opt () with
-              | None ->
-                  (* Quiet window elapsed: ready iff the server actually did
-                     something and has nothing outstanding. *)
-                  !saw_begin && !active <= 0
-              | Some raw -> (
+              | `Deadline | `Eof -> false
+              | `Quiet ->
+                  (* Silence is only quiescence when nothing is outstanding. A
+                     phase that goes quiet mid-flight — cargo fetching, a build
+                     script running — still has its token open, and abandoning
+                     there would waste the rest of the budget on exactly the wait
+                     this function was asked to perform. *)
+                  if !active > 0 then loop () else !saw_begin
+              | `Frame raw -> (
                   if trace then
                     prerr_endline
                       ("[lsp-trace] "
@@ -292,15 +309,21 @@ let start ~sw ~env ~command ~args ~project_dir ?(init_options = `Null) () =
                           | _ -> loop ())
                       | _ -> loop ()))
           in
-          (* protect:false, deliberately: [~protect:true] would make the section
-             uncancellable and the timeout above could never fire. *)
-          match
-            Eio.Time.with_timeout clock timeout (fun () ->
-                Ok (Eio.Mutex.use_rw ~protect:false mutex (fun () -> loop ())))
-          with
-          | Ok ready -> ready
-          | Error `Timeout -> false
-          | exception End_of_file -> false
+          (* Deliberately NOT under the request mutex.
+
+             An earlier version wrapped this in [Eio.Mutex.use_rw ~protect:false]
+             so an outer timeout could still cancel it. That is worse than no
+             lock at all: Eio POISONS a mutex whose critical section is left by
+             an exception, so one readiness timeout made every subsequent
+             [transport] call raise Poisoned, and the run wrote 0 functions and 0
+             calls — the emptiness this change exists to prevent, now caused by
+             it.
+
+             No lock is needed instead of a safer lock, because this runs during
+             the handshake: [start] has not returned the client yet, so no other
+             fiber can hold the connection. The deadline is enforced by the loop
+             itself rather than by cancelling it from outside. *)
+          try loop () with End_of_file -> false
         in
         ((fun () -> Eio.Process.await proc), transport, send_notify, await_ready)
     | exception exn ->
@@ -358,9 +381,14 @@ let start ~sw ~env ~command ~args ~project_dir ?(init_options = `Null) () =
       (Jc.encode_request ~method_:"initialized" ~params:(Jc.Named []) ())
   in
   send_notify notif ;
-  Ok {config = jcfg; send_notify; await_proc; await_ready}
+  (* Waited for HERE rather than by the caller: during the handshake the client
+     has not escaped yet, so the readiness loop provably owns the connection and
+     needs no lock around it. Making it the caller's job would turn that into a
+     convention that a future caller could break by issuing a request first. *)
+  let ready_reported = await_ready ~timeout:ready_timeout ~grace:ready_grace in
+  Ok {config = jcfg; send_notify; await_proc; ready_reported}
 
-let await_ready t ~timeout ~grace = t.await_ready ~timeout ~grace
+let ready_reported t = t.ready_reported
 
 let request t ~method_ ?params () =
   let jparams =

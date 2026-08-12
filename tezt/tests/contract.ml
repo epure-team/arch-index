@@ -67,8 +67,14 @@ let register () =
       (* escapes: the ⊤ frontier, scoped to what the root can actually reach. *)
       Batch.contains b ~msg:"escapes dirty must list t, the function making the ⊤ edge"
         ~haystack:(query db ["escapes"; "dirty"]) "t" ;
-      Batch.not_contains b ~msg:"escapes clean must not list t (t is not reachable from clean)"
-        ~haystack:(query db ["escapes"; "clean"]) "t" ;
+      (* Asserted as an empty ROW SET, not as the absence of the substring "t".
+         `escapes clean` prints nothing on this fixture, so `not_contains "t"`
+         was vacuously true — it would have kept passing if the command started
+         listing every function in the index, as long as none was spelt "t". *)
+      Batch.eq_int b
+        ~msg:"escapes clean must report an empty ⊤ frontier (t is not reachable from clean)"
+        (List.length (lines (query db ["escapes"; "clean"])))
+        0 ;
 
       Batch.contains b ~msg:"stats must report the contract flag"
         ~haystack:(query db ["stats"]) "contract: v1") ;
