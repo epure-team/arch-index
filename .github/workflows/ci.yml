@@ -10,6 +10,12 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # The language servers are installed below, so a test that reports "not
+    # exercised" here means that install rotted, not that the machine is bare.
+    # Without this the LSP-path tests would go back to passing while covering
+    # nothing, which is the failure mode the Tezt port exists to remove.
+    env:
+      ARCH_TEZT_REQUIRE_SERVERS: '1'
     steps:
       - uses: actions/checkout@v4
         with:
@@ -23,14 +29,35 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.21'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      # The LSP-path tests drive REAL language servers: tezt/tests/multilang.ml
+      # and selftest-lsp-languages.sh both report "not exercised" without them
+      # and cover precisely nothing, which is what they did here until now.
+      #
+      # Versions are pinned so that a regression on the server side arrives as a
+      # deliberate bump rather than as a mystery failure on an unrelated PR, and
+      # each one is PROBED BY RUNNING IT: `rustup component add` writes a shim
+      # that answers `command -v` whether or not the component behind it exists,
+      # so a PATH check would let a broken install through to an empty index.
+      - name: Install language servers
+        run: |
+          go install golang.org/x/tools/gopls@v0.23.0
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+          export PATH="$(go env GOPATH)/bin:$PATH"
+          npm i -g typescript-language-server@5.3.0 typescript@5
+          rustup component add rust-analyzer
+          gopls version
+          typescript-language-server --version
+          rust-analyzer --version
       - name: Install deps
         run: opam install --deps-only --yes .
       - name: Build
         run: opam exec -- dune build
       # `dune test` also runs the Tezt suite under tezt/, which covers the CMT
-      # indexer's module-language shapes and the polyglot indexing path. The
-      # polyglot test reports "not exercised" when gopls or
-      # typescript-language-server is absent, as it is on this runner.
+      # indexer's module-language shapes and, now that the servers above are
+      # installed, the polyglot indexing path for real.
       - name: Unit and integration tests
         run: opam exec -- dune test
       - name: Shell integration tests

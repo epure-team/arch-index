@@ -21,7 +21,17 @@ Q="$HERE/arch-query"
 fails=0
 skips=0
 note() { echo "FAIL: $*" >&2; fails=$((fails+1)); }
-skip() { echo "SKIP: $*" >&2; skips=$((skips+1)); }
+# A skip that reports success covers nothing. CI installs all three servers, so
+# it sets ARCH_TEZT_REQUIRE_SERVERS=1 and a skip there means the install rotted
+# -- which would otherwise return this script to green-but-vacuous. A
+# workstation with only some servers still gets a useful run.
+skip() {
+  if [ "${ARCH_TEZT_REQUIRE_SERVERS:-0}" = "1" ]; then
+    note "$* (ARCH_TEZT_REQUIRE_SERVERS=1 forbids skipping)"
+  else
+    echo "SKIP: $*" >&2; skips=$((skips+1))
+  fi
+}
 command -v sqlite3 >/dev/null 2>&1 || { echo "selftest-lsp-languages: sqlite3 required" >&2; exit 2; }
 command -v opam    >/dev/null 2>&1 && eval "$(cd "$HERE" && opam env 2>/dev/null)" || true
 
@@ -165,7 +175,7 @@ RUSTSRC
   if [ "${rust_calls:-0}" -ge 1 ]; then
     echo "INFO: Rust: $rust_calls call edge(s) extracted this run" >&2
   else
-    skip "Rust: no call edges this run (rust-analyzer readiness race, not asserted)"
+    echo "INFO: Rust: no call edges this run (rust-analyzer readiness race, not asserted)" >&2
   fi
 else
   skip "Rust: rust-analyzer not runnable (absent, or a rustup shim whose component is not installed)"
@@ -201,7 +211,7 @@ TSSRC
     sig=$(sqlite3 "$TMPDIR_ROOT/ts.db" "SELECT COALESCE(signature, '') FROM functions WHERE name = 'entry';")
     [ -n "$sig" ] || note "TypeScript: 'entry' has no signature; ts-morph enrichment did not apply"
   else
-    skip "TypeScript: npm install of typescript@5 and ts-morph failed"
+    echo "INFO: TypeScript: npm install of typescript@5 and ts-morph failed — not exercised" >&2
   fi
 else
   skip "TypeScript: typescript-language-server not runnable, or npm absent"
