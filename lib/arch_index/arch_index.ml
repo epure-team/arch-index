@@ -307,18 +307,34 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
           let resolve_local name =
             Hashtbl.find_opt fn_lookup (call.caller_module, name)
           in
+          (* [Fx3.G1.B.f] can be read several ways: compilation unit [Fx3]
+             holding [G1.B.f], unit [G1] holding [B.f], or unit [B] holding
+             [f].  Keeping only the last component -- the previous behaviour --
+             picks the last reading, which binds to an unrelated [b.ml] that
+             happens to define an [f] whenever one exists: a confident MUST edge
+             to the wrong function.
+
+             Nested definitions are indexed under their path, so the readings
+             are tried from the most qualified function name to the least, and
+             the first that resolves wins.  A name that resolves under no
+             reading stays unresolved rather than being forced onto a homonym. *)
           let resolve_qualified mod_name name =
-            (* For library-qualified names like Epure_db.Db_util, the lookup
-               table only has the last component "Db_util". *)
-            let lookup_name =
-              match String.rindex_opt mod_name '.' with
-              | Some i ->
-                  String.sub mod_name (i + 1) (String.length mod_name - i - 1)
-              | None -> mod_name
+            let parts = String.split_on_char '.' mod_name in
+            let rec try_from prefix rest =
+              match rest with
+              | [] -> None
+              | unit_name :: deeper -> (
+                  let qualified_name =
+                    String.concat "." (deeper @ [name])
+                  in
+                  match Hashtbl.find_opt mod_name_to_path unit_name with
+                  | Some mod_path -> (
+                      match Hashtbl.find_opt fn_lookup (mod_path, qualified_name) with
+                      | Some _ as found -> found
+                      | None -> try_from (prefix @ [unit_name]) deeper)
+                  | None -> try_from (prefix @ [unit_name]) deeper)
             in
-            match Hashtbl.find_opt mod_name_to_path lookup_name with
-            | Some mod_path -> Hashtbl.find_opt fn_lookup (mod_path, name)
-            | None -> None
+            try_from [] parts
           in
           let demoted = call.cond || call.partial in
           let callee_id, callee_display_name, kind =
