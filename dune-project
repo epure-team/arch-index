@@ -25,7 +25,13 @@
   caqti
   (caqti-driver-sqlite3 (>= 3.0))
   ocaml-compiler-libs
+  ; ppx_inline_test and ppx_assert are NOT test-only despite their names: they
+  ; appear in the (preprocess (pps ...)) of lib/arch_index and lib/arch_effects,
+  ; so the library cannot be built without them. Marking them with-test would
+  ; break a plain `opam install`.
   (ppx_inline_test (>= v0.16))
   (ppx_assert (>= v0.16))
-  (alcotest (>= 1.7))
-  (tezt (>= 4.0))))
+  ; alcotest and tezt are used only under test/ and tezt/. Unconditional, they
+  ; made every consumer of this package pull a test framework.
+  (alcotest (and (>= 1.7) :with-test))
+  (tezt (and (>= 4.0) :with-test))))
