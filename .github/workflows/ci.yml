@@ -41,6 +41,7 @@ jobs:
           chmod +x selftest-contract.sh selftest-load.sh selftest-effects.sh selftest-callgraph-ocaml.sh selftest-callgraph-soundness.sh selftest-callgraph-go.sh selftest-impact.sh
           chmod +x selftest-rules.sh selftest-mutants.sh selftest-coverage.sh selftest-decision-lint.sh selftest-pcc.sh
           chmod +x selftest-health.sh selftest-duplicates.sh selftest-curation.sh selftest-curation-doc.sh
+          chmod +x selftest-callgraph-nested.sh selftest-ocaml-shapes.sh selftest-lsp-languages.sh selftest-multilang.sh
           ./selftest-contract.sh
           ./selftest-load.sh
           ./selftest-impact.sh
@@ -53,6 +54,10 @@ jobs:
           ./selftest-curation.sh
           ./selftest-curation-doc.sh
           ./selftest-callgraph-ocaml.sh
+          ./selftest-callgraph-nested.sh
+          ./selftest-ocaml-shapes.sh
+          ./selftest-lsp-languages.sh
+          ./selftest-multilang.sh
           STRICT=1 ./selftest-callgraph-soundness.sh
           ./selftest-callgraph-go.sh
           ./selftest-decision-lint.sh
