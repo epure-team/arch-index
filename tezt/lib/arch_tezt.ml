@@ -69,11 +69,28 @@ let arch_curate () = locate ~env_var:"ARCH_CURATE" "bin/arch_curate/arch_curate.
 
 let arch_coverage () = locate ~env_var:"ARCH_COVERAGE" "bin/arch_coverage/arch_coverage.exe"
 
+let arch_rules () = locate ~env_var:"ARCH_RULES" "bin/arch_rules/arch_rules.exe"
+
+let arch_impact () = locate ~env_var:"ARCH_IMPACT" "bin/arch_impact/arch_impact.exe"
+
 let arch_mutants () = locate ~env_var:"ARCH_MUTANTS" "bin/arch_mutants/arch_mutants.exe"
 
 let decision_lint () =
   locate ~env_var:"ARCH_DECISION_LINT" "poc/decision-lint/bin/decision_lint.exe"
 let schema () = locate ~env_var:"ARCH_SCHEMA" "architecture-schema.sql"
+
+(* The repository root, found via a wrapper that only exists there. The pcc-*
+   tools resolve their siblings with `command -v arch-impact` while running with
+   CWD set to the TARGET repo, so both this directory and scripts/pcc have to be
+   on PATH — which is exactly how the workflow's operator invokes them. *)
+let repo_root () = Filename.dirname (locate ~env_var:"ARCH_REPO_ROOT" "arch-impact")
+let pcc_dir () = Filename.dirname (locate ~env_var:"ARCH_PCC_DIR" "scripts/pcc/pcc-index")
+
+(* The Go producer is built from source by the test rather than assumed
+   installed: it is part of this repository, so a stale binary on PATH would
+   test something other than the tree. *)
+let callgraph_go_src () =
+  Filename.dirname (locate ~env_var:"ARCH_CALLGRAPH_GO_SRC" "callgraph-go/main.go")
 
 let read_file path =
   let ic = open_in_bin path in
@@ -137,6 +154,31 @@ let run_command ?(env = []) ?cwd ?stdin prog args =
       (fun () -> really_input_string ic (in_channel_length ic))
   in
   (code, contents)
+
+(* Same, but with the two streams kept APART.
+
+   [run_command] merges stderr into stdout, which is what you want when the
+   output is for a human to read in a failure message. It makes one class of
+   assertion impossible though: "stdout is exactly one JSON object" cannot be
+   checked when a diagnostic line written to stderr lands in the middle of it.
+   Tools with a machine-readable stdout are asserted through this instead. *)
+let run_command_split ?(env = []) ?cwd prog args =
+  let out = Temp.file (Filename.basename prog ^ ".stdout") in
+  let err = Temp.file (Filename.basename prog ^ ".stderr") in
+  let quoted = List.map Filename.quote (prog :: args) |> String.concat " " in
+  let prelude =
+    match cwd with None -> "" | Some d -> Printf.sprintf "cd %s && " (Filename.quote d)
+  in
+  let assignments =
+    List.map (fun (k, v) -> Printf.sprintf "%s=%s" k (Filename.quote v)) env
+  in
+  let code =
+    Sys.command
+      (Printf.sprintf "{ %s%s %s ; } > %s 2> %s" prelude
+         (String.concat " " assignments)
+         quoted (Filename.quote out) (Filename.quote err))
+  in
+  (code, read_file out, read_file err)
 
 (* Absolute path of a PATH-resolved tool, resolved while PATH is still intact.
    Needed by tests that deliberately empty PATH: the wrapper they run (timeout)
@@ -359,6 +401,30 @@ module Json = struct
         Ok (List.filter_map (function `String s -> Some s | _ -> None) l)
     | other -> Error (Printf.sprintf "%s.%s is not a list of strings (%s)" what k (show other))
 
+  (* The machine-output contract is int/bool/string/null/array/object only. A
+     float is the interesting violation: it round-trips through most readers and
+     then compares unequal on a different platform, so it has to be rejected at
+     the shape level rather than noticed later. Intlit is the same hazard wearing
+     Yojson's clothes — an integer too large to have been intended. *)
+  let strict_object ~what s =
+    match Yojson.Safe.from_string s with
+    | exception exn ->
+        Error (Printf.sprintf "%s is not parseable JSON (%s):\n%s" what (Printexc.to_string exn) s)
+    | `Assoc _ as j ->
+        let bad = ref None in
+        let rec walk : Yojson.Safe.t -> unit = function
+          | `Float f -> if !bad = None then bad := Some (Printf.sprintf "float %g" f)
+          | `Intlit v -> if !bad = None then bad := Some (Printf.sprintf "Intlit %s" v)
+          | `Assoc fields -> List.iter (fun (_, v) -> walk v) fields
+          | `List l -> List.iter walk l
+          | _ -> ()
+        in
+        walk j ;
+        (match !bad with
+        | Some what_bad -> Error (Printf.sprintf "%s contains a %s: machine output must be int/bool/string/null/array/object only" what what_bad)
+        | None -> Ok j)
+    | _ -> Error (Printf.sprintf "%s is not a single JSON OBJECT:\n%s" what s)
+
   let field_of_objects ~field l =
     List.filter_map
       (function `Assoc f -> ( match List.assoc_opt field f with Some (`String s) -> Some s | _ -> None)
@@ -489,6 +555,15 @@ module Fixture = struct
 
   let minimal_flat ~name = flat ~name minimal_flat_stream
 
+  (* A database built from SQL alone, with no schema file behind it. Used where
+     the SHAPE is the subject — a legacy index with no kind column, a table that
+     is not an arch-index at all — and loading the real schema would supply the
+     very columns the test is asserting are missing. *)
+  let raw ~name sql =
+    let db = temp_db name in
+    Db.with_db_rw db (fun conn -> Db.exec conn sql) ;
+    db
+
   (* A main-schema index: architecture-schema.sql, then the caller's seed rows. *)
   let main ~name ?seed () =
     let db = temp_db name in
@@ -496,6 +571,29 @@ module Fixture = struct
         Db.exec conn (read_file (schema ())) ;
         Option.iter (Db.exec conn) seed) ;
     db
+
+  (* A project that is also a git repository, because the tool under test reads
+     a diff. Identity is set locally rather than relying on the machine having a
+     global one, which a CI runner does not. *)
+  let git_project ~name ~files k =
+    with_project ~name ~files @@ fun root ->
+    let code, output =
+      run_command ~cwd:root "sh"
+        ["-c";
+         "git init -q && git config user.email t@t && git config user.name t && git add -A && \
+          git commit -qm init"]
+    in
+    if code <> 0 then Test.fail "git fixture %s failed to initialise:\n%s" name output ;
+    k root
+
+  (* Commit whatever is in the working tree of a git fixture. Tests that need a
+     diff edit a file and then call this, so the diff under test is a real one
+     produced by git rather than a string the test wrote itself. *)
+  let git_commit ~cwd msg =
+    let code, output =
+      run_command ~cwd "sh" ["-c"; Printf.sprintf "git add -A && git commit -qm %s" (Filename.quote msg)]
+    in
+    if code <> 0 then Test.fail "git commit failed in %s:\n%s" cwd output
 
   (* The flag is set and `kind` exists, but a REAL edge on the A -> mid -> sink
      path carries NULL.

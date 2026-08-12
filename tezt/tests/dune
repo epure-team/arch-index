@@ -42,6 +42,11 @@
   %{exe:../../bin/arch_curate/arch_curate.exe}
   %{exe:../../bin/arch_coverage/arch_coverage.exe}
   %{exe:../../bin/arch_serve/arch_serve.exe}
+  %{exe:../../bin/arch_rules/arch_rules.exe}
+  %{exe:../../bin/arch_impact/arch_impact.exe}
+  %{exe:../../bin/arch_effects_ocaml/arch_effects_ocaml.exe}
+  %{exe:../../bin/arch_effects_load/main.exe}
+  ../../effects-schema-migration.sql
   %{exe:../../bin/arch_mutants/arch_mutants.exe}
   %{exe:../../poc/decision-lint/bin/decision_lint.exe}
   ../../architecture-schema.sql
