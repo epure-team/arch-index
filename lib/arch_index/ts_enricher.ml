@@ -10,7 +10,7 @@
     The shim is embedded at compile time via [ppx_blob].  At runtime the
     enricher writes it to a temp file, invokes [node <shim> <project_dir>],
     reads newline-delimited JSON from stdout, and merges [signature] and
-    [exposed] fields into the [functions] table of the arch DB.
+    [exported] fields into the [functions] table of the arch DB.
 
     Falls back gracefully: returns [Error msg] when Node is unavailable,
     the shim exits non-zero, or the DB update fails — callers are expected
@@ -47,11 +47,24 @@ let parse_record line =
     | _ -> None
   with _ -> None
 
-(* Update signature and exposed for a function row matching name + file_path. *)
+(* ts-morph reports absolute paths while the LSP rows store paths relative to
+   the project, so an update keyed on the raw path matches nothing -- and an
+   UPDATE that matches no row still returns DONE, so the mismatch was silent.
+   Strip the project prefix before looking the row up. *)
+let relative_to ~project_dir path =
+  let prefix = if project_dir = "" then "" else project_dir ^ "/" in
+  let plen = String.length prefix in
+  if plen > 0 && String.length path >= plen && String.sub path 0 plen = prefix
+  then String.sub path plen (String.length path - plen)
+  else path
+
+(* Update signature and exported for a function row matching name + file_path. *)
 let update_row db name file_path type_sig exported =
   let open Sqlite3 in
   let sql =
-    "UPDATE functions SET signature = ?, exposed = ? WHERE name = ? AND \
+    (* The column is [exported] in the schema Runner.run creates, which is the
+       only database this enricher ever runs against. *)
+    "UPDATE functions SET signature = ?, exported = ? WHERE name = ? AND \
      file_path = ?"
   in
   let stmt = prepare db sql in
@@ -64,7 +77,12 @@ let update_row db name file_path type_sig exported =
   let rc = step stmt in
   ignore (finalize stmt) ;
   match rc with
-  | Rc.DONE -> ()
+  | Rc.DONE ->
+      if Sqlite3.changes db = 0 then
+        Arch_io.warnf
+          "ts_enricher: no indexed function %s in %s to enrich"
+          name
+          file_path
   | _ ->
       Arch_io.warnf
         "ts_enricher: update failed for %s in %s"
@@ -75,7 +93,7 @@ let update_row db name file_path type_sig exported =
 
     Writes the bundled shim to a temp file, invokes [node <shim> <project_dir>],
     parses newline-delimited JSON records from stdout, and updates [signature]
-    and [exposed] in the functions table of [db_path].
+    and [exported] in the functions table of [db_path].
 
     Returns [Error msg] when Node is unavailable, the shim exits non-zero, or
     the DB cannot be opened.  Returns [Ok ()] on success or when the project
@@ -141,7 +159,12 @@ let enrich ~sw ~env ~project_dir ~db_path =
                 if String.length line > 0 then
                   match parse_record line with
                   | Some (name, file_path, type_sig, exported) ->
-                      update_row db name file_path type_sig exported
+                      update_row
+                        db
+                        name
+                        (relative_to ~project_dir file_path)
+                        type_sig
+                        exported
                   | None ->
                       Arch_io.warnf
                         "ts_enricher: unparseable record: %s"

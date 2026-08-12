@@ -263,7 +263,11 @@ let run ~sw ~env ~project_dir ~language ~output ?(no_enrich = false)
                     "arch_index_lsp: found %d functions\n%!"
                     (List.length fn_rows) ;
                 let call_rows =
-                  Call_graph_extractor.extract_calls client ~project_dir fn_rows
+                  Call_graph_extractor.extract_calls
+                    ~clock:(Eio.Stdenv.clock env)
+                    client
+                    ~project_dir
+                    fn_rows
                 in
                 call_rows_ref := call_rows ;
                 if verbose then

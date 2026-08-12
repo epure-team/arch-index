@@ -38,32 +38,72 @@ let call_site_label ~project_dir uri range =
   let rel = relative_path ~project_dir abs in
   Printf.sprintf "%s:%d" rel (range.Lsp_types.start.line + 1)
 
+(* [name_column ~abs_path ~line ~name] is the column at which [name] occurs on
+   [line], if it does.  workspace/symbol reports the range of the whole
+   declaration, so its start column lands on [pub] or [func] rather than on the
+   identifier -- and rust-analyzer only answers prepareCallHierarchy when the
+   position is on the name itself. *)
+let name_column ~abs_path ~line ~name =
+  match open_in_bin abs_path with
+  | exception _ -> None
+  | ic ->
+      let rec nth_line i =
+        match input_line ic with
+        | exception End_of_file -> None
+        | l -> if i = line then Some l else nth_line (i + 1)
+      in
+      let result =
+        match nth_line 0 with
+        | None -> None
+        | Some l ->
+            let n = String.length name and len = String.length l in
+            let rec find i =
+              if i + n > len then None
+              else if String.sub l i n = name then Some i
+              else find (i + 1)
+            in
+            if n = 0 then None else find 0
+      in
+      close_in_noerr ic ;
+      result
+
 (** [prepare_call_hierarchy client ~project_dir row] sends
-    callHierarchy/prepare for the function at its location. *)
+    callHierarchy/prepare for the function at its location.  When the position
+    the symbol reported yields nothing, it retries on the identifier itself. *)
 let prepare_call_hierarchy client ~project_dir (row : Lsp_extractor.fn_row) =
   let abs_path = Filename.concat project_dir row.file_path in
   let uri = "file://" ^ abs_path in
-  let params =
-    `Assoc
-      [
-        ("textDocument", `Assoc [("uri", `String uri)]);
-        ( "position",
-          `Assoc [("line", `Int row.line_start); ("character", `Int row.name_char)] );
-      ]
+  let request_at character =
+    let params =
+      `Assoc
+        [
+          ("textDocument", `Assoc [("uri", `String uri)]);
+          ( "position",
+            `Assoc [("line", `Int row.line_start); ("character", `Int character)]
+          );
+        ]
+    in
+    match
+      Lsp_client.request client ~method_:"textDocument/prepareCallHierarchy"
+        ~params ()
+    with
+    | Error _ -> []
+    | Ok `Null -> []
+    | Ok (`List lst) ->
+        List.filter_map
+          (fun j ->
+            match Lsp_types.call_hierarchy_item_of_yojson j with
+            | Ok item -> Some item
+            | Error _ -> None)
+          lst
+    | Ok _ -> []
   in
-  match
-    Lsp_client.request client ~method_:"textDocument/prepareCallHierarchy" ~params ()
-  with
-  | Error _ -> []
-  | Ok `Null -> []
-  | Ok (`List lst) ->
-      List.filter_map
-        (fun j ->
-          match Lsp_types.call_hierarchy_item_of_yojson j with
-          | Ok item -> Some item
-          | Error _ -> None)
-        lst
-  | Ok _ -> []
+  match request_at row.name_char with
+  | _ :: _ as items -> items
+  | [] -> (
+      match name_column ~abs_path ~line:row.line_start ~name:row.name with
+      | Some col when col <> row.name_char -> request_at col
+      | _ -> [])
 
 (** [outgoing_calls client ~project_dir item] fetches outgoing calls for a
     CallHierarchyItem. *)
@@ -235,19 +275,45 @@ let extract_calls_from_cmts ~project_dir fn_rows =
       cmt_only
   end
 
-let extract_calls client ~project_dir fn_rows =
-  (* Try LSP call hierarchy first; fall back to CMT if it yields nothing. *)
-  let candidates =
-    List.filter
-      (fun (row : Lsp_extractor.fn_row) -> row.exported || row.summary <> None)
-      fn_rows
+(* A server that is still loading its workspace answers prepareCallHierarchy
+   with nothing rather than with an error -- rust-analyzer does exactly that
+   until cargo metadata and the initial index are done, and a warm target/ does
+   not help because each process reloads.  So an empty first sweep is not
+   evidence of a call-free program: wait and sweep again, a bounded number of
+   times, before believing it. *)
+let sweep client ~project_dir fn_rows =
+  List.concat_map
+    (fun row ->
+      let items = prepare_call_hierarchy client ~project_dir row in
+      List.concat_map (outgoing_calls client ~project_dir) items)
+    fn_rows
+
+let extract_calls ?clock client ~project_dir fn_rows =
+  (* Try LSP call hierarchy first; fall back to CMT if it yields nothing.
+
+     Every row is queried, not just the exported ones: a private function's
+     outgoing calls are exactly what reachability needs -- dropping them makes
+     whatever it calls look uncalled.  The previous filter tied call-graph
+     completeness to visibility, so tightening Go's visibility rule silently
+     cost the graph its `main -> Entry` edge. *)
+  (* A server still loading its workspace answers prepareCallHierarchy with
+     nothing rather than with an error -- rust-analyzer does that until cargo
+     metadata and the initial index are done.  An empty sweep is therefore not
+     evidence of a call-free program: wait and sweep again, bounded.  Sweeping
+     repeatedly once results have started arriving does not help and destabil-
+     ises the server, so the first non-empty sweep is taken as the answer; an
+     index built against a project that has never been compiled may still be
+     partial, which is why the selftest warms its fixture first. *)
+  let rec attempt n =
+    match sweep client ~project_dir fn_rows with
+    | _ :: _ as calls -> calls
+    | [] -> (
+        match clock with
+        | Some clock when n > 0 ->
+            Eio.Time.sleep clock 1.0 ;
+            attempt (n - 1)
+        | _ -> [])
   in
-  let lsp_calls =
-    List.concat_map
-      (fun row ->
-        let items = prepare_call_hierarchy client ~project_dir row in
-        List.concat_map (outgoing_calls client ~project_dir) items)
-      candidates
-  in
+  let lsp_calls = if fn_rows = [] then [] else attempt 20 in
   if lsp_calls <> [] then lsp_calls
   else extract_calls_from_cmts ~project_dir fn_rows
