@@ -52,7 +52,7 @@ jobs:
           typescript-language-server --version
           rust-analyzer --version
       - name: Install deps
-        run: opam install --deps-only --yes .
+        run: opam install --deps-only --with-test --yes .
       - name: Build
         run: opam exec -- dune build
       # `dune test` also runs the Tezt suite under tezt/, which covers the CMT
@@ -163,7 +163,7 @@ jobs:
         # builds with arch-load and cross-checks with arch-query, so this job needs the whole
         # toolchain, not just the server's own dependencies.
         run: |
-          opam install --deps-only --yes .
+          opam install --deps-only --with-test --yes .
           opam install --yes mcp-kit
       - name: Build the MCP server and the CLIs it is checked against
         env:
@@ -211,7 +211,7 @@ jobs:
         run: ${{ matrix.extra_setup }}
       - name: Install deps and build
         run: |
-          opam install --deps-only --yes .
+          opam install --deps-only --with-test --yes .
           opam exec -- dune build --profile=${{ matrix.profile }}
       - name: Package binaries
         run: |

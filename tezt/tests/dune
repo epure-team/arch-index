@@ -1,3 +1,29 @@
+; The language servers and `dune` itself are invisible to dune's dependency
+; tracking: nothing in the build graph changes when gopls or rust-analyzer is
+; upgraded, so a cached green result outlives the toolchain it was produced
+; with. `servers.version` closes that hole by recording what is actually
+; installed and making the test depend on the recording.
+;
+; (universe) is what makes the probe re-run on every build — it is dune's marker
+; for "this action reads the outside world". The probe itself is three version
+; calls; when the output is byte-identical, dune still caches the test, so the
+; cost is the probe and not the suite.
+;
+; Absence is recorded, not fatal: a machine without rust-analyzer writes
+; "rust-analyzer: absent" and the tests take their own skip path (or fail under
+; ARCH_TEZT_REQUIRE_SERVERS=1, which is that flag's job, not this rule's).
+(rule
+ (target servers.version)
+ (deps (universe))
+ (action
+  (with-stdout-to
+   %{target}
+   (progn
+    (run sh -c "printf 'gopls: '; gopls version 2>/dev/null | head -1 || echo absent")
+    (run sh -c "printf 'rust-analyzer: '; rust-analyzer --version 2>/dev/null || echo absent")
+    (run sh -c "printf 'typescript-language-server: '; typescript-language-server --version 2>/dev/null || echo absent")
+    (run sh -c "printf 'dune: '; dune --version 2>/dev/null || echo absent")))))
+
 (test
  (name main)
  (libraries arch_tezt tezt)
@@ -5,4 +31,5 @@
   %{exe:../../bin/arch_callgraph_ocaml/arch_callgraph_ocaml.exe}
   %{exe:../../bin/arch_query/arch_query.exe}
   %{exe:../../bin/arch_index_cli/arch_index_cli.exe}
-  ../../architecture-schema.sql))
+  ../../architecture-schema.sql
+  servers.version))
