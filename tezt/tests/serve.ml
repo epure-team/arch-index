@@ -80,12 +80,20 @@ let curl args =
    soon as the process is gone — a server that died is never going to answer. *)
 let wait_ready ~pid_file =
   let url = Printf.sprintf "http://localhost:%d/" port in
+  (* Liveness is `kill -0`, not the existence of the pid FILE: the file is
+     written once at spawn and never removed, so testing for it is always true
+     and the loop it was meant to short-circuit ran its full 10s on a server
+     that had already died. *)
+  let alive () =
+    Sys.file_exists pid_file
+    && Sys.command (Printf.sprintf "kill -0 $(cat %s) 2>/dev/null" (Filename.quote pid_file)) = 0
+  in
   let rec attempt n =
     if n = 0 then false
     else
       let code, _ = curl ["-fsS"; "-o"; "/dev/null"; url] in
       if code = 0 then true
-      else if not (Sys.file_exists pid_file) then false
+      else if not (alive ()) then false
       else (
         ignore (Sys.command "sleep 0.2") ;
         attempt (n - 1))
@@ -114,7 +122,13 @@ let register_refusal () =
     ~tags:["serve"]
   @@ fun () ->
   let db = main_db () in
-  let code, output = run_command (serve_bin ()) [db; "--port"; string_of_int port] in
+  (* Wrapped in `timeout`: this command is expected to EXIT, and if the guard
+     regresses it does the opposite — it binds the port and serves. Without a
+     deadline the assertion below would never be reached and the suite would
+     hang rather than report the regression it exists to catch. *)
+  let code, output =
+    run_command (which "timeout") ["20"; serve_bin (); db; "--port"; string_of_int port]
+  in
   Batch.run (fun b ->
       Batch.exit_code b ~msg:"a main-schema index must be declined at startup" ~expected:2
         (code, output) ;

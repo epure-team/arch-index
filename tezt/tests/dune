@@ -19,10 +19,15 @@
   (with-stdout-to
    %{target}
    (progn
-    (run sh -c "printf 'gopls: '; gopls version 2>/dev/null | head -1 || echo absent")
-    (run sh -c "printf 'rust-analyzer: '; rust-analyzer --version 2>/dev/null || echo absent")
-    (run sh -c "printf 'typescript-language-server: '; typescript-language-server --version 2>/dev/null || echo absent")
-    (run sh -c "printf 'dune: '; dune --version 2>/dev/null || echo absent")))))
+    ; The probe is captured first and defaulted, rather than piped into an `||`:
+    ; in `prog | head -1 || echo absent` the exit status is HEAD's, which is 0
+    ; whatever prog did, so a missing tool recorded as a blank field instead of
+    ; "absent" — and a blank field still differs from the next machine's blank
+    ; field only by luck.
+    (run sh -c "v=$(gopls version 2>/dev/null | head -1); printf 'gopls: %s\n' \"${v:-absent}\"")
+    (run sh -c "v=$(rust-analyzer --version 2>/dev/null); printf 'rust-analyzer: %s\n' \"${v:-absent}\"")
+    (run sh -c "v=$(typescript-language-server --version 2>/dev/null); printf 'typescript-language-server: %s\n' \"${v:-absent}\"")
+    (run sh -c "v=$(dune --version 2>/dev/null); printf 'dune: %s\n' \"${v:-absent}\"")))))
 
 (test
  (name main)

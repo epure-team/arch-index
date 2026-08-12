@@ -21,6 +21,8 @@ val start :
   args:string list ->
   project_dir:string ->
   ?init_options:Yojson.Safe.t ->
+  ?ready_timeout:float ->
+  ?ready_grace:float ->
   unit ->
   (t, string) result
 
@@ -36,20 +38,19 @@ val request :
 (** [notify t ~method_ ~params ()] sends a JSON-RPC notification (no response). *)
 val notify : t -> method_:string -> ?params:Yojson.Safe.t -> unit -> unit
 
-(** [await_ready t ~timeout ~grace] blocks until the server has closed every
-    work-done progress token it opened, i.e. until its background indexing is
-    finished.
+(** [ready_reported t] is [true] when the server actually reported its
+    background work finished during {!start}'s handshake.
 
-    This exists because a server that is still loading answers
-    [prepareCallHierarchy] with an empty list rather than an error, making
-    "still indexing" indistinguishable from "no calls".
+    {!start} waits for that signal because a server that is still loading
+    answers [prepareCallHierarchy] with an empty list rather than an error,
+    making "still indexing" indistinguishable from "no calls". [ready_timeout]
+    bounds the whole wait and [ready_grace] bounds the wait for the FIRST
+    progress notification, so a server with no work to report does not stall
+    the run.
 
-    [grace] bounds the wait for the first [begin] notification, so a server with
-    no work to report does not stall the run; [timeout] bounds the whole wait.
-    Returns [true] if quiescence was actually observed, [false] if either bound
-    was hit — [false] is not an error, it just means the caller learned nothing
-    and should fall back to its own bounded retry. *)
-val await_ready : t -> timeout:float -> grace:float -> bool
+    [false] is not an error: it means nothing was learned, and the caller should
+    fall back to its own bounded retry. *)
+val ready_reported : t -> bool
 
 (** [shutdown t] sends shutdown + exit, waits for process exit. *)
 val shutdown : t -> unit
