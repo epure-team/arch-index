@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # selftest-lsp-languages.sh — regression cover for the LSP indexing path, per language.
 #
-# The CMT path (OCaml) has selftest-callgraph-ocaml.sh, -nested.sh and
-# -ocaml-shapes.sh.  Nothing exercised the LSP path end to end, so a change to
+# The CMT path (OCaml) has selftest-callgraph-ocaml.sh, -nested.sh and the Tezt
+# suite under tezt/.  Nothing exercised the LSP path end to end, so a change to
 # the shared indexer, schema or resolver could break Go or Rust indexing with
 # every OCaml test still green.  This builds a small project per language, runs
 # arch_index_cli against the real language server, and asserts the same

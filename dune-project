@@ -27,4 +27,5 @@
   ocaml-compiler-libs
   (ppx_inline_test (>= v0.16))
   (ppx_assert (>= v0.16))
-  (alcotest (>= 1.7))))
+  (alcotest (>= 1.7))
+  (tezt (>= 4.0))))
