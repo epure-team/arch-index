@@ -42,9 +42,28 @@ CREATE TABLE IF NOT EXISTS calls (
   caller_file TEXT NOT NULL,
   callee_name TEXT NOT NULL,
   callee_file TEXT,
-  call_site TEXT
+  call_site TEXT,
+  kind TEXT
 );
 |}
+
+(* Every edge this backend produces is MAY_ENUMERATED, and the column exists so that it can say
+   so. LSP callHierarchy answers "who does this function call", which pins the CALLEE but says
+   nothing about whether the call runs on every execution — there is no CFG here and no
+   post-dominance, so the dominance half of MUST is simply not computed.
+
+   Leaving the column out was not neutral. `Arch_db.kind_sql` reads a missing column as the
+   literal 'MUST' (COALESCE(kind,'MUST') on a kinded index, `'MUST'` on an unkinded one), so
+   every conditional Go/Rust/TypeScript call was entering the graph as must-reach ground truth
+   and `arch-query reaches` was printing "PATH EXISTS (must-reach)" over it.
+
+   This does NOT earn `callgraph_contract = v1`, and the flag stays unset on purpose: the
+   contract also requires that unknowable targets be recorded as MAY_TOP, and callHierarchy
+   does not report the call sites it failed to resolve — interface dispatch, trait objects,
+   function values. The ⊤ frontier is therefore unknown rather than empty, so `unreachable` and
+   `escapes` must keep refusing on this schema. Downgrading MUST to MAY_ENUMERATED removes a
+   false claim; it does not manufacture a sound index. *)
+let lsp_edge_kind = "MAY_ENUMERATED"
 
 let exec_exn db sql =
   match Sqlite3.exec db sql with
@@ -161,7 +180,7 @@ let write_calls db call_rows =
     Sqlite3.prepare
       db
       "INSERT INTO calls (caller_name, caller_file, callee_name, callee_file, \
-       call_site) VALUES (?, ?, ?, ?, ?)"
+       call_site, kind) VALUES (?, ?, ?, ?, ?, ?)"
   in
   List.iter
     (fun (row : Call_graph_extractor.call_row) ->
@@ -171,6 +190,7 @@ let write_calls db call_rows =
       ignore (Sqlite3.bind stmt 3 (Sqlite3.Data.TEXT row.callee_name)) ;
       bind_text stmt 4 row.callee_file ;
       ignore (Sqlite3.bind stmt 5 (Sqlite3.Data.TEXT row.call_site)) ;
+      ignore (Sqlite3.bind stmt 6 (Sqlite3.Data.TEXT lsp_edge_kind)) ;
       ignore (Sqlite3.step stmt))
     call_rows ;
   ignore (Sqlite3.finalize stmt)
@@ -421,9 +441,13 @@ let run_multi ~sw ~env ~project_dir ~languages ~output ?(no_enrich = false)
               exec_exn
                 db
                 (Printf.sprintf
+                   (* `kind` is carried through rather than re-defaulted: a merge that dropped
+                      it would silently re-promote every edge to MUST (see [lsp_edge_kind]),
+                      which is exactly the bug this column exists to prevent — and it would
+                      only show up on polyglot repositories. *)
                    "INSERT INTO calls (caller_name, caller_file, callee_name, \
-                    callee_file, call_site) SELECT caller_name, %scaller_file, \
-                    callee_name, %scallee_file, %scall_site FROM src.calls"
+                    callee_file, call_site, kind) SELECT caller_name, %scaller_file, \
+                    callee_name, %scallee_file, %scall_site, kind FROM src.calls"
                    q
                    q
                    q) ;

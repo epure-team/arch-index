@@ -179,7 +179,37 @@ let register () =
                      "'%s' should have exported = %%R in the merged index, got \
                       %%L"
                      name)))
-          [("GoEntry", 1); ("goHelper", 0); ("tsEntry", 1); ("tsIsland", 0)]) ;
+          [("GoEntry", 1); ("goHelper", 0); ("tsEntry", 1); ("tsIsland", 0)] ;
+
+        (* Every edge is MAY_ENUMERATED, and the merge did not lose it.
+
+           This asserts on the whole table rather than a sample, because the
+           failure being guarded against is silent: a NULL kind (or a dropped
+           column) reads as MUST in Arch_db.kind_sql, so a single untagged row
+           re-introduces a must-reach claim the LSP path cannot support. *)
+        Check.(
+          (Db.int db
+             "SELECT count(*) FROM calls WHERE kind IS NULL OR kind <> \
+              'MAY_ENUMERATED'"
+           = 0)
+            int
+            ~error_msg:
+              "%L call edge(s) are not MAY_ENUMERATED — an untagged LSP edge \
+               reads as MUST and forges a must-reach path") ;
+
+        (* And the index must NOT claim the ⊤-marking contract: callHierarchy
+           never reports the call sites it failed to resolve, so the ⊤ frontier
+           is unknown, not empty. `unreachable`/`escapes` have to keep
+           refusing. *)
+        Check.(
+          (Db.string_opt db
+             "SELECT value FROM comment_db_meta WHERE key = \
+              'callgraph_contract'"
+           = None)
+            (option string)
+            ~error_msg:
+              "the LSP path must not stamp callgraph_contract (got %L): it \
+               does not enumerate unresolved targets as MAY_TOP")) ;
       Lwt.return_unit
     end
   end
