@@ -166,7 +166,12 @@ val fn_arity : Typedtree.expression -> int
     syntactic arity, over a whole structure (covers forward references and
     [let rec … and …] groups). Used by both the main indexer and the LSP
     fallback so the two paths cannot drift. *)
-val build_local_fn_stamps : Typedtree.structure -> (string, int) Hashtbl.t
+(** [build_local_fn_stamps structure] maps each same-unit function binding's
+    [Ident.unique_name] to the definition path it is indexed under and its
+    arity.  Nested bindings are included, under their qualified path, so a call
+    site inside a functor names its target the way the target is registered. *)
+val build_local_fn_stamps :
+  Typedtree.structure -> (string, string * int) Hashtbl.t
 
 (** [collect_calls_from_expr ~src_path ~caller_module ~caller_name
     ~local_fn_stamps expr] lowers [expr] onto per-node CFGs and returns the
@@ -177,7 +182,7 @@ val collect_calls_from_expr :
   src_path:string ->
   caller_module:string ->
   caller_name:string ->
-  local_fn_stamps:(string, int) Hashtbl.t ->
+  local_fn_stamps:(string, string * int) Hashtbl.t ->
   Typedtree.expression ->
   pending_call list * lambda_node list
 
