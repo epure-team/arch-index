@@ -1,0 +1,8 @@
+(test
+ (name main)
+ (libraries arch_tezt tezt)
+ (deps
+  %{exe:../../bin/arch_callgraph_ocaml/arch_callgraph_ocaml.exe}
+  %{exe:../../bin/arch_query/arch_query.exe}
+  %{exe:../../bin/arch_index_cli/arch_index_cli.exe}
+  ../../architecture-schema.sql))
