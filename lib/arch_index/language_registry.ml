@@ -138,10 +138,17 @@ let skip_dir = function
     De-duplicates: each language appears at most once regardless of how many
     manifests exist.  Checks every manifest independently so multi-language
     repositories are fully covered. *)
-let detect_all_languages ~project_dir =
+(* Records the directory each marker was found in, not just the language: a
+   language server is started in the directory that holds its project file, and
+   typescript-language-server refuses to start at a root with no tsconfig.json
+   even when one sits a level down. *)
+let detect_language_roots ~project_dir =
   let detected = Hashtbl.create 8 in
-  let add lang = Hashtbl.replace detected lang () in
+  let add_in dir lang =
+    if not (Hashtbl.mem detected lang) then Hashtbl.replace detected lang dir
+  in
   let check_dir dir =
+    let add lang = add_in dir lang in
     let exists f = Sys.file_exists (Filename.concat dir f) in
     let glob_exists ext =
       try
@@ -177,9 +184,17 @@ let detect_all_languages ~project_dir =
   in
   walk 0 project_dir ;
   (* Return in a stable order: priority order of common languages *)
-  List.filter
-    (Hashtbl.mem detected)
+  List.filter_map
+    (fun lang ->
+      match Hashtbl.find_opt detected lang with
+      | Some dir -> Some (lang, dir)
+      | None -> None)
     ["ocaml"; "typescript"; "rust"; "go"; "python"; "c"; "java"]
+
+(** [detect_all_languages ~project_dir] is {!detect_language_roots} without the
+    directories. *)
+let detect_all_languages ~project_dir =
+  List.map fst (detect_language_roots ~project_dir)
 
 (** [lsp_install_instruction ~language] returns the recommended install command
     for the LSP binary used by [language], or [None] if unknown. *)

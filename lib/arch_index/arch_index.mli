@@ -110,3 +110,16 @@ module Arch_index_git = Arch_index_git
 
 (** Pure per-function CFG with post-dominance (dominance-MUST engine). *)
 module Arch_index_cfg = Arch_index_cfg
+
+(** [run_lsp_multi ~languages] indexes a project holding several languages into
+    a single database. *)
+val run_lsp_multi :
+  sw:Eio.Switch.t ->
+  env:Eio_unix.Stdenv.base ->
+  project_dir:string ->
+  languages:(string * string) list ->
+  output:string ->
+  ?no_enrich:bool ->
+  ?verbose:bool ->
+  unit ->
+  (unit, string) Stdlib.result
