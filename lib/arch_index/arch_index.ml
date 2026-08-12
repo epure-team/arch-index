@@ -621,3 +621,4 @@ module Ocaml_enricher = Ocaml_enricher
 (* -------------------------------------------------------------------------- *)
 
 let run_lsp = Runner.run
+let run_lsp_multi = Runner.run_multi

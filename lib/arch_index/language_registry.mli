@@ -55,6 +55,12 @@ val detect_language : project_dir:string -> string option
     Returns [[]] if no manifest found.  Each language appears at most once. *)
 val detect_all_languages : project_dir:string -> string list
 
+(** [detect_language_roots ~project_dir] is {!detect_all_languages} paired with
+    the directory each language's project file was found in.  A server must be
+    started there rather than at the repository root: typescript-language-server
+    refuses a root with no tsconfig.json even when one sits a level down. *)
+val detect_language_roots : project_dir:string -> (string * string) list
+
 (** [lsp_install_instruction ~language] returns the recommended shell command
     to install the LSP binary for [language], or [None] if no instruction is
     known for that language.

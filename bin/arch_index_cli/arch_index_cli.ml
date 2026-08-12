@@ -15,16 +15,36 @@ open Cmdliner
 let run project language output no_enrich verbose =
   Eio_posix.run (fun env ->
       Eio.Switch.run (fun sw ->
+          (* "auto" in a polyglot repository means every language it holds,
+             not the first one detected. *)
+          let languages =
+            if language = "auto" then
+              Arch_index.Language_registry.detect_language_roots
+                ~project_dir:project
+            else [(language, project)]
+          in
           match
-            Arch_index.run_lsp
-              ~sw
-              ~env
-              ~project_dir:project
-              ~language
-              ~output
-              ~no_enrich
-              ~verbose
-              ()
+            match languages with
+            | [] | [_] ->
+                Arch_index.run_lsp
+                  ~sw
+                  ~env
+                  ~project_dir:project
+                  ~language
+                  ~output
+                  ~no_enrich
+                  ~verbose
+                  ()
+            | languages ->
+                Arch_index.run_lsp_multi
+                  ~sw
+                  ~env
+                  ~project_dir:project
+                  ~languages
+                  ~output
+                  ~no_enrich
+                  ~verbose
+                  ()
           with
           | Ok () -> ()
           | Error msg ->

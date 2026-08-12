@@ -33,3 +33,17 @@ val run :
   ?verbose:bool ->
   unit ->
   (unit, string) result
+
+(** [run_multi ~languages] indexes a project holding several languages into one
+    database, by indexing each language separately and merging the rows.  The
+    [language] meta key lists every language that contributed. *)
+val run_multi :
+  sw:Eio.Switch.t ->
+  env:Eio_unix.Stdenv.base ->
+  project_dir:string ->
+  languages:(string * string) list ->
+  output:string ->
+  ?no_enrich:bool ->
+  ?verbose:bool ->
+  unit ->
+  (unit, string) result

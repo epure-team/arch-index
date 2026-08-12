@@ -328,3 +328,133 @@ let run ~sw ~env ~project_dir ~language ~output ?(no_enrich = false)
             msg
   end ;
   Ok ()
+
+(* -------------------------------------------------------------------------- *)
+(* Multi-language projects                                                    *)
+(* -------------------------------------------------------------------------- *)
+
+(* Each language is indexed relative to its own project file's directory, so a
+   row says [src/index.ts] where the repository says [tsapp/src/index.ts].
+   Re-root them on merge, otherwise two sub-projects with a [main.go] each are
+   indistinguishable in the combined index. *)
+let sub_prefix ~project_dir ~sub =
+  let root = Filename.concat project_dir "" in
+  let rlen = String.length root in
+  if String.length sub >= rlen && String.sub sub 0 rlen = root then
+    let rel = String.sub sub rlen (String.length sub - rlen) in
+    if rel = "" then "" else rel ^ "/"
+  else if sub = project_dir then ""
+  else ""
+
+(** [run_multi ~languages] indexes a project that holds several languages into a
+    single database.
+
+    [run] drives one language server and writes the database itself, so a
+    polyglot repository could only ever be indexed one language at a time, each
+    run replacing the previous file.  Rather than restructure that, each
+    language is indexed into its own temporary database and the rows are merged
+    afterwards -- which the schema makes safe, since [calls] refers to functions
+    by name and file rather than by row id, so nothing has to be renumbered.
+
+    The [language] meta key records every language that contributed, comma
+    separated, instead of a single one. *)
+let run_multi ~sw ~env ~project_dir ~languages ~output ?(no_enrich = false)
+    ?(verbose = false) () =
+  let tmp_dbs =
+    List.filter_map
+      (fun (language, project_dir_of_lang) ->
+        let tmp = Filename.temp_file "arch_index_lang_" ".db" in
+        (try Sys.remove tmp with _ -> ()) ;
+        match
+          run
+            ~sw
+            ~env
+            ~project_dir:project_dir_of_lang
+            ~language
+            ~output:tmp
+            ~no_enrich
+            ~verbose
+            ()
+        with
+        | Ok () -> Some (language, tmp, sub_prefix ~project_dir ~sub:project_dir_of_lang)
+        | Error msg ->
+            if verbose then
+              Arch_io.eprintf
+                "arch_index_lsp: %s failed: %s\n%!"
+                language
+                msg ;
+            (try Sys.remove tmp with _ -> ()) ;
+            None
+        | exception exn ->
+            if verbose then
+              Arch_io.eprintf
+                "arch_index_lsp: %s raised: %s\n%!"
+                language
+                (Printexc.to_string exn) ;
+            (try Sys.remove tmp with _ -> ()) ;
+            None)
+      languages
+  in
+  match tmp_dbs with
+  | [] -> Error "run_multi: no language could be indexed"
+  | _ :: _ ->
+      let merged = Filename.temp_file "arch_index_merged_" ".db" in
+      (try Sys.remove merged with _ -> ()) ;
+      let db = Sqlite3.db_open merged in
+      ignore (Sqlite3.exec db "PRAGMA journal_mode = WAL") ;
+      let ok =
+        try
+          exec_exn db schema_sql ;
+          List.iter
+            (fun (_, path, prefix) ->
+              let q = Printf.sprintf "'%s' || " (String.escaped prefix) in
+              let q = if prefix = "" then "" else q in
+              exec_exn db (Printf.sprintf "ATTACH DATABASE '%s' AS src" path) ;
+              exec_exn
+                db
+                (Printf.sprintf
+                   "INSERT INTO functions (name, file_path, line_start, \
+                    line_end, exported, signature, summary) SELECT name, %sfile_path, \
+                    line_start, line_end, exported, signature, summary FROM \
+                    src.functions"
+                   q) ;
+              exec_exn
+                db
+                (Printf.sprintf
+                   "INSERT INTO calls (caller_name, caller_file, callee_name, \
+                    callee_file, call_site) SELECT caller_name, %scaller_file, \
+                    callee_name, %scallee_file, %scall_site FROM src.calls"
+                   q
+                   q
+                   q) ;
+              exec_exn db "DETACH DATABASE src")
+            tmp_dbs ;
+          set_meta db "schema_version" "1" ;
+          set_meta
+            db
+            "language"
+            (String.concat "," (List.map (fun (l, _, _) -> l) tmp_dbs)) ;
+          true
+        with exn ->
+          if verbose then
+            Arch_io.eprintf
+              "arch_index_lsp: merge failed: %s\n%!"
+              (Printexc.to_string exn) ;
+          false
+      in
+      ignore (Sqlite3.db_close db) ;
+      List.iter (fun (_, p, _) -> try Sys.remove p with _ -> ()) tmp_dbs ;
+      if ok then begin
+        (try Sys.remove output with _ -> ()) ;
+        Sys.rename merged output ;
+        if verbose then
+          Arch_io.printf
+            "arch_index_lsp: wrote %s (%s)\n%!"
+            output
+            (String.concat ", " (List.map (fun (l, _, _) -> l) tmp_dbs)) ;
+        Ok ()
+      end
+      else begin
+        (try Sys.remove merged with _ -> ()) ;
+        Error "run_multi: merge failed"
+      end
