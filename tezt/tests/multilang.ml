@@ -66,8 +66,7 @@ let servers_available () =
   match missing with
   | [] -> true
   | _ ->
-      Log.warn
-        "not exercised: %s not runnable"
+      not_exercised "%s not runnable"
         (String.concat ", " (List.map (fun (n, _, _) -> n) missing)) ;
       false
 
@@ -90,7 +89,7 @@ let register () =
        arch-index, so a failure here is "not exercised" and not a red test.
        Without it [dune test] would need the network to pass. *)
     if code <> 0 then begin
-      Log.warn "not exercised: npm install failed (exit %d):\n%s" code output ;
+      not_exercised "npm install failed (exit %d):\n%s" code output ;
       Lwt.return_unit
     end
     else begin

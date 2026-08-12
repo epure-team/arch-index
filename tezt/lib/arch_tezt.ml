@@ -103,6 +103,18 @@ let run_command ?(env = []) ?cwd prog args =
    PATH check happily and then indexes nothing. *)
 let runnable prog args = fst (run_command prog args) = 0
 
+(* A test that skips itself and reports success is the failure mode this whole
+   port is about, so it must not be how CI behaves once the servers are meant to
+   be installed: there, ARCH_TEZT_REQUIRE_SERVERS turns a missing toolchain into
+   a red test.  On a workstation with only some servers, the run stays useful. *)
+let not_exercised fmt =
+  Printf.ksprintf
+    (fun reason ->
+      if Sys.getenv_opt "ARCH_TEZT_REQUIRE_SERVERS" = Some "1" then
+        Test.fail "%s -- and ARCH_TEZT_REQUIRE_SERVERS=1 forbids skipping" reason
+      else Log.warn "not exercised: %s" reason)
+    fmt
+
 (* [Temp.dir] roots the directory at /tmp/tezt-<pid>/<n>, so two runs on one
    machine cannot collide and nothing outside that root is ever removed.  A
    fixed name under the temp dir would be both racy and, since a directory
