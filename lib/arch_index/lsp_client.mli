@@ -36,5 +36,20 @@ val request :
 (** [notify t ~method_ ~params ()] sends a JSON-RPC notification (no response). *)
 val notify : t -> method_:string -> ?params:Yojson.Safe.t -> unit -> unit
 
+(** [await_ready t ~timeout ~grace] blocks until the server has closed every
+    work-done progress token it opened, i.e. until its background indexing is
+    finished.
+
+    This exists because a server that is still loading answers
+    [prepareCallHierarchy] with an empty list rather than an error, making
+    "still indexing" indistinguishable from "no calls".
+
+    [grace] bounds the wait for the first [begin] notification, so a server with
+    no work to report does not stall the run; [timeout] bounds the whole wait.
+    Returns [true] if quiescence was actually observed, [false] if either bound
+    was hit — [false] is not an error, it just means the caller learned nothing
+    and should fall back to its own bounded retry. *)
+val await_ready : t -> timeout:float -> grace:float -> bool
+
 (** [shutdown t] sends shutdown + exit, waits for process exit. *)
 val shutdown : t -> unit
