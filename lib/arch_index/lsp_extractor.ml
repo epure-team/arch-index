@@ -43,12 +43,26 @@ let relative_path ~project_dir abs_path =
   then String.sub abs_path (plen + 1) (String.length abs_path - plen - 1)
   else abs_path
 
-(** [is_exported name] returns true if [name] does not start with underscore. *)
-let is_exported name = String.length name = 0 || name.[0] <> '_'
+(** [is_exported ~language name] decides visibility from the name, using the
+    rule the language actually defines rather than one convention for all.
+
+    Go makes it lexical: an identifier is exported exactly when it starts with
+    an upper-case letter, so a lower-case [helper] is package-private.  Python
+    and TypeScript use the leading underscore by convention.  Rust and others
+    carry visibility in the declaration ([pub]), not in the name, and the LSP
+    symbol does not report it -- for those we default to exported and let a
+    language enricher correct it, the way ts_enricher does. *)
+let is_exported ~language name =
+  if String.length name = 0 then true
+  else
+    match language with
+    | "go" -> (
+        match name.[0] with 'A' .. 'Z' -> true | _ -> false)
+    | _ -> name.[0] <> '_'
 
 (** [extract_from_workspace_symbol client ~project_dir] fetches all symbols
     via workspace/symbol and filters to function kinds. *)
-let extract_from_workspace_symbol client ~project_dir =
+let extract_from_workspace_symbol client ~project_dir ~language =
   let params = `Assoc [("query", `String "")] in
   match Lsp_client.request client ~method_:"workspace/symbol" ~params () with
   | Error _ -> []
@@ -72,7 +86,7 @@ let extract_from_workspace_symbol client ~project_dir =
                     line_start;
                     line_end;
                     name_char = sym.location.range.start.character;
-                    exported = is_exported sym.name;
+                    exported = is_exported ~language sym.name;
                     signature = None;
                     summary = None;
                   })
@@ -81,11 +95,11 @@ let extract_from_workspace_symbol client ~project_dir =
 
 (** [flatten_document_symbols ~file_path syms] flattens a document symbol tree
     into fn_rows, keeping only function-kind symbols. *)
-let rec flatten_document_symbols ~file_path = function
+let rec flatten_document_symbols ~file_path ~language = function
   | [] -> []
   | sym :: rest ->
       let children_rows =
-        flatten_document_symbols ~file_path sym.Lsp_types.children
+        flatten_document_symbols ~file_path ~language sym.Lsp_types.children
       in
       let self_rows =
         if is_function_kind sym.kind then
@@ -96,14 +110,14 @@ let rec flatten_document_symbols ~file_path = function
               line_start = sym.range.start.line;
               line_end = sym.range.end_.line;
               name_char = sym.selection_range.start.character;
-              exported = is_exported sym.name;
+              exported = is_exported ~language sym.name;
               signature = None;
               summary = None;
             };
           ]
         else []
       in
-      self_rows @ children_rows @ flatten_document_symbols ~file_path rest
+      self_rows @ children_rows @ flatten_document_symbols ~file_path ~language rest
 
 (** [read_file_text uri] reads the file at [uri] (a file:// URI) and returns
     its content, or [""] on error. *)
@@ -136,7 +150,7 @@ let language_id_of_uri uri =
 
 (** [extract_from_document_symbols client ~project_dir ~file_uri] opens the
     file via [textDocument/didOpen] then fetches document symbols. *)
-let extract_from_document_symbols client ~project_dir ~file_uri =
+let extract_from_document_symbols client ~project_dir ~file_uri ~language =
   (* Open the file so the LSP server indexes it before we query symbols. *)
   let text = read_file_text file_uri in
   let lang = language_id_of_uri file_uri in
@@ -174,7 +188,7 @@ let extract_from_document_symbols client ~project_dir ~file_uri =
             | Error _ -> None)
           lst
       in
-      if syms <> [] then flatten_document_symbols ~file_path syms
+      if syms <> [] then flatten_document_symbols ~file_path ~language syms
       else
         List.filter_map
           (fun j ->
@@ -190,7 +204,7 @@ let extract_from_document_symbols client ~project_dir ~file_uri =
                       line_start = sym.location.range.start.line;
                       line_end = sym.location.range.end_.line;
                       name_char = sym.location.range.start.character;
-                      exported = is_exported sym.name;
+                      exported = is_exported ~language sym.name;
                       signature = None;
                       summary = None;
                     })
@@ -340,7 +354,7 @@ let extract_symbols client ~project_dir ~language =
      For other languages (TypeScript), workspace/symbol works reliably. *)
   let ws_rows =
     if language = "ocaml" then []
-    else extract_from_workspace_symbol client ~project_dir
+    else extract_from_workspace_symbol client ~project_dir ~language
   in
   (* Step 2: determine which files to query for document symbols. *)
   let file_uris =
@@ -350,7 +364,7 @@ let extract_symbols client ~project_dir ~language =
   let doc_rows =
     List.concat_map
       (fun uri ->
-        extract_from_document_symbols client ~project_dir ~file_uri:uri)
+        extract_from_document_symbols client ~project_dir ~file_uri:uri ~language)
       file_uris
   in
   merge_rows ws_rows doc_rows
