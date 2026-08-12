@@ -116,13 +116,32 @@ let dispatch (t : Arch_db.t) fmt ~cmd ~a ~b ~flat ~usage =
         if flat then "FROM calls c JOIN reach r ON c.caller_name=r.n"
         else "FROM calls c JOIN functions cf ON c.caller_id=cf.id JOIN reach r ON cf.name=r.n"
       in
+      (* A reachable MAY_TOP edge means "could call anything", so nothing below it can be called
+         dead: the closure is an under-approximation from there on. The candidates are still the
+         list worth reading, but the verdict must not claim soundness. An index with no calls.kind
+         carries no MAY_TOP information at all, so there is nothing to degrade on. *)
+      let top_from =
+        if flat then "FROM calls c2 WHERE c2.caller_name IN (SELECT n FROM reach)"
+        else
+          "FROM calls c2 JOIN functions cf2 ON c2.caller_id = cf2.id WHERE cf2.name IN (SELECT n \
+           FROM reach)"
+      in
+      let verdict_expr =
+        if Arch_db.has_col t "calls" "kind" then
+          Printf.sprintf
+            "CASE WHEN EXISTS(SELECT 1 %s AND (c2.kind IS NULL OR c2.kind NOT IN \
+             ('MUST','MAY_ENUMERATED'))) THEN 'candidate (MAY_TOP reachable: could-call-anything, \
+             cannot rule out a caller)' ELSE '%s' END"
+            top_from soundness
+        else Printf.sprintf "'%s'" soundness
+      in
       let sql roots_clause =
         Printf.sprintf
           "WITH RECURSIVE roots(n) AS (%s), reach(n) AS (SELECT n FROM roots UNION SELECT \
-           c.callee_name %s) SELECT f.name AS function_name, %s AS file_path, '%s' AS \
+           c.callee_name %s) SELECT f.name AS function_name, %s AS file_path, %s AS \
            verdict_soundness FROM functions f %s WHERE f.name NOT IN (SELECT n FROM reach) AND \
            f.name NOT LIKE '%%*TOP*%%' AND f.name NOT IN (SELECT n FROM roots) ORDER BY %s, f.name"
-          roots_clause edge_join fp_expr soundness join_clause fp_expr
+          roots_clause edge_join fp_expr verdict_expr join_clause fp_expr
       in
       let h = [ "function_name"; "file_path"; "verdict_soundness" ] in
       if roots_arg = "exported" then
