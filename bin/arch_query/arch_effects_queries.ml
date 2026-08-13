@@ -12,6 +12,15 @@ let die code msg =
 
 let lower = String.lowercase_ascii
 
+(* [mp] equals [fp], or is a whole-'/'-segment suffix of it, by SUBSTR ARITHMETIC.
+   Never LIKE: a path is data, and in a LIKE pattern `_` matches any character —
+   including '/' — so `foo_bar.ml` matched an effect recorded in `foo/bar.ml`. *)
+let suffix_match fp mp =
+  Printf.sprintf
+    "(%s = %s OR (length(%s) > length(%s) AND substr(%s, -length(%s)) = %s AND substr(%s, \
+     -length(%s)-1, 1) = '/'))"
+    fp mp fp mp fp mp mp fp mp
+
 let dispatch (t : Arch_db.t) fmt ~cmd ~a ~b ~flat ~usage =
   let q ~h ~shape ~cells ~pty sql params =
     Arch_fmt.print fmt h (Arch_db.rows t ~params_ty:pty ~shape ~to_cells:cells sql params)
@@ -37,11 +46,21 @@ let dispatch (t : Arch_db.t) fmt ~cmd ~a ~b ~flat ~usage =
      What CANNOT be id-keyed are the endpoints touching [function_effects]: that
      table has no function id, only (function_name, file_path). Seeds and
      projections therefore resolve a fe row to function ids by name, narrowed to
-     the candidates whose module path matches fe.file_path (equal, or a
-     '/'-suffix of one another — the CMT extractor emits build-dir paths like
-     `default/.lib.objs/byte/m1.ml` against a module path of `m1.ml`). When NO
-     candidate path-matches, all same-named candidates are kept: conservative,
-     and the residual ambiguity is this table's, not the closure's. *)
+     the candidates whose module path is a '/'-segment suffix of fe.file_path
+     (the CMT extractor emits build-dir paths like `default/.lib.objs/byte/m1.ml`
+     against a module path of `m1.ml`), preferring the LONGEST matching path —
+     `src/api.ml` beats `api.ml`, so a basename collision does not hand the row
+     to the shallower homonym. The comparison is substr arithmetic, NOT LIKE: a
+     path is data, and in a LIKE pattern `_` matches `/`, so `foo_bar.ml`
+     matched an effect recorded in `foo/bar.ml`. When NO candidate path-matches,
+     ALL same-named candidates are kept — conservative, never wrong-and-single.
+
+     RESIDUAL, stated rather than claimed away: if the extractor and the indexer
+     disagree about the source-relative root (an effect recorded as
+     `build/api.ml` against modules `src/api.ml` and `api.ml`), the shallow
+     homonym can still suffix-match alone and take the row. The cure is to
+     resolve effects to function ids at LOAD time; until then this narrowing is
+     best-effort and the fallback keeps it from ever dropping to zero. *)
 
   match cmd with
   | "mutators-of" ->
@@ -62,22 +81,28 @@ let dispatch (t : Arch_db.t) fmt ~cmd ~a ~b ~flat ~usage =
            ON f.name = t.fn ORDER BY how DESC, t.fn"
           (a, a)
       else
-        q ~h:[ "function_name"; "file_path"; "how"; "soundness" ] ~shape:Arch_db.Rows.t4' ~cells:Arch_db.Rows.c4 ~pty:str2
-          "WITH RECURSIVE dm(fn, fp) AS (SELECT DISTINCT function_name, file_path FROM \
-           function_effects WHERE value_kind=?), seed(id) AS (SELECT f.id FROM dm JOIN functions \
-           f ON f.name = dm.fn LEFT JOIN modules m ON f.module_id = m.id WHERE dm.fp IS NULL OR \
-           dm.fp = '' OR m.path = dm.fp OR m.path LIKE '%/' || dm.fp OR dm.fp LIKE '%/' || m.path \
-           OR NOT EXISTS (SELECT 1 FROM functions f2 JOIN modules m2 ON f2.module_id = m2.id \
-           WHERE f2.name = dm.fn AND (m2.path = dm.fp OR m2.path LIKE '%/' || dm.fp OR dm.fp \
-           LIKE '%/' || m2.path))), transitive(id) AS (SELECT id FROM seed UNION SELECT \
-           c.caller_id FROM calls c JOIN transitive t ON c.callee_id = t.id WHERE c.kind IS NULL \
-           OR c.kind IN ('MUST','MAY_ENUMERATED')) SELECT DISTINCT f.name AS function_name, \
-           COALESCE(fe.file_path, m.path) AS file_path, CASE WHEN sd.id IS NOT NULL THEN 'direct' \
-           ELSE 'transitive' END AS how, COALESCE(fe.soundness, 'candidate') AS soundness FROM \
-           transitive t JOIN functions f ON f.id = t.id LEFT JOIN modules m ON f.module_id = m.id \
-           LEFT JOIN seed sd ON sd.id = t.id LEFT JOIN function_effects fe ON sd.id IS NOT NULL \
-           AND fe.function_name = f.name AND fe.value_kind=? ORDER BY how DESC, f.name"
-          (a, a)
+        q ~h:[ "function_name"; "file_path"; "how"; "soundness" ] ~shape:Arch_db.Rows.t4' ~cells:Arch_db.Rows.c4 ~pty:str1
+          ("WITH RECURSIVE dm(fn, fp, snd) AS (SELECT DISTINCT function_name, file_path, \
+            soundness FROM function_effects WHERE value_kind=?), seed(id) AS (SELECT f.id FROM \
+            dm JOIN functions f ON f.name = dm.fn LEFT JOIN modules m ON f.module_id = m.id \
+            WHERE dm.fp IS NULL OR dm.fp = '' OR ("
+           ^ suffix_match "dm.fp" "m.path"
+           ^ " AND NOT EXISTS (SELECT 1 FROM functions f2 JOIN modules m2 ON f2.module_id = \
+              m2.id WHERE f2.name = dm.fn AND "
+           ^ suffix_match "dm.fp" "m2.path"
+           ^ " AND length(m2.path) > length(m.path))) OR NOT EXISTS (SELECT 1 FROM functions \
+              f2 JOIN modules m2 ON f2.module_id = m2.id WHERE f2.name = dm.fn AND "
+           ^ suffix_match "dm.fp" "m2.path"
+           ^ ")), transitive(id) AS (SELECT id FROM seed UNION SELECT c.caller_id FROM calls c \
+              JOIN transitive t ON c.callee_id = t.id WHERE c.kind IS NULL OR c.kind IN \
+              ('MUST','MAY_ENUMERATED')) SELECT DISTINCT f.name AS function_name, \
+              COALESCE(dm2.fp, m.path) AS file_path, CASE WHEN sd.id IS NOT NULL THEN 'direct' \
+              ELSE 'transitive' END AS how, COALESCE(dm2.snd, 'candidate') AS soundness FROM \
+              transitive t JOIN functions f ON f.id = t.id LEFT JOIN modules m ON f.module_id = \
+              m.id LEFT JOIN seed sd ON sd.id = t.id LEFT JOIN dm dm2 ON sd.id IS NOT NULL AND \
+              dm2.fn = f.name UNION ALL SELECT dm.fn, dm.fp, 'direct', dm.snd FROM dm WHERE NOT \
+              EXISTS (SELECT 1 FROM functions f WHERE f.name = dm.fn) ORDER BY 3 DESC, 1")
+          a
   | "effects-of" ->
       if not (Arch_db.has_table t "function_effects") then
         die 3 "arch-query: effects-of requires the effects tables." ;
@@ -91,18 +116,22 @@ let dispatch (t : Arch_db.t) fmt ~cmd ~a ~b ~flat ~usage =
           a
       else
         q ~h:[ "value_kind"; "mutating_fn"; "file_path"; "target"; "soundness" ] ~shape:Arch_db.Rows.t5' ~cells:Arch_db.Rows.c5 ~pty:str1
-          "WITH RECURSIVE reach(id) AS (SELECT id FROM functions WHERE name = ? UNION SELECT \
-           c.callee_id FROM calls c JOIN reach r ON c.caller_id = r.id WHERE c.callee_id IS NOT \
-           NULL AND (c.kind IS NULL OR c.kind IN ('MUST','MAY_ENUMERATED'))) SELECT DISTINCT \
-           fe.value_kind, fe.function_name AS mutating_fn, fe.file_path, fe.target, fe.soundness \
-           FROM function_effects fe WHERE fe.is_direct=1 AND EXISTS (SELECT 1 FROM functions f \
-           LEFT JOIN modules m ON f.module_id = m.id WHERE f.name = fe.function_name AND f.id IN \
-           (SELECT id FROM reach) AND (fe.file_path IS NULL OR fe.file_path = '' OR m.path = \
-           fe.file_path OR m.path LIKE '%/' || fe.file_path OR fe.file_path LIKE '%/' || m.path \
-           OR NOT EXISTS (SELECT 1 FROM functions f2 JOIN modules m2 ON f2.module_id = m2.id \
-           WHERE f2.name = fe.function_name AND (m2.path = fe.file_path OR m2.path LIKE '%/' || \
-           fe.file_path OR fe.file_path LIKE '%/' || m2.path)))) ORDER BY fe.value_kind, \
-           fe.function_name"
+          ("WITH RECURSIVE reach(id) AS (SELECT id FROM functions WHERE name = ? UNION SELECT \
+            c.callee_id FROM calls c JOIN reach r ON c.caller_id = r.id WHERE c.callee_id IS \
+            NOT NULL AND (c.kind IS NULL OR c.kind IN ('MUST','MAY_ENUMERATED'))) SELECT \
+            DISTINCT fe.value_kind, fe.function_name AS mutating_fn, fe.file_path, fe.target, \
+            fe.soundness FROM function_effects fe WHERE fe.is_direct=1 AND EXISTS (SELECT 1 \
+            FROM functions f LEFT JOIN modules m ON f.module_id = m.id WHERE f.name = \
+            fe.function_name AND f.id IN (SELECT id FROM reach) AND (fe.file_path IS NULL OR \
+            fe.file_path = '' OR ("
+           ^ suffix_match "fe.file_path" "m.path"
+           ^ " AND NOT EXISTS (SELECT 1 FROM functions f2 JOIN modules m2 ON f2.module_id = \
+              m2.id WHERE f2.name = fe.function_name AND "
+           ^ suffix_match "fe.file_path" "m2.path"
+           ^ " AND length(m2.path) > length(m.path))) OR NOT EXISTS (SELECT 1 FROM functions \
+              f2 JOIN modules m2 ON f2.module_id = m2.id WHERE f2.name = fe.function_name AND "
+           ^ suffix_match "fe.file_path" "m2.path"
+           ^ "))) ORDER BY fe.value_kind, fe.function_name")
           a
   | "pure-fns" ->
       if not (Arch_db.has_table t "function_effects") then
@@ -113,9 +142,10 @@ let dispatch (t : Arch_db.t) fmt ~cmd ~a ~b ~flat ~usage =
          anything, so purity cannot be certified for them.
 
          The effect seed is DELIBERATELY name-keyed with no path narrowing, unlike the other
-         closures: over-seeding marks a same-named pure function impure, which withholds a
-         purity claim rather than forging one. For "pure" — a claim consumers act on — that is
-         the only safe direction to be wrong in. *)
+         closures: over-seeding marks a same-named pure function impure — and, through the
+         backward closure, its ENTIRE caller cone with it — which withholds purity claims
+         rather than forging one. For "pure" — a claim consumers act on — that is the only
+         safe direction to be wrong in. *)
       if flat then
         q ~h:[ "name"; "file_path" ] ~shape:Arch_db.Rows.t2' ~cells:Arch_db.Rows.c2 ~pty:unit_ty
           "WITH RECURSIVE impure(fn) AS (SELECT DISTINCT function_name FROM function_effects WHERE \
@@ -194,12 +224,19 @@ let dispatch (t : Arch_db.t) fmt ~cmd ~a ~b ~flat ~usage =
       in
       (* An unresolved callee has no id, so it cannot extend the closure — and
          that IS lossy, not merely tidy. "Unresolved" does not mean "outside the
-         index": a module alias (`module A = Foo` then `A.target x`) defeats
-         resolution while `target` sits right there in [functions], and such
-         edges routinely carry kind MUST. So a reach set truncated at an
-         unresolved edge is a LOWER BOUND, and [verdict_expr] below degrades the
-         verdict to candidate whenever the cone holds one — kind alone does not
-         catch these, because the degradation-by-kind only fires on non-MUST/ENUM. *)
+         index". Two shapes exist, and they are handled by DIFFERENT branches of
+         [verdict_expr] below:
+         - a module alias (`module A = Foo` then `A.target x`): the CMT producer
+           demotes these to MAY_TOP (observed, not assumed), so the ⊤ kind
+           branch already degrades them;
+         - a qualified head the resolver cannot place — `Stdlib.+`, or a
+           cross-library name — recorded with kind MUST/MAY_ENUMERATED. The kind
+           branch NEVER fires on these, and the callee may perfectly well be an
+           indexed function. The unresolved branch exists for exactly this
+           shape, and its cost is stated: any cone that calls the stdlib
+           degrades from `sound` to the lower-bound message, and `sound` stays
+           reachable only for cones whose every edge resolves (the corpus pins
+           both directions). *)
       let reach_guard = if flat then "" else " WHERE c.callee_id IS NOT NULL" in
       let key = if flat then "f.name" else "f.id" in
       (* A reachable MAY_TOP edge means "could call anything", so nothing below it can be called
@@ -291,11 +328,17 @@ let dispatch (t : Arch_db.t) fmt ~cmd ~a ~b ~flat ~usage =
 
            On the FLAT schema the universe is NOT [functions] alone: a caller
            need not have a functions row there (arch_query.ml's `known` learned
-           this same lesson), so the check spans callers and callees too. *)
+           this same lesson), so the check spans callers too — but NOT callees.
+           A callee-only name has no outgoing edges by construction, so rooting
+           at one makes the cone exactly itself and every function comes back
+           dead: accepting `--roots '*TOP*'` or `--roots fmt.Println` as
+           "known" resurrects the whole-index-dead report this guard exists to
+           refuse. A review proved that with the callee arm present, both
+           exited 0 and stamped the report sound. *)
         let known_sql =
           if flat then
-            "SELECT name FROM (SELECT name FROM functions UNION SELECT caller_name FROM calls \
-             UNION SELECT callee_name FROM calls) WHERE name = ? LIMIT 1"
+            "SELECT name FROM (SELECT name FROM functions UNION SELECT caller_name FROM calls) \
+             WHERE name = ? LIMIT 1"
           else "SELECT name FROM functions WHERE name = ? LIMIT 1"
         in
         let unknown =
@@ -319,10 +362,9 @@ let dispatch (t : Arch_db.t) fmt ~cmd ~a ~b ~flat ~usage =
                 (* Same universe as the known-check: a legitimate flat root with
                    no functions row must still seed the closure, or the guard
                    would pass it and the query would then report everything
-                   dead anyway. *)
+                   dead anyway. Callees excluded for the same reason as there. *)
                 "SELECT name FROM (SELECT name FROM functions UNION SELECT caller_name FROM \
-                 calls UNION SELECT callee_name FROM calls) WHERE name IN (SELECT value FROM \
-                 json_each(?))"
+                 calls) WHERE name IN (SELECT value FROM json_each(?))"
               else "SELECT id FROM functions WHERE name IN (SELECT value FROM json_each(?))"))
           (Yojson.Safe.to_string (`List (List.map (fun n -> `String n) names)))
   | "capabilities-of" ->
