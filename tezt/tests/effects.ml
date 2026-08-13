@@ -409,7 +409,13 @@ INSERT INTO calls VALUES
         ~msg:"realcaller reaches foo/bar.ml's wild: the true attribution must survive"
         ~haystack:(query db ["effects-of"; "realcaller"]) "HashTbl" ;
       (let muts = query db ["mutators-of"; "HashTbl"] in
-       Batch.contains b ~msg:"caller is a transitive HashTbl mutator" ~haystack:muts "caller" ;
+       (* Line-ANCHORED, not a substring: the bare needle "caller" matches
+          realcaller/wildcaller/purecaller, and even "caller|" is still a
+          substring of "realcaller|" — the review that flagged the weak needle
+          proposed that spelling, and it is weak too. Only a line PREFIX pins
+          this row. *)
+       Batch.check b ~msg:"caller must be listed as a transitive HashTbl mutator"
+         (List.exists (has_prefix ~prefix:"caller|") (lines muts)) ;
        Batch.not_contains b
          ~msg:"purecaller must not be listed — its callee mutates nothing" ~haystack:muts
          "purecaller" ;
