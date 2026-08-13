@@ -33,11 +33,18 @@ let apply_migration db =
 let ocaml_files =
   [
     ("dune-project", "(lang dune 3.0)\n");
-    ("dune", "(library (name efxtest) (modules efxtest efxdeep))\n");
+    ("dune", "(library (name efxtest) (modules efxtest efxdeep efxtwin))\n");
     (* A SECOND module, so the effect closures have a boundary to cross. The
        fixture was single-module, which is why three closures that stopped at
        every module boundary went unnoticed. *)
     ("efxdeep.ml", {|let deep_mutator (h : (string, int) Hashtbl.t) = Hashtbl.replace h "deep" 1
+|});
+    (* The HOMONYM of the mutator: same short name, different module, PURE. A
+       review proved the closures, once they crossed module boundaries, matched
+       members by NAME on arrival — so calling THIS function read as reaching
+       efxdeep's mutation, effects-of invented an effect and mutators-of a
+       transitive mutator. The pair is what makes name-conflation observable. *)
+    ("efxtwin.ml", {|let deep_mutator (h : (string, int) Hashtbl.t) : int = Hashtbl.length h
 |});
     ("efxtest.ml", {|(* Effects fixture for selftest-effects.sh
    Mutations:
@@ -74,6 +81,9 @@ let exported_entry (b : box) (a : int array) (h : (string, int) Hashtbl.t) =
 
 (* Mutates nothing itself, and its only callee lives in ANOTHER module. *)
 let cross_entry (h : (string, int) Hashtbl.t) = Efxdeep.deep_mutator h
+
+(* Calls ONLY the pure twin — the function whose name matches the mutator. *)
+let twin_caller (h : (string, int) Hashtbl.t) : int = Efxtwin.deep_mutator h
 |});
   ]
 
@@ -127,10 +137,50 @@ let register_ocaml () =
             away"
          ~haystack:(query db ["pure-fns"]) cross) ;
 
+      (* The homonym, in both directions the review proved broken: calling the
+         PURE twin of a mutator must not read as reaching the mutation. *)
+      (let twin = discover db ~like:"twin_caller" ~unlike:None in
+       Batch.eq_int b
+         ~msg:
+           "effects-of twin_caller must be EMPTY — its only callee is the pure twin, and \
+            attributing efxdeep's mutation to it is name-conflation"
+         (List.length (lines (query db ["effects-of"; twin])))
+         0 ;
+       Batch.not_contains b
+         ~msg:"mutators-of must not list twin_caller — it reaches no mutation"
+         ~haystack:(query db ["mutators-of"; "HashTbl"]) twin) ;
+      (* Anti-stub: a closure that answers every question with everything —
+         `ON 1=1` in the transitive step — satisfies purely positive
+         assertions. island_fn calls nothing and mutates nothing: any output
+         listing it is inventing. *)
+      Batch.not_contains b
+        ~msg:"mutators-of must not list island_fn, which calls and mutates nothing"
+        ~haystack:(query db ["mutators-of"; "HashTbl"]) "island_fn" ;
+      Batch.eq_int b
+        ~msg:"effects-of island_fn must be EMPTY — it calls nothing"
+        (List.length (lines (query db ["effects-of"; "island_fn"])))
+        0 ;
+
       Batch.contains b ~msg:"a function with no effects must be listed pure"
         ~haystack:(query db ["pure-fns"]) "pure_fn" ;
-      Batch.contains b ~msg:"a function nothing calls must be reported dead"
-        ~haystack:(query db ["dead-code"]) "island_fn") ;
+      (* Rooted EXPLICITLY. The bare `dead-code` call this replaces passed for
+         the wrong reason: this fixture has no .mli, nothing is exposed, the
+         default root set was empty and EVERY function came back dead — the
+         assertion could not fail. The guard that now refuses that invocation
+         is itself under test here. *)
+      Batch.exit_code b
+        ~msg:
+          "dead-code with no roots on an index with nothing exposed must refuse — an empty \
+           root set reports the whole index as deletable"
+        ~expected:2
+        (query_raw db ["dead-code"]) ;
+      (let entry = discover db ~like:"exported_entry" ~unlike:None in
+       let dead = query db ["dead-code"; "--roots"; entry] in
+       Batch.contains b ~msg:"a function nothing calls must be reported dead" ~haystack:dead
+         "island_fn" ;
+       Batch.not_contains b
+         ~msg:"dead-code must not list record_mutator, which exported_entry calls"
+         ~haystack:dead "record_mutator")) ;
   Lwt.return_unit
 
 let go_files =

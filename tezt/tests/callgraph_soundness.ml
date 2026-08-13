@@ -31,7 +31,11 @@ let fixture_files =
     Fixture.dune_project;
     ("dune", "(library (name corpus) (modules cg crb))\n");
     ("crb.ml", {|let sink2 (x : int) : int = x
-let direct2 (x : int) : int = sink2 (x + 1)
+(* dup_leaf's HOMONYM lives in cg.ml: a name is unique only within its module,
+   so any name-keyed structure conflates the two. This one is REACHED (direct2
+   calls it); cg's is not. *)
+let dup_leaf (x : int) : int = x
+let direct2 (x : int) : int = dup_leaf (sink2 (x + 1))
 let mid (f : int -> int) (x : int) : int = f x
 |});
     ("cg.ml", {|[@@@warning "-60-21-20-8"] (* -60 functor; -21/-20 divergence; -8 partial-match fixtures *)
@@ -84,6 +88,13 @@ let fcm_param (module M : S) (x : int) : int = M.run x
 
 (* cross-module MUST chain (F2) *)
 let entry_direct (x : int) : int = Crb.direct2 x
+(* the homonym of Crb.dup_leaf: NEVER called, and it calls island *)
+let dup_leaf (x : int) : int = island (x + 2)
+(* a module ALIAS defeats the resolver: the edge below is recorded unresolved
+   (callee_id NULL), so the reach cone from alias_entry is a lower bound and
+   dead-code's verdict must say so instead of stamping the report sound *)
+module Ali = Crb
+let alias_entry (x : int) : int = Ali.direct2 x
 (* cross-module callee that internally escapes (F2 UNKNOWN preservation) *)
 let entry_unknown (x : int) : int = Crb.mid (fun y -> y) x
 
@@ -390,21 +401,95 @@ let register () =
          closed universe" — while cg.ml reaches crb.ml over a MUST edge. A tool
          that certifies architectural compliance must not be able to certify it
          by failing to look. *)
+      (* dead-code across the HOMONYM pair, line-level: both modules define
+         dup_leaf, only crb's is reached from entry_direct. A closure keyed by
+         name — coherently or only in its recursion set — cannot tell them
+         apart: it either revives cg's dead copy or kills crb's live one. *)
+      (let dead = query db ["dead-code"; "--roots"; "entry_direct"] in
+       let dead_lines = lines dead in
+       let line_with a c =
+         List.exists (fun l -> contains ~needle:a l && contains ~needle:c l) dead_lines
+       in
+       Batch.check b
+         ~msg:"cg.ml's dup_leaf is never called and must be reported dead"
+         (line_with "dup_leaf" "cg.ml") ;
+       Batch.check b
+         ~msg:
+           "crb.ml's dup_leaf is reached through direct2 and must NOT be reported dead — a \
+            name-keyed closure conflates it with its cg.ml homonym"
+         (not (line_with "dup_leaf" "crb.ml"))) ;
+      (* The alias: Ali.direct2 resolves to nothing (callee_id NULL), so from
+         alias_entry the reach cone is a LOWER bound. The report may list the
+         unreached functions — that is the honest under-approximation — but it
+         must not stamp itself sound while an unresolved edge leaves the cone. *)
+      (let dead = query db ["dead-code"; "--roots"; "alias_entry"] in
+       Batch.contains b
+         ~msg:
+           "dead-code below an unresolved alias edge must degrade its verdict to candidate"
+         ~haystack:dead "candidate (" ;
+       Batch.not_contains b
+         ~msg:
+           "no row below an unresolved alias edge may claim `sound` — the reach set is a \
+            lower bound"
+         ~haystack:dead "|sound") ;
       (let rules = Temp.file "xmodule.rules" in
        write_file rules
          "rule \"cg must not reach crb\"\n\
          \  forbid reach from file:**/cg.ml to file:**/crb.ml\n" ;
-       let _, out = run_command (arch_rules ()) [db; rules] in
-       Batch.contains b
-         ~msg:
-           "arch-rules must find the cross-module MUST path cg.ml -> crb.ml (a name-keyed graph             reports `pass` here, which is a false proof of compliance)"
-         ~haystack:out "FAIL" ;
-       Batch.not_contains b
-         ~msg:"and it must not certify the rule as proved-unreachable" ~haystack:out "[ pass  ]" ;
-       (* Non-vacuity: the verdict must name the module it reached, not just any
-          failure. *)
-       Batch.contains b ~msg:"the FAIL must name the reached callee in crb.ml" ~haystack:out
-         "direct2") ;
+       (* Asserted on --format json, NOT on the text report. The text assertions
+          this replaces were disarmable from unrelated files: `[ pass  ]`
+          depended on a 7-wide centering computation in the formatter, and a
+          bare `contains "FAIL"` also matched `FAIL?` — the POSSIBLE verdict —
+          so a degradation from proved-violation to maybe stayed green. *)
+       let _, out, _err = run_command_split (arch_rules ()) [db; rules; "--format"; "json"] in
+       match Batch.expect b (Json.strict_object ~what:"arch-rules --format json" out) with
+       | None -> ()
+       | Some j -> (
+           (match Json.member "verdict" j with
+           | Some (`String v) ->
+               Batch.eq_string b
+                 ~msg:
+                   "arch-rules must find the cross-module MUST path cg.ml -> crb.ml (a \
+                    name-keyed graph reports pass here, a false proof of compliance)"
+                 v "fail"
+           | other ->
+               Batch.note b "rules json: verdict missing or not a string (%s)" (Json.show other)) ;
+           match Batch.expect b (Json.list ~what:"rules" "results" j) with
+           | None -> ()
+           | Some [r] ->
+               (match Json.member "verdict" r with
+               | Some (`String v) ->
+                   Batch.eq_string b
+                     ~msg:
+                       "the verdict must be VIOLATION — a definite MUST path, not the \
+                        POSSIBLE/dynamic-dispatch downgrade"
+                     v "VIOLATION"
+               | other ->
+                   Batch.note b "rules json: results[0].verdict missing (%s)" (Json.show other)) ;
+               Option.iter
+                 (fun det ->
+                   Batch.contains b
+                     ~msg:"the violation must name the reached callee in crb.ml"
+                     ~haystack:(String.concat "," det) "direct2")
+                 (Batch.expect b (Json.strings ~what:"rules result" "detail" r)) ;
+               (* Every functions row in cg.ml must be a DISTINCT source node.
+                  Expected from the database itself, so the fixture can grow
+                  without editing a constant — and a graph that collapses
+                  homonyms (the dup_leaf pair spans exactly this selector)
+                  reports fewer sources than the db has rows. *)
+               Option.iter
+                 (fun n ->
+                   Db.with_db db (fun conn ->
+                       Batch.eq_int b
+                         ~msg:
+                           "source_size must equal cg.ml's function-row count — fewer means \
+                            the graph collapsed same-named functions into one node"
+                         n
+                         (Db.int conn
+                            "SELECT count(*) FROM functions f JOIN modules m ON f.module_id \
+                             = m.id WHERE m.path LIKE '%cg.ml'")))
+                 (Batch.expect b (Json.int ~what:"rules result" "source_size" r))
+           | Some l -> Batch.note b "rules json: expected exactly one result, got %d" (List.length l))) ;
       Batch.eq_string b ~msg:"escapes lam_map = empty ⊤ frontier"
         (if lines (query db ["escapes"; "lam_map"]) = [] then "empty" else "nonempty")
         "empty") ;

@@ -54,11 +54,35 @@
 
 ### Fixed
 - **`arch-query effects-of`, `mutators-of` and `pure-fns` stopped at every module boundary too** —
-  same root cause as `dead-code` below, found by re-checking the pattern rather than assuming it
-  was confined to one subcommand. On a two-module fixture where the mutation lives one module away
-  from its caller: `effects-of` returned NOTHING, `mutators-of` lost the transitive caller, and
-  `pure-fns` reported the caller as **pure** while it reaches a `Hashtbl.replace`. That last one is
-  a claim consumers act on. All three now hop through `calls.callee_id` on the main schema.
+  same root cause as `dead-code` below. On a two-module fixture where the mutation lives one module
+  away from its caller: `effects-of` returned NOTHING, `mutators-of` lost the transitive caller,
+  and `pure-fns` reported the caller as **pure** while it reaches a `Hashtbl.replace`. That last
+  one is a claim consumers act on.
+
+  The first fix moved only the join to `calls.callee_id` and left the recursion SET keyed by name
+  — which made the closures cross module boundaries and then conflate homonyms on arrival:
+  calling the pure namesake of a mutator read as reaching the mutation. An adversarial review
+  proved it before it shipped anywhere. Both the join and the set are ids now. The endpoints
+  touching `function_effects` cannot be id-keyed (that table has only `function_name, file_path`),
+  so seeds and projections narrow same-named candidates by module path, keeping all of them when
+  no path matches; `pure-fns` deliberately skips the narrowing — over-seeding withholds a purity
+  claim rather than forging one, the only safe direction for that verdict.
+- **`arch-query dead-code` could still report the whole index as dead through its DEFAULT
+  invocation.** The unmatched-root guard checked the name list, but the failure lives in the root
+  SET: bare `dead-code` on an index where nothing is exported (a library with no `.mli`, a Go
+  package with only lowercase names) rooted at nothing, reported every function dead, exited 0 —
+  and stamped the report with the strongest soundness the index supports, since an empty reach
+  cone touches no degrading edge. An empty root set now refuses with exit 2, as does `--roots`
+  with a missing or empty value. On the flat schema both the guard and the root lookup now use
+  the full universe (functions ∪ callers ∪ callees): a legitimate root without a `functions` row
+  was being refused, the exact mistake `arch-query`'s `known` had already documented and fixed.
+- **`dead-code`'s `sound` verdict ignored unresolved callees.** "Unresolved" does not mean
+  "outside the index": a module alias (`module A = Foo` … `A.target x`) defeats resolution while
+  `target` sits in `functions`, so the reach cone silently truncated and a live function could be
+  reported dead as `sound`. The verdict now degrades to
+  `candidate (unresolved callees in the cone — the reach set is a lower bound)` whenever the cone
+  holds an unresolved edge, kind notwithstanding — the kind-based ⊤ degradation never fired on
+  these, because alias edges routinely carry MUST.
 - **`arch-query dead-code` stopped at every module boundary on the MAIN schema.** The reachability
   closure walked callee NAMES: a caller records its callee as dune spells it
   (`Arch_index__.Lsp_client.start`) while that function's own `functions.name` is `start`, so the
