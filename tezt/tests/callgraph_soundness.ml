@@ -350,6 +350,31 @@ let register () =
           "this fixture has no .mli, so `exported` must be empty — if it is not, the            lambda-node assertion below has to be made real instead of vacuous"
         (List.length (lines (query db ["exported"])))
         0 ;
+      (* dead-code across a MODULE boundary, on the main schema.
+         `entry_direct` (cg.ml) calls `Crb.direct2` (crb.ml), which calls
+         `sink2`. Nothing covered this before, and it was broken: the closure
+         walked callee NAMES, so it accumulated "Crb.direct2" while that
+         function's own `functions.name` is "direct2" — the chain stopped at
+         every module boundary and everything reachable only across one was
+         reported deletable. `calls.callee_id` held the right answer all along.
+
+         Two hops, deliberately: one would pass even if the closure stopped
+         immediately after the root. *)
+      (let dead = query db ["dead-code"; "--roots"; "entry_direct"] in
+       List.iter
+         (fun reached ->
+           Batch.not_contains b
+             ~msg:
+               (Printf.sprintf
+                  "dead-code must follow the cross-module edge: %s is reachable from                    entry_direct via Crb.direct2"
+                  reached)
+             ~haystack:dead reached)
+         ["direct2"; "sink2"] ;
+       (* Non-vacuity: the report has to be saying something. `island` is not on
+          that path, so it must still be listed. *)
+       Batch.contains b
+         ~msg:"dead-code from entry_direct must still report what it does NOT reach"
+         ~haystack:dead "island") ;
       Batch.eq_string b ~msg:"escapes lam_map = empty ⊤ frontier"
         (if lines (query db ["escapes"; "lam_map"]) = [] then "empty" else "nonempty")
         "empty") ;
