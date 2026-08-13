@@ -231,20 +231,33 @@ let register_go () =
                   ~msg:(Printf.sprintf "effects-of %s must reach %s" entry kind)
                   ~haystack:eff_out kind)
               ["HashTbl"; "FieldAccess"; "ArrayElem"] ;
-            (* dead-code is asserted POSITIVELY only here, and that is a
-               limitation of this fixture rather than a choice: `functions.name`
-               carries the package prefix (`efxtest.islandFn`) while
-               `calls.caller_name` does not (`entry`), so the two never join and
-               EVERY function comes back dead. The positive assertion therefore
-               passes for the wrong reason, and the matching negative — "a
-               function the entry point calls must not be listed" — fails
-               against the real output.
+            (* Both directions, against an EXPLICIT root.
 
-               Not silently dropped, and not asserted as if it worked: the
-               discrimination is pinned on the OCaml fixture below, where the
-               names do join. See the report accompanying this change. *)
-            Batch.contains b ~msg:"islandFn must be reported dead"
-              ~haystack:(query db ["dead-code"]) "islandFn" ;
+               The default is `--roots exported`, and every function in this Go
+               fixture is lowercase — unexported — so the default root set is
+               empty and every function comes back dead. The positive assertion
+               alone passed on exactly that, i.e. for the opposite of the stated
+               reason. Naming the root makes the report discriminate, and the
+               negatives below are what prove it: a `dead-code` that lists code
+               reachable from its own root is worse than none. *)
+            (let root = "efxtest.entry" in
+             let dead = query db ["dead-code"; "--roots"; root] in
+             Batch.contains b ~msg:"islandFn must be reported dead" ~haystack:dead "islandFn" ;
+             List.iter
+               (fun live ->
+                 Batch.not_contains b
+                   ~msg:
+                     (Printf.sprintf "dead-code --roots %s must not list %s, which it reaches"
+                        root live)
+                   ~haystack:dead live)
+               ["mapMutator"; "fieldMutator"; "arrayMutator"] ;
+             (* And a root that matches nothing must REFUSE, not report the
+                whole index as dead — the failure mode the flag's silence
+                produced for as long as it went unparsed. *)
+             Batch.exit_code b
+               ~msg:"dead-code with an unmatched root must exit 2, not declare everything dead"
+               ~expected:2
+               (query_raw db ["dead-code"; "--roots"; "efxtest.no_such_function"])) ;
             (* pure-fns has the same shape: declaring every function pure passes
                a positive-only check, and "pure" is a claim consumers act on. *)
             (let pure = query db ["pure-fns"] in

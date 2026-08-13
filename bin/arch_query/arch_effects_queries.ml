@@ -102,7 +102,23 @@ let dispatch (t : Arch_db.t) fmt ~cmd ~a ~b ~flat ~usage =
            f.name NOT LIKE '%*TOP*%' ORDER BY m.path, f.name"
           ()
   | "dead-code" ->
-      let roots_arg = if a = "" then "exported" else a in
+      (* The flag this subcommand's own usage documents — `dead-code [--roots
+         exported|<fn1,fn2,...>]` — was never parsed. `--roots entry` put the
+         literal string "--roots" in the roots list, which matches no function,
+         so the root set came out EMPTY and every function in the index was
+         reported dead. A "delete this code" report that names everything,
+         produced by following the documented interface. Both spellings are
+         accepted now, and the bare positional form still works. *)
+      let roots_arg =
+        match (a, b) with
+        | "--roots", "" -> ""
+        | "--roots", v -> v
+        | _, _
+          when String.length a > 8 && String.sub a 0 8 = "--roots=" ->
+            String.sub a 8 (String.length a - 8)
+        | _ -> a
+      in
+      let roots_arg = if roots_arg = "" then "exported" else roots_arg in
       let soundness = match t.Arch_db.contract with Some _ -> "sound" | None -> "candidate" in
       let vis =
         if Arch_db.has_col t "functions" "exported" then "exported"
@@ -156,6 +172,28 @@ let dispatch (t : Arch_db.t) fmt ~cmd ~a ~b ~flat ~usage =
            spliced the names into the SQL with sed. Passing ONE json array and expanding it with
            json_each keeps the arity fixed at 1 and the names as data. *)
         let names = String.split_on_char ',' roots_arg |> List.map String.trim in
+        (* A root that matches no function is BROKEN INPUT, not a root set of
+           zero. Silently, an unmatched root makes the reachable set empty and
+           every function in the index is reported dead — the maximally wrong
+           answer for a report whose whole purpose is "this code can be
+           deleted", and indistinguishable from a correct answer to anyone who
+           trusts it. A typo in a root name has to fail, not delete a codebase. *)
+        let unknown =
+          List.filter
+            (fun n ->
+              Arch_db.rows t ~params_ty:str1 ~shape:Arch_db.Rows.t1
+                ~to_cells:Arch_db.Rows.c1
+                "SELECT name FROM functions WHERE name = ? LIMIT 1" n
+              = [])
+            names
+        in
+        if unknown <> [] then
+          die 2
+            (Printf.sprintf
+               "arch-query: dead-code: no function named %s in this index. Refusing: an \
+                unmatched root makes EVERY function unreachable, so the report would list the \
+                whole index as dead."
+               (String.concat ", " (List.map (Printf.sprintf "%S") unknown))) ;
         q ~h ~shape:Arch_db.Rows.t3' ~cells:Arch_db.Rows.c3 ~pty:str1
           (sql "SELECT name FROM functions WHERE name IN (SELECT value FROM json_each(?))")
           (Yojson.Safe.to_string (`List (List.map (fun n -> `String n) names)))
