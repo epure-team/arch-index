@@ -7,3 +7,6 @@ _opam/
 *.db
 # MCP / tooling scratch
 .playwright-mcp/
+# Agent worktrees: transient full checkouts the harness creates in-tree when a
+# subagent runs isolated. Committing them would nest the repo inside itself.
+.claude/
