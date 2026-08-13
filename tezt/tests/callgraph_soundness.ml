@@ -91,8 +91,9 @@ let entry_direct (x : int) : int = Crb.direct2 x
 (* the homonym of Crb.dup_leaf: NEVER called, and it calls island *)
 let dup_leaf (x : int) : int = island (x + 2)
 (* a module ALIAS defeats the resolver: the edge below is recorded unresolved
-   (callee_id NULL), so the reach cone from alias_entry is a lower bound and
-   dead-code's verdict must say so instead of stamping the report sound *)
+   (callee_id NULL) and demoted to MAY_TOP by the producer, so from alias_entry
+   the ⊤ branch of dead-code's verdict fires — the unresolved-MUST branch is
+   pinned separately, on the Stdlib.+ edge in entry_direct's cone *)
 module Ali = Crb
 let alias_entry (x : int) : int = Ali.direct2 x
 (* cross-module callee that internally escapes (F2 UNKNOWN preservation) *)
@@ -417,7 +418,26 @@ let register () =
          ~msg:
            "crb.ml's dup_leaf is reached through direct2 and must NOT be reported dead — a \
             name-keyed closure conflates it with its cg.ml homonym"
-         (not (line_with "dup_leaf" "crb.ml"))) ;
+         (not (line_with "dup_leaf" "crb.ml")) ;
+       (* This cone holds an unresolved MUST edge (`x + 1` -> Stdlib.+) and no ⊤,
+          so the verdict must be the unresolved-lower-bound message — the branch
+          a review deleted outright with all 68 tests staying green, because the
+          only fixture that claimed to pin it (the alias) is ⊤-demoted by the
+          producer and lands in the OTHER branch. *)
+       Batch.contains b
+         ~msg:
+           "a cone with an unresolved MUST edge and no ⊤ must degrade with the unresolved \
+            message, not report sound"
+         ~haystack:dead "unresolved callees") ;
+      (* And `sound` must remain REACHABLE, or the degradation is a constant and
+         the verdict column stops meaning anything: direct -> g -> sink is a
+         cone in which every edge resolves and nothing is ⊤. *)
+      (let dead = query db ["dead-code"; "--roots"; "direct"] in
+       Batch.contains b
+         ~msg:"a fully-resolved ⊤-free cone must still certify its report sound"
+         ~haystack:dead "|sound" ;
+       Batch.not_contains b
+         ~msg:"and no degradation may fire on it" ~haystack:dead "candidate (") ;
       (* The alias: Ali.direct2 resolves to nothing (callee_id NULL), so from
          alias_entry the reach cone is a LOWER bound. The report may list the
          unreached functions — that is the honest under-approximation — but it

@@ -341,6 +341,122 @@ let register_go () =
                 Assert.kinds_valid b conn ~label:"Go effects"))) ;
   Lwt.return_unit
 
+(* The endpoint mapping between [function_effects] (name + path, no id) and
+   [functions] (id-keyed), on a HAND-BUILT main-schema index — no producer
+   involved, because what is under test is the query layer's resolution rule,
+   and the CMT resolver has homonym defects of its own that would pollute an
+   end-to-end fixture.
+
+   Three findings of an adversarial review, each pinned in both directions:
+   - basename collision: `run` in `api.ml` (pure) vs `run` in `src/api.ml`
+     (mutator), effect recorded under the build-dir path. The suffix match must
+     prefer the LONGEST path, or the shallow homonym takes the row and calling
+     the pure twin reads as reaching the mutation.
+   - LIKE wildcards in data: `_` matches `/`, so `foo_bar.ml` matched an effect
+     recorded in `foo/bar.ml`. The comparison must be substr arithmetic.
+   - ghost effects: a fe row whose function has no [functions] row (producer
+     data the loader does not FK-check) must still be listed as a direct
+     mutator, not silently dropped by the id join. *)
+let register_endpoint_ambiguity () =
+  Test.register ~__FILE__
+    ~title:"effects: name+path endpoints resolve to the right id, or to all, never to a wrong one"
+    ~tags:["effects"; "query"; "homonym"]
+  @@ fun () ->
+  let db =
+    Fixture.raw ~name:"effects_endpoints"
+      {|
+CREATE TABLE comment_db_meta(key TEXT, value TEXT);
+INSERT INTO comment_db_meta VALUES('callgraph_contract','v1');
+CREATE TABLE modules(id INTEGER PRIMARY KEY, name TEXT, path TEXT);
+CREATE TABLE functions(id INTEGER PRIMARY KEY, module_id INT, name TEXT, exposed INT, line_start INT, line_end INT);
+CREATE TABLE calls(id INTEGER PRIMARY KEY, caller_id INT, callee_id INT, callee_name TEXT, call_site TEXT, kind TEXT);
+INSERT INTO modules VALUES (1,'api','api.ml'),(2,'api2','src/api.ml'),(3,'m3','m3.ml'),(4,'fb','foo_bar.ml'),(5,'fbr','foo/bar.ml');
+INSERT INTO functions VALUES
+ (1,1,'run',0,1,2),(2,2,'run',0,1,2),
+ (3,3,'caller',0,1,2),(4,3,'purecaller',0,3,4),
+ (5,4,'wild',0,1,2),(6,3,'wildcaller',0,5,6),(7,5,'wild',0,1,2),(8,3,'realcaller',0,7,8);
+INSERT INTO calls VALUES
+ (1,3,2,'Api.run','m3.ml:1','MUST'),
+ (2,4,1,'Api.run','m3.ml:3','MUST'),
+ (3,6,5,'Fb.wild','m3.ml:5','MUST'),
+ (4,8,7,'Fbr.wild','m3.ml:7','MUST');
+|}
+  in
+  apply_migration db ;
+  Db.with_db_rw db (fun conn ->
+      Db.exec conn
+        {|INSERT INTO function_effects (function_name, file_path, value_kind, target, is_direct, soundness) VALUES
+ ('run','default/src/.s.objs/byte/src/api.ml','HashTbl','tbl',1,'sound'),
+ ('wild','default/.l.objs/byte/foo/bar.ml','HashTbl','t',1,'sound'),
+ ('ghost_mut','gm.ml','HashTbl','g',1,'sound');|}) ;
+  Batch.run (fun b ->
+      Batch.contains b
+        ~msg:"caller reaches the src/api.ml mutator by id: its effect must be reported"
+        ~haystack:(query db ["effects-of"; "caller"]) "HashTbl" ;
+      Batch.eq_int b
+        ~msg:
+          "purecaller reaches only api.ml's pure run: attributing src/api.ml's effect to it \
+           is a basename conflation (the longest-path preference is what prevents it)"
+        (List.length (lines (query db ["effects-of"; "purecaller"])))
+        0 ;
+      Batch.eq_int b
+        ~msg:
+          "wildcaller reaches only foo_bar.ml's wild: matching it against foo/bar.ml's effect \
+           needs `_` to match `/`, i.e. LIKE with data as the pattern"
+        (List.length (lines (query db ["effects-of"; "wildcaller"])))
+        0 ;
+      Batch.contains b
+        ~msg:"realcaller reaches foo/bar.ml's wild: the true attribution must survive"
+        ~haystack:(query db ["effects-of"; "realcaller"]) "HashTbl" ;
+      (let muts = query db ["mutators-of"; "HashTbl"] in
+       Batch.contains b ~msg:"caller is a transitive HashTbl mutator" ~haystack:muts "caller" ;
+       Batch.not_contains b
+         ~msg:"purecaller must not be listed — its callee mutates nothing" ~haystack:muts
+         "purecaller" ;
+       Batch.not_contains b
+         ~msg:"wildcaller must not be listed — the `_`/`/` conflation invented its path"
+         ~haystack:muts "wildcaller" ;
+       Batch.contains b
+         ~msg:
+           "an effect row with NO functions row is producer data, not noise: it must be \
+            listed as a direct mutator, not dropped by the id join"
+         ~haystack:muts "ghost_mut")) ;
+  (* The FLAT root universe, refused and accepted at its exact boundary: a
+     CALLER without a functions row is a legitimate root (it has outgoing
+     edges); a CALLEE-only name has none, so rooting there makes the cone
+     itself and every function comes back dead — the report the guard exists
+     to refuse. `*TOP*` is the sentinel spelling of the same trap. *)
+  let flat =
+    Fixture.raw ~name:"effects_flat_roots"
+      {|
+CREATE TABLE comment_db_meta(key TEXT, value TEXT);
+CREATE TABLE functions(name TEXT, file_path TEXT, exported INT);
+INSERT INTO functions VALUES ('a','x',0),('b','x',0),('island','x',0);
+CREATE TABLE calls(caller_name TEXT, caller_file TEXT, callee_name TEXT, callee_file TEXT, call_site TEXT, kind TEXT);
+INSERT INTO calls VALUES
+ ('entry','x','a','x','x:1','MUST'),
+ ('a','x','b','x','x:2','MUST'),
+ ('b','x','*TOP*',NULL,'x:3','MAY_TOP'),
+ ('a','x','fmt.Println',NULL,'x:4','MUST');
+|}
+  in
+  Batch.run (fun b ->
+      Batch.exit_code b
+        ~msg:"rooting at the ⊤ sentinel must refuse — its cone is itself, everything else dead"
+        ~expected:2
+        (query_raw flat ["dead-code"; "--roots"; "*TOP*"]) ;
+      Batch.exit_code b
+        ~msg:"rooting at a callee-only external must refuse for the same reason" ~expected:2
+        (query_raw flat ["dead-code"; "--roots"; "fmt.Println"]) ;
+      (let code, out = query_raw flat ["dead-code"; "--roots"; "entry"] in
+       Batch.eq_int b
+         ~msg:"a caller-only root is legitimate on the flat schema (it has outgoing edges)" code
+         0 ;
+       Batch.contains b ~msg:"and the report discriminates: island is dead" ~haystack:out
+         "island" ;
+       Batch.not_contains b ~msg:"while b, reached through a, is not" ~haystack:out "b|")) ;
+  Lwt.return_unit
+
 (* The Rust MIR extractor does not exist yet, so this loads hand-crafted NDJSON
    representing what it would emit. What is under test is the CONTRACT — that a
    producer can supply effects for a language with no extractor, and that its

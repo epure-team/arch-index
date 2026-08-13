@@ -64,9 +64,19 @@
   calling the pure namesake of a mutator read as reaching the mutation. An adversarial review
   proved it before it shipped anywhere. Both the join and the set are ids now. The endpoints
   touching `function_effects` cannot be id-keyed (that table has only `function_name, file_path`),
-  so seeds and projections narrow same-named candidates by module path, keeping all of them when
-  no path matches; `pure-fns` deliberately skips the narrowing — over-seeding withholds a purity
-  claim rather than forging one, the only safe direction for that verdict.
+  so seeds and projections narrow same-named candidates by module path — and the first version of
+  THAT narrowing was broken twice over, caught by a further review round before shipping: it
+  compared paths with LIKE, where `_` in a filename matches `/` (so `foo_bar.ml` claimed an
+  effect recorded in `foo/bar.ml`), and a basename-only match could suppress the fallback and
+  DROP the true mutator entirely — an under-report, the one direction worse than conflation.
+  The comparison is now substr arithmetic (no wildcards), prefers the longest matching path, keeps
+  all same-named candidates when nothing matches, and effect rows with no `functions` row at all
+  are listed as direct mutators instead of vanishing through the id join. `pure-fns` deliberately
+  skips the narrowing — over-seeding withholds purity claims (for the namesake and its whole
+  caller cone) rather than forging one, the only safe direction for that verdict. Residual,
+  documented in the code: when extractor and indexer disagree about the source-relative root, a
+  basename collision can still hand the row to the wrong homonym; the cure is resolving effects
+  to ids at load time.
 - **`arch-query dead-code` could still report the whole index as dead through its DEFAULT
   invocation.** The unmatched-root guard checked the name list, but the failure lives in the root
   SET: bare `dead-code` on an index where nothing is exported (a library with no `.mli`, a Go
@@ -74,15 +84,20 @@
   and stamped the report with the strongest soundness the index supports, since an empty reach
   cone touches no degrading edge. An empty root set now refuses with exit 2, as does `--roots`
   with a missing or empty value. On the flat schema both the guard and the root lookup now use
-  the full universe (functions ∪ callers ∪ callees): a legitimate root without a `functions` row
-  was being refused, the exact mistake `arch-query`'s `known` had already documented and fixed.
+  functions ∪ callers — a legitimate root without a `functions` row was being refused, the exact
+  mistake `arch-query`'s `known` had already documented and fixed. NOT callees: a first version
+  included them, and a review showed `--roots '*TOP*'` or `--roots fmt.Println` then rooted at a
+  leaf with no outgoing edges — every function dead, exit 0, stamped sound — resurrecting the
+  precise report the guard exists to refuse.
 - **`dead-code`'s `sound` verdict ignored unresolved callees.** "Unresolved" does not mean
-  "outside the index": a module alias (`module A = Foo` … `A.target x`) defeats resolution while
-  `target` sits in `functions`, so the reach cone silently truncated and a live function could be
-  reported dead as `sound`. The verdict now degrades to
-  `candidate (unresolved callees in the cone — the reach set is a lower bound)` whenever the cone
-  holds an unresolved edge, kind notwithstanding — the kind-based ⊤ degradation never fired on
-  these, because alias edges routinely carry MUST.
+  "outside the index", and the two shapes it covers land in different branches: module aliases
+  are demoted to MAY_TOP by the CMT producer (observed, not assumed) and were already caught by
+  the ⊤ degradation; qualified heads the resolver cannot place — `Stdlib.+`, cross-library names
+  — carry MUST/MAY_ENUMERATED, the ⊤ branch never fires on them, and the callee may perfectly
+  well be an indexed function. The verdict now degrades to
+  `candidate (unresolved callees in the cone — the reach set is a lower bound)` for those. Stated
+  cost: any cone that calls the stdlib degrades; `sound` remains reachable exactly for cones
+  whose every edge resolves, and the corpus pins both directions.
 - **`arch-query dead-code` stopped at every module boundary on the MAIN schema.** The reachability
   closure walked callee NAMES: a caller records its callee as dune spells it
   (`Arch_index__.Lsp_client.start`) while that function's own `functions.name` is `start`, so the
