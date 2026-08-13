@@ -260,3 +260,183 @@ let truly_dead (x : int) : int =
               "after_raise follows an unconditional raise and must still be reported dead"
             (List.mem "after_raise" dead))) ;
   Lwt.return_unit
+
+(* Cross-library homonyms: several compilation units sharing a source basename.
+
+   The resolver mapped a qualified reference's module component through a table
+   keyed by CAPITALISED BASENAME, built with [Hashtbl.replace] — one path per
+   name, last writer wins. Two libraries each holding an `api.ml` collapsed to
+   one entry, so `Api` designated whichever was scanned last: a MUST edge
+   pointing at the wrong function, reachability forged toward the survivor and
+   lost from every loser, verdict still `sound`. The same collapse existed three
+   times over — calls, module dependencies and type usages.
+
+   Resolution now keys on the COMPILATION UNIT, taken from the .cmt filename:
+   `rootlib__Api` and `sublib__Api` are distinct keys for the two `api.ml`.
+
+   The fixture is built to refute the two wrong fixes that were tried before it,
+   because each looks right on a simpler fixture:
+
+   - REFUSING to bind. An unresolved callee is stored `kind = MUST,
+     callee_id = NULL`, which is bit-for-bit an external leaf like `Stdlib.+`,
+     so `arch-rules` answered `pass` and `unreachable` answered UNREACHABLE
+     about a call the source plainly makes.
+   - NARROWING by directory segment — reading `Sublib` as the directory
+     `sublib/`. Library `x` here lives in `xlib/`, which is exactly the shape
+     that breaks it: dune derives the object directory from the LIBRARY name,
+     so the identity is in `xlib/.x.objs/byte/x__B.cmt` and not in the source
+     layout. `deep` pins it.
+
+   `inc/` is the case that decides the shape of the fix: `api.ml` is
+   `include Base_api`, so the unit resolves but holds no row for `run`. That is
+   NOT a reason to look elsewhere — falling back to the basename map there is
+   how a reference to one library's `run` gets bound to another's. It must
+   degrade, and it must degrade to ⊤ rather than to a NULL leaf, or the two
+   verdicts above go quietly wrong. *)
+let homonym_libs =
+  [
+    ("dune-project", "(lang dune 3.0)\n");
+    ("rootlib/dune", "(library (name rootlib) (libraries sublib))\n");
+    ("rootlib/api.ml", "type t = int\nlet run (x : int) : int = x + 1\n");
+    ( "rootlib/caller.ml",
+      "let entry (h : (string, int) Hashtbl.t) = Sublib.Api.run h\n\
+       let entry2 (x : int) : int = Api.run x\n\
+       let use_t (v : Api.t) : int = v\n" );
+    (* The dependency path is a SEPARATE resolver and regressed on its own after
+       the call path was fixed: an unresolved dep degrades to its dotted string,
+       so a path-shaped `forbid dep` selector stops matching and the rule goes
+       green on a file that plainly says `open`. *)
+    ( "rootlib/opener.ml",
+      "open Sublib.Api\n\nlet via_open (h : (string, int) Hashtbl.t) = run h\n" );
+    ("sublib/dune", "(library (name sublib))\n");
+    ( "sublib/api.ml",
+      "type t = string\nlet run (h : (string, int) Hashtbl.t) = Hashtbl.replace h \"k\" 1\n" );
+    (* `X` is ambiguous (two x.ml) but `B` is unique: an outer ambiguity must not
+       abort the walk before the component that actually decides. The library is
+       `x` and the directory is `xlib` — deliberately different. *)
+    ("p/dune", "(library (name p))\n");
+    ("p/x.ml", "let z = 1\n");
+    ("q/dune", "(library (name q))\n");
+    ("q/x.ml", "let z = 2\n");
+    ("xlib/dune", "(library (name x))\n");
+    ("xlib/b.ml", "let f (n : int) : int = n + 1\n");
+    ("cl/dune", "(library (name cl) (libraries x))\n");
+    ("cl/caller.ml", "let deep (n : int) : int = X.B.f n\n");
+    (* A SECOND `open`, of the other homonym. One alone proves nothing: the
+       basename map resolves `Api` to whichever api.ml was scanned last, and on
+       this fixture that happens to be sublib's — so an assertion on the sublib
+       side alone passes under a resolver that ignores the unit entirely. Two
+       opens of two different units cannot both be right by luck. *)
+    ("dep2/dune", "(library (name dep2) (libraries rootlib))\n");
+    ("dep2/opener2.ml", "open Rootlib.Api\n\nlet use_r (x : int) : int = run x\n");
+    (* Re-export: the unit resolves, the name is not a row in it. *)
+    ("inc/dune", "(library (name inc))\n");
+    ("inc/base_api.ml", "let run (n : int) : int = n + 2\n");
+    ("inc/api.ml", "include Base_api\n");
+    ("icl/dune", "(library (name icl) (libraries inc))\n");
+    ("icl/caller.ml", "let via_include (n : int) : int = Inc.Api.run n\n");
+  ]
+
+let register_cross_library_homonyms () =
+  Test.register ~__FILE__
+    ~title:"cmt: a qualified reference resolves by compilation unit, not by basename"
+    ~tags:["cmt"; "resolve"; "homonym"]
+  @@ fun () ->
+  with_fixture ~name:"homonym_libs" ~files:homonym_libs @@ fun fixture ->
+  let db = index fixture in
+  Db.with_db db (fun conn ->
+      (* Every probe reads a COUNT alongside the value it asserts. A scalar read
+         cannot tell "bound to the right module" from "bound to the right module
+         AND to a second one as well", and emitting a duplicate row is a real
+         regression shape for a resolver that stopped being a single lookup. *)
+      let binding ~caller ~like =
+        let one q =
+          match Db.string_opt conn q with Some s -> s | None -> "<no row>"
+        in
+        one
+          (Printf.sprintf
+             "SELECT count(*) || ' row(s) -> ' || COALESCE(group_concat(DISTINCT tgt), '<none>') \
+              FROM (SELECT COALESCE(m.path || ':' || f.name, 'UNRESOLVED:' || c.kind) AS tgt \
+              FROM calls c JOIN functions fc ON c.caller_id = fc.id LEFT JOIN functions f ON \
+              c.callee_id = f.id LEFT JOIN modules m ON f.module_id = m.id WHERE fc.name = '%s' \
+              AND c.callee_name LIKE '%s')"
+             caller like)
+      in
+      Batch.run (fun b ->
+          (* The fixture must actually contain the collision it is about. *)
+          Batch.eq_string_opt b
+            ~msg:"the fixture must hold two DISTINCT units both spelled api.ml"
+            (Db.string_opt conn
+               "SELECT group_concat(unit_name, ',') FROM (SELECT unit_name FROM modules WHERE \
+                path LIKE '%/api.ml' AND unit_name LIKE '%__Api' ORDER BY unit_name)")
+            (Some "inc__Api,rootlib__Api,sublib__Api") ;
+          (* Both directions. A resolver that always picks the same library
+             passes either one alone, and which one it picks depends on
+             directory traversal order — so one direction is half inert. *)
+          Batch.eq_string b
+            ~msg:"entry calls Sublib.Api.run and must bind to SUBLIB's run, once, as MUST"
+            (binding ~caller:"entry" ~like:"%Api.run")
+            "1 row(s) -> sublib/api.ml:run" ;
+          Batch.eq_string b
+            ~msg:"entry2 calls Api.run inside rootlib and must bind to ROOTLIB's run"
+            (binding ~caller:"entry2" ~like:"%Api.run")
+            "1 row(s) -> rootlib/api.ml:run" ;
+          Batch.eq_string b
+            ~msg:"a name reached through `open` resolves by unit like any other"
+            (binding ~caller:"via_open" ~like:"%Api.run")
+            "1 row(s) -> sublib/api.ml:run" ;
+          (* Library `x` in directory `xlib`: a resolver reading identity off
+             the source layout binds this wrong or not at all. *)
+          Batch.eq_string b
+            ~msg:
+              "an ambiguous outer component must not lose a deeper unique resolution, and the \
+               library (x) is not its directory (xlib)"
+            (binding ~caller:"deep" ~like:"%B.f")
+            "1 row(s) -> xlib/b.ml:f" ;
+          (* The re-export. The only forbidden outcome is a confident binding
+             into a DIFFERENT unit; ⊤ is what honest ignorance looks like here,
+             and a NULL leaf is what it must not look like. *)
+          Batch.eq_string b
+            ~msg:
+              "Inc.Api.run is provided by an include: the unit is known, so this must degrade to \
+               ⊤ — never bind to another library's run, never a NULL leaf that reads as external"
+            (binding ~caller:"via_include" ~like:"%Api.run")
+            "1 row(s) -> UNRESOLVED:MAY_TOP" ;
+          (* Type usages are the third copy of the collapse, and they need a
+             POSITIVE control: asserting only that the wrong answer is absent is
+             satisfied by a resolver that resolves no types at all. *)
+          Batch.eq_string_opt b
+            ~msg:"a type written Api.t inside rootlib must resolve to ROOTLIB's t"
+            (Db.string_opt conn
+               "SELECT COALESCE(m.path, 'UNRESOLVED') FROM type_usage tu LEFT JOIN types t ON \
+                tu.type_id = t.id LEFT JOIN modules m ON t.module_id = m.id WHERE tu.type_name \
+                LIKE '%Api.t'")
+            (Some "rootlib/api.ml") ;
+          (* Module deps are resolved by their own code path. Asserted on the
+             target PATH and the row count: a count alone is also what "resolved
+             to the same module twice" produces. *)
+          Batch.eq_string_opt b
+            ~msg:"`open Sublib.Api` must record exactly one dep row, pointing at sublib"
+            (Db.string_opt conn
+               "SELECT count(*) || ' -> ' || COALESCE(group_concat(DISTINCT p), '<none>') FROM \
+                (SELECT COALESCE(mt.path, 'UNRESOLVED') AS p FROM module_deps d LEFT JOIN modules \
+                 mt ON d.target_module = mt.id WHERE d.target_path = 'Sublib.Api')")
+            (Some "1 -> sublib/api.ml") ;
+          Batch.eq_string_opt b
+            ~msg:"`open Rootlib.Api` must record its own dep row, pointing at rootlib"
+            (Db.string_opt conn
+               "SELECT count(*) || ' -> ' || COALESCE(group_concat(DISTINCT p), '<none>') FROM \
+                (SELECT COALESCE(mt.path, 'UNRESOLVED') AS p FROM module_deps d LEFT JOIN modules \
+                 mt ON d.target_module = mt.id WHERE d.target_path = 'Rootlib.Api')")
+            (Some "1 -> rootlib/api.ml")) ;
+      (* The end-to-end consequence of the ⊤ on the re-export: `unreachable`
+         must decline. UNREACHABLE here would be the forged verdict the whole
+         change exists to prevent. *)
+      Batch.run (fun b ->
+          Batch.contains b
+            ~msg:
+              "a call into a unit whose name we cannot place must not let unreachable prove \
+               anything"
+            ~haystack:(query db ["unreachable"; "via_include"; "run"])
+            "UNKNOWN")) ;
+  Lwt.return_unit

@@ -67,6 +67,7 @@ let () =
   Callgraph_ocaml.register_kinds () ;
   Callgraph_ocaml.register_soundness () ;
   Callgraph_ocaml.register_deferred_is_not_dead () ;
+  Callgraph_ocaml.register_cross_library_homonyms () ;
   Callgraph_soundness.register () ;
   Effects.register_ocaml () ;
   Effects.register_go () ;
