@@ -10,13 +10,43 @@
 
 module Jc = Jsonrpc_client
 
+(* What the readiness wait LEARNED, not merely whether it succeeded.
+
+   The distinction is load-bearing and a bool hid it. [Reported] is the server
+   saying so: its indexing phase closed. [Quiescent] is a GUESS — every token it
+   opened has closed and nothing has arrived since — and that guess is beatable,
+   because a server whose next phase starts after a longer gap than the quiet
+   window looks identical to one that has finished. rust-analyzer, the server
+   this exists for, has exactly that shape: a sequence of phases with real gaps
+   between them. So a caller that needs to trust the answer must be able to tell
+   the two apart, and a caller that cannot tell should not treat a guess as a
+   fact. *)
+type readiness =
+  | Reported  (** The indexing phase closed. Authoritative. *)
+  | Quiescent  (** All opened tokens closed and nothing since. A heuristic. *)
+  | No_progress  (** Nothing ever started: the server reports no progress. *)
+  | Timed_out  (** The budget ran out while work was still in flight. *)
+  | Stream_ended  (** The server closed its output mid-handshake. *)
+
+(* [Timed_out] and [Stream_ended] were one case, printed as "budget exhausted".
+   They are the two things an operator most needs told apart: one means raise
+   the budget, the other means the server died and no budget would have helped.
+   Naming the wrong one in the single line printed after an empty index sends
+   the reader to the wrong fix. *)
+let readiness_to_string = function
+  | Reported -> "reported complete"
+  | Quiescent -> "quiescent (heuristic, no indexing phase seen)"
+  | No_progress -> "not reported (server sent no progress)"
+  | Timed_out -> "not reported (budget exhausted)"
+  | Stream_ended -> "not reported (server closed the connection)"
+
 type t = {
   config : Jc.config;
   send_notify : string -> unit;
       (** Send a notification (fire-and-forget: writes only, no read). *)
   await_proc : unit -> Eio.Process.exit_status;
-  ready_reported : bool;
-      (** Did the server actually report its background work finished? *)
+  readiness : readiness;
+      (** What the handshake actually learned about the server's background work. *)
 }
 
 (* --- LSP Content-Length framing ------------------------------------------ *)
@@ -71,7 +101,7 @@ let error_to_string = function
   | Jc.Protocol_error msg -> Printf.sprintf "protocol error: %s" msg
 
 let start ~sw ~env ~command ~args ~project_dir ?(init_options = `Null)
-    ?(ready_timeout = 60.) ?(ready_grace = 5.) () =
+    ?(ready_timeout = 60.) ?(ready_grace = 5.) ?(ready_quiet = 2.) () =
   let ( let* ) = Result.bind in
   let proc_mgr = Eio.Stdenv.process_mgr env in
   let clock = Eio.Stdenv.clock env in
@@ -125,31 +155,71 @@ let start ~sw ~env ~command ~args ~project_dir ?(init_options = `Null)
           Eio.Mutex.use_rw ~protect:true write_mutex (fun () ->
               send_lsp reply stdin_w)
         in
+        (* Once a request has been written and its reply not read, the stream
+           is desynchronised: every subsequent reply is off by one relative to
+           the request that is waiting for it.
+
+           That does NOT silently return a wrong answer — [Jsonrpc_client]
+           stamps each request with a monotonic id and rejects any reply whose
+           id does not match, so a desynced stream yields one [Protocol_error]
+           per call, naming both ids. What it does produce is N confusing
+           errors, each blaming an id mismatch, none of them naming the single
+           event that caused all of them.
+
+           So the first failure retires the connection and every later call
+           reports that reason instead. This is stated here rather than left to
+           [Eio.Mutex]'s own poisoning, which reaches the same refusal by
+           accident and reports it as [Eio.Mutex.Poisoned] wrapped in
+           [Connection_failed] — an implementation detail standing in for a
+           diagnosis. The failures are caught inside the lock, so the mutex
+           stays usable and the reason is the one recorded below. *)
+        let retired = ref None in
         let transport payload =
-          match
-            Eio.Mutex.use_rw ~protect:true mutex (fun () ->
-                Eio.Time.with_timeout_exn clock 30.0 (fun () ->
-                    send_lsp payload stdin_w ;
-                    (* Skip any interleaved notifications before the response,
-                       and answer any interleaved server request rather than
-                       mistaking it for the reply. *)
-                    let rec read_response () =
-                      let raw = recv_lsp reader in
-                      match classify raw with
-                      | `Notification _ -> read_response ()
-                      | `Server_request (id, _) ->
-                          answer_server_request id ;
-                          read_response ()
-                      | `Response -> raw
-                    in
-                    read_response ()))
-          with
-          | response -> Ok response
-          | exception Eio.Time.Timeout -> Error Jc.Timeout
-          | exception End_of_file ->
-              Error (Jc.Transport_other "child process closed connection")
-          | exception exn ->
-              Error (Jc.Connection_failed (Printexc.to_string exn))
+          match !retired with
+          | Some why -> Error (Jc.Transport_other why)
+          | None ->
+              let outcome =
+                Eio.Mutex.use_rw ~protect:true mutex (fun () ->
+                    match
+                      Eio.Time.with_timeout_exn clock 30.0 (fun () ->
+                          send_lsp payload stdin_w ;
+                          (* Skip any interleaved notifications before the
+                             response, and answer any interleaved server request
+                             rather than mistaking it for the reply. *)
+                          let rec read_response () =
+                            let raw = recv_lsp reader in
+                            match classify raw with
+                            | `Notification _ -> read_response ()
+                            | `Server_request (id, _) ->
+                                answer_server_request id ;
+                                read_response ()
+                            | `Response -> raw
+                          in
+                          read_response ())
+                    with
+                    | response -> Ok response
+                    | exception Eio.Time.Timeout ->
+                        retired :=
+                          Some
+                            "the connection was retired: a request timed out \
+                             with its reply unread, so the stream is \
+                             desynchronised" ;
+                        Error Jc.Timeout
+                    | exception End_of_file ->
+                        retired :=
+                          Some
+                            "the connection was retired: the child process \
+                             closed it" ;
+                        Error (Jc.Transport_other "child process closed connection")
+                    | exception exn ->
+                        let why = Printexc.to_string exn in
+                        retired :=
+                          Some
+                            ("the connection was retired after a transport \
+                              failure: " ^ why) ;
+                        Error (Jc.Connection_failed why))
+              in
+              outcome
         in
         (* Notification-only send: writes without reading (no response expected). *)
         let send_notify payload =
@@ -174,10 +244,11 @@ let start ~sw ~env ~command ~args ~project_dir ?(init_options = `Null)
            - [timeout] caps the total wait, so a server that opens a token and
              dies, or reports progress forever, cannot hang the run.
 
-           Returns true if the server actually reported quiescence; false if a
-           bound was hit.  A false is NOT fatal — the caller falls back to the
-           bounded-sweep behaviour — so a server that reports no progress at all
-           is no worse off than before this existed. *)
+           Returns which of the four {!readiness} outcomes was reached. Only
+           [Reported] is a fact about the index; the other three are NOT fatal —
+           the caller falls back to the bounded-sweep behaviour — so a server
+           that reports no progress at all is no worse off than before this
+           existed. *)
         let await_ready ~timeout ~grace =
           let active = ref 0 in
           let saw_begin = ref false in
@@ -227,9 +298,13 @@ let start ~sw ~env ~command ~args ~project_dir ?(init_options = `Null)
              releases the client at the end of `cargo metadata`, before a single
              file has been indexed, which is the original race with extra steps.
 
-             Readiness is therefore quiescence: no tokens open AND nothing more
-             arriving for [quiet] seconds. *)
-          let quiet = Float.min 2.0 grace in
+             The indexing phase closing is the authoritative signal. Quiescence
+             — no tokens open and nothing arriving for [quiet] seconds — is only
+             the FALLBACK for a server that reports work but never names an
+             indexing phase, and it is reported as [Quiescent] rather than
+             [Reported] because it can fire in an inter-phase gap longer than
+             the window. It is a guess, and it says so. *)
+          let quiet = ready_quiet in
           let deadline = Eio.Time.now clock +. timeout in
           (* No cancellation is ever allowed to land INSIDE a frame.
              [Buf_read] consumes as it parses, so a read interrupted between the
@@ -245,11 +320,25 @@ let start ~sw ~env ~command ~args ~project_dir ?(init_options = `Null)
              stalls is left to the pipeline-level timeout in the runner, which
              abandons the whole connection rather than reusing a desynced one. *)
           let next_frame_opt () =
-            let remaining = deadline -. Eio.Time.now clock in
+            let now = Eio.Time.now clock in
+            let remaining = deadline -. now in
+            (* Every deadline this wait owes, as ONE bound. Checking [grace] only
+               between iterations was not enough: each iteration blocks for a
+               whole [quiet] first, so the effective bound on the wait for the
+               first [begin] became [quiet * ceil (grace / quiet)] — grace
+               rounded UP, the mirror image of the [min (quiet, grace)] bug this
+               replaced, and just as far from what the interface promises.
+               ~ready_grace:1. ~ready_quiet:30. waited thirty seconds. *)
+            let until_grace =
+              if !saw_begin then infinity else deadline_first -. now
+            in
             if remaining <= 0. then `Deadline
+            else if until_grace <= 0. then `Quiet
             else
               match
-                Eio.Time.with_timeout clock (Float.min quiet remaining) (fun () ->
+                Eio.Time.with_timeout clock
+                  (Float.min quiet (Float.min remaining until_grace))
+                  (fun () ->
                     Eio.Buf_read.ensure reader 1 ;
                     Ok ())
               with
@@ -258,19 +347,23 @@ let start ~sw ~env ~command ~args ~project_dir ?(init_options = `Null)
               | exception End_of_file -> `Eof
           in
           let rec loop () =
-            (* Nothing has started and nothing is going to: give up early rather
-               than spend the whole budget on a server with no work to report. *)
-            if (not !saw_begin) && Eio.Time.now clock > deadline_first then false
+            (* [grace] bounds the wait for the FIRST begin, and it has to be
+               checked HERE rather than inferred from a quiet window: silence
+               before anything starts is the normal case for a server with no
+               work, and returning on the first quiet window made the effective
+               bound min(quiet, grace) while the interface promised grace. *)
+            if (not !saw_begin) && Eio.Time.now clock > deadline_first then
+              No_progress
             else
               match next_frame_opt () with
-              | `Deadline | `Eof -> false
+              | `Deadline -> Timed_out
+              | `Eof -> Stream_ended
               | `Quiet ->
-                  (* Silence is only quiescence when nothing is outstanding. A
-                     phase that goes quiet mid-flight — cargo fetching, a build
-                     script running — still has its token open, and abandoning
-                     there would waste the rest of the budget on exactly the wait
-                     this function was asked to perform. *)
-                  if !active > 0 then loop () else !saw_begin
+                  (* Silence with a token still open is a phase in flight —
+                     cargo fetching, a build script running — so keep waiting.
+                     Silence with nothing open is quiescence, which is a GUESS:
+                     reported as such, never as the server having said so. *)
+                  if !active > 0 || not !saw_begin then loop () else Quiescent
               | `Frame raw -> (
                   if trace then
                     prerr_endline
@@ -304,7 +397,7 @@ let start ~sw ~env ~command ~args ~project_dir ?(init_options = `Null)
                                  satisfied regardless of real work in flight. *)
                               if !active > 0 then decr active ;
                               if is_index_title (Hashtbl.find_opt titles token)
-                              then true
+                              then Reported
                               else loop ()
                           | _ -> loop ())
                       | _ -> loop ()))
@@ -323,7 +416,7 @@ let start ~sw ~env ~command ~args ~project_dir ?(init_options = `Null)
              the handshake: [start] has not returned the client yet, so no other
              fiber can hold the connection. The deadline is enforced by the loop
              itself rather than by cancelling it from outside. *)
-          try loop () with End_of_file -> false
+          try loop () with End_of_file -> Stream_ended
         in
         ((fun () -> Eio.Process.await proc), transport, send_notify, await_ready)
     | exception exn ->
@@ -385,10 +478,10 @@ let start ~sw ~env ~command ~args ~project_dir ?(init_options = `Null)
      has not escaped yet, so the readiness loop provably owns the connection and
      needs no lock around it. Making it the caller's job would turn that into a
      convention that a future caller could break by issuing a request first. *)
-  let ready_reported = await_ready ~timeout:ready_timeout ~grace:ready_grace in
-  Ok {config = jcfg; send_notify; await_proc; ready_reported}
+  let readiness = await_ready ~timeout:ready_timeout ~grace:ready_grace in
+  Ok {config = jcfg; send_notify; await_proc; readiness}
 
-let ready_reported t = t.ready_reported
+let readiness t = t.readiness
 
 let request t ~method_ ?params () =
   let jparams =

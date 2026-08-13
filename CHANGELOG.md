@@ -48,7 +48,37 @@
   so an absent decision analysis is stated, not implied by a missing key. No floats, no `Intlit`,
   exactly one JSON object on stdout. Exit codes and text/md output are unchanged.
 
+- `arch-serve`: the read-only HTTP browser over a flat index. A MAIN-schema index is declined at
+  startup with exit 2 naming the schema, rather than reaching the first query and surfacing a raw
+  `Sqlite3.Error` — that shape is not read yet, and saying so is the honest answer.
+
 ### Fixed
+- **The LSP indexing path forged must-reach paths.** `arch-index --language go|rust|typescript`
+  wrote a `calls` table with no `kind` column, and a missing `kind` reads as the literal `'MUST'`
+  in `Arch_db.kind_sql` — so every callHierarchy edge, including the deferred and conditional
+  ones the protocol cannot distinguish, entered the MUST closure and `reaches` reported must-reach
+  paths that path does not support. Every edge it writes is now tagged `MAY_ENUMERATED`, and the
+  index deliberately does **not** stamp `callgraph_contract`: callHierarchy never reports the call
+  sites it failed to resolve, so the ⊤ frontier is unknown rather than empty and
+  `unreachable`/`escapes` must keep refusing.
+- **A race against the language server's background indexing.** rust-analyzer answers
+  `prepareCallHierarchy` with an empty list — not an error — while `cargo metadata` and the
+  initial index are still running, so "still indexing" and "no calls" were indistinguishable and
+  a cold checkout indexed to zero edges. The handshake now consumes `$/progress` and waits for
+  the work-done tokens the server already reports. The wait reports which of four outcomes it
+  reached, because they are not interchangeable: the indexing phase closing is authoritative,
+  quiescence is a heuristic that can fire in an inter-phase gap (rust-analyzer runs startup as a
+  sequence of tokens and closes each before opening the next), and no-progress and timed-out are
+  neither. Only the first is a fact about the index; the rest fall back to the previous
+  bounded-sweep behaviour, so a server that reports nothing is no worse off than before.
+- A language-server request that timed out with its reply unread left the connection
+  desynchronised, and every later call then failed with its own id-mismatch `Protocol_error` —
+  N confusing errors, none of them naming the single event that caused them all. (Not a
+  soundness bug: `Jsonrpc_client` stamps each request with a monotonic id and rejects a reply
+  whose id does not match, so a desynced stream never returned a wrong answer.) The connection
+  is now retired on the first such failure and every later call reports that reason, instead of
+  the same refusal arriving by accident as an `Eio.Mutex.Poisoned` wrapped in
+  `Connection_failed`.
 - A legacy index with no `calls.kind` column crashed the closure queries — the column cannot be
   named in SQL when it does not exist. Every edge now reads as MUST there, as `arch-query` does.
 - `arch-impact`'s `contract_ok`/`sound_reachability` used a weaker check (`t.contract <> None &&

@@ -85,11 +85,13 @@ let register () =
       run_command ~cwd:(Filename.concat repo "tsapp") "npm"
         ["i"; "--silent"; "--no-audit"; "--no-fund"; "typescript@5"; "ts-morph"]
     in
-    (* Reaching the npm registry is a property of the machine, never of
-       arch-index, so a failure here is "not exercised" and not a red test.
-       Without it [dune test] would need the network to pass. *)
+    (* Reaching the npm registry is a property of the network, never of
+       arch-index, so a failure here is a warning and not a red test — including
+       under ARCH_TEZT_REQUIRE_SERVERS, which is why this is [external_failure]
+       and not [not_exercised]. The strict flag's job is "the toolchain must be
+       installed", not "the registry must be up". *)
     if code <> 0 then begin
-      not_exercised "npm install failed (exit %d):\n%s" code output ;
+      external_failure "npm install failed (exit %d):\n%s" code output ;
       Lwt.return_unit
     end
     else begin

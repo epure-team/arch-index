@@ -307,6 +307,19 @@ INSERT INTO comment_db_meta(key,value) VALUES ('callgraph_contract','v1');
                      (String.concat "," names))
                 (List.mem "dup" names)
           | Error e -> Batch.note b "%s" e) ;
+          (* The counterweight, asserted HERE rather than in a different test on
+             a different fixture: "no mutant was attributed" is also what an
+             empty list looks like when the --mutants attachment silently did
+             nothing, and the emptiness below would then pass for the opposite
+             of the reason claimed. *)
+          (match Json.bool ~what:"coverage" "mutants_available" r with
+          | Ok v ->
+              Batch.check b
+                ~msg:
+                  "the mutants input must actually have been read — otherwise the empty list \
+                   below means 'nothing was attempted', not 'nothing was attributed'"
+                v
+          | Error e -> Batch.note b "%s" e) ;
           (match Json.list ~what:"coverage" "covered_but_mutants_survive" r with
           | Ok items ->
               Batch.eq_int b

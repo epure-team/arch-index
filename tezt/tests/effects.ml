@@ -182,17 +182,47 @@ let register_go () =
         let code, out = run_command ~stdin:eff_ndjson (effects_load ()) [db] in
         if code <> 0 then Test.fail "loading the Go effects failed (exit %d):\n%s" code out ;
         Batch.run (fun b ->
-            List.iter
-              (fun (kind, fn) ->
-                Batch.contains b
-                  ~msg:(Printf.sprintf "%s must be a %s mutator" fn kind)
-                  ~haystack:(query db ["mutators-of"; kind]) fn)
+            (* Each pair asserts BOTH directions. Positives alone are satisfied
+               by a query that ignores its KIND argument and returns every
+               mutator — proved by mutating the `value_kind = ?` predicate to
+               `value_kind = ? OR 1`, which left the file green. Since each
+               fixture function mutates exactly one kind, the other three kinds
+               must NOT list it, and that is what pins the argument. *)
+            let mutator_kinds =
               [
                 ("HashTbl", "mapMutator");
                 ("FieldAccess", "fieldMutator");
                 ("ArrayElem", "arrayMutator");
                 ("IoSideEffect", "ioFn");
-              ] ;
+              ]
+            in
+            List.iter
+              (fun (kind, fn) ->
+                let out = query db ["mutators-of"; kind] in
+                Batch.contains b
+                  ~msg:(Printf.sprintf "%s must be a %s mutator" fn kind)
+                  ~haystack:out fn ;
+                (* Exclusions on the DIRECT rows only. The Go SSA extractor
+                   reports transitive candidates across the whole stdlib, so
+                   "mutators-of X does not mention Y" is false for almost every
+                   pair and says nothing about the kind argument. The direct
+                   rows are the extractor's own claim, and they are exclusive
+                   here — except ioFn, which genuinely writes an array element
+                   (fmt.Println takes a []any), so it is excluded from the
+                   exclusions rather than asserted away. *)
+                let direct = List.filter (contains ~needle:"|direct|") (lines out) in
+                List.iter
+                  (fun (other_kind, other_fn) ->
+                    if other_kind <> kind && other_fn <> "ioFn" then
+                      Batch.check b
+                        ~msg:
+                          (Printf.sprintf
+                             "mutators-of %s must not report %s as a DIRECT mutator — it \
+                              mutates %s, and the query must honour its kind argument"
+                             kind other_fn other_kind)
+                        (not (List.exists (contains ~needle:other_fn) direct)))
+                  mutator_kinds)
+              mutator_kinds ;
             let entry = discover db ~like:"entry" ~unlike:(Some "main") in
             let eff_out = query db ["effects-of"; entry] in
             List.iter
@@ -201,8 +231,30 @@ let register_go () =
                   ~msg:(Printf.sprintf "effects-of %s must reach %s" entry kind)
                   ~haystack:eff_out kind)
               ["HashTbl"; "FieldAccess"; "ArrayElem"] ;
+            (* dead-code is asserted POSITIVELY only here, and that is a
+               limitation of this fixture rather than a choice: `functions.name`
+               carries the package prefix (`efxtest.islandFn`) while
+               `calls.caller_name` does not (`entry`), so the two never join and
+               EVERY function comes back dead. The positive assertion therefore
+               passes for the wrong reason, and the matching negative — "a
+               function the entry point calls must not be listed" — fails
+               against the real output.
+
+               Not silently dropped, and not asserted as if it worked: the
+               discrimination is pinned on the OCaml fixture below, where the
+               names do join. See the report accompanying this change. *)
             Batch.contains b ~msg:"islandFn must be reported dead"
               ~haystack:(query db ["dead-code"]) "islandFn" ;
+            (* pure-fns has the same shape: declaring every function pure passes
+               a positive-only check, and "pure" is a claim consumers act on. *)
+            (let pure = query db ["pure-fns"] in
+             Batch.contains b ~msg:"pureFn must be reported pure" ~haystack:pure "pureFn" ;
+             List.iter
+               (fun impure ->
+                 Batch.not_contains b
+                   ~msg:(Printf.sprintf "pure-fns must not list %s, a known mutator" impure)
+                   ~haystack:pure impure)
+               ["mapMutator"; "fieldMutator"; "arrayMutator"; "ioFn"]) ;
             Db.with_db db (fun conn ->
                 (* Absence, asserted as a NUMBER: an empty capture defaulted to
                    zero is how a query that failed to run reads as a pass. *)
@@ -247,8 +299,16 @@ INSERT INTO comment_db_meta VALUES ('callgraph_contract', 'v1');
   Batch.run (fun b ->
       Batch.contains b ~msg:"the declared mutator must be found by its value kind"
         ~haystack:(query db ["mutators-of"; "HeapRef"]) "mutator" ;
-      Batch.contains b ~msg:"a function nothing reaches must be reported dead"
-        ~haystack:(query db ["dead-code"]) "island" ;
-      Batch.contains b ~msg:"a function with no declared effects must be pure"
-        ~haystack:(query db ["pure-fns"]) "pure") ;
+      (let dead = query db ["dead-code"] in
+       Batch.contains b ~msg:"a function nothing reaches must be reported dead"
+         ~haystack:dead "island" ;
+       Batch.not_contains b
+         ~msg:"dead-code must not list the declared mutator, which the entry point reaches"
+         ~haystack:dead "mutator") ;
+      (let pure = query db ["pure-fns"] in
+       Batch.contains b ~msg:"a function with no declared effects must be pure"
+         ~haystack:pure "pure" ;
+       Batch.not_contains b
+         ~msg:"pure-fns must not list the declared mutator"
+         ~haystack:pure "mutator")) ;
   Lwt.return_unit

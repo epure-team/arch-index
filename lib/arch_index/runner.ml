@@ -279,12 +279,11 @@ let run ~sw ~env ~project_dir ~language ~output ?(no_enrich = false)
                 if verbose then
                   Arch_io.eprintf "arch_index_lsp: LSP start failed: %s\n%!" msg
             | Ok client ->
-                let ready = Lsp_client.ready_reported client in
+                let readiness = Lsp_client.readiness client in
                 if verbose then
                   Arch_io.printf
                     "arch_index_lsp: server readiness: %s\n%!"
-                    (if ready then "reported complete"
-                     else "not reported (falling back to bounded retry)") ;
+                    (Lsp_client.readiness_to_string readiness) ;
                 if verbose then
                   Arch_io.printf "arch_index_lsp: extracting symbols...\n%!" ;
                 let fn_rows =

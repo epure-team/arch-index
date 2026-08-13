@@ -16,9 +16,11 @@ jobs:
     # nothing, which is the failure mode the Tezt port exists to remove.
     env:
       ARCH_TEZT_REQUIRE_SERVERS: '1'
-      # The shell suite ran the soundness corpus under STRICT=1; this is the same
-      # switch, so a P2 target that regresses is red rather than a logged xfail.
-      ARCH_TEZT_STRICT_P2: '1'
+      # This runner has a network, so an npm-registry skip here is a real gap,
+      # not a developer working offline: multilang.ml is the only cover for the
+      # merged polyglot index and it ran zero assertions, reporting SUCCESS,
+      # when the registry was unreachable.
+      ARCH_TEZT_REQUIRE_NETWORK: '1'
     steps:
       - uses: actions/checkout@v4
         with:

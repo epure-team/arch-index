@@ -18,10 +18,17 @@ open Arch_tezt
 
 let serve_bin () = locate ~env_var:"ARCH_SERVE" "bin/arch_serve/arch_serve.exe"
 
-(* A fixed port rather than a random one: a server leaked by an earlier run would
-   otherwise answer these assertions instead of the one under test, and the
-   failure would be invisible. Fixed means the leak fails here. *)
-let port = 7387
+(* A port the OS hands out per test, then checked free before the spawn.
+
+   A single fixed port was wrong twice over. It does NOT make a leaked server
+   fail here — a squatter makes the assertions below pass green against a
+   foreign process, which was the original claim and its exact inverse. And with
+   both tests sharing one port, the suite's own `-j` scheduling made them race:
+   `--file serve.ml -j 2 --loop-count 40` failed on loop 2, the refusal test
+   seeing the routes test's live server.
+
+   {!free_port} removes the collision entirely; {!require_port_free} is what
+   turns a stranger on the port into a failure instead of a false pass. *)
 
 let flat_seed =
   {|
@@ -78,7 +85,7 @@ let curl args =
 
 (* Poll for readiness rather than sleeping a guessed interval, and give up as
    soon as the process is gone — a server that died is never going to answer. *)
-let wait_ready ~pid_file =
+let wait_ready ~port ~pid_file =
   let url = Printf.sprintf "http://localhost:%d/" port in
   (* Liveness is `kill -0`, not the existence of the pid FILE: the file is
      written once at spawn and never removed, so testing for it is always true
@@ -100,7 +107,24 @@ let wait_ready ~pid_file =
   in
   attempt 50
 
-let with_server db k =
+(* curl exits 7 when it could not connect at all. Any other outcome — a
+   response, a hang cut off by --max-time, a protocol error — means SOMETHING is
+   listening, and that something is not ours. *)
+let require_port_free port =
+  let code, _ =
+    curl
+      ["-sS"; "-o"; "/dev/null"; "--max-time"; "3";
+       Printf.sprintf "http://localhost:%d/" port]
+  in
+  if code <> 7 then
+    Test.fail
+      "port %d is already in use (curl exited %d, not 7 = could-not-connect). \
+       Refusing to run: the assertions in this file would pass against that \
+       process instead of the server under test."
+      port code
+
+let with_server ~port db k =
+  require_port_free port ;
   let log = Temp.file "serve.log" in
   let pid_file = Temp.file "serve.pid" in
   (* Backgrounded through the shell, with the pid recorded so cleanup can reach
@@ -122,12 +146,18 @@ let register_refusal () =
     ~tags:["serve"]
   @@ fun () ->
   let db = main_db () in
+  (* Same reason as in {!with_server}: if this test's guard regresses the binary
+     binds the port, and a squatter would mask that by making the bind fail for
+     an unrelated reason. *)
+  let port = free_port () in
+  require_port_free port ;
   (* Wrapped in `timeout`: this command is expected to EXIT, and if the guard
      regresses it does the opposite — it binds the port and serves. Without a
      deadline the assertion below would never be reached and the suite would
      hang rather than report the regression it exists to catch. *)
   let code, output =
-    run_command (which "timeout") ["20"; serve_bin (); db; "--port"; string_of_int port]
+    run_command (which "timeout")
+      ["20"; serve_bin (); db; "--port"; string_of_int port]
   in
   Batch.run (fun b ->
       Batch.exit_code b ~msg:"a main-schema index must be declined at startup" ~expected:2
@@ -147,8 +177,9 @@ let register_routes () =
     ~tags:["serve"]
   @@ fun () ->
   let db = flat_db () in
-  with_server db @@ fun ~log ~pid_file ->
-  if not (wait_ready ~pid_file) then
+  let port = free_port () in
+  with_server ~port db @@ fun ~log ~pid_file ->
+  if not (wait_ready ~port ~pid_file) then
     Test.fail "server did not answer on port %d:\n%s" port
       (if Sys.file_exists log then read_file log else "(no log)") ;
   let base = Printf.sprintf "http://localhost:%d" port in
@@ -167,15 +198,7 @@ let register_routes () =
       Batch.check b ~msg:"GET / must return a non-empty body" (String.length body > 0) ;
       Batch.check b ~msg:"GET / must return HTML"
         (let lowered = String.lowercase_ascii body in
-         let contains needle =
-           let n = String.length needle and h = String.length lowered in
-           let found = ref false in
-           for i = 0 to h - n do
-             if (not !found) && String.sub lowered i n = needle then found := true
-           done ;
-           !found
-         in
-         contains "<html" || contains "<!doctype") ;
+         contains ~needle:"<html" lowered || contains ~needle:"<!doctype" lowered) ;
 
       let _, functions = get "/api/functions" in
       Batch.contains b ~msg:"/api/functions must list Entry" ~haystack:functions {|"name":"Entry"|} ;

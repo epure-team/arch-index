@@ -61,7 +61,7 @@ let register_load () =
       (* All-or-nothing: the good line PRECEDES the malformed one, so a loader
          that wrote as it went would leave it behind. *)
       let before = count db "SELECT count(*) FROM coverage" in
-      let code, _ =
+      let outcome =
         coverage_load
           ~stdin:
             {|{"function":"f","covered_lines":1,"total_lines":10}
@@ -69,18 +69,19 @@ let register_load () =
 |}
           db
       in
-      Batch.eq_int b ~msg:"an unknown field must abort the load" code 2 ;
+      Batch.exit_code b ~msg:"an unknown field must abort the load" ~expected:2 outcome ;
       Batch.eq_int b
         ~msg:"an aborted load must leave no row behind, not even ones before the bad line"
         (count db "SELECT count(*) FROM coverage")
         before ;
 
-      let code, _ =
+      let outcome =
         coverage_load ~stdin:{|{"function":"f","covered_lines":11,"total_lines":10}|} db
       in
-      Batch.eq_int b ~msg:"covered_lines > total_lines must abort the load" code 2 ;
+      Batch.exit_code b ~msg:"covered_lines > total_lines must abort the load" ~expected:2
+        outcome ;
 
-      let code, _ =
+      let outcome =
         coverage_load
           ~stdin:
             {|{"function":"f","covered_lines":1,"total_lines":10}
@@ -88,8 +89,9 @@ let register_load () =
 |}
           db
       in
-      Batch.eq_int b ~msg:"the same function twice in one input must abort (one snapshot per row)"
-        code 2 ;
+      Batch.exit_code b
+        ~msg:"the same function twice in one input must abort (one snapshot per row)" ~expected:2
+        outcome ;
 
       (* Snapshots accumulate. The sleep is load-bearing: snapshot ordering is by
          a second-granularity timestamp, so a second write inside the same second
@@ -114,10 +116,11 @@ let register_load () =
       (* A flat index simply has no coverage table. That is broken input for this
          tool, not an unsound-verdict situation: exit 2, not 3. *)
       let flat = flat_index () in
-      let code, _ =
+      let outcome =
         coverage_load ~stdin:{|{"function":"f","covered_lines":1,"total_lines":1}|} flat
       in
-      Batch.eq_int b ~msg:"arch-coverage-load on a flat index must fail cleanly" code 2 ;
+      Batch.exit_code b ~msg:"arch-coverage-load on a flat index must fail cleanly" ~expected:2
+        outcome ;
 
       List.iter
         (fun args ->
@@ -179,8 +182,20 @@ let register_write () =
       Batch.contains b ~msg:"gardening log must show the entry with its provenance"
         ~haystack:(query db ["gardening"; "log"]) "alice|type-safety|fixed f.instance|55|900" ;
 
-      (* Append-only is enforced by there being no verb to do otherwise. *)
+      (* Append-only, checked against the DISPATCHER and not only against the
+         usage text.
+
+         The usage scan below is necessary but nowhere near sufficient: it only
+         proves the tool does not ADVERTISE a destructive verb. A review added
+         an undocumented `purge` case that ran `DELETE FROM gardening_log` and
+         this test passed — the audit ledger could be wiped while the suite
+         reported provenance intact. What actually holds the property is the row
+         count: no invocation may reduce it. *)
       let _, usage = run_command (arch_curate ()) [] in
+      (* Without this the four scans below are satisfied by an empty string. *)
+      Batch.check b
+        ~msg:"arch-curate with no arguments must print its usage (else the scans below are vacuous)"
+        (String.length (String.trim usage) > 0) ;
       List.iter
         (fun verb ->
           Batch.not_contains b
@@ -189,6 +204,26 @@ let register_write () =
                  verb)
             ~haystack:usage (verb ^ "-"))
         ["edit"; "delete"; "remove"; "update"] ;
+      (* And the dispatcher itself: a subcommand that exists without being
+         documented is exactly the case the usage scan cannot see. *)
+      let log_rows () = count db "SELECT count(*) FROM gardening_log" in
+      let rows_before_probe = log_rows () in
+      List.iter
+        (fun verb ->
+          let code, _ = curate db [verb] in
+          Batch.check b
+            ~msg:
+              (Printf.sprintf
+                 "arch-curate must not accept a '%s' subcommand — it exited 0, so the                   dispatcher has a verb the usage does not mention"
+                 verb)
+            (code <> 0) ;
+          Batch.eq_int b
+            ~msg:
+              (Printf.sprintf
+                 "gardening_log is append-only: '%s' must not remove rows from it" verb)
+            (log_rows ()) rows_before_probe)
+        ["purge"; "clear"; "reset"; "wipe"; "truncate"; "delete-log"; "edit-log";
+         "remove-log"; "update-log"; "rm"] ;
 
       let after = count db "SELECT count(*) FROM gardening_log" in
       ok ~msg:"a second log entry must succeed"

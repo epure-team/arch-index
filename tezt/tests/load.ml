@@ -67,8 +67,14 @@ let register () =
         ~haystack:(query db ["reaches"; "clean"; "a"]) "PATH EXISTS (must-reach)" ;
       Batch.contains b ~msg:"clean -> b is MAY_ENUMERATED, which is not a MUST path"
         ~haystack:(query db ["reaches"; "clean"; "b"]) "no MUST path" ;
-      Batch.contains b ~msg:"escapes dirty must list the ⊤ frontier node t"
-        ~haystack:(query db ["escapes"; "dirty"]) "t") ;
+      (* See contract.ml: the needle "t" is satisfied by any output containing a
+         lowercase t, including one that names the root as the frontier. *)
+      (let escapes = query db ["escapes"; "dirty"] in
+       Batch.contains b ~msg:"escapes dirty must report the ⊤ edge at x:4"
+         ~haystack:escapes "x:4" ;
+       Batch.not_contains b
+         ~msg:"escapes must name t, the function holding the ⊤ edge, not the root dirty"
+         ~haystack:escapes "dirty")) ;
   Lwt.return_unit
 
 let register_enforcement () =

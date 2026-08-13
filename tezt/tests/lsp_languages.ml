@@ -16,9 +16,12 @@
     keeps its caller, and dead-code discriminates — so a backend that regresses
     fails on the property rather than on a language-specific spelling.
 
-    One gap is deliberately NOT asserted here: the runner schema tags every edge
+    What is NOT asserted here is soundness: the runner tags every edge
     MAY_ENUMERATED and stamps no contract, so no verdict from this path is
-    sound. Asserting soundness would enshrine a claim the path cannot make. *)
+    sound, and asserting otherwise would enshrine a claim the path cannot make.
+    Both halves of that — the tag on every edge, the absent contract — are
+    asserted per language instead, so they hold wherever a single server
+    happens to be installed. *)
 
 open Arch_tezt
 
@@ -56,7 +59,35 @@ let check_language b ~label ~db ~exported ~internal ~island =
                  (Printf.sprintf
                     "SELECT count(*) FROM functions WHERE name = '%s' OR name LIKE '%%.%s'" fn fn))
               1)
-          [exported; internal; island]) ;
+          [exported; internal; island] ;
+        (* The kind contract of this path, asserted per language rather than
+           once on the merged multi-language index: that one lived behind
+           gopls AND tsserver AND npm AND the network, so on a machine with
+           only gopls the production claim below had no cover at all.
+
+           On the whole table, not a sample: the failure is silent. A NULL kind
+           (or a dropped column) reads as literal 'MUST' in Arch_db.kind_sql,
+           so one untagged row forges a must-reach path. *)
+        Batch.eq_int b
+          ~msg:
+            (label
+           ^ ": every LSP call edge must be MAY_ENUMERATED — an untagged edge \
+              reads as MUST and forges a must-reach path")
+          (Db.int conn
+             "SELECT count(*) FROM calls WHERE kind IS NULL OR kind <> 'MAY_ENUMERATED'")
+          0 ;
+        (* And the index must NOT claim the ⊤-marking contract: callHierarchy
+           never reports the call sites it failed to resolve, so the ⊤ frontier
+           is unknown, not empty. `unreachable`/`escapes` have to keep
+           refusing. *)
+        Batch.eq_string_opt b
+          ~msg:
+            (label
+           ^ ": the LSP path must not stamp callgraph_contract — it does not \
+              enumerate unresolved targets as MAY_TOP")
+          (Db.string_opt conn
+             "SELECT value FROM comment_db_meta WHERE key = 'callgraph_contract'")
+          None) ;
     (* Roots are given explicitly: dead-code from an exported root must still
        discriminate, which is what makes the island a finding rather than noise. *)
     let code, dc = query_raw db ["dead-code"; exported] in
@@ -166,29 +197,29 @@ let register_rust () =
                 Batch.ge_int b ~msg:"Rust: 'inner::nested' must be indexed, not flattened away"
                   (Db.int conn "SELECT count(*) FROM functions WHERE name LIKE '%nested%'") 1 ;
                 let edges = Db.int conn "SELECT count(*) FROM calls" in
-                (* The call-edge assertion is tied to readiness rather than made
-                   unconditional. Where the server reported its indexing
-                   finished, zero edges is a real failure; where it did not — an
-                   old server that sends no $/progress, or a machine slow enough
-                   to blow the budget — we are back to the previous
-                   reported-never-failed state and say so rather than inventing
-                   a flake. *)
+                (* This assertion USED to be gated on readiness having been
+                   reported, with a bare [Log.warn] on the other branch — the
+                   exact defect shape this suite exists to remove, and one a
+                   review proved live here: with the extractor returning no
+                   edges and the readiness line reworded, a test titled "…and
+                   its call edges" passed with zero call edges under
+                   ARCH_TEZT_REQUIRE_SERVERS=1, because [Log.warn] is not
+                   escalated by that flag.
+
+                   Gating an assertion on a signal that the regression would
+                   itself destroy means the assertion cannot fail. So edges are
+                   now required unconditionally, and the readiness line is only
+                   used to explain WHICH failure this is. *)
                 let readiness_reported =
-                  let needle = "readiness: reported complete" in
-                  let n = String.length needle and h = String.length log in
-                  let found = ref false in
-                  for i = 0 to h - n do
-                    if (not !found) && String.sub log i n = needle then found := true
-                  done ;
-                  !found
+                  contains ~needle:"readiness: reported complete" log
                 in
-                if readiness_reported then
-                  Batch.ge_int b
-                    ~msg:"Rust: the server reported indexing complete, so edges must be extracted"
-                    edges 1
-                else if edges >= 1 then
-                  Log.info "Rust: %d call edge(s), readiness not reported" edges
-                else Log.warn "Rust: no call edges and no readiness signal (not asserted)"))) ;
+                Batch.ge_int b
+                  ~msg:
+                    (Printf.sprintf
+                       "Rust: call edges must be extracted (readiness was %s — if it was not \
+                        reported, the wait or the budget is the suspect, not the extractor)"
+                       (if readiness_reported then "reported" else "NOT reported"))
+                  edges 1))) ;
   Lwt.return_unit
 
 let ts_files =
@@ -219,9 +250,9 @@ let register_typescript () =
             ["i"; "--silent"; "--no-audit"; "--no-fund"; "typescript@5"; "ts-morph"]
         in
         if code <> 0 then
-          (* Reaching the npm registry is a property of the machine, never of
+          (* Reaching the npm registry is a property of the network, never of
              this code, so it stays a skip even under the strict flag. *)
-          Log.warn "TypeScript: npm install failed, not exercised:\n%s" out
+          external_failure "TypeScript: npm install failed (exit %d):\n%s" code out
         else begin
           let db, _ = index_project_lang ~name:"lsp_ts" ~language:"typescript" project in
           Batch.run (fun b ->

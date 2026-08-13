@@ -226,13 +226,23 @@ done
   let code, output = run_command ~env:[("PATH", path)] "timeout" ["60"; decision_lint (); rel] in
   (* 124 is what `timeout` reports when it had to kill the process. *)
   Batch.run (fun b ->
+      (* Exit 0, not merely "not 124". `code <> 124` says only that `timeout`
+         did not have to kill it — a decision-lint that hit the read deadline
+         and then ABORTED, or crashed, satisfies "did not hang" while failing
+         to do the thing the test is named for. The sibling test
+         (register_smt_noise) asserts exit 0; this one now matches it. *)
       Batch.check b
         ~msg:
           (Printf.sprintf
              "a solver that answers the probe then goes silent must not hang the analysis (no \
               deadline on the read); timeout killed it:\n%s"
              output)
-        (code <> 124)) ;
+        (code <> 124) ;
+      Batch.exit_code b
+        ~msg:
+          "and the analysis must COMPLETE, not abort: a silent solver is a reason to fall back \
+           to no SMT evidence, not to fail the run"
+        ~expected:0 (code, output)) ;
   Lwt.return_unit
 
 let register_smt_absent () =

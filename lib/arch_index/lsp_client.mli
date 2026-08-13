@@ -23,6 +23,7 @@ val start :
   ?init_options:Yojson.Safe.t ->
   ?ready_timeout:float ->
   ?ready_grace:float ->
+  ?ready_quiet:float ->
   unit ->
   (t, string) result
 
@@ -38,19 +39,40 @@ val request :
 (** [notify t ~method_ ~params ()] sends a JSON-RPC notification (no response). *)
 val notify : t -> method_:string -> ?params:Yojson.Safe.t -> unit -> unit
 
-(** [ready_reported t] is [true] when the server actually reported its
-    background work finished during {!start}'s handshake.
+(** What {!start}'s handshake learned about the server's background work.
 
-    {!start} waits for that signal because a server that is still loading
-    answers [prepareCallHierarchy] with an empty list rather than an error,
-    making "still indexing" indistinguishable from "no calls". [ready_timeout]
-    bounds the whole wait and [ready_grace] bounds the wait for the FIRST
-    progress notification, so a server with no work to report does not stall
-    the run.
+    {!start} waits for it because a server that is still loading answers
+    [prepareCallHierarchy] with an empty list rather than an error, making
+    "still indexing" indistinguishable from "no calls".
 
-    [false] is not an error: it means nothing was learned, and the caller should
-    fall back to its own bounded retry. *)
-val ready_reported : t -> bool
+    The four outcomes are NOT interchangeable, which is why this is not a bool:
+
+    - [Reported] — the server's indexing phase closed. Authoritative.
+    - [Quiescent] — every token it opened has closed and nothing has arrived for
+      [ready_quiet] seconds. A HEURISTIC: a server whose next phase begins after
+      a longer gap than that window is indistinguishable from one that has
+      finished, and rust-analyzer has exactly that shape. Do not treat it as a
+      fact about the index.
+    - [No_progress] — [ready_grace] elapsed with no progress at all. Expected
+      from a server with nothing to do, or one that does not report progress.
+    - [Timed_out] — [ready_timeout] elapsed with work still in flight. The
+      budget was too small, or the server is much slower than expected.
+    - [Stream_ended] — the server closed its output during the handshake. No
+      budget would have helped; kept distinct from [Timed_out] because the two
+      send an operator to opposite fixes.
+
+    None of these is an error. Anything other than [Reported] means the caller
+    learned nothing it can rely on and should fall back to its own bounded
+    retry. *)
+type readiness =
+  | Reported
+  | Quiescent
+  | No_progress
+  | Timed_out
+  | Stream_ended
+
+val readiness : t -> readiness
+val readiness_to_string : readiness -> string
 
 (** [shutdown t] sends shutdown + exit, waits for process exit. *)
 val shutdown : t -> unit
