@@ -25,7 +25,7 @@ open Arch_tezt
 
 let fixture_files =
   [
-    ("dune-project", "(lang dune 3.0)\n");
+    Fixture.dune_project;
     ( "dune",
       "(library\n\
       \ (name testnested)\n\

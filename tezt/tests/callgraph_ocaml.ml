@@ -82,13 +82,8 @@ let dirty_entry () : int = apply_fn (fun n -> n + 1) 42
   let add = discover db ~like:"add" in
   Batch.run (fun b ->
       Db.with_db db (fun conn ->
-          Batch.ge_int b ~msg:"the producer must emit functions"
-            (Db.int conn "SELECT count(*) FROM functions") 1 ;
-          Batch.eq_int b ~msg:"no edge may carry a missing or invalid kind"
-            (Db.int conn
-               "SELECT count(*) FROM calls WHERE kind IS NULL OR kind NOT IN \
-                ('MUST','MAY_ENUMERATED','MAY_TOP')")
-            0) ;
+          Assert.produced_functions b conn ~label:"OCaml" ;
+          Assert.kinds_valid b conn ~label:"OCaml") ;
 
       (* reaches: MUST only. *)
       Batch.contains b ~msg:"clean_entry -> add is a MUST chain of direct applications"

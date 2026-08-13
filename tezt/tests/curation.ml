@@ -69,7 +69,7 @@ let register_load () =
 |}
           db
       in
-      Batch.exit_code b ~msg:"an unknown field must abort the load" ~expected:2 outcome ;
+      Batch.exit_code b ~msg:"arch-coverage-load: an unknown field must abort the load" ~expected:2 outcome ;
       Batch.eq_int b
         ~msg:"an aborted load must leave no row behind, not even ones before the bad line"
         (count db "SELECT count(*) FROM coverage")

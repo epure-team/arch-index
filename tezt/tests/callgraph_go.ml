@@ -101,21 +101,6 @@ let build_producer () =
    producer's business. A name that does not resolve is a hard failure, not a
    skipped assertion: every verdict below would otherwise be asked about a
    function that does not exist, and answered vacuously. *)
-let discover db ~like ~unlike =
-  Db.with_db db (fun conn ->
-      let sql =
-        match unlike with
-        | Some u ->
-            Printf.sprintf
-              "SELECT name FROM functions WHERE name LIKE '%%%s%%' AND name NOT LIKE '%%%s%%' \
-               LIMIT 1"
-              like u
-        | None -> Printf.sprintf "SELECT name FROM functions WHERE name LIKE '%%%s%%' LIMIT 1" like
-      in
-      match Db.string_opt conn sql with
-      | Some n -> n
-      | None -> Test.fail "the producer emitted no function matching %S" like)
-
 let index_go_module ~name source =
   let producer = build_producer () in
   let root = Temp.dir name in
@@ -148,15 +133,10 @@ let register () =
               (Db.string_opt conn
                  "SELECT value FROM comment_db_meta WHERE key='callgraph_contract'")
               (Some "v1") ;
-            Batch.ge_int b ~msg:"the producer must emit functions"
-              (Db.int conn "SELECT count(*) FROM functions") 1 ;
+            Assert.produced_functions b conn ~label:"Go" ;
             (* The loader is supposed to reject an un-kinded edge, so a single
                one here means enforcement failed upstream of the query layer. *)
-            Batch.eq_int b ~msg:"no edge may carry a missing or invalid kind"
-              (Db.int conn
-                 "SELECT count(*) FROM calls WHERE kind IS NULL OR kind NOT IN \
-                  ('MUST','MAY_ENUMERATED','MAY_TOP')")
-              0) ;
+            Assert.kinds_valid b conn ~label:"Go") ;
 
         (* reaches: MUST only. *)
         Batch.contains b ~msg:"cleanEntry -> direct is a MUST path"

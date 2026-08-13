@@ -69,12 +69,8 @@ let register () =
         ~haystack:(query db ["reaches"; "clean"; "b"]) "no MUST path" ;
       (* See contract.ml: the needle "t" is satisfied by any output containing a
          lowercase t, including one that names the root as the frontier. *)
-      (let escapes = query db ["escapes"; "dirty"] in
-       Batch.contains b ~msg:"escapes dirty must report the ⊤ edge at x:4"
-         ~haystack:escapes "x:4" ;
-       Batch.not_contains b
-         ~msg:"escapes must name t, the function holding the ⊤ edge, not the root dirty"
-         ~haystack:escapes "dirty")) ;
+      Assert.escapes_frontier b
+        ~out:(query db ["escapes"; "dirty"]) ~root:"dirty" ~call_site:"x:4") ;
   Lwt.return_unit
 
 let register_enforcement () =
@@ -104,7 +100,7 @@ let register_enforcement () =
       refuses ~msg:"a stream with zero call edges must abort the load"
         ~stdin:{|{"type":"function","name":"solo","file_path":"x"}|}
         "load_empty" ;
-      refuses ~msg:"an unknown field must abort the load"
+      refuses ~msg:"arch-load: an unknown field must abort the load"
         ~stdin:({|{"type":"function","name":"f","mutation_sites":3}|} ^ "\n" ^ edge)
         "load_unknown_field" ;
       refuses ~msg:"an unknown record type must abort the load"

@@ -20,7 +20,7 @@ open Arch_tezt
 
 let fixture_files =
   [
-    ("dune-project", "(lang dune 3.0)\n");
+    Fixture.dune_project;
     ( "dune",
       "(library\n\
       \ (name shapes)\n\
@@ -174,7 +174,7 @@ end
    unit named B makes the wrong reading reachable. *)
 let cross_module_files =
   [
-    ("dune-project", "(lang dune 3.0)\n");
+    Fixture.dune_project;
     ( "dune",
       "(library\n (name qual)\n (modules b g1 g2)\n (flags (:standard -w -32)))\n" );
     ("b.ml", "let f (x : int) : int = x + 100\n");

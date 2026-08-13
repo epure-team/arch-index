@@ -27,20 +27,6 @@ let effects_load () =
 
 let migration () = locate ~env_var:"ARCH_EFFECTS_MIGRATION" "effects-schema-migration.sql"
 
-let discover db ~like ~unlike =
-  Db.with_db db (fun conn ->
-      let sql =
-        match unlike with
-        | Some u ->
-            Printf.sprintf
-              "SELECT name FROM functions WHERE name LIKE '%%%s%%' AND name NOT LIKE '%%%s%%' LIMIT 1"
-              like u
-        | None -> Printf.sprintf "SELECT name FROM functions WHERE name LIKE '%%%s%%' LIMIT 1" like
-      in
-      match Db.string_opt conn sql with
-      | Some n -> n
-      | None -> Test.fail "no function matching %S in the index" like)
-
 let apply_migration db =
   Db.with_db_rw db (fun conn -> Db.exec conn (read_file (migration ())))
 
@@ -271,11 +257,7 @@ let register_go () =
             Db.with_db db (fun conn ->
                 (* Absence, asserted as a NUMBER: an empty capture defaulted to
                    zero is how a query that failed to run reads as a pass. *)
-                Batch.eq_int b ~msg:"no edge may carry a missing or invalid kind"
-                  (Db.int conn
-                     "SELECT count(*) FROM calls WHERE kind IS NULL OR kind NOT IN \
-                      ('MUST','MAY_ENUMERATED','MAY_TOP')")
-                  0))) ;
+                Assert.kinds_valid b conn ~label:"Go effects"))) ;
   Lwt.return_unit
 
 (* The Rust MIR extractor does not exist yet, so this loads hand-crafted NDJSON
