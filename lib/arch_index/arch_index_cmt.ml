@@ -547,10 +547,27 @@ let path_to_module_name path =
 
     The mangling matches what dune writes: [Sublib.Api.run] roots at the
     persistent [Sublib] with first component [Api], giving [sublib__Api] and the
-    in-unit name [run]. A `(wrapped false)` unit has no component after the root
+    in-unit name [run].
+
+    The root may be the ALIAS module rather than the wrapper. As soon as a
+    library carries a hand-written [rootlib.ml], dune generates [Rootlib__] and
+    compiles every sibling with [-open Rootlib__], so an intra-library reference
+    roots at [Rootlib__] and not at [Rootlib]. Mangling that verbatim yields
+    [rootlib____Api], which is no unit at all — the lookup misses, resolution
+    falls back to the basename map, and the reference binds to whichever library
+    was scanned last. That is the very defect this function exists to remove,
+    and it fires in the most ordinary library layout there is, including this
+    repository's own. The trailing [__] is stripped for that reason. A `(wrapped false)` unit has no component after the root
     ([Foo.bar] → [foo], [bar]). Deeper components stay with the NAME, not the
     unit: [Rootlib.Api.Inner.f] is [f] spelled [Inner.f] inside [rootlib__Api],
     which is how the function table already keys nested definitions. *)
+(* `Rootlib__` (dune's alias module) and `Rootlib` (the wrapper) denote the
+   same library; the alias is what an intra-library path roots at. *)
+let unit_root_of root =
+  let n = String.length root in
+  let root = if n > 2 && String.sub root (n - 2) 2 = "__" then String.sub root 0 (n - 2) else root in
+  String.uncapitalize_ascii root
+
 let unit_of_path path =
   let rec root_and_rest = function
     | Path.Pident id -> if Ident.persistent id then Some (Ident.name id, []) else None
@@ -563,7 +580,7 @@ let unit_of_path path =
   match root_and_rest path with
   | None -> None
   | Some (root, rest) -> (
-      let root_low = String.uncapitalize_ascii root in
+      let root_low = unit_root_of root in
       match rest with
       (* The whole path is the unit root: a `(wrapped false)` unit referenced
          bare. There is no callee name here, so this shape is not a call. *)
@@ -594,7 +611,7 @@ let unit_of_module_path path =
   match root_and_rest path with
   | None -> None
   | Some (root, rest) -> (
-      let root_low = String.uncapitalize_ascii root in
+      let root_low = unit_root_of root in
       match rest with
       | [] -> Some root_low
       | comp :: _ -> Some (root_low ^ "__" ^ comp))

@@ -297,6 +297,15 @@ let homonym_libs =
   [
     ("dune-project", "(lang dune 3.0)\n");
     ("rootlib/dune", "(library (name rootlib) (libraries sublib))\n");
+    (* A hand-written library module makes dune emit the ALIAS module
+       `Rootlib__` and compile every sibling with `-open Rootlib__`, so an
+       intra-library reference roots at `Rootlib__` rather than `Rootlib`. This
+       one file is what turns `entry2` and `use_t` below into a test of the
+       alias root; without it the fixture never exercises the most ordinary
+       library layout there is — the one this repository itself uses. A review
+       added exactly this file to an earlier version and two assertions flipped
+       to sublib. *)
+    ("rootlib/rootlib.ml", "module Api = Api\nmodule Caller = Caller\nmodule Opener = Opener\n");
     ("rootlib/api.ml", "type t = int\nlet run (x : int) : int = x + 1\n");
     ( "rootlib/caller.ml",
       "let entry (h : (string, int) Hashtbl.t) = Sublib.Api.run h\n\
@@ -308,6 +317,12 @@ let homonym_libs =
        green on a file that plainly says `open`. *)
     ( "rootlib/opener.ml",
       "open Sublib.Api\n\nlet via_open (h : (string, int) Hashtbl.t) = run h\n" );
+    (* The type probe's mirror. One direction alone passes under a pure
+       basename resolver whenever scan order happens to favour the asserted
+       library — the same defect that made the first deps assertion inert, found
+       for deps and not carried across to types. Two usages of two different
+       units cannot both be right by luck. *)
+    ("sublib/user.ml", "let use_t (v : Api.t) : int = String.length v\n");
     ("sublib/dune", "(library (name sublib))\n");
     ( "sublib/api.ml",
       "type t = string\nlet run (h : (string, int) Hashtbl.t) = Hashtbl.replace h \"k\" 1\n" );
@@ -329,6 +344,24 @@ let homonym_libs =
        opens of two different units cannot both be right by luck. *)
     ("dep2/dune", "(library (name dep2) (libraries rootlib))\n");
     ("dep2/opener2.ml", "open Rootlib.Api\n\nlet use_r (x : int) : int = run x\n");
+    (* Two executables. Every `(executable (name main))` stanza mangles its
+       modules to `dune__exe__<Module>`, so these two `util.ml` share a unit
+       NAME while being different compilation units — the unit map is no more
+       injective than the basename map was. Keeping one of them silently would
+       reinstate the original defect on a different key, with a MUST edge from
+       one program into another it never links. This repository has the
+       collision for real (`dune__exe__Main` covers three modules). *)
+    (* The caller is NOT the main module: an executable's own entry module
+       compiles to `dune__exe`, not `dune__exe__Main`, so a call written there
+       is not indexed and an assertion about it passes vacuously — which is
+       exactly how the first version of this case failed to catch anything. *)
+    ("e1/dune", "(executable (name main) (modules main util caller))\n");
+    ("e1/util.ml", "let helper (n : int) : int = n + 1\n");
+    ("e1/caller.ml", "let go (n : int) : int = Util.helper n\n");
+    ("e1/main.ml", "let () = ignore (Caller.go 1)\n");
+    ("e2/dune", "(executable (name main) (modules main util))\n");
+    ("e2/util.ml", "let helper (n : int) : int = n - 1\n");
+    ("e2/main.ml", "let () = ignore (Util.helper 1)\n");
     (* Re-export: the unit resolves, the name is not a row in it. *)
     ("inc/dune", "(library (name inc))\n");
     ("inc/base_api.ml", "let run (n : int) : int = n + 2\n");
@@ -405,13 +438,30 @@ let register_cross_library_homonyms () =
           (* Type usages are the third copy of the collapse, and they need a
              POSITIVE control: asserting only that the wrong answer is absent is
              satisfied by a resolver that resolves no types at all. *)
-          Batch.eq_string_opt b
-            ~msg:"a type written Api.t inside rootlib must resolve to ROOTLIB's t"
-            (Db.string_opt conn
-               "SELECT COALESCE(m.path, 'UNRESOLVED') FROM type_usage tu LEFT JOIN types t ON \
-                tu.type_id = t.id LEFT JOIN modules m ON t.module_id = m.id WHERE tu.type_name \
-                LIKE '%Api.t'")
-            (Some "rootlib/api.ml") ;
+          List.iter
+            (fun (fn, want) ->
+              Batch.eq_string_opt b
+                ~msg:
+                  (Printf.sprintf
+                     "the type written Api.t in %s must resolve to ITS OWN library's t" fn)
+                (Db.string_opt conn
+                   (Printf.sprintf
+                      "SELECT COALESCE(m.path, 'UNRESOLVED') FROM type_usage tu JOIN functions \
+                       fu ON tu.function_id = fu.id JOIN modules fm ON fu.module_id = fm.id \
+                       LEFT JOIN types t ON tu.type_id = t.id LEFT JOIN modules m ON \
+                       t.module_id = m.id WHERE tu.type_name LIKE '%%Api.t' AND fm.path = '%s'"
+                      fn))
+                (Some want))
+            [("rootlib/caller.ml", "rootlib/api.ml"); ("sublib/user.ml", "sublib/api.ml")] ;
+          (* The other side of the ⊤ branch: a unit this index does NOT hold
+             must stay a MUST leaf. Without this, emitting ⊤ for every
+             unresolved callee also passes — and that turns 78% of a real graph
+             into ⊤ while the golden file, which counts calls and not kinds,
+             still matches exactly. *)
+          Batch.eq_string b
+            ~msg:"an external callee stays a MUST leaf, never ⊤"
+            (binding ~caller:"run" ~like:"%Hashtbl.replace")
+            "1 row(s) -> UNRESOLVED:MUST" ;
           (* Module deps are resolved by their own code path. Asserted on the
              target PATH and the row count: a count alone is also what "resolved
              to the same module twice" produces. *)
@@ -428,7 +478,25 @@ let register_cross_library_homonyms () =
                "SELECT count(*) || ' -> ' || COALESCE(group_concat(DISTINCT p), '<none>') FROM \
                 (SELECT COALESCE(mt.path, 'UNRESOLVED') AS p FROM module_deps d LEFT JOIN modules \
                  mt ON d.target_module = mt.id WHERE d.target_path = 'Rootlib.Api')")
-            (Some "1 -> rootlib/api.ml")) ;
+            (Some "1 -> rootlib/api.ml") ;
+          Batch.eq_string_opt b
+            ~msg:"the fixture must really collide: two units both named dune__exe__Util"
+            (Db.string_opt conn
+               "SELECT count(*) FROM modules WHERE unit_name = 'dune__exe__Util'")
+            (Some "2") ;
+          (* The only forbidden answer is e2. Resolving to e1 would be correct
+             and is not required — the point is that a colliding unit name must
+             never be resolved by picking one of its members. *)
+          (* A collided unit name must resolve to NOTHING. Asserting merely
+             "not e2" is satisfied by picking the first member, which happens to
+             be e1 here — right by list order, not by resolution, and the
+             mutation that keeps an arbitrary member passed under it. *)
+          Batch.eq_string b
+            ~msg:
+              "two units sharing dune__exe__Util cannot be told apart, so the call must degrade \
+               to ⊤ rather than pick either one"
+            (binding ~caller:"go" ~like:"%Util.helper")
+            "1 row(s) -> UNRESOLVED:MAY_TOP") ;
       (* The end-to-end consequence of the ⊤ on the re-export: `unreachable`
          must decline. UNREACHABLE here would be the forged verdict the whole
          change exists to prevent. *)

@@ -279,11 +279,21 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
      thing still reached through here is the residue that has no unit identity
      at all (a path rooted at a local `let module`). *)
   let mod_name_to_path = Hashtbl.create 128 in
-  (* Compilation-unit identity → source path. Injective where the basename map
-     is not: `rootlib__Api` and `sublib__Api` are distinct keys for the two
-     `api.ml`. Written by the toolchain as the .cmt filename, so it is a fact
-     about the build, not an inference from the source layout. *)
-  let unit_to_path : (string, string) Hashtbl.t = Hashtbl.create 128 in
+  (* Compilation-unit identity → source path(s). Far more discriminating than
+     the basename map — `rootlib__Api` and `sublib__Api` are distinct keys for
+     the two `api.ml`, and the key is written by the toolchain as the .cmt
+     filename, so it is a fact about the build rather than an inference from
+     the source layout.
+
+     A LIST, not one path, because it is not injective either. Every
+     `(executable (name main))` stanza mangles to `dune__exe__Main`, so two
+     programs in one workspace collide exactly as two `api.ml` do. Keeping one
+     of them — which `Hashtbl.replace` would do silently — reinstates the
+     original defect on a different key: a review demonstrated a MUST edge from
+     one program into a *different program it never links*, and `reaches`
+     answering `PATH EXISTS`. A collided key resolves to nothing and degrades,
+     which is the whole point of the change. *)
+  let unit_to_path : (string, string list) Hashtbl.t = Hashtbl.create 128 in
   ignore
     (Sqlite3.exec_not_null
        db
@@ -294,8 +304,27 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
          Hashtbl.replace mod_name_to_path name path ;
          match row.(1) with
          | "" -> ()
-         | unit_name -> Hashtbl.replace unit_to_path unit_name path)
+         | unit_name ->
+             let prev =
+               match Hashtbl.find_opt unit_to_path unit_name with
+               | Some l -> l
+               | None -> []
+             in
+             Hashtbl.replace unit_to_path unit_name (path :: prev))
        "SELECT path, COALESCE(unit_name,'') FROM modules") ;
+  (* Three answers, and collapsing the last two is a bug: [`Absent] means the
+     unit is not in this index at all (`Stdlib.Hashtbl`), where falling back to
+     the name costs nothing because nothing here could have matched anyway;
+     [`Ambiguous] means the name designates several units we hold (colliding
+     executable stanzas), and there the fallback is actively harmful — it hands
+     the reference to whichever module the basename map kept, which is the
+     original defect wearing a different key. Ambiguous is terminal. *)
+  let unit_target u =
+    match Hashtbl.find_opt unit_to_path u with
+    | None -> `Absent
+    | Some [one] -> `One one
+    | Some _ -> `Ambiguous
+  in
   List.iter
     (fun (call : pending_call) ->
       match
@@ -306,8 +335,11 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
           (* Edge-kind classification from the (head × cond × partial) facts —
              execution-sound dominance with ENUMERATED demotion:
                - Head_unknown → MAY_TOP (⊤): could call anything. This is the
-                 ONLY source of ⊤ — computed heads, parameter/local-value
-                 calls, dynamic roots, over-application residuals.
+                 source of ⊤ for an UNKNOWABLE HEAD — computed heads,
+                 parameter/local-value calls, dynamic roots, over-application
+                 residuals. It is no longer the only source: a qualified head
+                 whose compilation unit is indexed but holds no row for the
+                 name (an `include`, a re-export) is also ⊤, below.
                - Head_enumerated → MAY_ENUMERATED (bounded candidate), whether
                  or not the escape site is conditional.
                - Head_local / Head_qualified, unconditional + saturated → MUST
@@ -394,9 +426,10 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
                   match unit_opt with
                   | None -> None
                   | Some (unit_name, in_unit_name) -> (
-                      match Hashtbl.find_opt unit_to_path unit_name with
-                      | None -> None
-                      | Some mod_path ->
+                      match unit_target unit_name with
+                      | `Absent -> None
+                      | `Ambiguous -> Some None
+                      | `One mod_path ->
                           Some
                             (Hashtbl.find_opt
                                fn_lookup
@@ -513,7 +546,8 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
              real violation green and invents one that is not there. *)
           let target_id =
             match
-              Option.bind dep.target_unit (Hashtbl.find_opt unit_to_path)
+              Option.bind dep.target_unit (fun u ->
+                  match unit_target u with `One p -> Some p | _ -> None)
             with
             | Some path -> (
                 match Hashtbl.find_opt mod_path_to_id path with
@@ -619,9 +653,10 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
           match usage.type_unit with
           | None -> None
           | Some (unit_name, in_unit_name) -> (
-              match Hashtbl.find_opt unit_to_path unit_name with
-              | None -> None
-              | Some mod_path ->
+              match unit_target unit_name with
+              | `Absent -> None
+              | `Ambiguous -> Some None
+              | `One mod_path ->
                   Some (Hashtbl.find_opt type_by_unit (mod_path, in_unit_name)))
         in
         match by_unit with
