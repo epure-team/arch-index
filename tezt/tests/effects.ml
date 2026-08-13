@@ -33,7 +33,12 @@ let apply_migration db =
 let ocaml_files =
   [
     ("dune-project", "(lang dune 3.0)\n");
-    ("dune", "(library (name efxtest) (modules efxtest))\n");
+    ("dune", "(library (name efxtest) (modules efxtest efxdeep))\n");
+    (* A SECOND module, so the effect closures have a boundary to cross. The
+       fixture was single-module, which is why three closures that stopped at
+       every module boundary went unnoticed. *)
+    ("efxdeep.ml", {|let deep_mutator (h : (string, int) Hashtbl.t) = Hashtbl.replace h "deep" 1
+|});
     ("efxtest.ml", {|(* Effects fixture for selftest-effects.sh
    Mutations:
      counter_ref : ref — HeapRef (module-level)
@@ -66,6 +71,9 @@ let exported_entry (b : box) (a : int array) (h : (string, int) Hashtbl.t) =
   record_mutator b;
   array_mutator a;
   hashtbl_mutator h
+
+(* Mutates nothing itself, and its only callee lives in ANOTHER module. *)
+let cross_entry (h : (string, int) Hashtbl.t) = Efxdeep.deep_mutator h
 |});
   ]
 
@@ -95,6 +103,29 @@ let register_ocaml () =
             ~msg:(Printf.sprintf "effects-of %s must reach %s through its callees" entry kind)
             ~haystack:eff kind)
         ["FieldAccess"; "HashTbl"] ;
+
+      (* Across a MODULE boundary, in all three directions.
+
+         Every closure here used to hop by joining a callee NAME against a
+         function NAME. A caller records its callee as dune spells it
+         (`Efxdeep.deep_mutator`) while that function's own name is
+         `deep_mutator`, so the join failed and each query stopped at the
+         boundary: `effects-of` returned nothing, `mutators-of` lost the
+         transitive caller, and `pure-fns` called an impure function pure.
+         Nothing covered this because the fixture had a single module. *)
+      (let cross = discover db ~like:"cross_entry" ~unlike:None in
+       Batch.contains b
+         ~msg:"effects-of must cross the module boundary to reach Efxdeep.deep_mutator"
+         ~haystack:(query db ["effects-of"; cross]) "deep_mutator" ;
+       Batch.contains b
+         ~msg:"mutators-of must list the cross-module caller as a transitive mutator"
+         ~haystack:(query db ["mutators-of"; "HashTbl"]) cross ;
+       (* The one that matters most: "pure" is a claim consumers act on. *)
+       Batch.not_contains b
+         ~msg:
+           "pure-fns must not call cross_entry pure — it reaches a HashTbl mutation one module \
+            away"
+         ~haystack:(query db ["pure-fns"]) cross) ;
 
       Batch.contains b ~msg:"a function with no effects must be listed pure"
         ~haystack:(query db ["pure-fns"]) "pure_fn" ;

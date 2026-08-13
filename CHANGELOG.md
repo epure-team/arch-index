@@ -53,6 +53,22 @@
   `Sqlite3.Error` — that shape is not read yet, and saying so is the honest answer.
 
 ### Fixed
+- **`arch-query effects-of`, `mutators-of` and `pure-fns` stopped at every module boundary too** —
+  same root cause as `dead-code` below, found by re-checking the pattern rather than assuming it
+  was confined to one subcommand. On a two-module fixture where the mutation lives one module away
+  from its caller: `effects-of` returned NOTHING, `mutators-of` lost the transitive caller, and
+  `pure-fns` reported the caller as **pure** while it reaches a `Hashtbl.replace`. That last one is
+  a claim consumers act on. All three now hop through `calls.callee_id` on the main schema.
+- **`arch-query dead-code` stopped at every module boundary on the MAIN schema.** The reachability
+  closure walked callee NAMES: a caller records its callee as dune spells it
+  (`Arch_index__.Lsp_client.start`) while that function's own `functions.name` is `start`, so the
+  chain broke at each cross-module call and everything reachable only across one was reported
+  deletable. `calls.callee_id` already held the correct resolution — the query was not using it.
+  The closure now walks ids on the main schema (the flat schema keeps names, where the name is
+  the key). Walking names also *invented* edges through homonyms, since distinct functions
+  sharing a short name in different modules were conflated; both directions are fixed. Found by
+  running arch-index on its own test suite, which reported 129 of its own shared helpers dead;
+  it now reports 3, all of them `let`-bound constants that are referenced but never applied.
 - **`arch-query dead-code --roots` reported the entire index as dead.** The flag its own usage
   documents was never parsed: the raw argument became the roots list, so `--roots entry` searched
   for a function literally named `--roots`, matched nothing, and left the reachable set empty —
