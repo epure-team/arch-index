@@ -53,7 +53,9 @@ let dispatch (t : Arch_db.t) fmt ~cmd ~a ~b ~flat ~usage =
      to the shallower homonym. The comparison is substr arithmetic, NOT LIKE: a
      path is data, and in a LIKE pattern `_` matches `/`, so `foo_bar.ml`
      matched an effect recorded in `foo/bar.ml`. When NO candidate path-matches,
-     ALL same-named candidates are kept — conservative, never wrong-and-single.
+     ALL same-named candidates are kept. The FALLBACK is what never narrows to
+     zero; the positive arm can still pick a single wrong candidate in the
+     residual below, so the guarantee is scoped to the arm that provides it.
 
      RESIDUAL, stated rather than claimed away: if the extractor and the indexer
      disagree about the source-relative root (an effect recorded as
@@ -85,7 +87,7 @@ let dispatch (t : Arch_db.t) fmt ~cmd ~a ~b ~flat ~usage =
           ("WITH RECURSIVE dm(fn, fp, snd) AS (SELECT DISTINCT function_name, file_path, \
             soundness FROM function_effects WHERE value_kind=?), seed(id) AS (SELECT f.id FROM \
             dm JOIN functions f ON f.name = dm.fn LEFT JOIN modules m ON f.module_id = m.id \
-            WHERE dm.fp IS NULL OR dm.fp = '' OR ("
+            WHERE dm.fp IS NULL OR dm.fp = '' OR m.path IS NULL OR ("
            ^ suffix_match "dm.fp" "m.path"
            ^ " AND NOT EXISTS (SELECT 1 FROM functions f2 JOIN modules m2 ON f2.module_id = \
               m2.id WHERE f2.name = dm.fn AND "
@@ -123,7 +125,7 @@ let dispatch (t : Arch_db.t) fmt ~cmd ~a ~b ~flat ~usage =
             fe.soundness FROM function_effects fe WHERE fe.is_direct=1 AND EXISTS (SELECT 1 \
             FROM functions f LEFT JOIN modules m ON f.module_id = m.id WHERE f.name = \
             fe.function_name AND f.id IN (SELECT id FROM reach) AND (fe.file_path IS NULL OR \
-            fe.file_path = '' OR ("
+            fe.file_path = '' OR m.path IS NULL OR ("
            ^ suffix_match "fe.file_path" "m.path"
            ^ " AND NOT EXISTS (SELECT 1 FROM functions f2 JOIN modules m2 ON f2.module_id = \
               m2.id WHERE f2.name = fe.function_name AND "
@@ -329,12 +331,14 @@ let dispatch (t : Arch_db.t) fmt ~cmd ~a ~b ~flat ~usage =
            On the FLAT schema the universe is NOT [functions] alone: a caller
            need not have a functions row there (arch_query.ml's `known` learned
            this same lesson), so the check spans callers too — but NOT callees.
-           A callee-only name has no outgoing edges by construction, so rooting
-           at one makes the cone exactly itself and every function comes back
-           dead: accepting `--roots '*TOP*'` or `--roots fmt.Println` as
-           "known" resurrects the whole-index-dead report this guard exists to
-           refuse. A review proved that with the callee arm present, both
-           exited 0 and stamped the report sound. *)
+           The rule is indexed-vs-external, not leaf-ness: an INDEXED leaf
+           (`--roots island`) is a legitimate if odd question and stays
+           accepted. A callee-only name is a function this index knows nothing
+           about — `*TOP*`, `fmt.Println` — and treating it as "known" rooted
+           the closure at a node with no outgoing edges: every function dead,
+           exit 0, stamped sound, the whole-index-dead report this guard
+           exists to refuse. A review proved both spellings did exactly that
+           while the callee arm was present. *)
         let known_sql =
           if flat then
             "SELECT name FROM (SELECT name FROM functions UNION SELECT caller_name FROM calls) \
