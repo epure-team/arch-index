@@ -671,6 +671,11 @@ end
    express. Repeating that duplication in OCaml would be importing a limitation
    along with the tests. When the contract changes, one definition changes. *)
 module Fixture = struct
+  (* The preamble every OCaml source fixture needs. A constant because three
+     files carried their own copy, and a lang-version bump applied to two of
+     three is a difference between fixtures that nobody intended. *)
+  let dune_project = ("dune-project", "(lang dune 3.0)\n")
+
   (* The smallest well-formed producer stream: one exported function calling one
      private one, over a MUST edge. Used wherever a test needs "a valid flat
      index" as a backdrop rather than as its subject. *)
@@ -758,6 +763,72 @@ CREATE TABLE calls(caller_name TEXT, caller_file TEXT, callee_name TEXT, callee_
 INSERT INTO calls VALUES ('A','x','mid','x','x:1','MUST'),('mid','x','sink','x','x:2',NULL);
 |}) ;
     db
+end
+
+(* The name a producer actually emitted for a function, found by substring.
+
+   Producers qualify differently — arch-callgraph-go writes `pkg.entry`, the CMT
+   walker writes `Mod.entry`, and a generic instantiation may write neither — so
+   a test that hard-codes one spelling breaks on the others while proving
+   nothing about the property it meant to check. [unlike] separates two names
+   where one contains the other (`entry` vs `newEntryNode`).
+
+   Fails rather than returning an option: a test that cannot find its subject
+   has learned nothing, and every assertion it would go on to make would pass
+   vacuously against an empty name. *)
+let discover db ~like ~unlike =
+  Db.with_db db (fun conn ->
+      let sql =
+        match unlike with
+        | Some u ->
+            Printf.sprintf
+              "SELECT name FROM functions WHERE name LIKE '%%%s%%' AND name NOT LIKE '%%%s%%' \
+               LIMIT 1"
+              like u
+        | None -> Printf.sprintf "SELECT name FROM functions WHERE name LIKE '%%%s%%' LIMIT 1" like
+      in
+      match Db.string_opt conn sql with
+      | Some n -> n
+      | None -> Test.fail "the producer emitted no function matching %S" like)
+
+(* The two claims every call-graph PRODUCER owes, asserted identically wherever
+   one is exercised, so a backend that regresses fails on the property rather
+   than on a per-language spelling.
+
+   [kinds_valid] is the load-bearing one: a NULL or unrecognised kind reads as
+   literal 'MUST' in Arch_db.kind_sql, so one untagged row forges a must-reach
+   path. Asserted over the WHOLE table rather than a sample, because the failure
+   is silent. *)
+module Assert = struct
+  let produced_functions b conn ~label =
+    Batch.ge_int b ~msg:(label ^ ": the producer must emit functions")
+      (Db.int conn "SELECT count(*) FROM functions") 1
+
+  (* The ⊤ frontier of [root] is the function that MAKES the escaping edge, not
+     the root the question was asked about. Both are strings in the same output,
+     so the distinction has to be asserted in both directions: the edge's call
+     site present, the root absent. Pinned once here because two files needed
+     it and the first spelling — `contains "t"` — was satisfied by any output
+     containing a lowercase t, including one naming the root as the frontier. *)
+  let escapes_frontier b ~out ~root ~call_site =
+    Batch.contains b
+      ~msg:(Printf.sprintf "escapes %s must report the ⊤ edge at %s" root call_site)
+      ~haystack:out call_site ;
+    Batch.not_contains b
+      ~msg:
+        (Printf.sprintf
+           "escapes must name the function HOLDING the ⊤ edge, not the root %s it was asked \
+            about"
+           root)
+      ~haystack:out root
+
+  let kinds_valid b conn ~label =
+    Batch.eq_int b
+      ~msg:(label ^ ": no edge may carry a missing or invalid kind (a NULL kind reads as MUST)")
+      (Db.int conn
+         "SELECT count(*) FROM calls WHERE kind IS NULL OR kind NOT IN \
+          ('MUST','MAY_ENUMERATED','MAY_TOP')")
+      0
 end
 
 (* Non-empty lines of a tool's output: a row count should count rows, not the

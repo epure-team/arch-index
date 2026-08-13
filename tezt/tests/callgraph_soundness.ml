@@ -28,7 +28,7 @@ open Arch_tezt
 
 let fixture_files =
   [
-    ("dune-project", "(lang dune 3.0)\n");
+    Fixture.dune_project;
     ("dune", "(library (name corpus) (modules cg crb))\n");
     ("crb.ml", {|let sink2 (x : int) : int = x
 let direct2 (x : int) : int = sink2 (x + 1)

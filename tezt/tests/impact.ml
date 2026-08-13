@@ -29,11 +29,7 @@ let impact args = run_command (arch_impact ()) args
    and merged into stdout they make the object unparseable. *)
 let impact_json b ~what args =
   let _, out, _err = run_command_split (arch_impact ()) args in
-  match Json.strict_object ~what out with
-  | Ok j -> Some j
-  | Error e ->
-      Batch.note b "%s" e ;
-      None
+  Batch.expect b (Json.strict_object ~what out)
 
 (* Three functions at known, non-overlapping spans:
      1-3   entry     (exported)

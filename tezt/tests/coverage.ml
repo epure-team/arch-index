@@ -34,11 +34,8 @@ let coverage_json b ~what args =
     Batch.note b "%s: arch-coverage exited %d:\n%s" what code output ;
     None)
   else
-    match Json.parse ~what output with
-    | Ok j -> Some j
-    | Error e ->
-        Batch.note b "%s" e ;
-        None
+    (* [Batch.expect] is exactly this fold: Ok -> Some, Error -> note and None. *)
+    Batch.expect b (Json.parse ~what output)
 
 (* api (exported) --MUST--> hot, cold, nodata ; dyn --MUST--> hidden and --MAY_TOP--> ⊤,
    so `hidden` is covered but reachable only through the ⊤ cone. *)
