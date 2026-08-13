@@ -272,7 +272,18 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
          Hashtbl.replace fn_lookup (mod_path, fn_name) fn_id)
        "SELECT f.id, f.name, m.path FROM functions f JOIN modules m ON \
         f.module_id = m.id") ;
+  (* Capitalised basename → source path. Lossy BY CONSTRUCTION: two libraries
+     can each hold an `api.ml`, and `Hashtbl.replace` keeps whichever was
+     scanned last, so `Api` designates one of them at random. That is why it is
+     no longer the primary key — {!unit_to_path} below is — and why the only
+     thing still reached through here is the residue that has no unit identity
+     at all (a path rooted at a local `let module`). *)
   let mod_name_to_path = Hashtbl.create 128 in
+  (* Compilation-unit identity → source path. Injective where the basename map
+     is not: `rootlib__Api` and `sublib__Api` are distinct keys for the two
+     `api.ml`. Written by the toolchain as the .cmt filename, so it is a fact
+     about the build, not an inference from the source layout. *)
+  let unit_to_path : (string, string) Hashtbl.t = Hashtbl.create 128 in
   ignore
     (Sqlite3.exec_not_null
        db
@@ -280,8 +291,11 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
          let path = row.(0) in
          let base = Filename.basename path in
          let name = Filename.remove_extension base |> String.capitalize_ascii in
-         Hashtbl.replace mod_name_to_path name path)
-       "SELECT path FROM modules") ;
+         Hashtbl.replace mod_name_to_path name path ;
+         match row.(1) with
+         | "" -> ()
+         | unit_name -> Hashtbl.replace unit_to_path unit_name path)
+       "SELECT path, COALESCE(unit_name,'') FROM modules") ;
   List.iter
     (fun (call : pending_call) ->
       match
@@ -356,23 +370,80 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
                 | None ->
                     (* Not in the function table (shadow/anomaly): unknowable. *)
                     (None, n, "MAY_TOP"))
-            | Arch_index_cmt.Head_qualified (mod_opt, n) -> (
+            | Arch_index_cmt.Head_qualified (mod_opt, n, unit_opt) -> (
                 let display_name =
                   match mod_opt with Some m -> m ^ "." ^ n | None -> n
                 in
                 let kind = if demoted then "MAY_ENUMERATED" else "MUST" in
-                match mod_opt with
+                (* Resolution by COMPILATION-UNIT IDENTITY first, and it is an
+                   exact equality, not a search. `Sublib.Api.run` carries
+                   ("sublib__Api", "run"); `rootlib__Api` is a different key, so
+                   the two `api.ml` cannot be confused however they are laid out
+                   on disk.
+
+                   The decisive property is what happens when the unit IS known
+                   and the function is not in it. That is NOT a reason to look
+                   elsewhere — it means the name is provided by something this
+                   index does not own a row for (an `include`, a re-export, an
+                   alias) or is genuinely external. Falling back to the basename
+                   map there is exactly how a reference to sublib's `run` ends up
+                   bound to rootlib's, with kind MUST: a forged proof pointing at
+                   another library. So a known unit is terminal — resolve within
+                   it or record an unresolved leaf, never a neighbour. *)
+                let by_unit =
+                  match unit_opt with
+                  | None -> None
+                  | Some (unit_name, in_unit_name) -> (
+                      match Hashtbl.find_opt unit_to_path unit_name with
+                      | None -> None
+                      | Some mod_path ->
+                          Some
+                            (Hashtbl.find_opt
+                               fn_lookup
+                               (mod_path, in_unit_name)))
+                in
+                match by_unit with
+                | Some (Some id) -> incr n_resolved ; (Some id, display_name, kind)
+                | Some None ->
+                    (* Unit known and INDEXED, name not in it. Terminal, per
+                       above — but not a leaf.
+
+                       An unresolved callee is stored as `callee_id = NULL`,
+                       which is bit-for-bit how a genuine external like
+                       `Stdlib.+` is stored, and the read model turns both into
+                       an inert `ext:` node. For a unit we do not index that is
+                       the truth. Here it is a lie: the unit is in the index,
+                       so the name is provided by something we hold no row for
+                       — an `include`, a re-export, an alias — and the target is
+                       very likely an indexed function. Recording it as an
+                       external leaf would let `arch-rules` answer `pass` and
+                       `unreachable` answer UNREACHABLE about a call that
+                       really does land inside the index.
+
+                       ⊤ is the honest encoding: bounded to nothing we can
+                       name, never traversed, and it degrades the verdicts that
+                       must not be trusted here. It costs precision only where
+                       we genuinely cannot see the target. *)
+                    (None, display_name, "MAY_TOP")
                 | None -> (
-                    match resolve_local n with
-                    | Some id -> incr n_resolved ; (Some id, n, kind)
-                    | None -> (None, n, (if demoted then "MAY_ENUMERATED" else "MAY_TOP")))
-                | Some mod_name -> (
-                    match resolve_qualified mod_name n with
-                    | Some id -> incr n_resolved ; (Some id, display_name, kind)
-                    | None ->
-                        (* Unresolved external: a leaf either way — MUST leaf
-                           when unconditional, enumerated leaf when demoted. *)
-                        (None, display_name, kind)))
+                    (* No unit identity to key on — a path rooted at a local
+                       `let module`, or a unit this index never scanned. The
+                       basename walk is the residue, and it is only ever
+                       consulted here. *)
+                    match mod_opt with
+                    | None -> (
+                        match resolve_local n with
+                        | Some id -> incr n_resolved ; (Some id, n, kind)
+                        | None ->
+                            ( None,
+                              n,
+                              (if demoted then "MAY_ENUMERATED" else "MAY_TOP") ))
+                    | Some mod_name -> (
+                        match resolve_qualified mod_name n with
+                        | Some id ->
+                            incr n_resolved ;
+                            (Some id, display_name, kind)
+                        | None -> (None, display_name, kind))))
           in
           insert_call
             db
@@ -435,22 +506,41 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
       match Hashtbl.find_opt mod_path_to_id dep.source_module with
       | None -> ()
       | Some source_id ->
+          (* Unit identity first, as on the call and type paths. `open
+             Sublib.Api` carries "sublib__Api", which is a different key from
+             "rootlib__Api" — and this resolver decides what a path-shaped
+             `forbid dep` rule sees, so binding it to the wrong library turns a
+             real violation green and invents one that is not there. *)
           let target_id =
-            match Hashtbl.find_opt mod_path_to_id dep.target_path with
-            | Some id ->
-                incr n_deps_resolved ;
-                Some id
-            | None -> (
-                let parts = String.split_on_char '.' dep.target_path in
-                let name = List.hd (List.rev parts) in
-                match Hashtbl.find_opt mod_name_to_path name with
-                | Some path -> (
-                    match Hashtbl.find_opt mod_path_to_id path with
-                    | Some id ->
-                        incr n_deps_resolved ;
-                        Some id
-                    | None -> None)
+            match
+              Option.bind dep.target_unit (Hashtbl.find_opt unit_to_path)
+            with
+            | Some path -> (
+                match Hashtbl.find_opt mod_path_to_id path with
+                | Some id ->
+                    incr n_deps_resolved ;
+                    Some id
                 | None -> None)
+            | None -> (
+                match Hashtbl.find_opt mod_path_to_id dep.target_path with
+                | Some id ->
+                    incr n_deps_resolved ;
+                    Some id
+                | None -> (
+                    (* Residue only: a target with no unit identity. The
+                       basename walk collapses homonyms by construction, which
+                       is why it is no longer reached for anything the
+                       toolchain named. *)
+                    let parts = String.split_on_char '.' dep.target_path in
+                    let name = List.hd (List.rev parts) in
+                    match Hashtbl.find_opt mod_name_to_path name with
+                    | Some path -> (
+                        match Hashtbl.find_opt mod_path_to_id path with
+                        | Some id ->
+                            incr n_deps_resolved ;
+                            Some id
+                        | None -> None)
+                    | None -> None))
           in
           insert_module_dep
             db
@@ -477,6 +567,7 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
   let n_type_usages = ref 0 in
   let n_type_usages_resolved = ref 0 in
   let type_lookup = Hashtbl.create 256 in
+  let type_by_unit : (string * string, int) Hashtbl.t = Hashtbl.create 256 in
   ignore
     (Sqlite3.exec_not_null
        db
@@ -488,7 +579,11 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
          let mod_name =
            Filename.remove_extension base |> String.capitalize_ascii
          in
-         Hashtbl.replace type_lookup (mod_name, type_name) type_id)
+         (* Basename key: same collapse as everywhere else, kept only as the
+            residue for paths with no unit identity. *)
+         Hashtbl.replace type_lookup (mod_name, type_name) type_id ;
+         (* Unit key: injective across libraries, the primary. *)
+         Hashtbl.replace type_by_unit (mod_path, type_name) type_id)
        "SELECT t.id, t.name, m.path FROM types t JOIN modules m ON t.module_id \
         = m.id") ;
   List.iter
@@ -513,11 +608,31 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
         | None -> ("", usage.type_path)
       in
       let type_id =
-        match Hashtbl.find_opt type_lookup (mod_name, type_name) with
-        | Some id ->
-            incr n_type_usages_resolved ;
-            Some id
-        | None -> None
+        (* Unit identity first, exactly as on the call path: `Rootlib.Api.t`
+           carries ("rootlib__Api", "t"), which cannot be confused with
+           sublib's `t` however the two api.ml are laid out. A known unit is
+           terminal here too — if the type is not in it, we do not go looking
+           in a namesake. Unlike a call, an unresolved type usage degrades
+           nothing (type_usage feeds no soundness closure and no consumer in
+           bin/ reads it), so NULL is the honest answer rather than ⊤. *)
+        let by_unit =
+          match usage.type_unit with
+          | None -> None
+          | Some (unit_name, in_unit_name) -> (
+              match Hashtbl.find_opt unit_to_path unit_name with
+              | None -> None
+              | Some mod_path ->
+                  Some (Hashtbl.find_opt type_by_unit (mod_path, in_unit_name)))
+        in
+        match by_unit with
+        | Some (Some id) -> incr n_type_usages_resolved ; Some id
+        | Some None -> None
+        | None -> (
+            match Hashtbl.find_opt type_lookup (mod_name, type_name) with
+            | Some id ->
+                incr n_type_usages_resolved ;
+                Some id
+            | None -> None)
       in
       insert_type_usage
         db

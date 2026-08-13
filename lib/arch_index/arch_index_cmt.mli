@@ -106,6 +106,10 @@ val extract_signatures_from_cmti_files :
 type pending_dep = {
   source_module : string;
   target_path : string;
+  target_unit : string option;
+      (** compilation-unit identity of the target module — the resolution key;
+          [target_path] is the display spelling and collapses across
+          libraries *)
   dep_kind : string;
   alias_name : string option;
   line_number : int;
@@ -115,8 +119,12 @@ type pending_dep = {
     call is conditional (see the .ml for the full taxonomy). *)
 type call_head =
   | Head_local of string  (** same-module top-level fn — MUST candidate *)
-  | Head_qualified of string option * string
-      (** resolved qualified [(module, name)] — MUST candidate / external leaf *)
+  | Head_qualified of string option * string * (string * string) option
+      (** resolved qualified [(module, name, unit)] — MUST candidate / external
+          leaf. [module]/[name] are the display spelling; [unit] is
+          [Some (unit_name, in_unit_name)] — the compilation-unit identity the
+          resolver keys on — or [None] for a non-persistent (local-module)
+          root. *)
   | Head_enumerated of string
       (** named local fn passed as a callback → bounded candidate set *)
   | Head_unknown of string
@@ -190,6 +198,9 @@ val collect_calls_from_expr :
 type pending_type_usage = {
   function_id : int;
   type_path : string;
+  type_unit : (string * string) option;
+      (** compilation-unit identity — the resolution key; [type_path] is the
+          display spelling *)
   usage_role : string;
   position : int option;
 }

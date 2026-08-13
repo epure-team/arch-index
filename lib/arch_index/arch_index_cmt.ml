@@ -398,6 +398,10 @@ let extract_signatures_from_cmti_files ~project_dir cmti_files =
 type pending_dep = {
   source_module : string; (* Module path, e.g. "src/foo.ml" *)
   target_path : string; (* Module path string, e.g. "Stdlib.List" *)
+  target_unit : string option;
+      (* Compilation-unit identity of the target module — "sublib__Api" for
+         `open Sublib.Api`. The resolution key; [target_path] is the display
+         spelling and collapses across libraries. *)
   dep_kind : string; (* 'open', 'include', 'alias' *)
   alias_name : string option; (* For aliases: the local name *)
   line_number : int;
@@ -411,9 +415,18 @@ type call_head =
   | Head_local of string
       (** Unqualified name resolving (stamp-based) to a same-module top-level
           function body — a MUST candidate when unconditional and saturated. *)
-  | Head_qualified of string option * string
-      (** Resolved qualified path [(module, name)] with a persistent root —
-          a MUST candidate (external leaf or in-index) when unconditional. *)
+  | Head_qualified of string option * string * (string * string) option
+      (** Resolved qualified path [(module, name, unit)] with a persistent root
+          — a MUST candidate (external leaf or in-index) when unconditional.
+
+          [module] and [name] are the DISPLAY spelling, kept because that is
+          what [callee_name] records and what a kind-less consumer reads.
+          [unit] is the resolution key: [Some (unit_name, in_unit_name)] as
+          {!unit_of_path} computes it, e.g. [("sublib__Api", "run")]. It is
+          [None] when the path roots at a non-persistent [Ident] — a local
+          [let module] — where no unit identity exists to record. Resolving on
+          [unit] rather than on [module] is what stops `Api` from designating
+          whichever [api.ml] was scanned last. *)
   | Head_enumerated of string
       (** A named local function passed as a function-typed ARGUMENT: the
           callee (e.g. [List.map]) may invoke it → bounded candidate set. *)
@@ -447,7 +460,7 @@ type pending_call = {
 let pending_display (p : pending_call) =
   match p.head with
   | Head_local n | Head_enumerated n | Head_unknown n -> (n, None)
-  | Head_qualified (m, n) -> (n, m)
+  | Head_qualified (m, n, _) -> (n, m)
 
 (** A synthetic function node for a nested [fun …]/[function] literal:
     [lam_name] chains through every enclosing node
@@ -481,6 +494,10 @@ type lctx = {
 type pending_type_usage = {
   function_id : int;
   type_path : string; (* Full path, e.g. "Stdlib.result" or "Types.story" *)
+  type_unit : (string * string) option;
+      (* Compilation-unit identity of the type's path, as {!unit_of_path}
+         computes it — ("rootlib__Api", "t"). The resolution key; [type_path] is
+         the display spelling. [None] for a non-persistent root. *)
   usage_role : string; (* 'param', 'return' *)
   position : int option; (* Parameter position for params *)
 }
@@ -489,11 +506,16 @@ type pending_type_usage = {
 (* Call graph extraction helpers                                              *)
 (* -------------------------------------------------------------------------- *)
 
-(** Extract module path string from a module_expr. *)
-let rec module_path_of_expr (me : Typedtree.module_expr) =
+(** The raw [Path.t] behind a module expression.
+
+    This used to return [Path.name path] directly. Callers need the path itself:
+    the unit identity lives in the root [Ident] and does not survive the
+    formatting, which is how `open Sublib.Api` and `open Rootlib.Api` became the
+    same dependency. *)
+let rec module_pathr_of_expr (me : Typedtree.module_expr) =
   match me.mod_desc with
-  | Tmod_ident (path, _longident) -> Some (Path.name path)
-  | Tmod_constraint (inner, _, _, _) -> module_path_of_expr inner
+  | Tmod_ident (path, _longident) -> Some path
+  | Tmod_constraint (inner, _, _, _) -> module_pathr_of_expr inner
   | _ -> None
 
 (** Format a Path.t to a module-qualified name. *)
@@ -508,6 +530,74 @@ let path_to_module_name path =
       in
       (Some (module_path prefix), name)
   | Path.Papply _ | Path.Pextra_ty _ -> (None, Path.name path)
+
+(** The COMPILATION UNIT a resolved [Path.t] points into, plus the name of the
+    callee within that unit.
+
+    This is the identity that [path_to_module_name] throws away. It formats the
+    path into a display string, and the root [Ident] — the only part that says
+    which unit the reference crosses into — survives only as its printed name.
+    Two libraries can each hold an [api.ml], so `Api` names neither of them;
+    `rootlib__Api` and `sublib__Api` name exactly one each, and the toolchain
+    already wrote those names as the .cmt filenames.
+
+    Only a PERSISTENT root yields a unit. A local [let module M = … in M.f]
+    roots at a non-persistent [Ident] and belongs to no unit — [None], and the
+    caller falls back to the name-based path rather than inventing an identity.
+
+    The mangling matches what dune writes: [Sublib.Api.run] roots at the
+    persistent [Sublib] with first component [Api], giving [sublib__Api] and the
+    in-unit name [run]. A `(wrapped false)` unit has no component after the root
+    ([Foo.bar] → [foo], [bar]). Deeper components stay with the NAME, not the
+    unit: [Rootlib.Api.Inner.f] is [f] spelled [Inner.f] inside [rootlib__Api],
+    which is how the function table already keys nested definitions. *)
+let unit_of_path path =
+  let rec root_and_rest = function
+    | Path.Pident id -> if Ident.persistent id then Some (Ident.name id, []) else None
+    | Path.Pdot (p, s) -> (
+        match root_and_rest p with
+        | Some (root, rest) -> Some (root, rest @ [s])
+        | None -> None)
+    | Path.Papply _ | Path.Pextra_ty _ -> None
+  in
+  match root_and_rest path with
+  | None -> None
+  | Some (root, rest) -> (
+      let root_low = String.uncapitalize_ascii root in
+      match rest with
+      (* The whole path is the unit root: a `(wrapped false)` unit referenced
+         bare. There is no callee name here, so this shape is not a call. *)
+      | [] -> None
+      (* Root + the callee only: the root IS the unit, `(wrapped false)`. *)
+      | [name] -> Some (root_low, name)
+      (* Root + one component + the callee: the component is the unit member. *)
+      | comp :: deeper -> Some (root_low ^ "__" ^ comp, String.concat "." deeper))
+
+(** The compilation unit a MODULE path denotes — for `open Sublib.Api`, the unit
+    [sublib__Api] itself rather than a value inside it.
+
+    Separate from {!unit_of_path} because the shapes differ by one component: a
+    value path spends its last component on the value name, a module path does
+    not. Sharing one function would make `open Sublib.Api` denote unit [sublib]
+    with member [Api], which is not a unit this index has a row for. A nested
+    module ([Rootlib.Api.Inner]) still belongs to its enclosing unit, so deeper
+    components are dropped. *)
+let unit_of_module_path path =
+  let rec root_and_rest = function
+    | Path.Pident id -> if Ident.persistent id then Some (Ident.name id, []) else None
+    | Path.Pdot (p, s) -> (
+        match root_and_rest p with
+        | Some (root, rest) -> Some (root, rest @ [s])
+        | None -> None)
+    | Path.Papply _ | Path.Pextra_ty _ -> None
+  in
+  match root_and_rest path with
+  | None -> None
+  | Some (root, rest) -> (
+      let root_low = String.uncapitalize_ascii root in
+      match rest with
+      | [] -> Some root_low
+      | comp :: _ -> Some (root_low ^ "__" ^ comp))
 
 (* -------------------------------------------------------------------------- *)
 (* Mutability metrics (R8)                                                    *)
@@ -587,11 +677,15 @@ let type_path_of_path path = Path.name path
     Returns list of (type_path, role, position) where type_path is fully qualified. *)
 let extract_types_from_signature ty =
   let types = ref [] in
-  let add_type path role pos = types := (path, role, pos) :: !types in
+  let add_type path unit role pos = types := (path, unit, role, pos) :: !types in
   let rec extract_constr ty role pos =
     match Types.get_desc ty with
     | Tconstr (path, args, _) ->
-        add_type (type_path_of_path path) role pos ;
+        (* The same unit identity the call path carries, for the same reason:
+           `Api.t` names no module when two libraries define one. This is the
+           third copy of the basename collapse, and it resolved a type in one
+           library to the other library's type of the same name. *)
+        add_type (type_path_of_path path) (unit_of_path path) role pos ;
         (* Also extract type arguments (e.g., 'a list -> extract list) *)
         List.iter (fun arg -> extract_constr arg role pos) args
     | Tarrow (_, arg_ty, ret_ty, _) ->
@@ -856,7 +950,10 @@ let collect_calls_from_expr ~src_path ~caller_module ~caller_name
             | None -> callee_name
           in
           add_call (Head_unknown disp) loc
-        else add_call (Head_qualified (callee_module, callee_name)) loc
+        else
+          add_call
+            (Head_qualified (callee_module, callee_name, unit_of_path path))
+            loc
   in
   (* Diverging (noreturn) application head: a SATURATED call whose head Path
      resolves to a Stdlib primitive that never returns. Path-based detection is
@@ -1227,7 +1324,8 @@ let collect_calls_from_expr ~src_path ~caller_module ~caller_name
                     else
                       add_call
                         ~partial
-                        (Head_qualified (callee_module, callee_name))
+                        (Head_qualified
+                           (callee_module, callee_name, unit_of_path path))
                         expr.exp_loc
                 | Texp_function _ -> (
                     (* Immediately-applied literal (beta-redex): the head IS
@@ -1464,11 +1562,13 @@ let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
               let pending_deps = ref [] in
               let pending_type_usages = ref [] in
               let local_fn_stamps = build_local_fn_stamps structure in
-              let add_dep target_path dep_kind alias_name line_number =
+              let add_dep target_path target_unit dep_kind alias_name
+                  line_number =
                 pending_deps :=
                   {
                     source_module = rel_path;
                     target_path;
+                    target_unit;
                     dep_kind;
                     alias_name;
                     line_number;
@@ -1487,26 +1587,28 @@ let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
                      toplevel contributes: an [open] or an alias local to a
                      nested module is not a dependency of the compilation
                      unit. *)
-                  let add_dep path kind alias line =
-                    if prefix = "" then add_dep path kind alias line
+                  let add_dep path unit kind alias line =
+                    if prefix = "" then add_dep path unit kind alias line
                   in
                   match item.str_desc with
                   | Tstr_open od -> (
                       (* open Module *)
-                      match module_path_of_expr od.open_expr with
-                      | Some path ->
+                      match module_pathr_of_expr od.open_expr with
+                      | Some p ->
                           add_dep
-                            path
+                            (Path.name p)
+                            (unit_of_module_path p)
                             "open"
                             None
                             od.open_loc.loc_start.pos_lnum
                       | None -> ())
                   | Tstr_include id -> (
                       (* include Module *)
-                      match module_path_of_expr id.incl_mod with
-                      | Some path ->
+                      match module_pathr_of_expr id.incl_mod with
+                      | Some p ->
                           add_dep
-                            path
+                            (Path.name p)
+                            (unit_of_module_path p)
                             "include"
                             None
                             id.incl_loc.loc_start.pos_lnum
@@ -1515,10 +1617,11 @@ let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
                       (* module M = SomeModule (alias) *)
                       (match mb.mb_id with
                       | Some id -> (
-                          match module_path_of_expr mb.mb_expr with
-                          | Some path ->
+                          match module_pathr_of_expr mb.mb_expr with
+                          | Some p ->
                               add_dep
-                                path
+                                (Path.name p)
+                                (unit_of_module_path p)
                                 "alias"
                                 (Some (Ident.name id))
                                 mb.mb_expr.mod_loc.loc_start.pos_lnum
@@ -1709,11 +1812,12 @@ let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
                                 extract_types_from_signature vb.vb_pat.pat_type
                               in
                               List.iter
-                                (fun (type_path, usage_role, position) ->
+                                (fun (type_path, type_unit, usage_role, position) ->
                                   pending_type_usages :=
                                     {
                                       function_id;
                                       type_path;
+                                      type_unit;
                                       usage_role;
                                       position;
                                     }
