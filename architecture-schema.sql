@@ -12,6 +12,13 @@ CREATE TABLE IF NOT EXISTS modules (
     intent TEXT,                            -- human-written purpose description
     last_analyzed TEXT,                     -- ISO 8601 timestamp
     has_mli BOOLEAN DEFAULT 0,              -- whether .mli exists
+    -- Compilation-unit identity, as the toolchain mangles it: 'rootlib__Api' for
+    -- rootlib/api.ml inside library rootlib, 'foo' for a (wrapped false) unit,
+    -- 'dune__exe__Main' for an executable module. Distinct where `path` basenames
+    -- collide, which is the whole point: two libraries can each hold an api.ml,
+    -- and resolving a qualified reference by basename picks one at random.
+    -- NULL on a producer that does not know it (the flat/LSP path).
+    unit_name TEXT DEFAULT NULL,
     quint_module_raw TEXT DEFAULT NULL,     -- body of {quint-module} comment section (Quint preamble)
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );

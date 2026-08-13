@@ -165,6 +165,7 @@ val insert_module :
   path:string ->
   lines:int ->
   has_mli:bool ->
+  ?unit_name:string option ->
   ?quint_module_raw:string option ->
   unit ->
   int

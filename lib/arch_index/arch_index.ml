@@ -157,8 +157,8 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
   let stmt_mod =
     Sqlite3.prepare
       db
-      "INSERT INTO modules (path, lines, last_analyzed, has_mli, \
-       quint_module_raw) VALUES (?, ?, ?, ?, ?)"
+      "INSERT INTO modules (path, lines, last_analyzed, has_mli, unit_name, \
+       quint_module_raw) VALUES (?, ?, ?, ?, ?, ?)"
   in
   let stmt_fn =
     Sqlite3.prepare

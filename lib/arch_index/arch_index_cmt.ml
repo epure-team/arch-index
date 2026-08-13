@@ -1433,6 +1433,21 @@ let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
               let quint_module_raw =
                 Hashtbl.find_opt module_quint_tbl modname
               in
+              (* The compilation-unit identity, taken from the .cmt FILENAME —
+                 which the toolchain writes, not us. `rootlib__Api.cmt` for
+                 rootlib/api.ml in library rootlib, `foo.cmt` for a
+                 `(wrapped false)` unit, `dune__exe__Main.cmt` for an
+                 executable module.
+
+                 The filename and not the directory: dune derives the object
+                 directory from the LIBRARY name, so a library `x` living in
+                 `xlib/` produces `xlib/.x.objs/byte/x__B.cmt`. Reading the
+                 identity off the source layout instead is a convention that
+                 breaks exactly there, and breaking it silently binds a
+                 reference to another library. *)
+              let unit_name =
+                Some (Filename.remove_extension (Filename.basename path))
+              in
               let module_id =
                 insert_module
                   db
@@ -1440,6 +1455,7 @@ let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
                   ~path:rel_path
                   ~lines
                   ~has_mli
+                  ~unit_name
                   ?quint_module_raw:(Option.map Option.some quint_module_raw)
                   ()
               in
