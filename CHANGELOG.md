@@ -53,6 +53,14 @@
   `Sqlite3.Error` — that shape is not read yet, and saying so is the honest answer.
 
 ### Fixed
+- **`arch-query dead-code --roots` reported the entire index as dead.** The flag its own usage
+  documents was never parsed: the raw argument became the roots list, so `--roots entry` searched
+  for a function literally named `--roots`, matched nothing, and left the reachable set empty —
+  every function in the index came back as deletable, for anyone following the documented
+  interface. Both `--roots X` and `--roots=X` are parsed now (the bare positional form still
+  works), and a root matching no function is refused with exit 2 instead of silently producing
+  that report: an unmatched root makes every function unreachable, so a typo in a root name would
+  otherwise read exactly like a correct answer.
 - **The LSP indexing path forged must-reach paths.** `arch-index --language go|rust|typescript`
   wrote a `calls` table with no `kind` column, and a missing `kind` reads as the literal `'MUST'`
   in `Arch_db.kind_sql` — so every callHierarchy edge, including the deferred and conditional
