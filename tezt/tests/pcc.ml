@@ -153,9 +153,21 @@ let register_dossier () =
         let contents = read_file dossier in
         Batch.check b ~msg:"pcc-dossier must write a non-empty file"
           (String.length (String.trim contents) > 0) ;
-        Batch.contains b
-          ~msg:"the dossier must surface the real arch-rules FAIL verdict, not swallow it"
-          ~haystack:contents "FAIL"
+        (* Not a bare `contains "FAIL"`: the word appears in headers, legends and
+           in "FAIL: 0", so the substring cannot tell "the verdict was surfaced"
+           from "the template mentions the word". Pinned to the line that
+           carries the verdict, and to the rule that produced it. *)
+        let fail_lines =
+          List.filter (contains ~needle:"FAIL") (lines contents)
+          |> List.filter (fun l -> not (contains ~needle:"FAIL: 0" l))
+        in
+        Batch.ge_int b
+          ~msg:
+            (Printf.sprintf
+               "the dossier must surface the real arch-rules FAIL verdict, not swallow it \
+                (no line carries a FAIL verdict) — dossier:\n%s"
+               contents)
+          (List.length fail_lines) 1
       end ;
 
       (* A missing required argument must fail loudly, before writing anything —

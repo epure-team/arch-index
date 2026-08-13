@@ -88,41 +88,25 @@ INSERT INTO functions(module_id, name, line_start, line_end) VALUES
          these fields, so a renamed key is a breaking change even when the
          human-readable line still says the right thing. *)
       let json = bc_out db ["duplicates"; "--repo"; repo; "--format"; "json"] in
-      match Yojson.Safe.from_string json with
-      | exception exn ->
-          Batch.note b "duplicates --format json did not emit parseable JSON (%s):\n%s"
-            (Printexc.to_string exn) json
-      | parsed ->
-          let member k =
-            match parsed with
-            | `Assoc fields -> List.assoc_opt k fields
-            | _ -> None
-          in
-          (match member "candidates_with_multiple_definitions" with
-          | Some (`Int n) ->
-              Batch.eq_int b ~msg:"json: candidates_with_multiple_definitions" n 1
-          | other ->
-              Batch.note b "json: candidates_with_multiple_definitions missing or not an int (%s)"
-                (match other with None -> "absent" | Some v -> Yojson.Safe.to_string v)) ;
-          (match member "proven_duplicates" with
-          | Some (`List items) ->
-              let names =
-                List.filter_map
-                  (function `Assoc f -> (
-                     match List.assoc_opt "name" f with Some (`String s) -> Some s | _ -> None)
-                    | _ -> None)
-                  items
-              in
+      match Batch.expect b (Json.strict_object ~what:"duplicates --format json" json) with
+      | None -> ()
+      | Some parsed ->
+          Option.iter
+            (fun n -> Batch.eq_int b ~msg:"json: candidates_with_multiple_definitions" n 1)
+            (Batch.expect b
+               (Json.int ~what:"duplicates" "candidates_with_multiple_definitions" parsed)) ;
+          Option.iter
+            (fun items ->
               Batch.eq_string b ~msg:"json: proven_duplicates names"
-                (String.concat "," names) "dup"
-          | other ->
-              Batch.note b "json: proven_duplicates missing or not a list (%s)"
-                (match other with None -> "absent" | Some v -> Yojson.Safe.to_string v)) ;
-          (match member "unverifiable_empty_body" with
-          | Some (`List []) -> ()
-          | other ->
-              Batch.note b "json: unverifiable_empty_body should be empty here, got %s"
-                (match other with None -> "absent" | Some v -> Yojson.Safe.to_string v))) ;
+                (String.concat "," (Json.field_of_objects ~field:"name" items))
+                "dup")
+            (Batch.expect b (Json.list ~what:"duplicates" "proven_duplicates" parsed)) ;
+          Option.iter
+            (fun items ->
+              Batch.eq_int b
+                ~msg:"json: unverifiable_empty_body should be empty here"
+                (List.length items) 0)
+            (Batch.expect b (Json.list ~what:"duplicates" "unverifiable_empty_body" parsed))) ;
   Lwt.return_unit
 
 (* Two occurrences whose sources cannot be read hash the same (empty) body. That

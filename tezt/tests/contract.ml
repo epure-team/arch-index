@@ -62,8 +62,17 @@ let register () =
         ~haystack:dirty_z "UNREACHABLE:" ;
 
       (* escapes: the ⊤ frontier, scoped to what the root can actually reach. *)
-      Batch.contains b ~msg:"escapes dirty must list t, the function making the ⊤ edge"
-        ~haystack:(query db ["escapes"; "dirty"]) "t" ;
+      (* The ⊤ frontier is the function that MAKES the escaping edge, not the
+         root the question was asked about. Pinned by the edge's call site and
+         by the root's absence: the needle used to be the single letter "t",
+         which any output containing a lowercase t satisfies — including one
+         naming `dirty` itself as the frontier. *)
+      (let escapes = query db ["escapes"; "dirty"] in
+       Batch.contains b ~msg:"escapes dirty must report the ⊤ edge at x:4"
+         ~haystack:escapes "x:4" ;
+       Batch.not_contains b
+         ~msg:"escapes must name t, the function holding the ⊤ edge, not the root dirty"
+         ~haystack:escapes "dirty") ;
       (* Asserted as an empty ROW SET, not as the absence of the substring "t".
          `escapes clean` prints nothing on this fixture, so `not_contains "t"`
          was vacuously true — it would have kept passing if the command started
@@ -155,9 +164,14 @@ let register_unknown_names () =
       (* The mirror image: a callee that exists only as an edge endpoint IS a
          node, or the guard would refuse legitimate questions about unresolved
          callees. *)
-      Batch.contains b
+      (* Through [verdict_token], NOT `contains "REACHABLE"`: "REACHABLE" is a
+         substring of "UNREACHABLE", so the substring form cannot tell a
+         may-reach answer from a proof of unreachability — it accepted a forged
+         soundness claim about an unresolved callee. *)
+      Batch.eq_string b
         ~msg:"a callee with no functions row is still a node and must not be refused"
-        ~haystack:(query db ["unreachable"; "a"; "ext_only"]) "REACHABLE") ;
+        (verdict_token (query db ["unreachable"; "a"; "ext_only"]))
+        "REACHABLE (may-reach)") ;
   Lwt.return_unit
 
 (* Exit 3 means "this index cannot answer that soundly", and callers — the MCP

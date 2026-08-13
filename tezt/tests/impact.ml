@@ -262,11 +262,14 @@ let register_findings_gate () =
       (match impact_json b ~what:"impact" (args with_findings ["--format"; "json"]) with
       | None -> ()
       | Some j -> (
-          match Json.list ~what:"impact" "findings" j with
-          | _ -> (
-              (* Only the finding on a TOUCHED line may be reported: line 10 is
-                 not in the diff. *)
-              match Json.member "findings" j with
+          (* The `match Json.list "findings" … with | _ -> …` that used to wrap
+             this discarded its own result: every branch fell through, so it
+             read as a check and enforced nothing. Removed rather than
+             repaired — `findings` is an OBJECT here, not a list, so the read it
+             performed could never have succeeded anyway. *)
+          (* Only the finding on a TOUCHED line may be reported: line 10 is
+             not in the diff. *)
+          match Json.member "findings" j with
               | Some (`Assoc f) -> (
                   match List.assoc_opt "decisions" f with
                   | Some (`List ds) ->
@@ -284,7 +287,7 @@ let register_findings_gate () =
                         ~msg:"only the finding on a touched line may be reported"
                         (String.concat "," ls) "6"
                   | _ -> Batch.note b "impact.findings.decisions is missing or not a list")
-              | _ -> Batch.note b "impact.findings is missing or not an object"))) ;
+          | _ -> Batch.note b "impact.findings is missing or not an object")) ;
 
       (* exit 1 <-> verdict "fail": a consumer with only stdout must reach the
          same conclusion as one with only the exit code. *)
@@ -381,8 +384,15 @@ let register_diff_parsing () =
   (* Delete lines 1 and 3 AND edit the line that ends up at new line 3: a MIXED
      diff, so neither the deleted-file branch nor the deletion-only branch can
      rescue it. *)
+  (* The last line is ADDED, so the diff renders it `+++ /dev/null` — the
+     new-file header that means "this file was deleted". Deleting the `++ …`
+     line above only ever produced `-++ /dev/null`, so the `+++` half of the
+     trap was named in the assertion messages but never actually present in the
+     input. Both halves are now genuinely in the diff:
+       `--- header comment`   (deleted `-- …`, reads as an old-file header)
+       `+++ /dev/null`        (added `++ …`, reads as "file deleted") *)
   write_file (Filename.concat root "q.sql")
-    "SELECT 1;\nSELECT 2;\nSELECT 33;\nSELECT 4;\nSELECT 5;\n" ;
+    "SELECT 1;\nSELECT 2;\nSELECT 33;\nSELECT 4;\nSELECT 5;\n++ /dev/null\n" ;
   Fixture.git_commit ~cwd:root "edit" ;
   let db =
     Fixture.flat ~name:"impact_diff"
@@ -403,8 +413,9 @@ let register_diff_parsing () =
           Batch.check b
             ~msg:
               (Printf.sprintf
-                 "the edit lands at new line 3 inside 'mid' — unless `+++ /dev/null` was read as \
-                  a header, which cleared the file and dropped every later hunk (touched: %s)"
+                 "the edit lands at new line 3 inside 'mid' — unless `--- header comment` was \
+                  read as an old-file header, which restarted the parse and dropped every later \
+                  hunk (touched: %s)"
                  (String.concat "," touched))
             (List.mem "mid" touched) ;
           Batch.check b
@@ -415,10 +426,9 @@ let register_diff_parsing () =
                  (String.concat "," touched))
             (List.mem "top" touched) ;
           let invented =
-            (match Json.strings ~what:"impact" "files_unmatched" j with Ok l -> l | Error _ -> [])
-            @ (match Json.strings ~what:"impact" "files_file_granular" j with
-              | Ok l -> l
-              | Error _ -> [])
+            Batch.list_or_empty b (Json.strings ~what:"impact" "files_unmatched" j)
+            @ Batch.list_or_empty b
+                (Json.strings ~what:"impact" "files_file_granular" j)
           in
           List.iter
             (fun ghost ->

@@ -98,30 +98,28 @@ let register () =
      the extracted SQL rather than on the database, because the claim is about
      what the documentation says, not about what this run happened to execute. *)
   let lowered = String.lowercase_ascii script in
+  (* [verb] appears, and gardening_log appears in the same statement — i.e.
+     before the next ';'. Scanning every occurrence, not just the first: one
+     harmless UPDATE elsewhere in the doc must not mask a later one that does
+     target the append-only table. *)
   let mentions verb =
-    let rec scan i =
-      if i < 0 then false
+    let rec scan from =
+      if from >= String.length lowered then false
       else
-        let n = String.length verb in
-        if i + n <= String.length lowered && String.sub lowered i n = verb then
-          (* only if gardening_log appears before the next statement separator *)
-          let rest =
-            String.sub lowered i (min 200 (String.length lowered - i))
-          in
-          let stop = match String.index_opt rest ';' with Some j -> j | None -> String.length rest in
-          let stmt = String.sub rest 0 stop in
-          let has_log =
-            let target = "gardening_log" and tn = 13 in
-            let found = ref false in
-            for k = 0 to String.length stmt - tn do
-              if (not !found) && String.sub stmt k tn = target then found := true
-            done ;
-            !found
-          in
-          has_log || scan (i - 1)
-        else scan (i - 1)
+        let tail = String.sub lowered from (String.length lowered - from) in
+        match index_of ~needle:verb tail with
+        | None -> false
+        | Some i ->
+            let rest = String.sub tail i (String.length tail - i) in
+            let stmt =
+              match String.index_opt rest ';' with
+              | Some j -> String.sub rest 0 j
+              | None -> rest
+            in
+            contains ~needle:"gardening_log" stmt
+            || scan (from + i + String.length verb)
     in
-    scan (String.length lowered - 1)
+    scan 0
   in
   Batch.check b
     ~msg:

@@ -17,17 +17,14 @@
     two failure modes are opposite, so the corpus asserts both directions on the
     same fixture.
 
-    Assertions carry the phase they were written in. P1 is behaviour that must
-    hold now. P2 marks the redesign's targets, expected to fail until the phase
-    that implements them lands: an XFAIL is reported, not failed, unless
-    ARCH_TEZT_STRICT_P2=1 — which is how the suite gets promoted once the work
-    is done. A P2 that starts passing is reported as XPASS rather than silently
-    counted, because a target that has been met should be re-tagged rather than
-    left looking outstanding. *)
+    Every assertion here is enforced. Some of them were written ahead of the
+    implementation, as XFAIL-until-implemented targets reported by [Log.info]
+    and gated behind an environment variable; they all pass now, and a target
+    that has been met but is still logged rather than asserted is a regression
+    waiting to go unnoticed. So they were promoted: a failure in any row below
+    fails the test, on every run, with no flag to set. *)
 
 open Arch_tezt
-
-type phase = P1 | P2
 
 let fixture_files =
   [
@@ -223,109 +220,85 @@ let beta_redex (x : int) : int = (fun y -> island y) x
 |});
   ]
 
-(* The single token arch-query's answer turns on. Matching the FIRST occurrence
-   of one of these, rather than scanning for a substring anywhere, is what stops
-   a function whose own name contains "UNREACHABLE" inverting its own verdict. *)
-let verdict_token output =
-  let tokens =
-    ["PATH EXISTS"; "no MUST path"; "REACHABLE (may-reach)"; "UNREACHABLE:"; "UNKNOWN:"; "REFUSED"]
-  in
-  let best = ref None in
-  List.iter
-    (fun t ->
-      let n = String.length t and h = String.length output in
-      let i = ref 0 in
-      while !i <= h - n do
-        if String.sub output !i n = t then begin
-          (match !best with
-          | Some (j, _) when j <= !i -> ()
-          | _ -> best := Some (!i, t)) ;
-          i := h
-        end
-        else incr i
-      done)
-    tokens ;
-  match !best with Some (_, t) -> t | None -> "<no verdict token>"
-
 let verdict_checks =
   [
-    (P1, "reaches direct sink = must-path", `Verdict (["reaches"; "direct"; "sink"], "PATH EXISTS"));
-    (P1, "reaches entry_direct sink2 = cross-mod must", `Verdict (["reaches"; "entry_direct"; "sink2"], "PATH EXISTS"));
-    (P1, "unreachable entry_unknown sink2 = UNKNOWN", `Verdict (["unreachable"; "entry_unknown"; "sink2"], "UNKNOWN:"));
-    (P1, "reaches call_param island = no must (param shadow)", `Verdict (["reaches"; "call_param"; "island"], "no MUST path"));
-    (P1, "unreachable call_param island = UNKNOWN", `Verdict (["unreachable"; "call_param"; "island"], "UNKNOWN:"));
-    (P1, "unreachable val_call sink = UNKNOWN (fn-value)", `Verdict (["unreachable"; "val_call"; "sink"], "UNKNOWN:"));
-    (P1, "unreachable named_map island = REACHABLE (callback)", `Verdict (["unreachable"; "named_map"; "island"], "REACHABLE (may-reach)"));
-    (P1, "reaches named_map island = no must (callback not must)", `Verdict (["reaches"; "named_map"; "island"], "no MUST path"));
-    (P1, "unreachable param_map island = UNKNOWN (param cb)", `Verdict (["unreachable"; "param_map"; "island"], "UNKNOWN:"));
-    (P1, "unreachable apply_param island = UNKNOWN", `Verdict (["unreachable"; "apply_param"; "island"], "UNKNOWN:"));
-    (P1, "reaches ping pong = no must (recursive call is in an else-branch)", `Verdict (["reaches"; "ping"; "pong"], "no MUST path"));
-    (P1, "unreachable on unknown root = REFUSED", `Refuses ["unreachable"; "no_such_fn"; "also_missing"]);
-    (P1, "reaches cond_if sink = no must (if-branch conditional)", `Verdict (["reaches"; "cond_if"; "sink"], "no MUST path"));
-    (P1, "reaches cond_match sink = no must (match arm conditional)", `Verdict (["reaches"; "cond_match"; "sink"], "no MUST path"));
-    (P1, "reaches cond_try sink = no must (exception handler)", `Verdict (["reaches"; "cond_try"; "sink"], "no MUST path"));
-    (P1, "reaches cond_andalso sink = no must (&& right operand)", `Verdict (["reaches"; "cond_andalso"; "sink"], "no MUST path"));
-    (P1, "reaches cond_assert sink = no must (assert elided by -noassert)", `Verdict (["reaches"; "cond_assert"; "sink"], "no MUST path"));
-    (P1, "reaches cond_functor sink = no must (unapplied functor body)", `Verdict (["reaches"; "cond_functor"; "sink"], "no MUST path"));
-    (P1, "reaches root_fun sink = no must (root function arm conditional)", `Verdict (["reaches"; "root_fun"; "sink"], "no MUST path"));
-    (P1, "reaches root_guard sink = no must (root function guard conditional)", `Verdict (["reaches"; "root_guard"; "sink"], "no MUST path"));
-    (P1, "reaches letop_body sink = no must (let* continuation conditional)", `Verdict (["reaches"; "letop_body"; "sink"], "no MUST path"));
-    (P1, "reaches overapp_entry choose2 = must (over-applied head is saturated)", `Verdict (["reaches"; "overapp_entry"; "choose2"], "PATH EXISTS"));
-    (P1, "reaches add2 sink = must (saturated call runs the body)", `Verdict (["reaches"; "add2"; "sink"], "PATH EXISTS"));
-    (P1, "reaches partial_app sink = no must (partial application defers body)", `Verdict (["reaches"; "partial_app"; "sink"], "no MUST path"));
-    (P1, "reaches alias_partial sink = no must (alias-hidden partial application)", `Verdict (["reaches"; "alias_partial"; "sink"], "no MUST path"));
-    (P1, "reaches unused_closure island = no must (uninvoked nested body)", `Verdict (["reaches"; "unused_closure"; "island"], "no MUST path"));
-    (P1, "reaches lam_map island = no must (passed lambda never a MUST path)", `Verdict (["reaches"; "lam_map"; "island"], "no MUST path"));
-    (P1, "reaches lazy_thunk island = no must (lazy thunk deferred)", `Verdict (["reaches"; "lazy_thunk"; "island"], "no MUST path"));
-    (P1, "reaches opt_default island = no must (opt-arg default conditional)", `Verdict (["reaches"; "opt_default"; "island"], "no MUST path"));
-    (P1, "unreachable computed_map island = UNKNOWN (computed callback = true ⊤)", `Verdict (["unreachable"; "computed_map"; "island"], "UNKNOWN:"));
-    (P1, "unreachable fcm_param sink = UNKNOWN (first-class module param = true ⊤)", `Verdict (["unreachable"; "fcm_param"; "sink"], "UNKNOWN:"));
-    (P1, "unreachable direct sink = REACHABLE (direct MUST chain intact)", `Verdict (["unreachable"; "direct"; "sink"], "REACHABLE (may-reach)"));
-    (P1, "reaches try_body_must sink = must (try body is eager)", `Verdict (["reaches"; "try_body_must"; "sink"], "PATH EXISTS"));
-    (P1, "reaches join_after sink = must (join after a branch is unconditional)", `Verdict (["reaches"; "join_after"; "sink"], "PATH EXISTS"));
-    (P1, "reaches try_noreturn sink = no must (handler never post-dominates)", `Verdict (["reaches"; "try_noreturn"; "sink"], "no MUST path"));
-    (P1, "reaches single_total sink = must (total unguarded single arm always runs)", `Verdict (["reaches"; "single_total"; "sink"], "PATH EXISTS"));
-    (P1, "reaches single_partial sink = no must (refutable arm may fail)", `Verdict (["reaches"; "single_partial"; "sink"], "no MUST path"));
-    (P1, "reaches single_guarded sink = no must (guard may fail)", `Verdict (["reaches"; "single_guarded"; "sink"], "no MUST path"));
-    (P1, "reaches false_arg sink = no must (raising argument precedes the call)", `Verdict (["reaches"; "false_arg"; "sink"], "no MUST path"));
-    (P1, "reaches no_shadow_stdlib g = must (local Stdlib.failwith is not a terminator)", `Verdict (["reaches"; "no_shadow_stdlib"; "g"], "PATH EXISTS"));
-    (P1, "reaches cond_bind island = no must (conditional binding not recorded)", `Verdict (["reaches"; "cond_bind"; "island"], "no MUST path"));
-    (P1, "unreachable cond_bind island = REACHABLE (arm literals are enumerated occurrences)", `Verdict (["unreachable"; "cond_bind"; "island"], "REACHABLE (may-reach)"));
-    (P1, "reaches tuple_bind island = no must (tuple pattern not recorded)", `Verdict (["reaches"; "tuple_bind"; "island"], "no MUST path"));
-    (P1, "reaches shadow_bind island = no must (rebound name is a fresh stamp)", `Verdict (["reaches"; "shadow_bind"; "island"], "no MUST path"));
-    (P1, "reaches partial_bind island = no must (partial application of bound lambda)", `Verdict (["reaches"; "partial_bind"; "island"], "no MUST path"));
-    (P1, "unreachable stored_bind island = REACHABLE (tuple-stored lambda escapes)", `Verdict (["unreachable"; "stored_bind"; "island"], "REACHABLE (may-reach)"));
-    (P1, "reaches beta_redex island = must (beta-redex head is the lambda node)", `Verdict (["reaches"; "beta_redex"; "island"], "PATH EXISTS"));
-    (P2, "reaches after_raise sink = no must (post-raise block entry-unreachable)", `Verdict (["reaches"; "after_raise"; "sink"], "no MUST path"));
-    (P2, "unreachable cond_if sink = REACHABLE (enumerated conditional callee)", `Verdict (["unreachable"; "cond_if"; "sink"], "REACHABLE (may-reach)"));
-    (P2, "unreachable cond_if island = UNREACHABLE (no ⊤ in cond_if closure)", `Verdict (["unreachable"; "cond_if"; "island"], "UNREACHABLE:"));
-    (P2, "unreachable cond_functor sink = REACHABLE (deferred but enumerated)", `Verdict (["unreachable"; "cond_functor"; "sink"], "REACHABLE (may-reach)"));
-    (P2, "unreachable root_fun sink = REACHABLE (arm callee enumerated)", `Verdict (["unreachable"; "root_fun"; "sink"], "REACHABLE (may-reach)"));
-    (P2, "unreachable lazy_thunk island = REACHABLE (thunk callee enumerated)", `Verdict (["unreachable"; "lazy_thunk"; "island"], "REACHABLE (may-reach)"));
-    (P2, "unreachable opt_default island = REACHABLE (default callee enumerated)", `Verdict (["unreachable"; "opt_default"; "island"], "REACHABLE (may-reach)"));
-    (P2, "unreachable try_noreturn sink = REACHABLE (handler callee enumerated)", `Verdict (["unreachable"; "try_noreturn"; "sink"], "REACHABLE (may-reach)"));
-    (P2, "unreachable lam_map island = REACHABLE (through the lambda node)", `Verdict (["unreachable"; "lam_map"; "island"], "REACHABLE (may-reach)"));
-    (P2, "unreachable unused_closure island = REACHABLE (ignore h = escape occurrence)", `Verdict (["unreachable"; "unused_closure"; "island"], "REACHABLE (may-reach)"));
-    (P2, "reaches invoked_closure island = must (invoked local lambda → MUST chain)", `Verdict (["reaches"; "invoked_closure"; "island"], "PATH EXISTS"));
-    (P2, "unreachable dead_lambda island = UNREACHABLE (dead lambda, no ⊤)", `Verdict (["unreachable"; "dead_lambda"; "island"], "UNREACHABLE:"));
+    ("reaches direct sink = must-path", `Verdict (["reaches"; "direct"; "sink"], "PATH EXISTS"));
+    ("reaches entry_direct sink2 = cross-mod must", `Verdict (["reaches"; "entry_direct"; "sink2"], "PATH EXISTS"));
+    ("unreachable entry_unknown sink2 = UNKNOWN", `Verdict (["unreachable"; "entry_unknown"; "sink2"], "UNKNOWN:"));
+    ("reaches call_param island = no must (param shadow)", `Verdict (["reaches"; "call_param"; "island"], "no MUST path"));
+    ("unreachable call_param island = UNKNOWN", `Verdict (["unreachable"; "call_param"; "island"], "UNKNOWN:"));
+    ("unreachable val_call sink = UNKNOWN (fn-value)", `Verdict (["unreachable"; "val_call"; "sink"], "UNKNOWN:"));
+    ("unreachable named_map island = REACHABLE (callback)", `Verdict (["unreachable"; "named_map"; "island"], "REACHABLE (may-reach)"));
+    ("reaches named_map island = no must (callback not must)", `Verdict (["reaches"; "named_map"; "island"], "no MUST path"));
+    ("unreachable param_map island = UNKNOWN (param cb)", `Verdict (["unreachable"; "param_map"; "island"], "UNKNOWN:"));
+    ("unreachable apply_param island = UNKNOWN", `Verdict (["unreachable"; "apply_param"; "island"], "UNKNOWN:"));
+    ("reaches ping pong = no must (recursive call is in an else-branch)", `Verdict (["reaches"; "ping"; "pong"], "no MUST path"));
+    ("unreachable on unknown root = REFUSED", `Refuses ["unreachable"; "no_such_fn"; "also_missing"]);
+    ("reaches cond_if sink = no must (if-branch conditional)", `Verdict (["reaches"; "cond_if"; "sink"], "no MUST path"));
+    ("reaches cond_match sink = no must (match arm conditional)", `Verdict (["reaches"; "cond_match"; "sink"], "no MUST path"));
+    ("reaches cond_try sink = no must (exception handler)", `Verdict (["reaches"; "cond_try"; "sink"], "no MUST path"));
+    ("reaches cond_andalso sink = no must (&& right operand)", `Verdict (["reaches"; "cond_andalso"; "sink"], "no MUST path"));
+    ("reaches cond_assert sink = no must (assert elided by -noassert)", `Verdict (["reaches"; "cond_assert"; "sink"], "no MUST path"));
+    ("reaches cond_functor sink = no must (unapplied functor body)", `Verdict (["reaches"; "cond_functor"; "sink"], "no MUST path"));
+    ("reaches root_fun sink = no must (root function arm conditional)", `Verdict (["reaches"; "root_fun"; "sink"], "no MUST path"));
+    ("reaches root_guard sink = no must (root function guard conditional)", `Verdict (["reaches"; "root_guard"; "sink"], "no MUST path"));
+    ("reaches letop_body sink = no must (let* continuation conditional)", `Verdict (["reaches"; "letop_body"; "sink"], "no MUST path"));
+    ("reaches overapp_entry choose2 = must (over-applied head is saturated)", `Verdict (["reaches"; "overapp_entry"; "choose2"], "PATH EXISTS"));
+    ("reaches add2 sink = must (saturated call runs the body)", `Verdict (["reaches"; "add2"; "sink"], "PATH EXISTS"));
+    ("reaches partial_app sink = no must (partial application defers body)", `Verdict (["reaches"; "partial_app"; "sink"], "no MUST path"));
+    ("reaches alias_partial sink = no must (alias-hidden partial application)", `Verdict (["reaches"; "alias_partial"; "sink"], "no MUST path"));
+    ("reaches unused_closure island = no must (uninvoked nested body)", `Verdict (["reaches"; "unused_closure"; "island"], "no MUST path"));
+    ("reaches lam_map island = no must (passed lambda never a MUST path)", `Verdict (["reaches"; "lam_map"; "island"], "no MUST path"));
+    ("reaches lazy_thunk island = no must (lazy thunk deferred)", `Verdict (["reaches"; "lazy_thunk"; "island"], "no MUST path"));
+    ("reaches opt_default island = no must (opt-arg default conditional)", `Verdict (["reaches"; "opt_default"; "island"], "no MUST path"));
+    ("unreachable computed_map island = UNKNOWN (computed callback = true ⊤)", `Verdict (["unreachable"; "computed_map"; "island"], "UNKNOWN:"));
+    ("unreachable fcm_param sink = UNKNOWN (first-class module param = true ⊤)", `Verdict (["unreachable"; "fcm_param"; "sink"], "UNKNOWN:"));
+    ("unreachable direct sink = REACHABLE (direct MUST chain intact)", `Verdict (["unreachable"; "direct"; "sink"], "REACHABLE (may-reach)"));
+    ("reaches try_body_must sink = must (try body is eager)", `Verdict (["reaches"; "try_body_must"; "sink"], "PATH EXISTS"));
+    ("reaches join_after sink = must (join after a branch is unconditional)", `Verdict (["reaches"; "join_after"; "sink"], "PATH EXISTS"));
+    ("reaches try_noreturn sink = no must (handler never post-dominates)", `Verdict (["reaches"; "try_noreturn"; "sink"], "no MUST path"));
+    ("reaches single_total sink = must (total unguarded single arm always runs)", `Verdict (["reaches"; "single_total"; "sink"], "PATH EXISTS"));
+    ("reaches single_partial sink = no must (refutable arm may fail)", `Verdict (["reaches"; "single_partial"; "sink"], "no MUST path"));
+    ("reaches single_guarded sink = no must (guard may fail)", `Verdict (["reaches"; "single_guarded"; "sink"], "no MUST path"));
+    ("reaches false_arg sink = no must (raising argument precedes the call)", `Verdict (["reaches"; "false_arg"; "sink"], "no MUST path"));
+    ("reaches no_shadow_stdlib g = must (local Stdlib.failwith is not a terminator)", `Verdict (["reaches"; "no_shadow_stdlib"; "g"], "PATH EXISTS"));
+    ("reaches cond_bind island = no must (conditional binding not recorded)", `Verdict (["reaches"; "cond_bind"; "island"], "no MUST path"));
+    ("unreachable cond_bind island = REACHABLE (arm literals are enumerated occurrences)", `Verdict (["unreachable"; "cond_bind"; "island"], "REACHABLE (may-reach)"));
+    ("reaches tuple_bind island = no must (tuple pattern not recorded)", `Verdict (["reaches"; "tuple_bind"; "island"], "no MUST path"));
+    ("reaches shadow_bind island = no must (rebound name is a fresh stamp)", `Verdict (["reaches"; "shadow_bind"; "island"], "no MUST path"));
+    ("reaches partial_bind island = no must (partial application of bound lambda)", `Verdict (["reaches"; "partial_bind"; "island"], "no MUST path"));
+    ("unreachable stored_bind island = REACHABLE (tuple-stored lambda escapes)", `Verdict (["unreachable"; "stored_bind"; "island"], "REACHABLE (may-reach)"));
+    ("reaches beta_redex island = must (beta-redex head is the lambda node)", `Verdict (["reaches"; "beta_redex"; "island"], "PATH EXISTS"));
+    ("reaches after_raise sink = no must (post-raise block entry-unreachable)", `Verdict (["reaches"; "after_raise"; "sink"], "no MUST path"));
+    ("unreachable cond_if sink = REACHABLE (enumerated conditional callee)", `Verdict (["unreachable"; "cond_if"; "sink"], "REACHABLE (may-reach)"));
+    ("unreachable cond_if island = UNREACHABLE (no ⊤ in cond_if closure)", `Verdict (["unreachable"; "cond_if"; "island"], "UNREACHABLE:"));
+    ("unreachable cond_functor sink = REACHABLE (deferred but enumerated)", `Verdict (["unreachable"; "cond_functor"; "sink"], "REACHABLE (may-reach)"));
+    ("unreachable root_fun sink = REACHABLE (arm callee enumerated)", `Verdict (["unreachable"; "root_fun"; "sink"], "REACHABLE (may-reach)"));
+    ("unreachable lazy_thunk island = REACHABLE (thunk callee enumerated)", `Verdict (["unreachable"; "lazy_thunk"; "island"], "REACHABLE (may-reach)"));
+    ("unreachable opt_default island = REACHABLE (default callee enumerated)", `Verdict (["unreachable"; "opt_default"; "island"], "REACHABLE (may-reach)"));
+    ("unreachable try_noreturn sink = REACHABLE (handler callee enumerated)", `Verdict (["unreachable"; "try_noreturn"; "sink"], "REACHABLE (may-reach)"));
+    ("unreachable lam_map island = REACHABLE (through the lambda node)", `Verdict (["unreachable"; "lam_map"; "island"], "REACHABLE (may-reach)"));
+    ("unreachable unused_closure island = REACHABLE (ignore h = escape occurrence)", `Verdict (["unreachable"; "unused_closure"; "island"], "REACHABLE (may-reach)"));
+    ("reaches invoked_closure island = must (invoked local lambda → MUST chain)", `Verdict (["reaches"; "invoked_closure"; "island"], "PATH EXISTS"));
+    ("unreachable dead_lambda island = UNREACHABLE (dead lambda, no ⊤)", `Verdict (["unreachable"; "dead_lambda"; "island"], "UNREACHABLE:"));
   ]
 
 let sql_checks =
   [
-    (P1, "no NULL/invalid kinds", "SELECT count(*) FROM calls WHERE kind IS NULL OR kind NOT IN ('MUST','MAY_ENUMERATED','MAY_TOP');", "0");
-    (P1, "overapp_entry emits a MAY_TOP residual (over-application ⊤)", "SELECT CASE WHEN count(*)>0 THEN 'yes' ELSE 'no' END FROM calls c JOIN functions f ON c.caller_id=f.id WHERE f.name='overapp_entry' AND c.kind='MAY_TOP';", "yes");
-    (P1, "letop_body records the let* operator call (MUST, not dropped)", "SELECT COALESCE(MAX(kind),'MISSING') FROM calls c JOIN functions f ON c.caller_id=f.id WHERE f.name='letop_body' AND c.callee_name='let*';", "MUST");
-    (P1, "try_noreturn raise edge is MUST (the raise always runs)", "SELECT COALESCE(MAX(kind),'MISSING') FROM calls c JOIN functions f ON c.caller_id=f.id WHERE f.name='try_noreturn' AND c.callee_name LIKE '%raise';", "MUST");
-    (P1, "false_arg mk_exn edge is MUST (argument evaluation runs)", "SELECT COALESCE(MAX(kind),'MISSING') FROM calls c JOIN functions f ON c.caller_id=f.id WHERE f.name='false_arg' AND c.callee_name='mk_exn';", "MUST");
-    (P1, "stored_bind lambda not orphaned (has an incoming enumerated edge)", "SELECT COALESCE(MAX(c.kind),'ORPHAN') FROM calls c WHERE c.callee_name LIKE 'stored_bind.<fun:%';", "MAY_ENUMERATED");
-    (P1, "letop_diverge let* edge is not MUST (operand diverges before the bind)", "SELECT COALESCE(MAX(kind),'MISSING') FROM calls c JOIN functions f ON c.caller_id=f.id WHERE f.name='letop_diverge' AND c.callee_name='let*';", "MAY_ENUMERATED");
-    (P1, "beta_redex has no ⊤ edge (literal head resolved, not *TOP*)", "SELECT count(*) FROM calls c JOIN functions f ON c.caller_id=f.id WHERE f.name='beta_redex' AND c.kind='MAY_TOP';", "0");
-    (P2, "after_raise sink call recorded, demoted (never dropped)", "SELECT CASE WHEN count(*)=1 AND MAX(kind)<>'MUST' THEN 'demoted' WHEN count(*)=0 THEN 'DROPPED' ELSE 'other' END FROM calls c JOIN functions f ON c.caller_id=f.id WHERE f.name='after_raise' AND c.callee_name='sink';", "demoted");
-    (P2, "lam_map lambda node exists", "SELECT CASE WHEN count(*)=1 THEN 'yes' ELSE 'no' END FROM functions WHERE name LIKE 'lam_map.<fun:%';", "yes");
-    (P2, "lam_map lambda → island is MUST (lambda body straight-line)", "SELECT COALESCE(MAX(c.kind),'MISSING') FROM calls c JOIN functions f ON c.caller_id=f.id WHERE f.name LIKE 'lam_map.<fun:%' AND c.callee_name='island';", "MUST");
-    (P2, "lam_map parent → lambda is MAY_ENUMERATED (passed literal)", "SELECT COALESCE(MAX(c.kind),'MISSING') FROM calls c JOIN functions f ON c.caller_id=f.id WHERE f.name='lam_map' AND c.callee_name LIKE 'lam_map.<fun:%';", "MAY_ENUMERATED");
-    (P2, "dead_lambda has no parent→lambda edge (never referenced)", "SELECT CASE WHEN count(*)=0 THEN 'none' ELSE 'edge' END FROM calls c JOIN functions f ON c.caller_id=f.id WHERE f.name='dead_lambda' AND c.callee_name LIKE '%<fun:%';", "none");
-    (P2, "nested lambda node chains through the outer node", "SELECT CASE WHEN count(*)>=1 THEN 'yes' ELSE 'no' END FROM functions WHERE name LIKE 'nested_lam.<fun:%.<fun:%';", "yes");
+    ("no NULL/invalid kinds", "SELECT count(*) FROM calls WHERE kind IS NULL OR kind NOT IN ('MUST','MAY_ENUMERATED','MAY_TOP');", "0");
+    ("overapp_entry emits a MAY_TOP residual (over-application ⊤)", "SELECT CASE WHEN count(*)>0 THEN 'yes' ELSE 'no' END FROM calls c JOIN functions f ON c.caller_id=f.id WHERE f.name='overapp_entry' AND c.kind='MAY_TOP';", "yes");
+    ("letop_body records the let* operator call (MUST, not dropped)", "SELECT COALESCE(MAX(kind),'MISSING') FROM calls c JOIN functions f ON c.caller_id=f.id WHERE f.name='letop_body' AND c.callee_name='let*';", "MUST");
+    ("try_noreturn raise edge is MUST (the raise always runs)", "SELECT COALESCE(MAX(kind),'MISSING') FROM calls c JOIN functions f ON c.caller_id=f.id WHERE f.name='try_noreturn' AND c.callee_name LIKE '%raise';", "MUST");
+    ("false_arg mk_exn edge is MUST (argument evaluation runs)", "SELECT COALESCE(MAX(kind),'MISSING') FROM calls c JOIN functions f ON c.caller_id=f.id WHERE f.name='false_arg' AND c.callee_name='mk_exn';", "MUST");
+    ("stored_bind lambda not orphaned (has an incoming enumerated edge)", "SELECT COALESCE(MAX(c.kind),'ORPHAN') FROM calls c WHERE c.callee_name LIKE 'stored_bind.<fun:%';", "MAY_ENUMERATED");
+    ("letop_diverge let* edge is not MUST (operand diverges before the bind)", "SELECT COALESCE(MAX(kind),'MISSING') FROM calls c JOIN functions f ON c.caller_id=f.id WHERE f.name='letop_diverge' AND c.callee_name='let*';", "MAY_ENUMERATED");
+    ("beta_redex has no ⊤ edge (literal head resolved, not *TOP*)", "SELECT count(*) FROM calls c JOIN functions f ON c.caller_id=f.id WHERE f.name='beta_redex' AND c.kind='MAY_TOP';", "0");
+    ("after_raise sink call recorded, demoted (never dropped)", "SELECT CASE WHEN count(*)=1 AND MAX(kind)<>'MUST' THEN 'demoted' WHEN count(*)=0 THEN 'DROPPED' ELSE 'other' END FROM calls c JOIN functions f ON c.caller_id=f.id WHERE f.name='after_raise' AND c.callee_name='sink';", "demoted");
+    ("lam_map lambda node exists", "SELECT CASE WHEN count(*)=1 THEN 'yes' ELSE 'no' END FROM functions WHERE name LIKE 'lam_map.<fun:%';", "yes");
+    ("lam_map lambda → island is MUST (lambda body straight-line)", "SELECT COALESCE(MAX(c.kind),'MISSING') FROM calls c JOIN functions f ON c.caller_id=f.id WHERE f.name LIKE 'lam_map.<fun:%' AND c.callee_name='island';", "MUST");
+    ("lam_map parent → lambda is MAY_ENUMERATED (passed literal)", "SELECT COALESCE(MAX(c.kind),'MISSING') FROM calls c JOIN functions f ON c.caller_id=f.id WHERE f.name='lam_map' AND c.callee_name LIKE 'lam_map.<fun:%';", "MAY_ENUMERATED");
+    ("dead_lambda has no parent→lambda edge (never referenced)", "SELECT CASE WHEN count(*)=0 THEN 'none' ELSE 'edge' END FROM calls c JOIN functions f ON c.caller_id=f.id WHERE f.name='dead_lambda' AND c.callee_name LIKE '%<fun:%';", "none");
+    ("nested lambda node chains through the outer node", "SELECT CASE WHEN count(*)>=1 THEN 'yes' ELSE 'no' END FROM functions WHERE name LIKE 'nested_lam.<fun:%.<fun:%';", "yes");
   ]
 
 let register () =
@@ -334,60 +307,50 @@ let register () =
   @@ fun () ->
   with_fixture ~name:"soundness" ~files:fixture_files @@ fun fixture ->
   let db = index fixture in
-  let strict = Sys.getenv_opt "ARCH_TEZT_STRICT_P2" = Some "1" in
-  let xfail = ref 0 and xpass = ref 0 in
   Batch.run (fun b ->
-      let record phase ~desc ~actual ~expected =
-        match phase with
-        | P1 -> Batch.eq_string b ~msg:("P1: " ^ desc) actual expected
-        | P2 ->
-            if actual = expected then begin
-              incr xpass ;
-              Log.info "P2 XPASS (target already met): %s" desc
-            end
-            else if strict then
-              Batch.note b "P2: %s: got %S, expected %S" desc actual expected
-            else begin
-              incr xfail ;
-              Log.info "P2 xfail: %s: got %S, expected %S" desc actual expected
-            end
-      in
       List.iter
-        (fun (phase, desc, what) ->
+        (fun (desc, what) ->
           match what with
           | `Verdict (args, expected) ->
               let _, out = query_raw db args in
-              record phase ~desc ~actual:(verdict_token out) ~expected
+              Batch.eq_string b ~msg:desc (verdict_token out) expected
           | `Refuses args ->
               let code, _ = query_raw db args in
-              record phase ~desc ~actual:(if code = 3 then "REFUSED" else "NOREFUSE")
-                ~expected:"REFUSED")
+              Batch.eq_string b ~msg:desc
+                (if code = 3 then "REFUSED" else "NOREFUSE")
+                "REFUSED")
         verdict_checks ;
       Db.with_db db (fun conn ->
           List.iter
-            (fun (phase, desc, sql, expected) ->
+            (fun (desc, sql, expected) ->
               let actual =
                 match Db.string_opt conn sql with Some v -> v | None -> "<no row>"
               in
-              record phase ~desc ~actual ~expected)
+              Batch.eq_string b ~msg:desc actual expected)
             sql_checks) ;
 
       (* Three checks whose shape does not fit the table. *)
-      let mentions_lambda l =
-        let n = String.length "<fun:" and h = String.length l in
-        let found = ref false in
-        for i = 0 to h - n do
-          if (not !found) && String.sub l i n = "<fun:" then found := true
-        done ;
-        !found
-      in
-      Batch.ge_int b ~msg:"P1: find locates lambda nodes on the main schema"
-        (List.length (List.filter mentions_lambda (lines (query db ["find"; "<fun:"]))))
+      Batch.ge_int b ~msg:"find locates lambda nodes on the main schema"
+        (List.length
+           (List.filter
+              (contains ~needle:"<fun:")
+              (lines (query db ["find"; "<fun:"]))))
         1 ;
-      Batch.not_contains b ~msg:"P1: exported never lists lambda nodes"
-        ~haystack:(query db ["exported"]) "<fun:" ;
-      record P2 ~desc:"escapes lam_map = empty ⊤ frontier"
-        ~actual:(if lines (query db ["escapes"; "lam_map"]) = [] then "empty" else "nonempty")
-        ~expected:"empty") ;
-  Log.info "P2: %d xfail (targets outstanding), %d xpass" !xfail !xpass ;
+      (* `exported` returns NOTHING on this fixture — the corpus is a .ml-only
+         dune library, so no .cmti exists and nothing is ever marked exposed.
+         The negative below was therefore satisfied by an empty haystack, not by
+         lambda nodes being filtered, and `exported` could have been replaced by
+         `WHERE 0` with the whole suite green.
+
+         Stated rather than quietly asserted: the emptiness is now the claim,
+         and if the fixture ever grows an .mli this fails and forces the
+         lambda-filtering assertion to be written for real. *)
+      Batch.eq_int b
+        ~msg:
+          "this fixture has no .mli, so `exported` must be empty — if it is not, the            lambda-node assertion below has to be made real instead of vacuous"
+        (List.length (lines (query db ["exported"])))
+        0 ;
+      Batch.eq_string b ~msg:"escapes lam_map = empty ⊤ frontier"
+        (if lines (query db ["escapes"; "lam_map"]) = [] then "empty" else "nonempty")
+        "empty") ;
   Lwt.return_unit

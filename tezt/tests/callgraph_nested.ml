@@ -219,7 +219,13 @@ let register () =
                 (Some "1"))
             ["Named.go"; "R1.f"; "R2.g"; "included_fn"; "Scoped.uses"] ;
 
-          (* An `open` inside a nested module is scoped to it, not to the file. *)
+          (* An `open` inside a nested module is scoped to it, not to the file.
+
+             Weaker than it looks, and said so rather than left implied:
+             `module_deps` is written ONLY by the LSP path (arch_index.ml), never
+             by arch-callgraph-ocaml, so the table is empty here by construction.
+             A leak would still trip this, but a producer with no open-tracking
+             at all passes it identically. *)
           Batch.eq_int b
             ~msg:"the open inside module Scoped must not leak into file-scoped module_deps"
             (Db.int conn

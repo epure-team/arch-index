@@ -92,6 +92,84 @@ let pcc_dir () = Filename.dirname (locate ~env_var:"ARCH_PCC_DIR" "scripts/pcc/p
 let callgraph_go_src () =
   Filename.dirname (locate ~env_var:"ARCH_CALLGRAPH_GO_SRC" "callgraph-go/main.go")
 
+(* Index of the first occurrence of [needle] in [haystack]. Substring search is
+   not in the stdlib, so every test that needed it grew its own loop; five
+   copies of the same off-by-one is five chances to write a search that never
+   matches and an assertion that therefore never fires. *)
+let index_of ~needle haystack =
+  let n = String.length needle and h = String.length haystack in
+  if n = 0 then Some 0
+  else
+    let rec scan i =
+      if i > h - n then None
+      else if String.sub haystack i n = needle then Some i
+      else scan (i + 1)
+    in
+    scan 0
+
+let contains ~needle haystack = index_of ~needle haystack <> None
+
+(* The text following the first [marker], up to the end of that line. Reading a
+   value a tool prints as "label: value" is common enough to share. *)
+let field_after ~marker output =
+  match index_of ~needle:marker output with
+  | None -> None
+  | Some i ->
+      let start = i + String.length marker in
+      let rest = String.sub output start (String.length output - start) in
+      Some
+        (String.trim
+           (match String.index_opt rest '\n' with
+           | Some j -> String.sub rest 0 j
+           | None -> rest))
+
+(* The single token arch-query's answer turns on. Matching the FIRST occurrence
+   of one of these, rather than scanning for a substring anywhere, is what stops
+   a function whose own name contains "UNREACHABLE" inverting its own verdict —
+   and what stops the assertion itself doing so: "REACHABLE" is a substring of
+   "UNREACHABLE", so `contains "REACHABLE"` cannot tell a may-reach answer from
+   a proof of unreachability. That mistake shipped in two test files while this
+   function sat, unshared, in a third.
+
+   Shared here for that reason: any test asserting on a verdict must go through
+   it. *)
+let verdict_token output =
+  let tokens =
+    ["PATH EXISTS"; "no MUST path"; "REACHABLE (may-reach)"; "UNREACHABLE:"; "UNKNOWN:"; "REFUSED"]
+  in
+  let best = ref None in
+  List.iter
+    (fun t ->
+      match index_of ~needle:t output with
+      | None -> ()
+      | Some i -> (
+          match !best with
+          | Some (j, _) when j <= i -> ()
+          | _ -> best := Some (i, t)))
+    tokens ;
+  match !best with Some (_, t) -> t | None -> "<no verdict token>"
+
+(* A port the OS says is free right now: bind 0, read what was assigned, release.
+
+   Not a fixed constant. A fixed port cannot be made safe — two tests in one
+   file raced over one, and the same test raced itself under [--loop-count -j].
+   Worse, a fixed port was documented as making a LEAKED server fail the run,
+   which is its exact inverse: a squatter answers the assertions and they pass
+   green against a foreign process.
+
+   There is still a window between the close here and the server's bind, so
+   callers pair this with a check that nothing answers before they spawn. *)
+let free_port () =
+  let sock = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
+  Fun.protect
+    ~finally:(fun () -> try Unix.close sock with _ -> ())
+    (fun () ->
+      Unix.setsockopt sock Unix.SO_REUSEADDR true ;
+      Unix.bind sock (Unix.ADDR_INET (Unix.inet_addr_loopback, 0)) ;
+      match Unix.getsockname sock with
+      | Unix.ADDR_INET (_, p) -> p
+      | Unix.ADDR_UNIX _ -> Test.fail "free_port: bound socket is not an inet socket")
+
 let read_file path =
   let ic = open_in_bin path in
   Fun.protect
@@ -206,6 +284,30 @@ let not_exercised fmt =
       else Log.warn "not exercised: %s" reason)
     fmt
 
+(* An EXTERNAL SERVICE failed — the npm registry, a network fetch — as opposed
+   to a tool being absent.
+
+   Never escalated by ARCH_TEZT_REQUIRE_SERVERS, and that is the point of the
+   distinction. CI can reasonably insist a toolchain is installed, because
+   installing it is CI's own job; it cannot insist a third-party registry is up.
+   Routing a registry outage through [not_exercised] made the strict flag turn
+   somebody else's downtime into a red build, which is how a team learns to
+   ignore red.
+
+   It has its OWN flag instead, ARCH_TEZT_REQUIRE_NETWORK, because silence here
+   is not free: [multilang.ml] is the only cover for the merged polyglot index,
+   and with the registry unreachable it ran ZERO assertions and reported
+   SUCCESS. A run that decides to skip that must be a decision, not a default —
+   so a machine with no network stays green, and CI, which does have one, says
+   so and fails if it turns out not to. *)
+let external_failure fmt =
+  Printf.ksprintf
+    (fun reason ->
+      if Sys.getenv_opt "ARCH_TEZT_REQUIRE_NETWORK" = Some "1" then
+        Test.fail "%s -- and ARCH_TEZT_REQUIRE_NETWORK=1 forbids skipping" reason
+      else Log.warn "not exercised (external): %s" reason)
+    fmt
+
 (* [Temp.dir] roots the directory at /tmp/tezt-<pid>/<n>, so two runs on one
    machine cannot collide and nothing outside that root is ever removed.  A
    fixed name under the temp dir would be both racy and, since a directory
@@ -248,14 +350,20 @@ let index fixture =
   db
 
 (* The LSP path: [arch_index_cli] drives a real language server over the project
-   directory.  A non-zero exit is reported rather than fatal, because a server
-   that answers nothing still produces a database, and the assertions on that
-   empty database say far more than an exit code does. *)
+   directory. A non-zero exit is NOT fatal, because a server that answers
+   nothing still produces a database and the assertions on that empty database
+   say far more than an exit code does — but it is logged, which the comment
+   here used to claim ("reported rather than fatal") while the code did neither:
+   [code] was read only inside the failure message for a missing file, so a
+   non-zero exit on a database that WAS produced vanished without trace. *)
 let index_project ~name project =
   let db = temp_db name in
   let code, output = run_command (arch_index_cli ()) ["--project"; project; "--output"; db] in
   if not (Sys.file_exists db) then
     Test.fail "arch_index produced no database (exit %d):\n%s" code output ;
+  if code <> 0 then
+    Log.warn "arch_index exited %d but produced a database; asserting on it anyway:\n%s" code
+      output ;
   db
 
 (* [box] is the default output format and renders as UTF-8 box drawing, which a
@@ -313,25 +421,20 @@ module Batch = struct
   (* Substring search on a tool's output. Reported with the haystack truncated,
      because these are multi-line CLI captures and an untruncated dump buries
      the other failures in the batch. *)
+  (* Bound before [contains] below shadows the top-level one. *)
+  let has_substring = contains
+
   let contains t ~msg ~haystack needle =
-    let n = String.length needle and h = String.length haystack in
-    let found = ref false in
-    for i = 0 to h - n do
-      if (not !found) && String.sub haystack i n = needle then found := true
-    done ;
-    if not !found then
+    if not (has_substring ~needle haystack) then
+      let h = String.length haystack in
       let shown =
         if h <= 400 then haystack else String.sub haystack 0 400 ^ "\n  [...truncated]"
       in
       note t "%s: %S not found in:\n%s" msg needle shown
 
   let not_contains t ~msg ~haystack needle =
-    let n = String.length needle and h = String.length haystack in
-    let found = ref false in
-    for i = 0 to h - n do
-      if (not !found) && String.sub haystack i n = needle then found := true
-    done ;
-    if !found then note t "%s: %S should not appear, but does" msg needle
+    if has_substring ~needle haystack then
+      note t "%s: %S should not appear, but does" msg needle
 
   (* Exit codes carry meaning in this project — 2 is broken input, 3 is "this
      index cannot answer that soundly" — so they are asserted constantly. The
@@ -351,14 +454,38 @@ module Batch = struct
         note t "%s" e ;
         None
 
+  (* Same, for a list read that feeds a "must not contain" assertion. Written
+     as `match … with Ok l -> l | Error _ -> []` it defaults the failure away:
+     the empty list satisfies every negative assertion, so a report that stopped
+     emitting the field entirely reads as a clean bill of health. The error is
+     recorded, and the caller still gets a list to carry on with. *)
+  let list_or_empty t r = match expect t r with Some l -> l | None -> []
+
+  (* The body is run under [Fun.protect]-style capture rather than bare, because
+     raising out of it is NORMAL, not exceptional: [query] fails the test on a
+     non-zero exit, [Db.int] on an absent row, every [Fixture] constructor on a
+     build failure — and all of them are routinely called from inside a batch.
+
+     Bare, `k t` raising skipped the report entirely and threw away every
+     failure collected before it, which is the one-failure-per-run outcome this
+     module exists to prevent, reached from inside the module itself. The
+     exception is now the LAST line of the batch report rather than a
+     replacement for it. *)
   let run k =
     let t = {failures = []} in
-    k t ;
-    match List.rev t.failures with
+    let raised = match k t with () -> None | exception e -> Some e in
+    let collected = List.rev t.failures in
+    let lines =
+      List.map (fun f -> "  - " ^ f) collected
+      @ (match raised with
+        | None -> []
+        | Some e -> ["  - (the batch then aborted: " ^ Printexc.to_string e ^ ")"])
+    in
+    match lines with
     | [] -> ()
-    | fs ->
-        Test.fail "%d assertion(s) failed:\n%s" (List.length fs)
-          (String.concat "\n" (List.map (fun f -> "  - " ^ f) fs))
+    | _ ->
+        Test.fail "%d assertion(s) failed:\n%s" (List.length lines)
+          (String.concat "\n" lines)
 end
 
 (* Machine-output assertions.
@@ -393,12 +520,25 @@ module Json = struct
     | Some (`List l) -> Ok l
     | other -> Error (Printf.sprintf "%s.%s is not a list (%s)" what k (show other))
 
-  (* A list of strings, or of one string field pulled out of a list of objects —
-     the two shapes these reports actually use. *)
+  (* A list of strings. An element that is NOT a string is an error, not
+     something to skip.
+
+     [filter_map] here returned [Ok []] for a list of objects — a shape the old
+     comment even claimed to support — so a report that changed
+     ["a"] to [{"file": "a"}] read as "the list is empty". Every caller feeds
+     these into absence assertions ("no diff content line became a file"), and
+     an empty list satisfies all of them: the breaking change and the guard
+     against it disappeared together. *)
   let strings ~what k j =
     match member k j with
     | Some (`List l) ->
-        Ok (List.filter_map (function `String s -> Some s | _ -> None) l)
+        let bad = List.find_opt (function `String _ -> false | _ -> true) l in
+        (match bad with
+        | Some v ->
+            Error
+              (Printf.sprintf "%s.%s contains a non-string element (%s)" what k
+                 (Yojson.Safe.to_string v))
+        | None -> Ok (List.filter_map (function `String s -> Some s | _ -> None) l))
     | other -> Error (Printf.sprintf "%s.%s is not a list of strings (%s)" what k (show other))
 
   (* The machine-output contract is int/bool/string/null/array/object only. A
