@@ -375,6 +375,36 @@ let register () =
        Batch.contains b
          ~msg:"dead-code from entry_direct must still report what it does NOT reach"
          ~haystack:dead "island") ;
+      (* arch-rules over the SAME main-schema index, across a module boundary.
+
+         This lives here rather than in rules.ml because rules.ml is entirely
+         FLAT-schema — which is precisely why nothing covered this. On the main
+         schema `lib/arch_tools`'s graph must key edges by ROW ID: a name is
+         unique only within its module there, and resolved vs unresolved callees
+         live in different namespaces (`callee_id` FK vs a qualified
+         `callee_name` string), so a name-keyed graph finds zero callers for a
+         function that has them.
+
+         The consequence is not a missing row, it is a FALSE PROOF: with the
+         graph keyed by name this rule reports `pass` — "proved unreachable in a
+         closed universe" — while cg.ml reaches crb.ml over a MUST edge. A tool
+         that certifies architectural compliance must not be able to certify it
+         by failing to look. *)
+      (let rules = Temp.file "xmodule.rules" in
+       write_file rules
+         "rule \"cg must not reach crb\"\n\
+         \  forbid reach from file:**/cg.ml to file:**/crb.ml\n" ;
+       let _, out = run_command (arch_rules ()) [db; rules] in
+       Batch.contains b
+         ~msg:
+           "arch-rules must find the cross-module MUST path cg.ml -> crb.ml (a name-keyed graph             reports `pass` here, which is a false proof of compliance)"
+         ~haystack:out "FAIL" ;
+       Batch.not_contains b
+         ~msg:"and it must not certify the rule as proved-unreachable" ~haystack:out "[ pass  ]" ;
+       (* Non-vacuity: the verdict must name the module it reached, not just any
+          failure. *)
+       Batch.contains b ~msg:"the FAIL must name the reached callee in crb.ml" ~haystack:out
+         "direct2") ;
       Batch.eq_string b ~msg:"escapes lam_map = empty ⊤ frontier"
         (if lines (query db ["escapes"; "lam_map"]) = [] then "empty" else "nonempty")
         "empty") ;
