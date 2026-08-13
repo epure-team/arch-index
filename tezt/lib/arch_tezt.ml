@@ -413,6 +413,11 @@ module Batch = struct
   let eq_string t ~msg actual expected =
     if actual <> expected then note t "%s: got %S, expected %S" msg actual expected
 
+  let eq_int_opt t ~msg actual expected =
+    let show = function None -> "unresolved" | Some i -> string_of_int i in
+    if actual <> expected then
+      note t "%s: got %s, expected %s" msg (show actual) (show expected)
+
   let eq_string_opt t ~msg actual expected =
     let show = function None -> "<no row>" | Some s -> Printf.sprintf "%S" s in
     if actual <> expected then

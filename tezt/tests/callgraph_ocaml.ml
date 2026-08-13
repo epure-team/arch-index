@@ -260,3 +260,235 @@ let truly_dead (x : int) : int =
               "after_raise follows an unconditional raise and must still be reported dead"
             (List.mem "after_raise" dead))) ;
   Lwt.return_unit
+
+(* Cross-library homonyms: two libraries, each with an `api.ml`.
+
+   The resolver mapped a qualified reference's module component to a source path
+   through a table keyed by CAPITALISED BASENAME, built with [Hashtbl.replace] —
+   one path per name, last writer wins. `Api` designated whichever `api.ml` was
+   scanned last, so a MUST edge pointed at the wrong function: reachability
+   forged toward the survivor, lost from every loser, verdict still `sound`.
+
+   Two wrong answers were shipped before the right one, and this fixture is
+   pinned against BOTH of them, because each is a different way to lie:
+
+   - REFUSING to bind. An unresolved qualified callee is encoded bit-for-bit
+     like an external leaf (`kind = MUST`, `callee_id = NULL`), so `arch-rules`
+     answered `pass` and `unreachable` answered `sound` on a fixture whose
+     source literally calls the forbidden function.
+   - NARROWING by directory segment — reading `Sublib` in `Sublib.Api.run` as
+     the directory `sublib/` and binding there with kind MUST. Dune laying a
+     library out under a directory of its name is a convention, not a
+     guarantee: a library `q` in `alt/` next to a library `qq` in `q/` makes
+     the filter elect the wrong library and stamp it MUST. That is the original
+     defect re-created by its own fix, so the heuristic is gone.
+
+   What is asserted instead is the CANDIDATE SET: one MAY_ENUMERATED row per
+   module the name could designate. It costs precision here — this is a layout
+   where the directory heuristic happened to be right, and `reaches` can no
+   longer prove the path — but the set is guaranteed to CONTAIN the true target,
+   and no member of it is ever claimed as a proof.
+
+   Four cases, because they fail independently:
+   - `entry` and `entry2` (both ways round: a resolver that always picks the
+     same library passes either one alone, and which one it picks depends on
+     directory traversal order, so a single direction is half inert);
+   - `X.B.f` regresses if an ambiguous OUTER component aborts the walk instead
+     of letting a deeper, unique component decide — and it is also what keeps
+     the rest non-vacuous, since a resolver that enumerated everything would
+     still pass the two above;
+   - the type usage exercises a third copy of the same collapse, which resolved
+     `Api.t` in one library to the other library's `t`. A type usage has one FK
+     and no candidate-set kind, so the honest answer there is NULL. *)
+let homonym_libs =
+  [
+    ("dune-project", "(lang dune 3.0)\n");
+    ("rootlib/dune", "(library (name rootlib) (libraries sublib))\n");
+    ("rootlib/api.ml", "type t = int\nlet run (x : int) : int = x + 1\n");
+    ( "rootlib/caller.ml",
+      "let entry (h : (string, int) Hashtbl.t) = Sublib.Api.run h\n\
+       let entry2 (x : int) : int = Api.run x\n\
+       let use_t (v : Api.t) : int = v\n" );
+    (* The same ambiguity on the module-deps path, which is a SEPARATE resolver
+       and regressed on its own after the call path was fixed: an unresolved dep
+       degrades to its dotted string, so a path-shaped `forbid dep` selector
+       stops matching and the rule goes green on a file that says `open`. *)
+    ( "rootlib/opener.ml",
+      "open Sublib.Api\n\nlet via_open (h : (string, int) Hashtbl.t) = run h\n" );
+    ("sublib/dune", "(library (name sublib))\n");
+    ("sublib/api.ml",
+     "type t = string\nlet run (h : (string, int) Hashtbl.t) = Hashtbl.replace h \"k\" 1\n");
+    (* `X` is ambiguous (two x.ml) but `B` is unique: an outer ambiguity must not
+       abort the walk before the component that actually decides. *)
+    ("p/dune", "(library (name p))\n");
+    ("p/x.ml", "let z = 1\n");
+    ("q/dune", "(library (name q))\n");
+    ("q/x.ml", "let z = 2\n");
+    ("xlib/dune", "(library (name x))\n");
+    ("xlib/b.ml", "let f (n : int) : int = n + 1\n");
+    ("cl/dune", "(library (name cl) (libraries x))\n");
+    ("cl/caller.ml", "let deep (n : int) : int = X.B.f n\n");
+  ]
+
+let register_cross_library_homonyms () =
+  Test.register ~__FILE__
+    ~title:"cmt: a name shared by two libraries binds to the candidate set, never to one guess"
+    ~tags:["cmt"; "resolve"; "homonym"]
+  @@ fun () ->
+  with_fixture ~name:"homonym_libs" ~files:homonym_libs @@ fun fixture ->
+  let db = index fixture in
+  Db.with_db db (fun conn ->
+      let fn_id ~name ~path =
+        match
+          Db.int_opt conn
+            (Printf.sprintf
+               "SELECT f.id FROM functions f JOIN modules m ON f.module_id = m.id WHERE \
+                f.name = '%s' AND m.path LIKE '%%%s'"
+               name path)
+        with
+        | Some id -> id
+        | None -> Test.fail "the fixture has no '%s' in %s" name path
+      in
+      let root_run = fn_id ~name:"run" ~path:"rootlib/api.ml" in
+      let sub_run = fn_id ~name:"run" ~path:"sublib/api.ml" in
+      (* COALESCE, not int_opt alone: the row EXISTS with a NULL callee_id when
+         the resolver declines, and "no row" and "row with NULL" are different
+         facts that must not both read as None. *)
+      (* group_concat, not a scalar read: an ambiguous binding emits SEVERAL
+         rows for one call site, and a scalar reader fails hard on the extra row
+         — a caught failure, but reported as "expected at most one row" instead
+         of naming what bound where. This reads the whole set as text so both
+         the resolved case and the enumerated case produce a legible message. *)
+      (* Sorted, so the expectation is a stable string rather than one that
+         depends on the order sqlite happens to aggregate rows in. Reading the
+         whole set as text also means a wrong answer names what bound where,
+         instead of a scalar reader failing with "expected at most one row". *)
+      let callees ~caller ~like =
+        match
+          Db.string_opt conn
+            (Printf.sprintf
+               "SELECT group_concat(id, ',') FROM (SELECT DISTINCT COALESCE(c.callee_id, -1) \
+                AS id FROM calls c JOIN functions f ON c.caller_id = f.id WHERE f.name = '%s' \
+                AND c.callee_name LIKE '%s' ORDER BY id)"
+               caller like)
+        with
+        | None | Some "" ->
+            Test.fail "the fixture recorded no call from %s matching %s" caller like
+        | Some s -> s
+      in
+      let kinds ~caller ~like =
+        match
+          Db.string_opt conn
+            (Printf.sprintf
+               "SELECT group_concat(k, ',') FROM (SELECT DISTINCT COALESCE(c.kind, 'NULL') AS \
+                k FROM calls c JOIN functions f ON c.caller_id = f.id WHERE f.name = '%s' AND \
+                c.callee_name LIKE '%s' ORDER BY k)"
+               caller like)
+        with
+        | None | Some "" -> Test.fail "no call from %s matching %s" caller like
+        | Some s -> s
+      in
+      let set = String.concat "," (List.sort compare [root_run; sub_run] |> List.map string_of_int) in
+      Batch.run (fun b ->
+          Batch.check b
+            ~msg:"the fixture must produce TWO distinct 'run' functions, one per library"
+            (root_run <> sub_run) ;
+          (* Both directions, and the same expected SET both times — which is
+             the point: the resolver cannot tell them apart, and the assertion
+             says so rather than pretending it can. What each direction pins is
+             that its own true target is IN the set. *)
+          Batch.eq_string b
+            ~msg:
+              "entry calls Sublib.Api.run: the candidate set must be both runs, so it contains \
+               SUBLIB's (-1 = declined, which is encoded like an external leaf)"
+            (callees ~caller:"entry" ~like:"%Api.run")
+            set ;
+          Batch.eq_string b
+            ~msg:
+              "entry2 calls Api.run from inside rootlib: the same set, so it contains ROOTLIB's"
+            (callees ~caller:"entry2" ~like:"%Api.run")
+            set ;
+          (* The kind is what stops the set being read as a proof. Two ids under
+             kind MUST would be strictly worse than the bug being fixed: two
+             forged must-paths instead of one. *)
+          List.iter
+            (fun caller ->
+              Batch.eq_string b
+                ~msg:
+                  (Printf.sprintf
+                     "every edge of %s's candidate set must be MAY_ENUMERATED — a MUST here \
+                      would be a forged proof"
+                     caller)
+                (kinds ~caller ~like:"%Api.run")
+                "MAY_ENUMERATED")
+            ["entry"; "entry2"] ;
+          (* An ambiguous OUTER component must not abort the walk: `X` is two
+             modules, `B` is one, and the answer is decided by `B`. This is also
+             the non-vacuity guard for everything above — a resolver that simply
+             enumerated every homonym, or refused on any ambiguity at all, would
+             satisfy the candidate-set assertions and fail here. *)
+          Batch.eq_string b
+            ~msg:"an ambiguous outer component must not lose a deeper unique resolution"
+            (callees ~caller:"deep" ~like:"%B.f")
+            (string_of_int (fn_id ~name:"f" ~path:"xlib/b.ml")) ;
+          Batch.eq_string b
+            ~msg:"and that unique resolution must still be a MUST edge, not a demoted one"
+            (kinds ~caller:"deep" ~like:"%B.f")
+            "MUST" ;
+          (* The third copy of the collapse: same key, same last-writer-wins,
+             in type-usage resolution. Both api.ml define a `t`, so both are
+             candidates — and type_usage has a single FK with no enumerated
+             kind, so the answer is NULL. Asserted against the ROOT id rather
+             than just "not sub": binding to either one would be a guess, and
+             the one that looks right here is right by coincidence of layout. *)
+          let type_id ~path =
+            match
+              Db.int_opt conn
+                (Printf.sprintf
+                   "SELECT t.id FROM types t JOIN modules m ON t.module_id = m.id WHERE t.name \
+                    = 't' AND m.path LIKE '%%%s'"
+                   path)
+            with
+            | Some id -> id
+            | None -> Test.fail "the fixture has no type 't' in %s" path
+          in
+          Batch.check b
+            ~msg:"the fixture must produce TWO distinct types named 't', one per library"
+            (type_id ~path:"rootlib/api.ml" <> type_id ~path:"sublib/api.ml") ;
+          Batch.eq_int_opt b
+            ~msg:
+              "a type written Api.t where two modules define one must stay unresolved (-1), \
+               not pick a homonym"
+            (Db.int_opt conn
+               "SELECT COALESCE(type_id, -1) FROM type_usage WHERE type_name LIKE '%Api.t'")
+            (Some (-1)) ;
+          (* Module deps are resolved by their own code path, and that path kept
+             the refusal for a round after the call path had dropped it. Asserted
+             on the TARGET PATHS rather than a row count: a count of 2 is also
+             what "resolved to the same module twice" produces, and one of those
+             two must be sublib's — the module the file actually opens. *)
+          Batch.eq_string_opt b
+            ~msg:
+              "`open Sublib.Api` must record one dep row per candidate module, sublib's among \
+               them — not one NULL row, which reads exactly like an external dependency"
+            (Db.string_opt conn
+               "SELECT group_concat(p, ',') FROM (SELECT DISTINCT COALESCE((SELECT path FROM \
+                modules WHERE id = d.target_module), 'NULL') AS p FROM module_deps d WHERE \
+                d.target_path = 'Sublib.Api' ORDER BY p)")
+            (Some "rootlib/api.ml,sublib/api.ml")) ;
+      (* The end-to-end consequence, which is the whole reason the kind matters.
+         With the pre-fix resolver both of these lied: `reaches` proved a
+         must-path to whichever `run` won the last write, and on the losing side
+         `unreachable` said UNREACHABLE about a function the source calls. *)
+      Batch.run (fun b ->
+          Batch.contains b
+            ~msg:"a candidate set must not be walkable as a proof — reaches must decline"
+            ~haystack:(query db ["reaches"; "entry"; "run"])
+            "no MUST path" ;
+          Batch.contains b
+            ~msg:
+              "but the target must stay in the may-closure: UNREACHABLE here would be the \
+               original forged verdict"
+            ~haystack:(query db ["unreachable"; "entry"; "run"])
+            "REACHABLE (may-reach)")) ;
+  Lwt.return_unit

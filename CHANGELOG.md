@@ -53,6 +53,44 @@
   `Sqlite3.Error` — that shape is not read yet, and saying so is the honest answer.
 
 ### Fixed
+- **A qualified call could bind to a same-named module in another library.** The resolver mapped a
+  reference's module component to a source path through a table keyed by capitalised basename and
+  built with `Hashtbl.replace` — one path per basename, last writer wins, silently. Two libraries
+  each containing `api.ml` collapsed to one entry, so every qualified reference to `Api` resolved
+  to whichever was scanned last. That is not a missing edge but a **MUST edge pointing at the wrong
+  function**: reachability forged toward the survivor, lost from every loser, and the verdict still
+  reading `sound`.
+
+  The resolver now collects every module sharing the basename that actually DEFINES the name and
+  binds the reference to that whole **candidate set** — one `MAY_ENUMERATED` edge per candidate,
+  the contract's own word for a bounded candidate set, never one arbitrary member and never `MUST`.
+  `reaches` walks MUST edges only, so a candidate set can never forge a must-path, while
+  `unreachable`/`escapes`/`arch-rules` traverse all of them and stay correct. Most references are
+  not ambiguous at all: two libraries with an `api.ml` where only one defines `run` leave exactly
+  one candidate and resolve to `MUST` as before.
+
+  Two other answers were tried and both were worse than the bug. **Refusing** to bind produces a
+  row that is encoded bit-for-bit like an external leaf (`kind = MUST`, `callee_id = NULL`), so
+  `arch-rules` answered `pass` ("proved unreachable in a closed universe") and `unreachable`
+  answered `sound` on a fixture whose caller literally calls the other library. **Narrowing by
+  directory segment** — reading `Sublib` in `Sublib.Api.run` as the directory `sublib/` — then
+  binding the survivor as `MUST` looked like free precision, and is not: dune laying a library out
+  under a directory of its name is a convention, not a guarantee, and a library `q` in `alt/` beside
+  a library `qq` in `q/` makes the filter elect the wrong library and stamp it `MUST`. That is the
+  original defect re-created by its own fix, so no directory heuristic ships. The cost is real and
+  paid deliberately: in the common layout where the convention holds, a cross-library call that
+  could have been proved is now only enumerated.
+
+  The same collapse existed **three** times in one function — calls, module dependencies, and type
+  usages — and the module-dependency copy kept the refusal for a round after the call path had
+  dropped it. Calls and deps now enumerate; a type usage has a single FK and no enumerated kind, so
+  an ambiguous one stays NULL (under-approximate, and `type_usage` feeds no soundness closure).
+
+  Ambiguity here is a permanent state, not scaffolding: two `(wrapped false)` libraries, or two
+  vendored copies of one library, are ambiguous at the compilation-unit level too. Resolving by
+  unit identity (dune's `Rootlib__Api`) would collapse most sets to one member and recover the
+  precision given up above; it needs the alias tables from the wrapper modules and is a separate
+  change.
 - **`arch-query effects-of`, `mutators-of` and `pure-fns` stopped at every module boundary too** —
   same root cause as `dead-code` below. On a two-module fixture where the mutation lives one module
   away from its caller: `effects-of` returned NOTHING, `mutators-of` lost the transitive caller,

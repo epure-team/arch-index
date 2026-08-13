@@ -272,7 +272,30 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
          Hashtbl.replace fn_lookup (mod_path, fn_name) fn_id)
        "SELECT f.id, f.name, m.path FROM functions f JOIN modules m ON \
         f.module_id = m.id") ;
-  let mod_name_to_path = Hashtbl.create 128 in
+  (* Module name -> EVERY path carrying that basename.
+
+     This used to be [Hashtbl.replace name path] — one path per capitalised
+     basename, last writer wins, silently. Two modules named `api.ml` in two
+     libraries collapse to one entry, and every qualified reference to `Api`
+     from anywhere resolves to whichever the scan happened to reach last. That
+     is not a missing edge: it is a MUST edge, confidently pointing at the wrong
+     function. Reachability gets forged toward the survivor and lost from the
+     losers, and the verdict says `sound`.
+
+     Keeping the whole list lets the resolvers below bind a reference to the
+     whole CANDIDATE SET when the name does not designate a single module —
+     one MAY_ENUMERATED edge per candidate, never one arbitrary member and
+     never MUST. The set is guaranteed to contain the true target, which is
+     what makes it sound: `reaches` walks MUST edges only and so cannot forge a
+     path through it, while `unreachable`/`escapes`/`arch-rules` traverse all of
+     them and stay correct.
+
+     Resolving BY UNIT IDENTITY would collapse most sets to one member: dune
+     mangles these to `Rootlib__Api` and `Sublib__Api` and the .cmt files carry
+     it. That is the follow-up. Ambiguity that survives it — two
+     `(wrapped false)` libraries, two vendored copies of one library — is
+     permanent, so the candidate set is not scaffolding. *)
+  let mod_name_to_paths : (string, string list) Hashtbl.t = Hashtbl.create 128 in
   ignore
     (Sqlite3.exec_not_null
        db
@@ -280,8 +303,14 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
          let path = row.(0) in
          let base = Filename.basename path in
          let name = Filename.remove_extension base |> String.capitalize_ascii in
-         Hashtbl.replace mod_name_to_path name path)
+         let prev =
+           match Hashtbl.find_opt mod_name_to_paths name with
+           | Some l -> l
+           | None -> []
+         in
+         Hashtbl.replace mod_name_to_paths name (path :: prev))
        "SELECT path FROM modules") ;
+  let n_ambiguous = ref 0 in
   List.iter
     (fun (call : pending_call) ->
       match
@@ -318,44 +347,96 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
              are tried from the most qualified function name to the least, and
              the first that resolves wins.  A name that resolves under no
              reading stays unresolved rather than being forced onto a homonym. *)
+          (* Returns EVERY function this reference could designate, under the
+             most qualified reading that matches anything.
+
+             The candidates are the modules sharing the referenced basename that
+             actually DEFINE the function — the module map is ambiguous, the
+             function set usually is not: two libraries with an `api.ml` where
+             only one defines `run` leave exactly one candidate, and refusing
+             there would throw away a resolution nothing was ambiguous about. *)
           let resolve_qualified mod_name name =
             let parts = String.split_on_char '.' mod_name in
-            let rec try_from prefix rest =
+            let rec try_from rest =
               match rest with
-              | [] -> None
+              | [] -> []
               | unit_name :: deeper -> (
-                  let qualified_name =
-                    String.concat "." (deeper @ [name])
+                  let qualified_name = String.concat "." (deeper @ [name]) in
+                  let paths =
+                    match Hashtbl.find_opt mod_name_to_paths unit_name with
+                    | Some l -> l
+                    | None -> []
                   in
-                  match Hashtbl.find_opt mod_name_to_path unit_name with
-                  | Some mod_path -> (
-                      match Hashtbl.find_opt fn_lookup (mod_path, qualified_name) with
-                      | Some _ as found -> found
-                      | None -> try_from (prefix @ [unit_name]) deeper)
-                  | None -> try_from (prefix @ [unit_name]) deeper)
+                  let defining =
+                    List.filter
+                      (fun p -> Hashtbl.mem fn_lookup (p, qualified_name))
+                      paths
+                  in
+                  (* NO directory heuristic here, and that is a decision.
+
+                     An earlier version narrowed these candidates by matching
+                     the already-consumed components against the module's
+                     directory segments — `Sublib` picking `sublib/api.ml` — on
+                     the grounds that dune lays a library out under a directory
+                     of its name. It is a convention, not a guarantee, and when
+                     it is wrong it is wrong in the worst possible way: library
+                     `q` living in `alt/` and library `qq` living in `q/` makes
+                     the filter elect `q/api.ml` for `Q.Api.beta` and stamp it
+                     MUST — a forged proof pointing at another library, which is
+                     the exact defect this whole commit removes, re-created by
+                     its own fix. The comment there claimed the narrowing "can
+                     gain precision, never invent it"; it invents.
+
+                     So the candidate set stands as it is. It is guaranteed to
+                     CONTAIN the true target, which is what makes it sound. *)
+                  let ids ps =
+                    List.filter_map
+                      (fun p -> Hashtbl.find_opt fn_lookup (p, qualified_name))
+                      ps
+                  in
+                  match defining with
+                  | [] -> try_from deeper
+                  | found -> ids found)
             in
-            try_from [] parts
+            try_from parts
           in
           let demoted = call.cond || call.partial in
-          let callee_id, callee_display_name, kind =
+          (* A list, because an ambiguous reference emits ONE ROW PER CANDIDATE
+             rather than a single row that lies.
+
+             The first attempt at this refused instead — callee_id NULL — and
+             that was bit-for-bit the encoding of an EXTERNAL LEAF (`Stdlib.+`),
+             so `arch-rules` answered `pass` ("proved unreachable in a closed
+             universe") and `unreachable` answered "sound" on a fixture whose
+             caller literally calls the other library. A confident-wrong absence
+             replacing a confident-wrong edge.
+
+             MAY_ENUMERATED is the contract's own word for "bounded to a known
+             candidate set", which is exactly what this is. It is the sound
+             direction: `reaches` walks MUST edges only, so an enumerated set
+             can never forge a must-path, while `unreachable`/`escapes`/rules —
+             the over-approximating side — traverse all of them and stay
+             correct. The schema already carries several rows per call site
+             (argument escapes emit them routinely), so this needs no migration. *)
+          let outcomes =
             match call.head with
-            | Arch_index_cmt.Head_unknown n -> (None, n, "MAY_TOP")
+            | Arch_index_cmt.Head_unknown n -> [(None, n, "MAY_TOP")]
             | Arch_index_cmt.Head_enumerated n -> (
                 (* A named local function passed as a callback — resolve it to a
                    node so the closure can follow it, but as MAY_ENUMERATED (the
                    callee may or may not invoke it), never MUST — conditional or
                    not, the candidate set is the same. *)
                 match resolve_local n with
-                | Some id -> incr n_resolved ; (Some id, n, "MAY_ENUMERATED")
-                | None -> (None, n, "MAY_ENUMERATED"))
+                | Some id -> incr n_resolved ; [(Some id, n, "MAY_ENUMERATED")]
+                | None -> [(None, n, "MAY_ENUMERATED")])
             | Arch_index_cmt.Head_local n -> (
                 match resolve_local n with
                 | Some id ->
                     incr n_resolved ;
-                    (Some id, n, (if demoted then "MAY_ENUMERATED" else "MUST"))
+                    [(Some id, n, (if demoted then "MAY_ENUMERATED" else "MUST"))]
                 | None ->
                     (* Not in the function table (shadow/anomaly): unknowable. *)
-                    (None, n, "MAY_TOP"))
+                    [(None, n, "MAY_TOP")])
             | Arch_index_cmt.Head_qualified (mod_opt, n) -> (
                 let display_name =
                   match mod_opt with Some m -> m ^ "." ^ n | None -> n
@@ -364,35 +445,57 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
                 match mod_opt with
                 | None -> (
                     match resolve_local n with
-                    | Some id -> incr n_resolved ; (Some id, n, kind)
-                    | None -> (None, n, (if demoted then "MAY_ENUMERATED" else "MAY_TOP")))
+                    | Some id -> incr n_resolved ; [(Some id, n, kind)]
+                    | None -> [(None, n, (if demoted then "MAY_ENUMERATED" else "MAY_TOP"))])
                 | Some mod_name -> (
                     match resolve_qualified mod_name n with
-                    | Some id -> incr n_resolved ; (Some id, display_name, kind)
-                    | None ->
+                    | [id] -> incr n_resolved ; [(Some id, display_name, kind)]
+                    | [] ->
                         (* Unresolved external: a leaf either way — MUST leaf
                            when unconditional, enumerated leaf when demoted. *)
-                        (None, display_name, kind)))
+                        [(None, display_name, kind)]
+                    | ids ->
+                        (* Several modules share the basename AND define the
+                           name: the reference designates one of them and we
+                           cannot tell which, so record the whole candidate set.
+                           Never MUST — no single one of these is guaranteed. *)
+                        (* Counted per ROW, because [n_calls] — the denominator
+                           it is printed against, "N calls (M resolved to known
+                           functions)" — is incremented per row below. Counting
+                           sites here instead would make the fraction compare a
+                           site count to a row count; the number of SITES that
+                           are ambiguous is what [n_ambiguous] reports on its
+                           own line. *)
+                        incr n_ambiguous ;
+                        n_resolved := !n_resolved + List.length ids ;
+                        List.map
+                          (fun id -> (Some id, display_name, "MAY_ENUMERATED"))
+                          ids))
           in
-          insert_call
-            db
-            stmt_call
-            ~caller_id
-            ~callee_id
-            ~callee_name:callee_display_name
-            ~call_site:(Some call.call_site)
-            ~kind ;
+          List.iter
+            (fun (callee_id, callee_display_name, kind) ->
+              insert_call
+                db
+                stmt_call
+                ~caller_id
+                ~callee_id
+                ~callee_name:callee_display_name
+                ~call_site:(Some call.call_site)
+                ~kind ;
+              incr n_calls)
+            outcomes ;
           (* R2: the call sits in a block unreachable from its function's CFG
              entry, so it can never execute. Recorded with its location — that
-             is what makes the finding actionable. *)
+             is what makes the finding actionable. Once per SITE, not per
+             candidate: the finding is about the site. *)
           if call.dead then begin
+            let _, display, _ = List.hd outcomes in
             Arch_index_db.bind_int stmt_dead 1 caller_id ;
             Arch_index_db.bind_text stmt_dead 2 call.call_site ;
-            Arch_index_db.bind_text stmt_dead 3 callee_display_name ;
+            Arch_index_db.bind_text stmt_dead 3 display ;
             Arch_index_db.exec_stmt db stmt_dead ;
             incr n_dead_sites
-          end ;
-          incr n_calls)
+          end)
     !all_pending_calls ;
   (* Every emitted edge now carries a valid kind (MUST | MAY_ENUMERATED | MAY_TOP), so this
      backend satisfies the ⊤-marking contract — but ONLY stamp the flag when a
@@ -410,6 +513,13 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
     "Inserted %d calls (%d resolved to known functions)\n%!"
     !n_calls
     !n_resolved ;
+  if !n_ambiguous > 0 then
+    (* Named out loud: an enumerated candidate set is a weaker answer than a
+       resolved edge, and silence would let it pass for one. *)
+    Arch_io.printf
+      "  %d call site(s) bound to a CANDIDATE SET rather than one function: the \
+       qualified name designates two or more modules sharing a basename\n%!"
+      !n_ambiguous ;
 
   (* Resolve and insert module dependencies *)
   Arch_io.printf
@@ -425,49 +535,70 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
        ~cb:(fun row _h ->
          let mod_id = int_of_string row.(0) in
          let path = row.(1) in
-         Hashtbl.replace mod_path_to_id path mod_id ;
-         let base = Filename.basename path in
-         let name = Filename.remove_extension base |> String.capitalize_ascii in
-         Hashtbl.replace mod_name_to_path name path)
+         Hashtbl.replace mod_path_to_id path mod_id)
        "SELECT id, path FROM modules") ;
+  (* [mod_name_to_paths] is already built above from the same table and the
+     modules set has not changed since; this block used to rebuild it with the
+     same last-writer-wins collapse. *)
+  let n_deps_ambiguous = ref 0 in
   List.iter
     (fun (dep : pending_dep) ->
       match Hashtbl.find_opt mod_path_to_id dep.source_module with
       | None -> ()
       | Some source_id ->
-          let target_id =
+          (* Every module the written path could designate, not one guess and
+             not a refusal. The refusal shipped in the first draft of this
+             commit and a review caught it here after it had been fixed for
+             calls: an unresolved dep degrades to its dotted string, so a
+             path-shaped `forbid dep` selector stops matching and the rule goes
+             green — on a fixture whose source literally contains
+             `open Sublib.Api`. One row per candidate keeps the true target in
+             the table, which is what the rule needs to see. *)
+          let targets =
+            let name =
+              List.hd (List.rev (String.split_on_char '.' dep.target_path))
+            in
             match Hashtbl.find_opt mod_path_to_id dep.target_path with
-            | Some id ->
-                incr n_deps_resolved ;
-                Some id
+            | Some id -> [Some id]
             | None -> (
-                let parts = String.split_on_char '.' dep.target_path in
-                let name = List.hd (List.rev parts) in
-                match Hashtbl.find_opt mod_name_to_path name with
-                | Some path -> (
-                    match Hashtbl.find_opt mod_path_to_id path with
-                    | Some id ->
-                        incr n_deps_resolved ;
-                        Some id
-                    | None -> None)
-                | None -> None)
+                let paths =
+                  match Hashtbl.find_opt mod_name_to_paths name with
+                  | Some l -> l
+                  | None -> []
+                in
+                match List.filter_map (Hashtbl.find_opt mod_path_to_id) paths with
+                | [] -> [None]
+                | [one] -> [Some one]
+                | several ->
+                    incr n_deps_ambiguous ;
+                    List.map (fun id -> Some id) several)
           in
-          insert_module_dep
-            db
-            stmt_dep
-            ~source_module:source_id
-            ~target_module:target_id
-            ~target_path:dep.target_path
-            ~dep_kind:dep.dep_kind
-            ~alias_name:dep.alias_name
-            ~line_number:dep.line_number ;
-          incr n_deps)
+          n_deps_resolved :=
+            !n_deps_resolved + List.length (List.filter (fun t -> t <> None) targets) ;
+          List.iter
+            (fun target_module ->
+              insert_module_dep
+                db
+                stmt_dep
+                ~source_module:source_id
+                ~target_module
+                ~target_path:dep.target_path
+                ~dep_kind:dep.dep_kind
+                ~alias_name:dep.alias_name
+                ~line_number:dep.line_number ;
+              incr n_deps)
+            targets)
     !all_pending_deps ;
   exec_exn db "COMMIT" ;
   Arch_io.printf
     "Inserted %d module deps (%d resolved to known modules)\n%!"
     !n_deps
     !n_deps_resolved ;
+  if !n_deps_ambiguous > 0 then
+    Arch_io.printf
+      "  %d module dep(s) bound to a CANDIDATE SET for the same reason: one row \
+       per candidate module\n%!"
+      !n_deps_ambiguous ;
 
   (* Resolve and insert type usages *)
   Arch_io.printf
@@ -476,6 +607,7 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
   exec_exn db "BEGIN TRANSACTION" ;
   let n_type_usages = ref 0 in
   let n_type_usages_resolved = ref 0 in
+  let n_types_ambiguous = ref 0 in
   let type_lookup = Hashtbl.create 256 in
   ignore
     (Sqlite3.exec_not_null
@@ -484,16 +616,18 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
          let type_id = int_of_string row.(0) in
          let type_name = row.(1) in
          let mod_path = row.(2) in
-         let base = Filename.basename mod_path in
-         let mod_name =
-           Filename.remove_extension base |> String.capitalize_ascii
-         in
-         Hashtbl.replace type_lookup (mod_name, type_name) type_id)
+         (* Keyed by module PATH, not by capitalised basename. The basename key
+            was a third instance of the same last-writer-wins collapse fixed for
+            calls and module deps in this commit — and the worst of the three,
+            because the lookup below then kept only the LAST component of the
+            written prefix, discarding the very library name that tells the two
+            apart. `use (x : Api.t)` in rootlib recorded sublib's `t`. *)
+         Hashtbl.replace type_lookup (mod_path, type_name) type_id)
        "SELECT t.id, t.name, m.path FROM types t JOIN modules m ON t.module_id \
         = m.id") ;
   List.iter
     (fun (usage : pending_type_usage) ->
-      let mod_name, type_name =
+      let mod_parts, type_name =
         match String.rindex_opt usage.type_path '.' with
         | Some idx ->
             let prefix = String.sub usage.type_path 0 idx in
@@ -503,21 +637,35 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
                 (idx + 1)
                 (String.length usage.type_path - idx - 1)
             in
-            let mod_name =
-              match String.rindex_opt prefix '.' with
-              | Some i ->
-                  String.sub prefix (i + 1) (String.length prefix - i - 1)
-              | None -> prefix
-            in
-            (mod_name, name)
-        | None -> ("", usage.type_path)
+            (String.split_on_char '.' prefix, name)
+        | None -> ([], usage.type_path)
       in
       let type_id =
-        match Hashtbl.find_opt type_lookup (mod_name, type_name) with
-        | Some id ->
-            incr n_type_usages_resolved ;
-            Some id
-        | None -> None
+        (* Same candidate rule as for calls: the modules whose basename matches
+           the last written component AND define the type. *)
+        match List.rev mod_parts with
+        | [] -> None
+        | last :: _ -> (
+            let paths =
+              match Hashtbl.find_opt mod_name_to_paths last with
+              | Some l -> l
+              | None -> []
+            in
+            let defining =
+              List.filter (fun p -> Hashtbl.mem type_lookup (p, type_name)) paths
+            in
+            (* No directory heuristic, for the reason given on the call path.
+               A type usage has one FK and no candidate-set kind to fall back
+               on, so an ambiguous one stays unresolved — under-approximate,
+               and type_usage feeds no soundness closure. *)
+            match defining with
+            | [one] ->
+                incr n_type_usages_resolved ;
+                Hashtbl.find_opt type_lookup (one, type_name)
+            | [] -> None
+            | _ ->
+                incr n_types_ambiguous ;
+                None)
       in
       insert_type_usage
         db
@@ -534,6 +682,11 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
     "Inserted %d type usages (%d resolved to known types)\n%!"
     !n_type_usages
     !n_type_usages_resolved ;
+  if !n_types_ambiguous > 0 then
+    Arch_io.printf
+      "  %d type usage(s) left unresolved: the written path designates two or \
+       more modules sharing a basename\n%!"
+      !n_types_ambiguous ;
 
   (* Count results *)
   ignore

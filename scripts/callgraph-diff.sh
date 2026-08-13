@@ -108,6 +108,51 @@ SELECT '  '||ok||' -> '||nk||': '||count(*) FROM (
 ) GROUP BY ok, nk;
 SQL
 
+# Kind movements above key a site on (caller, callee_name, call_site) and
+# compare only the KIND — which is blind to the movement that matters most for
+# a resolver change: the same site, same written name, same kind, bound to a
+# DIFFERENT function. The homonym collapse this gate exists to catch was exactly
+# that, and it would have shown here as "no change".
+#
+# So compare the resolved TARGET SET per site. Targets are identified by
+# module-path:function-name, never by id: ids are assigned in scan order and
+# differ between the two databases even when nothing moved. '?' is an
+# unresolved callee (external leaf or a refusal), and a set with more than one
+# member is a candidate set.
+echo "== resolution movements (old target(s) → new target(s), per shared site) =="
+sqlite3 "" <<SQL
+ATTACH '$OLD_DB' AS o; ATTACH '$NEW_DB' AS n;
+WITH ot AS (
+  SELECT fo.name AS caller, co.callee_name AS callee, co.call_site AS site,
+         group_concat(t, ',') AS tgt
+  FROM (SELECT DISTINCT co.caller_id, co.callee_name, co.call_site,
+               COALESCE(mo.path||':'||fo2.name, '?') AS t
+        FROM o.calls co
+        LEFT JOIN o.functions fo2 ON co.callee_id=fo2.id
+        LEFT JOIN o.modules mo ON fo2.module_id=mo.id
+        ORDER BY t) co
+  JOIN o.functions fo ON co.caller_id=fo.id
+  GROUP BY caller, callee, site
+), nt AS (
+  SELECT fn.name AS caller, cn.callee_name AS callee, cn.call_site AS site,
+         group_concat(t, ',') AS tgt
+  FROM (SELECT DISTINCT cn.caller_id, cn.callee_name, cn.call_site,
+               COALESCE(mn.path||':'||fn2.name, '?') AS t
+        FROM n.calls cn
+        LEFT JOIN n.functions fn2 ON cn.callee_id=fn2.id
+        LEFT JOIN n.modules mn ON fn2.module_id=mn.id
+        ORDER BY t) cn
+  JOIN n.functions fn ON cn.caller_id=fn.id
+  GROUP BY caller, callee, site
+)
+SELECT '  '||ot.tgt||' -> '||nt.tgt||': '||count(*)
+FROM ot JOIN nt ON nt.caller=ot.caller AND nt.callee=ot.callee AND nt.site=ot.site
+WHERE ot.tgt <> nt.tgt
+GROUP BY ot.tgt, nt.tgt
+ORDER BY count(*) DESC
+LIMIT 40;
+SQL
+
 if [ -n "$dropped" ]; then
   echo "== DROPPED EDGES (HARD FAIL) =="
   echo "$dropped" | head -40
