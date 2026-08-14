@@ -68,7 +68,7 @@ let bind_text_opt stmt idx = function
 (* -------------------------------------------------------------------------- *)
 
 let insert_module db stmt_mod ~path ~lines ~has_mli ?(unit_name = None)
-    ?(quint_module_raw = None) () =
+    ?(library_name = None) ?(quint_module_raw = None) () =
   let now =
     Printf.sprintf
       "%04d-%02d-%02dT%02d:%02d:%02d"
@@ -90,7 +90,8 @@ let insert_module db stmt_mod ~path ~lines ~has_mli ?(unit_name = None)
   bind_text stmt_mod 3 now ;
   bind_bool stmt_mod 4 has_mli ;
   bind_text_opt stmt_mod 5 unit_name ;
-  bind_text_opt stmt_mod 6 quint_module_raw ;
+  bind_text_opt stmt_mod 6 library_name ;
+  bind_text_opt stmt_mod 7 quint_module_raw ;
   exec_stmt db stmt_mod ;
   last_insert_rowid db
 

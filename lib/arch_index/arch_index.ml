@@ -158,7 +158,7 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
     Sqlite3.prepare
       db
       "INSERT INTO modules (path, lines, last_analyzed, has_mli, unit_name, \
-       quint_module_raw) VALUES (?, ?, ?, ?, ?, ?)"
+       library_name, quint_module_raw) VALUES (?, ?, ?, ?, ?, ?, ?)"
   in
   let stmt_fn =
     Sqlite3.prepare
@@ -294,6 +294,10 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
      answering `PATH EXISTS`. A collided key resolves to nothing and degrades,
      which is the whole point of the change. *)
   let unit_to_path : (string, string list) Hashtbl.t = Hashtbl.create 128 in
+  (* Source path → the dune library it was compiled into. Absent for a producer
+     that does not know it, and an absent library never contributes to the
+     straddle test below — unknown is not a second library. *)
+  let path_to_lib : (string, string) Hashtbl.t = Hashtbl.create 128 in
   ignore
     (Sqlite3.exec_not_null
        db
@@ -302,6 +306,7 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
          let base = Filename.basename path in
          let name = Filename.remove_extension base |> String.capitalize_ascii in
          Hashtbl.replace mod_name_to_path name path ;
+         (match row.(2) with "" -> () | l -> Hashtbl.replace path_to_lib path l) ;
          match row.(1) with
          | "" -> ()
          | unit_name ->
@@ -311,7 +316,7 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
                | None -> []
              in
              Hashtbl.replace unit_to_path unit_name (path :: prev))
-       "SELECT path, COALESCE(unit_name,'') FROM modules") ;
+       "SELECT path, COALESCE(unit_name,''), COALESCE(library_name,'') FROM modules") ;
   (* Resolve a CANDIDATE LIST of unit readings against the units actually
      indexed, rather than trusting one guess. `A.Inner.f` reads as
      `a__Inner`.`f` under a wrapped library and as `a`.`Inner.f` under a
@@ -354,6 +359,17 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
   let resolve_group ~lookup (cands : (string * string) list) =
     let unit_hit = ref false in
     let collided = ref false in
+    (* Libraries the LIVE readings belong to. Preferring the reading that
+       resolves is sound only inside one library: there, a wrong pick still
+       lands in a library the caller demonstrably links. Across libraries it is
+       the original defect. `A.Inner.f` reads as unit `a` name `Inner.f` and as
+       unit `a__Inner` name `f`; when `a` is a `(wrapped false)` module of
+       library `flat` and `a__Inner` belongs to a library literally named `a`,
+       those are two libraries, and `flat` need not link `a`. With `flat/a.ml`
+       an `include`, only the foreign reading held the name — one survivor, and
+       a review measured `reaches` answering PATH EXISTS through a library the
+       caller never links, with `escapes` empty so the proof looked total. *)
+    let libs = ref [] in
     let hits =
       List.concat_map
         (fun (u, inner) ->
@@ -361,6 +377,12 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
           | None -> []
           | Some paths ->
               unit_hit := true ;
+              List.iter
+                (fun p ->
+                  match Hashtbl.find_opt path_to_lib p with
+                  | Some l when not (List.mem l !libs) -> libs := l :: !libs
+                  | _ -> ())
+                paths ;
               if List.compare_length_with paths 1 > 0 then (
                 collided := true ;
                 [])
@@ -374,7 +396,10 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
     if !collided then `Ambiguous
     else
       match hits with
-      | [(_, id)] -> `One id
+      | [(_, id)] ->
+          (* One reading resolved. If the live readings straddle two libraries,
+             that single hit is a choice between them, not a deduction. *)
+          if List.compare_length_with !libs 1 > 0 then `Ambiguous else `One id
       | [] -> if !unit_hit then `Missing else `Absent
       | _ -> `Ambiguous
   in
@@ -391,6 +416,12 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
     | [] -> `Absent
     | [v] -> v
     | live -> (
+        (* Unanimity is kept for the rule it states, not for traffic it carries:
+           a review showed it cannot fire. Agreement would need two distinct
+           unit names resolving to one module id, and `modules.path` is UNIQUE
+           with one `unit_name` per row, so distinct keys have distinct paths.
+           Deleting the branch leaves every test green — correctly, since it is
+           unreachable rather than untested. *)
         match List.sort_uniq compare live with
         | [(`One _ as v)] -> v
         | _ -> `Ambiguous)

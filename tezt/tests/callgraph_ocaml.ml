@@ -295,7 +295,8 @@ let truly_dead (x : int) : int =
    verdicts above go quietly wrong. *)
 let homonym_libs =
   [
-    ("dune-project", "(lang dune 3.0)\n");
+    (* 3.7 is the floor for `(include_subdirs qualified)` below. *)
+    ("dune-project", "(lang dune 3.7)\n");
     ("rootlib/dune", "(library (name rootlib) (libraries sublib))\n");
     (* A hand-written library module makes dune emit the ALIAS module
        `Rootlib__` and compile every sibling with `-open Rootlib__`, so an
@@ -441,6 +442,33 @@ let homonym_libs =
     ("shl/buffer.ml", "let add_string (b : int) (s : string) : int = b + String.length s\n");
     ("shc/dune", "(library (name shc))\n");
     ("shc/user.ml", "let std_call (b : Buffer.t) : unit = Buffer.add_string b \"x\"\n");
+    (* `(include_subdirs qualified)` mangles ONE LEVEL PER DIRECTORY:
+       `isq/sub/leaf.ml` in library `isq` is the unit `isq__Sub__Leaf`. Offering
+       only the root and its first component made every reference crossing a
+       subdirectory `Absent`, and since this branch now records an external leaf
+       rather than walking the basename map, the call and the `open` both
+       vanished into the encoding reserved for `Stdlib.+` — `arch-rules`
+       answering pass, `unreachable` answering UNREACHABLE, about a call written
+       in plain sight. A supported dune feature that appeared in no fixture. *)
+    ("isq/dune", "(include_subdirs qualified)\n(library (name isq))\n");
+    ("isq/sub/leaf.ml", "let deep_target (n : int) : int = n + 5\n");
+    (* The ASYMMETRIC form of the wf/wfa pair above, and the one that lied. When
+       both readings define the name, two hits make it ambiguous and the fixture
+       looks covered. Make one an `include` — the shape used everywhere else in
+       this fixture — and only the FOREIGN reading holds the name: one survivor,
+       elected across a library boundary. `reaches nested_inc forged` answered
+       PATH EXISTS through a library `xflat` never links, with `escapes` empty
+       so the proof looked total, while the call that really runs was reported
+       UNREACHABLE. Both lies from one election. *)
+    ("xa/dune", "(library (name aa))\n");
+    ("xa/inner.ml", "let forged (n : int) : int = n + 7\nlet g (n : int) : int = forged n\n");
+    ("xflat/dune", "(library (name xflat) (wrapped false))\n");
+    ("xflat/base2.ml", "let real (n : int) : int = n + 8\nlet g (n : int) : int = real n\n");
+    ("xflat/aa.ml", "module Inner = struct include Base2 end\n");
+    ("xflat/b2.ml", "let nested_inc (n : int) : int = Aa.Inner.g n\n");
+    ("isqc/dune", "(library (name isqc) (libraries isq))\n");
+    ( "isqc/user.ml",
+      "open Isq.Sub.Leaf\n\nlet via_subdir (n : int) : int = deep_target n\n" );
   ]
 
 let register_cross_library_homonyms () =
@@ -535,6 +563,26 @@ let register_cross_library_homonyms () =
                merely shares the basename"
             (binding ~caller:"std_call" ~like:"%Buffer.add_string")
             "1 row(s) -> UNRESOLVED:MUST" ;
+          Batch.eq_string b
+            ~msg:
+              "unit `aa` (library xflat) and unit `aa__Inner` (library aa) are TWO libraries: a \
+               lone survivor across them is a choice, not a deduction"
+            (binding ~caller:"nested_inc" ~like:"%Inner.g")
+            "1 row(s) -> UNRESOLVED:MAY_TOP" ;
+          (* `(include_subdirs qualified)`: the unit boundary falls TWO
+             components in. Both the call and the dep must find it — an
+             external leaf here is the false-silence lie, not honest ignorance,
+             because the target is indexed and on screen. *)
+          Batch.eq_string b
+            ~msg:"a reference crossing a qualified subdirectory resolves to isq__Sub__Leaf"
+            (binding ~caller:"via_subdir" ~like:"%deep_target")
+            "1 row(s) -> isq/sub/leaf.ml:deep_target" ;
+          Batch.eq_string_opt b
+            ~msg:"`open Isq.Sub.Leaf` must resolve too, or a path-shaped `forbid dep` goes green"
+            (Db.string_opt conn
+               "SELECT COALESCE(mt.path, 'UNRESOLVED') FROM module_deps d LEFT JOIN modules mt \
+                ON d.target_module = mt.id WHERE d.target_path = 'Isq.Sub.Leaf'")
+            (Some "isq/sub/leaf.ml") ;
           (* Positive control for the multi-component tail of the wrapped
              reading — the branch a mutation could delete unnoticed. *)
           Batch.eq_string b

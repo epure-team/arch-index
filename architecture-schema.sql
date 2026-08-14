@@ -19,6 +19,15 @@ CREATE TABLE IF NOT EXISTS modules (
     -- and resolving a qualified reference by basename picks one at random.
     -- NULL on a producer that does not know it (the flat/LSP path).
     unit_name TEXT DEFAULT NULL,
+    -- The dune LIBRARY (or executable stanza) the unit was compiled into, read
+    -- off the object directory in the .cmt path ('.x.objs' -> 'x'). Two units
+    -- whose names look nested ('a' and 'a__Inner') need not belong to the same
+    -- library: a (wrapped false) library holding a.ml sits beside a wrapped
+    -- library literally named a. Preferring the nested reading there binds a
+    -- MUST edge into a library the caller never links, so the resolver only
+    -- prefers one reading over another WITHIN one library.
+    -- NULL on a producer that does not know it (the flat/LSP path).
+    library_name TEXT DEFAULT NULL,
     quint_module_raw TEXT DEFAULT NULL,     -- body of {quint-module} comment section (Quint preamble)
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );

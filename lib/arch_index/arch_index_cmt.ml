@@ -627,14 +627,26 @@ let unit_of_path path =
   | Some (root, rest) ->
       List.map
         (fun r ->
-          (* the whole rest is the name inside a `(wrapped false)` unit … *)
-          (r, String.concat "." rest)
-          ::
-          (match rest with
-          (* … or the first component is the member of a wrapped library. *)
-          | comp :: (_ :: _ as deeper) ->
-              [(r ^ "__" ^ comp, String.concat "." deeper)]
-          | _ -> []))
+          (* EVERY split point, not just the first two. The unit boundary can
+             fall anywhere along the path: the whole rest is the name inside a
+             `(wrapped false)` unit, the first component is the member of a
+             wrapped library, and under `(include_subdirs qualified)` dune keeps
+             mangling one level per directory — `xlib/sub/bar.ml` in library `x`
+             is the unit `x__Sub__Bar`, so `X.Sub.Bar.f` only resolves if the
+             two-component prefix is offered. Stopping at one component made
+             every reference that crosses a subdirectory Absent, hence an
+             external leaf, hence `arch-rules` answering pass and `unreachable`
+             answering UNREACHABLE about a call written in plain sight — inside
+             a single library as much as across two. A review reproduced it in
+             five files. The last component is always the value name, so the
+             prefix runs to n-1. *)
+          let rec splits acc unit = function
+            | [] | [_] -> List.rev acc
+            | comp :: tl ->
+                let unit = unit ^ "__" ^ comp in
+                splits ((unit, String.concat "." tl) :: acc) unit tl
+          in
+          (r, String.concat "." rest) :: splits [] r rest)
         (unit_roots root)
 
 (** Every compilation unit a MODULE path could denote — for `open Sublib.Api`,
@@ -647,16 +659,32 @@ let unit_of_module_path path =
   | Some (root, rest) ->
       List.map
         (fun r ->
+          (* Every mangled PREFIX, for the same `(include_subdirs qualified)`
+             reason as {!unit_of_path}: `open X.Sub.Bar` names unit
+             `x__Sub__Bar`, and offering only `x__Sub` dropped the dependency
+             entirely — a path-shaped `forbid dep` rule then passes on a file
+             that plainly says `open`.
+
+             The bare root `r` is NOT offered when there is a component after
+             it. A dep target must be a COMPILATION UNIT and a nested module has
+             no `modules` row, so `Rootlib.Api` should mean unit `rootlib__Api`,
+             not "the nested module `Api` inside unit `rootlib`". Offering the
+             bare root made every intra-library `open` ambiguous as soon as the
+             library had a hand-written wrapper, since `rootlib` is then an
+             indexed unit too. That asymmetry with {!unit_of_path} is a known
+             defect, not a design: it loses the real dep when the root genuinely
+             IS a `(wrapped false)` unit holding a nested module. Fixing it
+             needs the LIBRARY recorded per unit — tracked as lot 2-ter. *)
           match rest with
           | [] -> [r]
-          (* Only the wrapped reading, unlike {!unit_of_path}. A dep target must
-             be a COMPILATION UNIT, and a nested module has no `modules` row —
-             so `Rootlib.Api` can only mean unit `rootlib__Api`, never "the
-             nested module `Api` inside unit `rootlib`". Offering both readings
-             here made every intra-library `open` ambiguous as soon as the
-             library had a hand-written wrapper module, since `rootlib` is then
-             an indexed unit too and nothing distinguishes the two. *)
-          | comp :: _ -> [r ^ "__" ^ comp])
+          | _ :: _ ->
+              let rec prefixes acc unit = function
+                | [] -> List.rev acc
+                | comp :: tl ->
+                    let unit = unit ^ "__" ^ comp in
+                    prefixes (unit :: acc) unit tl
+              in
+              prefixes [] r rest)
         (unit_roots root)
 
 (* -------------------------------------------------------------------------- *)
@@ -1606,6 +1634,19 @@ let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
               let unit_name =
                 Some (Filename.remove_extension (Filename.basename path))
               in
+              (* The library, from the object directory two levels up:
+                 `…/xlib/.x.objs/byte/x__B.cmt` → `x`. Same reason as above —
+                 dune names it after the LIBRARY, not the directory. It is what
+                 tells `a` (a `(wrapped false)` unit of library `flat`) apart
+                 from `a__Inner` (a member of a library literally named `a`),
+                 which look like one nesting but are two libraries. *)
+              let library_name =
+                let objs = Filename.basename (Filename.dirname (Filename.dirname path)) in
+                if Filename.check_suffix objs ".objs" && String.length objs > 6
+                   && objs.[0] = '.'
+                then Some (String.sub objs 1 (String.length objs - 6))
+                else None
+              in
               let module_id =
                 insert_module
                   db
@@ -1614,6 +1655,7 @@ let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
                   ~lines
                   ~has_mli
                   ~unit_name
+                  ~library_name
                   ?quint_module_raw:(Option.map Option.some quint_module_raw)
                   ()
               in
