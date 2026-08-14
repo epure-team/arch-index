@@ -588,13 +588,23 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
                   (List.map (fun u -> (u, "")) dep.target_unit)
                   ~lookup:(fun p _ -> Hashtbl.find_opt mod_path_to_id p)
               with
-              | `One id -> Some id
-              | `Absent | `Ambiguous | `Missing -> None
+              | `One id -> `Resolved id
+              (* Terminal, exactly as on the call path. Letting these fall
+                 through to the basename walk below is what the walk's own
+                 comment calls actively harmful: a review demonstrated
+                 `open Util` inside one executable binding to a DIFFERENT
+                 program's util.ml, because the two mangle alike and the
+                 basename map keeps the last. The call path already treated
+                 them as terminal; the dep path did not, and deps are what a
+                 path-shaped `forbid dep` rule reads. *)
+              | `Ambiguous | `Missing -> `Terminal
+              | `Absent -> `Fallback
             with
-            | Some id ->
+            | `Resolved id ->
                 incr n_deps_resolved ;
                 Some id
-            | None -> (
+            | `Terminal -> None
+            | `Fallback -> (
                 match Hashtbl.find_opt mod_path_to_id dep.target_path with
                 | Some id ->
                     incr n_deps_resolved ;

@@ -357,7 +357,12 @@ let homonym_libs =
        exactly how the first version of this case failed to catch anything. *)
     ("e1/dune", "(executable (name main) (modules main util caller))\n");
     ("e1/util.ml", "let helper (n : int) : int = n + 1\n");
-    ("e1/caller.ml", "let go (n : int) : int = Util.helper n\n");
+    (* `open Util` as well as the qualified call: the dep resolver is a
+       SEPARATE path and treated an ambiguous unit as merely unresolved, so it
+       fell through to the basename walk and bound this `open` to the OTHER
+       program's util.ml. The call already degraded correctly, which is what
+       hid it. *)
+    ("e1/caller.ml", "open Util\n\nlet go (n : int) : int = helper n\n");
     ("e1/main.ml", "let () = ignore (Caller.go 1)\n");
     ("e2/dune", "(executable (name main) (modules main util))\n");
     ("e2/util.ml", "let helper (n : int) : int = n - 1\n");
@@ -455,6 +460,25 @@ let register_cross_library_homonyms () =
                it must degrade to ⊤ rather than pick the wrapped reading"
             (binding ~caller:"nested" ~like:"%Inner.f")
             "1 row(s) -> UNRESOLVED:MAY_TOP" ;
+          Batch.eq_string_opt b
+            ~msg:
+              "`open Util` across two programs that mangle alike must resolve to nothing, not \
+               to the other program's module"
+            (Db.string_opt conn
+               "SELECT count(*) || ' -> ' || COALESCE(group_concat(DISTINCT p), '<none>') FROM \
+                (SELECT COALESCE(mt.path, 'UNRESOLVED') AS p FROM module_deps d LEFT JOIN \
+                 modules mt ON d.target_module = mt.id WHERE d.target_path LIKE '%Util')")
+            (Some "1 -> UNRESOLVED") ;
+          (* The alias rows `rootlib.ml` produces go through unit_of_module_path
+             with an alias-module root. Nothing asserted them, so breaking the
+             `__` strip on the dep path alone left the whole suite green. *)
+          Batch.eq_string_opt b
+            ~msg:"`module Api = Api` inside rootlib.ml must alias ROOTLIB's Api, not sublib's"
+            (Db.string_opt conn
+               "SELECT COALESCE(mt.path, 'UNRESOLVED') FROM module_deps d LEFT JOIN modules mt \
+                ON d.target_module = mt.id WHERE d.dep_kind = 'alias' AND d.target_path LIKE \
+                '%.Api'")
+            (Some "rootlib/api.ml") ;
           (* Type usages are the third copy of the collapse, and they need a
              POSITIVE control: asserting only that the wrong answer is absent is
              satisfied by a resolver that resolves no types at all. *)
