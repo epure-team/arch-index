@@ -398,10 +398,10 @@ let extract_signatures_from_cmti_files ~project_dir cmti_files =
 type pending_dep = {
   source_module : string; (* Module path, e.g. "src/foo.ml" *)
   target_path : string; (* Module path string, e.g. "Stdlib.List" *)
-  target_unit : string option;
-      (* Compilation-unit identity of the target module — "sublib__Api" for
-         `open Sublib.Api`. The resolution key; [target_path] is the display
-         spelling and collapses across libraries. *)
+  target_unit : string list;
+      (* Candidate compilation-unit identities of the target module —
+         "sublib__Api" for `open Sublib.Api`. The resolution key; [target_path]
+         is the display spelling and collapses across libraries. *)
   dep_kind : string; (* 'open', 'include', 'alias' *)
   alias_name : string option; (* For aliases: the local name *)
   line_number : int;
@@ -415,16 +415,19 @@ type call_head =
   | Head_local of string
       (** Unqualified name resolving (stamp-based) to a same-module top-level
           function body — a MUST candidate when unconditional and saturated. *)
-  | Head_qualified of string option * string * (string * string) option
+  | Head_qualified of string option * string * (string * string) list
       (** Resolved qualified path [(module, name, unit)] with a persistent root
           — a MUST candidate (external leaf or in-index) when unconditional.
 
           [module] and [name] are the DISPLAY spelling, kept because that is
           what [callee_name] records and what a kind-less consumer reads.
-          [unit] is the resolution key: [Some (unit_name, in_unit_name)] as
-          {!unit_of_path} computes it, e.g. [("sublib__Api", "run")]. It is
-          [None] when the path roots at a non-persistent [Ident] — a local
-          [let module] — where no unit identity exists to record. Resolving on
+          [unit] is the resolution key: every (unit_name, in_unit_name) reading
+          {!unit_of_path} produces, e.g. [("sublib__Api", "run")]. A LIST because
+          the unit boundary is not readable from the path shape alone, and
+          because dune's alias module makes the root spelling ambiguous too; the
+          resolver validates them against the units it holds. Empty when the
+          path roots at a non-persistent [Ident] — a local [let module] — where
+          no unit identity exists. Resolving on
           [unit] rather than on [module] is what stops `Api` from designating
           whichever [api.ml] was scanned last. *)
   | Head_enumerated of string
@@ -494,10 +497,11 @@ type lctx = {
 type pending_type_usage = {
   function_id : int;
   type_path : string; (* Full path, e.g. "Stdlib.result" or "Types.story" *)
-  type_unit : (string * string) option;
-      (* Compilation-unit identity of the type's path, as {!unit_of_path}
-         computes it — ("rootlib__Api", "t"). The resolution key; [type_path] is
-         the display spelling. [None] for a non-persistent root. *)
+  type_unit : (string * string) list;
+      (* Candidate compilation-unit identities of the type's path, as
+         {!unit_of_path} produces them — ("rootlib__Api", "t"). The resolution
+         key; [type_path] is the display spelling. Empty for a non-persistent
+         root. *)
   usage_role : string; (* 'param', 'return' *)
   position : int option; (* Parameter position for params *)
 }
@@ -561,60 +565,82 @@ let path_to_module_name path =
     ([Foo.bar] → [foo], [bar]). Deeper components stay with the NAME, not the
     unit: [Rootlib.Api.Inner.f] is [f] spelled [Inner.f] inside [rootlib__Api],
     which is how the function table already keys nested definitions. *)
-(* `Rootlib__` (dune's alias module) and `Rootlib` (the wrapper) denote the
-   same library; the alias is what an intra-library path roots at. *)
-let unit_root_of root =
+(* Every root spelling a path could be using. `Rootlib__` is dune's ALIAS
+   module for library `rootlib`, so the trailing `__` must come off — but
+   `(library (name foo__))` is legal and ITS wrapper module is also `Foo__`.
+   Stripping unconditionally maps two different libraries onto one key, which is
+   the collision this change exists to remove, re-created by its own fix. Both
+   spellings are offered; the resolver decides which names a real unit. *)
+let unit_roots root =
   let n = String.length root in
-  let root = if n > 2 && String.sub root (n - 2) 2 = "__" then String.sub root 0 (n - 2) else root in
-  String.uncapitalize_ascii root
+  let low = String.uncapitalize_ascii root in
+  if n > 2 && String.sub root (n - 2) 2 = "__" then
+    [String.uncapitalize_ascii (String.sub root 0 (n - 2)); low]
+  else [low]
 
+let rec path_root_and_rest = function
+  | Path.Pident id ->
+      if Ident.persistent id then Some (Ident.name id, []) else None
+  | Path.Pdot (p, s) -> (
+      match path_root_and_rest p with
+      | Some (root, rest) -> Some (root, rest @ [s])
+      | None -> None)
+  | Path.Papply _ | Path.Pextra_ty _ -> None
+
+(** Every (compilation unit, name-within-it) a resolved value [Path.t] could
+    denote — a CANDIDATE LIST, deliberately, not one answer.
+
+    Where the UNIT ENDS cannot be read off the path shape. [A.Inner.f] is
+    `a__Inner`.`f` if `a` is a wrapped library, and `a`.`Inner.f` if `a` is
+    `(wrapped false)` and `Inner` is a nested module. An earlier version assumed
+    the first, and on a tree holding a `(wrapped false)` library `flat` beside a
+    library `a` it bound `flat/b.ml`'s own call to `alib/inner.ml` — a MUST edge
+    into a library `flat` does not link, plus a false UNREACHABLE about the real
+    target. Guessing here is the very failure being fixed, one level up.
+
+    So both readings are returned and the resolver checks them against the units
+    it actually holds, degrading when several match instead of preferring one.
+
+    Only a PERSISTENT root yields anything: a local [let module M = … in M.f]
+    belongs to no unit, and the empty list sends the caller to the name-based
+    residue rather than inventing an identity. *)
 let unit_of_path path =
-  let rec root_and_rest = function
-    | Path.Pident id -> if Ident.persistent id then Some (Ident.name id, []) else None
-    | Path.Pdot (p, s) -> (
-        match root_and_rest p with
-        | Some (root, rest) -> Some (root, rest @ [s])
-        | None -> None)
-    | Path.Papply _ | Path.Pextra_ty _ -> None
-  in
-  match root_and_rest path with
-  | None -> None
-  | Some (root, rest) -> (
-      let root_low = unit_root_of root in
-      match rest with
-      (* The whole path is the unit root: a `(wrapped false)` unit referenced
-         bare. There is no callee name here, so this shape is not a call. *)
-      | [] -> None
-      (* Root + the callee only: the root IS the unit, `(wrapped false)`. *)
-      | [name] -> Some (root_low, name)
-      (* Root + one component + the callee: the component is the unit member. *)
-      | comp :: deeper -> Some (root_low ^ "__" ^ comp, String.concat "." deeper))
+  match path_root_and_rest path with
+  | None | Some (_, []) -> []
+  | Some (root, rest) ->
+      List.concat_map
+        (fun r ->
+          (* the whole rest is the name inside a `(wrapped false)` unit … *)
+          (r, String.concat "." rest)
+          ::
+          (match rest with
+          (* … or the first component is the member of a wrapped library. *)
+          | comp :: (_ :: _ as deeper) ->
+              [(r ^ "__" ^ comp, String.concat "." deeper)]
+          | _ -> []))
+        (unit_roots root)
 
-(** The compilation unit a MODULE path denotes — for `open Sublib.Api`, the unit
-    [sublib__Api] itself rather than a value inside it.
-
-    Separate from {!unit_of_path} because the shapes differ by one component: a
-    value path spends its last component on the value name, a module path does
-    not. Sharing one function would make `open Sublib.Api` denote unit [sublib]
-    with member [Api], which is not a unit this index has a row for. A nested
-    module ([Rootlib.Api.Inner]) still belongs to its enclosing unit, so deeper
-    components are dropped. *)
+(** Every compilation unit a MODULE path could denote — for `open Sublib.Api`,
+    the unit itself rather than a value inside it. Separate from
+    {!unit_of_path} because the shapes differ by one component: a value path
+    spends its last component on the value name, a module path does not. *)
 let unit_of_module_path path =
-  let rec root_and_rest = function
-    | Path.Pident id -> if Ident.persistent id then Some (Ident.name id, []) else None
-    | Path.Pdot (p, s) -> (
-        match root_and_rest p with
-        | Some (root, rest) -> Some (root, rest @ [s])
-        | None -> None)
-    | Path.Papply _ | Path.Pextra_ty _ -> None
-  in
-  match root_and_rest path with
-  | None -> None
-  | Some (root, rest) -> (
-      let root_low = unit_root_of root in
-      match rest with
-      | [] -> Some root_low
-      | comp :: _ -> Some (root_low ^ "__" ^ comp))
+  match path_root_and_rest path with
+  | None -> []
+  | Some (root, rest) ->
+      List.concat_map
+        (fun r ->
+          match rest with
+          | [] -> [r]
+          (* Only the wrapped reading, unlike {!unit_of_path}. A dep target must
+             be a COMPILATION UNIT, and a nested module has no `modules` row —
+             so `Rootlib.Api` can only mean unit `rootlib__Api`, never "the
+             nested module `Api` inside unit `rootlib`". Offering both readings
+             here made every intra-library `open` ambiguous as soon as the
+             library had a hand-written wrapper module, since `rootlib` is then
+             an indexed unit too and nothing distinguishes the two. *)
+          | comp :: _ -> [r ^ "__" ^ comp])
+        (unit_roots root)
 
 (* -------------------------------------------------------------------------- *)
 (* Mutability metrics (R8)                                                    *)

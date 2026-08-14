@@ -362,6 +362,20 @@ let homonym_libs =
     ("e2/dune", "(executable (name main) (modules main util))\n");
     ("e2/util.ml", "let helper (n : int) : int = n - 1\n");
     ("e2/main.ml", "let () = ignore (Util.helper 1)\n");
+    (* A `(wrapped false)` library holding a NESTED module, beside a wrapped
+       library whose unit name collides with the wrapped reading of that path.
+       `A.Inner.f` reads two ways — unit `a__Inner` name `f`, or unit `a` name
+       `Inner.f` — and both name real units here. An earlier version assumed the
+       first and bound `wf/b.ml`'s own call to `wfa/inner.ml`, a MUST edge into
+       a library it does not link, plus a false UNREACHABLE about the real
+       target. Neither reading can be preferred, so the honest answer is ⊤.
+       There was no `(wrapped false)` stanza in this fixture at all, which is
+       exactly why the regression got in. *)
+    ("wfa/dune", "(library (name a))\n");
+    ("wfa/inner.ml", "let f (n : int) : int = n + 7\n");
+    ("wf/dune", "(library (name wf) (wrapped false))\n");
+    ("wf/a.ml", "module Inner = struct let f (n : int) : int = n + 8 end\n");
+    ("wf/b.ml", "let nested (n : int) : int = A.Inner.f n\n");
     (* Re-export: the unit resolves, the name is not a row in it. *)
     ("inc/dune", "(library (name inc))\n");
     ("inc/base_api.ml", "let run (n : int) : int = n + 2\n");
@@ -434,6 +448,12 @@ let register_cross_library_homonyms () =
               "Inc.Api.run is provided by an include: the unit is known, so this must degrade to \
                ⊤ — never bind to another library's run, never a NULL leaf that reads as external"
             (binding ~caller:"via_include" ~like:"%Api.run")
+            "1 row(s) -> UNRESOLVED:MAY_TOP" ;
+          Batch.eq_string b
+            ~msg:
+              "A.Inner.f reads as both a__Inner.f and a.Inner.f, and both name real units, so \
+               it must degrade to ⊤ rather than pick the wrapped reading"
+            (binding ~caller:"nested" ~like:"%Inner.f")
             "1 row(s) -> UNRESOLVED:MAY_TOP" ;
           (* Type usages are the third copy of the collapse, and they need a
              POSITIVE control: asserting only that the wrong answer is absent is

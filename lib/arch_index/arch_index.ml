@@ -312,18 +312,57 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
              in
              Hashtbl.replace unit_to_path unit_name (path :: prev))
        "SELECT path, COALESCE(unit_name,'') FROM modules") ;
-  (* Three answers, and collapsing the last two is a bug: [`Absent] means the
-     unit is not in this index at all (`Stdlib.Hashtbl`), where falling back to
-     the name costs nothing because nothing here could have matched anyway;
-     [`Ambiguous] means the name designates several units we hold (colliding
-     executable stanzas), and there the fallback is actively harmful — it hands
-     the reference to whichever module the basename map kept, which is the
-     original defect wearing a different key. Ambiguous is terminal. *)
-  let unit_target u =
-    match Hashtbl.find_opt unit_to_path u with
-    | None -> `Absent
-    | Some [one] -> `One one
-    | Some _ -> `Ambiguous
+  (* Resolve a CANDIDATE LIST of unit readings against the units actually
+     indexed, rather than trusting one guess. `A.Inner.f` reads as
+     `a__Inner`.`f` under a wrapped library and as `a`.`Inner.f` under a
+     `(wrapped false)` one, and `Foo__` is dune's alias for library `foo` but
+     also the wrapper of a library legitimately named `foo__`. Preferring one
+     reading binds MUST edges into libraries the caller does not even link — the
+     defect this whole change removes, re-created one level up.
+
+     Three answers, and collapsing the last two is itself a bug: [`Absent] means
+     no reading names a unit we hold (`Stdlib.Hashtbl`), where deferring to the
+     name costs nothing because nothing here could have matched; [`Ambiguous]
+     means several do — two readings, or one unit name shared by two modules
+     (every `(executable (name main))` mangles to `dune__exe__Main`) — and there
+     deferring is actively harmful, since it hands the reference to whichever
+     module the basename map kept. Ambiguous is terminal. *)
+  (* A candidate counts only if its unit exists AND provides the name. Checking
+     the unit alone is not enough: as soon as a library has a hand-written
+     `rootlib.ml`, that wrapper is itself an indexed unit called `rootlib`, so
+     the `(wrapped false)` reading of `Rootlib__.Api.run` — unit `rootlib`, name
+     `Api.run` — always names a real unit and every intra-library reference goes
+     ambiguous. The wrapper holds no value called `Api.run`, so asking for the
+     name settles it.
+
+     Absent and Ambiguous must stay distinct. [`Absent] means no reading names a
+     unit we hold (`Stdlib.Hashtbl`), where deferring to the basename map costs
+     nothing since nothing here could have matched. [`Ambiguous] means several
+     readings resolve, or a unit name is shared by two modules — every
+     `(executable (name main))` mangles to `dune__exe__Main` — and deferring
+     there is harmful, since it hands the reference to whichever module the
+     basename map kept. [`Missing] means a unit matched but holds no such name:
+     an `include` or re-export. The last two degrade to ⊤; only Absent falls
+     back. *)
+  let resolve_units ~lookup (cands : (string * string) list) =
+    let unit_hit = ref false in
+    let hits =
+      List.concat_map
+        (fun (u, inner) ->
+          match Hashtbl.find_opt unit_to_path u with
+          | None -> []
+          | Some paths ->
+              unit_hit := true ;
+              List.filter_map
+                (fun p -> Option.map (fun id -> (p, id)) (lookup p inner))
+                paths)
+        cands
+      |> List.sort_uniq compare
+    in
+    match hits with
+    | [(_, id)] -> `One id
+    | [] -> if !unit_hit then `Missing else `Absent
+    | _ -> `Ambiguous
   in
   List.iter
     (fun (call : pending_call) ->
@@ -423,17 +462,13 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
                    another library. So a known unit is terminal — resolve within
                    it or record an unresolved leaf, never a neighbour. *)
                 let by_unit =
-                  match unit_opt with
-                  | None -> None
-                  | Some (unit_name, in_unit_name) -> (
-                      match unit_target unit_name with
-                      | `Absent -> None
-                      | `Ambiguous -> Some None
-                      | `One mod_path ->
-                          Some
-                            (Hashtbl.find_opt
-                               fn_lookup
-                               (mod_path, in_unit_name)))
+                  match
+                    resolve_units unit_opt ~lookup:(fun p n ->
+                        Hashtbl.find_opt fn_lookup (p, n))
+                  with
+                  | `Absent -> None
+                  | `Ambiguous | `Missing -> Some None
+                  | `One id -> Some (Some id)
                 in
                 match by_unit with
                 | Some (Some id) -> incr n_resolved ; (Some id, display_name, kind)
@@ -546,15 +581,19 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
              real violation green and invents one that is not there. *)
           let target_id =
             match
-              Option.bind dep.target_unit (fun u ->
-                  match unit_target u with `One p -> Some p | _ -> None)
+              (* A dep names a MODULE, so the "name it provides" is the module
+                 itself: the lookup is the module id. *)
+              match
+                resolve_units
+                  (List.map (fun u -> (u, "")) dep.target_unit)
+                  ~lookup:(fun p _ -> Hashtbl.find_opt mod_path_to_id p)
+              with
+              | `One id -> Some id
+              | `Absent | `Ambiguous | `Missing -> None
             with
-            | Some path -> (
-                match Hashtbl.find_opt mod_path_to_id path with
-                | Some id ->
-                    incr n_deps_resolved ;
-                    Some id
-                | None -> None)
+            | Some id ->
+                incr n_deps_resolved ;
+                Some id
             | None -> (
                 match Hashtbl.find_opt mod_path_to_id dep.target_path with
                 | Some id ->
@@ -650,14 +689,13 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
            nothing (type_usage feeds no soundness closure and no consumer in
            bin/ reads it), so NULL is the honest answer rather than ⊤. *)
         let by_unit =
-          match usage.type_unit with
-          | None -> None
-          | Some (unit_name, in_unit_name) -> (
-              match unit_target unit_name with
-              | `Absent -> None
-              | `Ambiguous -> Some None
-              | `One mod_path ->
-                  Some (Hashtbl.find_opt type_by_unit (mod_path, in_unit_name)))
+          match
+            resolve_units usage.type_unit ~lookup:(fun p n ->
+                Hashtbl.find_opt type_by_unit (p, n))
+          with
+          | `Absent -> None
+          | `Ambiguous | `Missing -> Some None
+          | `One id -> Some (Some id)
         in
         match by_unit with
         | Some (Some id) -> incr n_type_usages_resolved ; Some id
