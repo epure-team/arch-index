@@ -36,7 +36,7 @@ the stamp rather than answering emptily.
 | Backend | Edge kinds | Notes |
 |---|---|---|
 | Go SSA (`callgraph-go` → `arch-load`) | ✅ execution-sound | A statically-resolved call (`StaticCallee() != nil`) is `MUST` only if its SSA basic block **post-dominates the function entry** (runs on every execution); a call in an `if`/`switch`/`select`/loop block is demoted to `MAY_ENUMERATED` (candidate set of one). CHA candidate set → `MAY_ENUMERATED`; interface/closure/reflection/cgo (incl. in-package `_Cfunc_*` wrappers) → `MAY_TOP`. Output is emitted in deterministic sorted order. |
-| OCaml CMT (`arch-callgraph-ocaml`) | ✅ execution-sound | Each function body — and each promoted lambda — is lowered to a real per-node **CFG** (`arch_index_cfg.ml`); a call is `MUST` iff its block post-dominates the node's entry AND the head resolves uniquely AND the application is saturated. Conditional/partial calls to resolved callees → `MAY_ENUMERATED`; unknowable targets → `MAY_TOP`. Resolution is `Ident`-stamp-based (shadows never forge a `MUST`). Qualified references resolve by **compilation-unit identity** (`rootlib__Api`, read off the .cmt filename), not by capitalised basename — two libraries may each hold an `api.ml`, and the basename names neither. When the unit is indexed but holds no row for the name (an `include` or re-export), or when the unit name itself is ambiguous (two `(executable (name main))` stanzas both mangle to `dune__exe__Main`), the edge is **`MAY_TOP`** rather than an unresolved leaf: an unresolved callee is stored exactly like an external one, which would let `arch-rules` answer `pass` about a call that lands inside the index. |
+| OCaml CMT (`arch-callgraph-ocaml`) | ✅ execution-sound | Each function body — and each promoted lambda — is lowered to a real per-node **CFG** (`arch_index_cfg.ml`); a call is `MUST` iff its block post-dominates the node's entry AND the head resolves uniquely AND the application is saturated. Conditional/partial calls to resolved callees → `MAY_ENUMERATED`; unknowable targets → `MAY_TOP`. Resolution is `Ident`-stamp-based (shadows never forge a `MUST`). Qualified references with a persistent root resolve by **compilation-unit identity** (`rootlib__Api`, read off the .cmt filename); the capitalised-basename map is residue, reachable only for a path that carries no unit identity at all (a root bound by a local `let module`). Two libraries may each hold an `api.ml`, and the basename names neither. Three degradations, each closing a demonstrated forged proof: the unit is indexed but holds no row for the name (an `include` or re-export) → **`MAY_TOP`**; a unit name covers several modules (two `(executable (name main))` stanzas both mangle to `dune__exe__Main`) → **`MAY_TOP`**, decided *before* asking which of them holds the name, since holding it is not evidence of identity; a path admits two root spellings naming **different libraries** (`Foo__` is dune's alias module for library `foo` and equally the wrapper of a library named `foo__`) → **`MAY_TOP`** unless they agree. ⊤ rather than an unresolved leaf, because an unresolved callee is stored exactly like an external one, which would let `arch-rules` answer `pass` about a call that lands inside the index. Conversely, when identity is checked and names no unit we hold, the callee really is external and the edge is an ordinary **`MUST` leaf** — the basename map is not consulted there, so a project owning a `buffer.ml` no longer has `Stdlib.Buffer.add_string` bound to it. |
 
 **Both backends define `MUST` as execution-sound dominance computed over a real CFG** (Go: SSA
 post-dominators; OCaml: Typedtree lowered onto a per-node CFG with an iterative post-dominance
@@ -104,9 +104,13 @@ Both backends also share one **precision** limitation (not a soundness issue): w
 a branch calls the same target (`if b then f () else f ()`), the call is `MAY_ENUMERATED`, not
 `MUST` — neither backend reasons about callee-level coverage across mutually-exclusive blocks.
 
-**Precision status (self-index):** `MAY_TOP` ≈ 4% (down from ~79% pre-CFG), `MUST` ≈ 32%,
-`MAY_ENUMERATED` ≈ 64% — the ⊤ frontier now contains only genuinely unknowable targets (computed
-heads, parameter calls, dynamic roots, FFI anchors). Remaining precision follow-up: 0-CFA
+**Precision status (self-index, 13 221 call edges):** `MUST` ≈ 38%, `MAY_ENUMERATED` ≈ 53%,
+`MAY_TOP` ≈ 9% (down from ~79% pre-CFG). The ⊤ frontier holds genuinely unknowable targets
+(computed heads, parameter calls, dynamic roots, FFI anchors) **and** the unit-identity
+degradations above: unit-identity resolution moved 167 edges out of unresolved-leaf encoding and
+into ⊤ on this repository, without changing which edges resolve (the resolved set is identical
+before and after, 4 425 edges). Those 167 were previously indistinguishable from external calls —
+the honest cost of the fix is that they now read as unknown instead of as absent. Remaining precision follow-up: 0-CFA
 closure-flow to enumerate first-class-value calls (research R3); see
 [docs/research/control-flow-coverage-analysis.md](research/control-flow-coverage-analysis.md).
 

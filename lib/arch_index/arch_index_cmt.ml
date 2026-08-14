@@ -398,7 +398,7 @@ let extract_signatures_from_cmti_files ~project_dir cmti_files =
 type pending_dep = {
   source_module : string; (* Module path, e.g. "src/foo.ml" *)
   target_path : string; (* Module path string, e.g. "Stdlib.List" *)
-  target_unit : string list;
+  target_unit : string list list;
       (* Candidate compilation-unit identities of the target module —
          "sublib__Api" for `open Sublib.Api`. The resolution key; [target_path]
          is the display spelling and collapses across libraries. *)
@@ -415,7 +415,8 @@ type call_head =
   | Head_local of string
       (** Unqualified name resolving (stamp-based) to a same-module top-level
           function body — a MUST candidate when unconditional and saturated. *)
-  | Head_qualified of string option * string * (string * string) list
+  | Head_qualified of
+      string option * string * (string * string) list list
       (** Resolved qualified path [(module, name, unit)] with a persistent root
           — a MUST candidate (external leaf or in-index) when unconditional.
 
@@ -497,7 +498,7 @@ type lctx = {
 type pending_type_usage = {
   function_id : int;
   type_path : string; (* Full path, e.g. "Stdlib.result" or "Types.story" *)
-  type_unit : (string * string) list;
+  type_unit : (string * string) list list;
       (* Candidate compilation-unit identities of the type's path, as
          {!unit_of_path} produces them — ("rootlib__Api", "t"). The resolution
          key; [type_path] is the display spelling. Empty for a non-persistent
@@ -561,7 +562,9 @@ let path_to_module_name path =
     falls back to the basename map, and the reference binds to whichever library
     was scanned last. That is the very defect this function exists to remove,
     and it fires in the most ordinary library layout there is, including this
-    repository's own. The trailing [__] is stripped for that reason. A `(wrapped false)` unit has no component after the root
+    repository's own. The trailing [__] is stripped for that reason.
+
+    A [(wrapped false)] unit has no component after the root
     ([Foo.bar] → [foo], [bar]). Deeper components stay with the NAME, not the
     unit: [Rootlib.Api.Inner.f] is [f] spelled [Inner.f] inside [rootlib__Api],
     which is how the function table already keys nested definitions. *)
@@ -601,6 +604,20 @@ let rec path_root_and_rest = function
     So both readings are returned and the resolver checks them against the units
     it actually holds, degrading when several match instead of preferring one.
 
+    The result is GROUPED BY ROOT SPELLING — one inner list per {!unit_roots}
+    alternative — and the grouping is load-bearing, not tidiness. The two kinds
+    of alternative are not equally strong evidence. Within one group the
+    readings differ by where the unit boundary falls in a path, but they name
+    modules of the SAME library, so preferring the one that resolves is bounded:
+    a wrong pick stays inside a library the caller demonstrably links. ACROSS
+    groups the readings name DIFFERENT LIBRARIES — `Foo__.Bar` is either
+    library `foo`'s `bar.ml` seen through dune's alias module, or library
+    `foo__`'s. There, resolving because exactly one of them happened to hold the
+    name is the original defect with extra steps, and a review demonstrated it:
+    a MUST edge into a library the caller does not link, where the previous
+    release honestly recorded an unresolved leaf. Only unanimity across live
+    groups is evidence.
+
     Only a PERSISTENT root yields anything: a local [let module M = … in M.f]
     belongs to no unit, and the empty list sends the caller to the name-based
     residue rather than inventing an identity. *)
@@ -608,7 +625,7 @@ let unit_of_path path =
   match path_root_and_rest path with
   | None | Some (_, []) -> []
   | Some (root, rest) ->
-      List.concat_map
+      List.map
         (fun r ->
           (* the whole rest is the name inside a `(wrapped false)` unit … *)
           (r, String.concat "." rest)
@@ -628,7 +645,7 @@ let unit_of_module_path path =
   match path_root_and_rest path with
   | None -> []
   | Some (root, rest) ->
-      List.concat_map
+      List.map
         (fun r ->
           match rest with
           | [] -> [r]

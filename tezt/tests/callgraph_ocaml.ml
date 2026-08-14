@@ -383,10 +383,64 @@ let homonym_libs =
     ("wf/b.ml", "let nested (n : int) : int = A.Inner.f n\n");
     (* Re-export: the unit resolves, the name is not a row in it. *)
     ("inc/dune", "(library (name inc))\n");
-    ("inc/base_api.ml", "let run (n : int) : int = n + 2\n");
+    ("inc/base_api.ml", "type t = int\nlet run (n : int) : int = n + 2\n");
     ("inc/api.ml", "include Base_api\n");
     ("icl/dune", "(library (name icl) (libraries inc))\n");
-    ("icl/caller.ml", "let via_include (n : int) : int = Inc.Api.run n\n");
+    (* The type mirror of the re-export. Nothing reached the Missing branch on
+       the TYPE path, so making it fall back to the basename map left all 70
+       tests green while `Inc.Api.t` bound to another library's `t`. *)
+    ( "icl/caller.ml",
+      "let via_include (n : int) : int = Inc.Api.run n\n\
+       let use_inc_t (v : Inc.Api.t) : int = v\n" );
+    (* Two root SPELLINGS, and they name two DIFFERENT LIBRARIES. `Foo__` is
+       dune's alias module for library `foo`, and it is equally the wrapper of a
+       library legitimately named `foo__`. Both readings name a real unit here,
+       and only one of them holds `run` — the other's `bar.ml` is an `include`.
+       Trusting that lone survivor bound `alc`, which links `foo__` and nothing
+       else, into library `foo` with kind MUST, where the PREVIOUS RELEASE
+       honestly recorded an unresolved leaf. The fix for the alias-module root
+       introduced this; an adversarial review produced it in three files. *)
+    ("al1/dune", "(library (name foo))\n");
+    ("al1/bar.ml", "let run (n : int) : int = n + 111\n");
+    ("al2/dune", "(library (name foo__))\n");
+    ("al2/base.ml", "let run (n : int) : int = n + 222\n");
+    ("al2/bar.ml", "include Base\n");
+    ("alc/dune", "(library (name alc) (libraries foo__))\n");
+    ("alc/caller.ml", "let alias_root (n : int) : int = Foo__.Bar.run n\n");
+    (* A COLLIDED unit key where only one member holds the name. Both `hutil.ml`
+       mangle to `dune__exe__Hutil`; e3's is an `include` so it owns no row for
+       `hop`, e4's defines it. Filtering candidates by "provides the name" and
+       then calling the lone survivor unique elects a DIFFERENT PROGRAM — the
+       defect this change exists to remove, alive inside its own fix. The
+       e1/e2 pair above cannot catch it: both define `helper`, so the collision
+       stays visible without the filter. Holding the name is not evidence of
+       identity, and that is why the collision check must come first. *)
+    ("e3/dune", "(executable (name p3) (modules p3 hbase hutil hcaller))\n");
+    ("e3/hbase.ml", "let hop (n : int) : int = n + 1\n");
+    ("e3/hutil.ml", "include Hbase\n");
+    ("e3/hcaller.ml", "let via_collided (n : int) : int = Hutil.hop n\n");
+    ("e3/p3.ml", "let () = ignore (Hcaller.via_collided 1)\n");
+    ("e4/dune", "(executable (name p4) (modules p4 hutil))\n");
+    ("e4/hutil.ml", "let hop (n : int) : int = n - 1\n");
+    ("e4/p4.ml", "let () = ignore (Hutil.hop 1)\n");
+    (* Three components after the root, so the wrapped reading carries a
+       MULTI-component tail (`rr__Api` . `Inner.deepf`). Narrowing that branch
+       to a single-component tail left the whole suite green. *)
+    ("dd/dune", "(library (name rr))\n");
+    ("dd/api.ml", "module Inner = struct let deepf (n : int) : int = n + 3 end\n");
+    ("ddc/dune", "(library (name ddc) (libraries rr))\n");
+    ("ddc/user.ml", "let deep3 (n : int) : int = Rr.Api.Inner.deepf n\n");
+    (* A local module whose BASENAME collides with a stdlib one. `Absent` means
+       identity was checked and no reading names a unit we hold — so the callee
+       is external, and consulting the basename map there can only invent. It
+       did: every project owning a `buffer.ml`, `queue.ml`, `result.ml` or
+       `option.ml` had its stdlib calls bound to that file with kind MUST, and
+       `reaches` proved paths through them. Two independent reviews found this;
+       it predates the change, and the change is what makes it fixable. *)
+    ("shl/dune", "(library (name shl))\n");
+    ("shl/buffer.ml", "let add_string (b : int) (s : string) : int = b + String.length s\n");
+    ("shc/dune", "(library (name shc))\n");
+    ("shc/user.ml", "let std_call (b : Buffer.t) : unit = Buffer.add_string b \"x\"\n");
   ]
 
 let register_cross_library_homonyms () =
@@ -421,7 +475,7 @@ let register_cross_library_homonyms () =
             (Db.string_opt conn
                "SELECT group_concat(unit_name, ',') FROM (SELECT unit_name FROM modules WHERE \
                 path LIKE '%/api.ml' AND unit_name LIKE '%__Api' ORDER BY unit_name)")
-            (Some "inc__Api,rootlib__Api,sublib__Api") ;
+            (Some "inc__Api,rootlib__Api,rr__Api,sublib__Api") ;
           (* Both directions. A resolver that always picks the same library
              passes either one alone, and which one it picks depends on
              directory traversal order — so one direction is half inert. *)
@@ -460,6 +514,33 @@ let register_cross_library_homonyms () =
                it must degrade to ⊤ rather than pick the wrapped reading"
             (binding ~caller:"nested" ~like:"%Inner.f")
             "1 row(s) -> UNRESOLVED:MAY_TOP" ;
+          (* The two shapes that survived INSIDE the unit-identity fix. Both
+             produced a confident MUST into a library/program the caller does
+             not link; on the first, `origin/main` was strictly more honest. *)
+          Batch.eq_string b
+            ~msg:
+              "Foo__.Bar.run reads as library foo's bar.ml and as library foo__'s, and both are \
+               indexed: one of them merely failing to hold `run` is not evidence for the other"
+            (binding ~caller:"alias_root" ~like:"%Bar.run")
+            "1 row(s) -> UNRESOLVED:MAY_TOP" ;
+          Batch.eq_string b
+            ~msg:
+              "two programs collide on dune__exe__Hutil and only one holds `hop`: a collided \
+               unit key is ambiguous BEFORE the name filter, never elected by it"
+            (binding ~caller:"via_collided" ~like:"%Hutil.hop")
+            "1 row(s) -> UNRESOLVED:MAY_TOP" ;
+          Batch.eq_string b
+            ~msg:
+              "a stdlib call must stay an external MUST leaf, not bind to a local buffer.ml that \
+               merely shares the basename"
+            (binding ~caller:"std_call" ~like:"%Buffer.add_string")
+            "1 row(s) -> UNRESOLVED:MUST" ;
+          (* Positive control for the multi-component tail of the wrapped
+             reading — the branch a mutation could delete unnoticed. *)
+          Batch.eq_string b
+            ~msg:"a three-component path resolves through the wrapped reading rr__Api.Inner.deepf"
+            (binding ~caller:"deep3" ~like:"%Inner.deepf")
+            "1 row(s) -> dd/api.ml:Inner.deepf" ;
           Batch.eq_string_opt b
             ~msg:
               "`open Util` across two programs that mangle alike must resolve to nothing, not \
@@ -496,7 +577,14 @@ let register_cross_library_homonyms () =
                        t.module_id = m.id WHERE tu.type_name LIKE '%%Api.t' AND fm.path = '%s'"
                       fn))
                 (Some want))
-            [("rootlib/caller.ml", "rootlib/api.ml"); ("sublib/user.ml", "sublib/api.ml")] ;
+            [
+              ("rootlib/caller.ml", "rootlib/api.ml");
+              ("sublib/user.ml", "sublib/api.ml");
+              (* Missing on the TYPE path: unit `inc__Api` is indexed and holds
+                 no `t` (it is an `include`). Terminal, like everywhere else —
+                 the basename map would hand it another library's `t`. *)
+              ("icl/caller.ml", "UNRESOLVED");
+            ] ;
           (* The other side of the ⊤ branch: a unit this index does NOT hold
              must stay a MUST leaf. Without this, emitting ⊤ for every
              unresolved callee also passes — and that turns 78% of a real graph

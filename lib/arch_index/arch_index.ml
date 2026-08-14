@@ -320,32 +320,40 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
      reading binds MUST edges into libraries the caller does not even link — the
      defect this whole change removes, re-created one level up.
 
-     Three answers, and collapsing the last two is itself a bug: [`Absent] means
-     no reading names a unit we hold (`Stdlib.Hashtbl`), where deferring to the
-     name costs nothing because nothing here could have matched; [`Ambiguous]
-     means several do — two readings, or one unit name shared by two modules
-     (every `(executable (name main))` mangles to `dune__exe__Main`) — and there
-     deferring is actively harmful, since it hands the reference to whichever
-     module the basename map kept. Ambiguous is terminal. *)
-  (* A candidate counts only if its unit exists AND provides the name. Checking
-     the unit alone is not enough: as soon as a library has a hand-written
+     Within a group a candidate counts only if its unit exists AND provides the
+     name. The unit alone is not enough: as soon as a library has a hand-written
      `rootlib.ml`, that wrapper is itself an indexed unit called `rootlib`, so
      the `(wrapped false)` reading of `Rootlib__.Api.run` — unit `rootlib`, name
-     `Api.run` — always names a real unit and every intra-library reference goes
-     ambiguous. The wrapper holds no value called `Api.run`, so asking for the
-     name settles it.
+     `Api.run` — always names a real unit and every intra-library reference
+     would go ambiguous. The wrapper holds no value called `Api.run`, so asking
+     for the name settles it. That shortcut is sound only BETWEEN READINGS OF
+     ONE SPELLING, which name modules of a single library; see {!resolve_units}
+     for why it must not be applied across spellings, and {!resolve_group} for
+     why it must not be applied to a collided key.
 
-     Absent and Ambiguous must stay distinct. [`Absent] means no reading names a
-     unit we hold (`Stdlib.Hashtbl`), where deferring to the basename map costs
-     nothing since nothing here could have matched. [`Ambiguous] means several
-     readings resolve, or a unit name is shared by two modules — every
-     `(executable (name main))` mangles to `dune__exe__Main` — and deferring
-     there is harmful, since it hands the reference to whichever module the
-     basename map kept. [`Missing] means a unit matched but holds no such name:
-     an `include` or re-export. The last two degrade to ⊤; only Absent falls
-     back. *)
-  let resolve_units ~lookup (cands : (string * string) list) =
+     Three verdicts, and each collapse of them has been a demonstrated bug:
+
+     - [`Absent]: no reading names a unit we hold. Identity was checked and came
+       back negative, so the callee is genuinely outside the index — an external
+       leaf, kind preserved. The basename map is NOT consulted: it is reachable
+       only when there is no unit identity at all.
+     - [`Missing]: a unit matched but holds no such name — an `include`, a
+       re-export, an alias. The target is very likely indexed under another row,
+       so a leaf would read as external and let `arch-rules` pass. ⊤.
+     - [`Ambiguous]: several readings resolve, or a unit name is shared by two
+       modules. Deferring hands the reference to whichever module the basename
+       map kept. ⊤. *)
+  (* One root spelling's readings. A collided unit key is `Ambiguous BEFORE the
+     name filter, and that ordering is the fix to a demonstrated forged proof:
+     holding the name is not evidence of IDENTITY. Two `(executable (name main))`
+     stanzas both mangle to `dune__exe__Util`; if one program's `util.ml` is an
+     `include` (so it owns no row for the name) and the other's defines it, the
+     filter leaves exactly one survivor and elects a different program. A review
+     produced precisely that: `MUST` from e1 into e2, which never links it. The
+     collision is the answer — filtering by name only picks a winner. *)
+  let resolve_group ~lookup (cands : (string * string) list) =
     let unit_hit = ref false in
+    let collided = ref false in
     let hits =
       List.concat_map
         (fun (u, inner) ->
@@ -353,16 +361,39 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
           | None -> []
           | Some paths ->
               unit_hit := true ;
-              List.filter_map
-                (fun p -> Option.map (fun id -> (p, id)) (lookup p inner))
-                paths)
+              if List.compare_length_with paths 1 > 0 then (
+                collided := true ;
+                [])
+              else
+                List.filter_map
+                  (fun p -> Option.map (fun id -> (p, id)) (lookup p inner))
+                  paths)
         cands
       |> List.sort_uniq compare
     in
-    match hits with
-    | [(_, id)] -> `One id
-    | [] -> if !unit_hit then `Missing else `Absent
-    | _ -> `Ambiguous
+    if !collided then `Ambiguous
+    else
+      match hits with
+      | [(_, id)] -> `One id
+      | [] -> if !unit_hit then `Missing else `Absent
+      | _ -> `Ambiguous
+  in
+  (* Combine the root spellings. A group naming no indexed unit at all is not
+     evidence against the others — `Foo__.Bar` on a tree holding only library
+     `foo` leaves the `foo__` group empty, and that is simply the wrong guess
+     being unavailable. But once two groups are LIVE they denote two different
+     libraries, and only unanimity resolves: anything else is the tool choosing
+     a library for the user. *)
+  let resolve_units ~lookup (groups : (string * string) list list) =
+    match
+      List.filter (fun v -> v <> `Absent) (List.map (resolve_group ~lookup) groups)
+    with
+    | [] -> `Absent
+    | [v] -> v
+    | live -> (
+        match List.sort_uniq compare live with
+        | [(`One _ as v)] -> v
+        | _ -> `Ambiguous)
   in
   List.iter
     (fun (call : pending_call) ->
@@ -462,17 +493,29 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
                    another library. So a known unit is terminal — resolve within
                    it or record an unresolved leaf, never a neighbour. *)
                 let by_unit =
-                  match
-                    resolve_units unit_opt ~lookup:(fun p n ->
-                        Hashtbl.find_opt fn_lookup (p, n))
-                  with
-                  | `Absent -> None
-                  | `Ambiguous | `Missing -> Some None
-                  | `One id -> Some (Some id)
+                  if unit_opt = [] then `No_identity
+                  else
+                    match
+                      resolve_units unit_opt ~lookup:(fun p n ->
+                          Hashtbl.find_opt fn_lookup (p, n))
+                    with
+                    (* No reading names a unit we hold, and we DO have a unit
+                       identity to check — so the callee lives in a compilation
+                       unit outside this index. That is the definition of
+                       external, and the honest record is a leaf. Walking the
+                       basename map here is what forged `Stdlib.Buffer.add_string`
+                       into a local `buffer.ml`: any project owning a `result.ml`,
+                       `option.ml` or `queue.ml` had stdlib calls bound to it,
+                       with kind MUST. The map cannot be right in this branch —
+                       it is consulted precisely when identity says no. *)
+                    | `Absent -> `External
+                    | `Ambiguous | `Missing -> `Top
+                    | `One id -> `Id id
                 in
                 match by_unit with
-                | Some (Some id) -> incr n_resolved ; (Some id, display_name, kind)
-                | Some None ->
+                | `Id id -> incr n_resolved ; (Some id, display_name, kind)
+                | `External -> (None, display_name, kind)
+                | `Top ->
                     (* Unit known and INDEXED, name not in it. Terminal, per
                        above — but not a leaf.
 
@@ -493,7 +536,7 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
                        must not be trusted here. It costs precision only where
                        we genuinely cannot see the target. *)
                     (None, display_name, "MAY_TOP")
-                | None -> (
+                | `No_identity -> (
                     (* No unit identity to key on — a path rooted at a local
                        `let module`, or a unit this index never scanned. The
                        basename walk is the residue, and it is only ever
@@ -585,7 +628,7 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
                  itself: the lookup is the module id. *)
               match
                 resolve_units
-                  (List.map (fun u -> (u, "")) dep.target_unit)
+                  (List.map (List.map (fun u -> (u, ""))) dep.target_unit)
                   ~lookup:(fun p _ -> Hashtbl.find_opt mod_path_to_id p)
               with
               | `One id -> `Resolved id
@@ -596,8 +639,21 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
                  program's util.ml, because the two mangle alike and the
                  basename map keeps the last. The call path already treated
                  them as terminal; the dep path did not, and deps are what a
-                 path-shaped `forbid dep` rule reads. *)
+                 path-shaped `forbid dep` rule reads.
+
+                 [`Missing] is listed for the exhaustiveness the type demands,
+                 not because it fires: `unit_to_path` and `mod_path_to_id` are
+                 built from the same `SELECT … FROM modules`, so a path that
+                 came out of the first is always a key of the second. A review
+                 mutated this arm and no test moved — correctly, since the arm
+                 is unreachable rather than untested. *)
               | `Ambiguous | `Missing -> `Terminal
+              (* Identity checked and no reading names a unit we hold: the
+                 target module is outside the index. Terminal for the same
+                 reason as on the call path — the basename map is consulted
+                 exactly when identity has already said no, so it can only
+                 invent. `Fallback` is left for a dep carrying NO identity. *)
+              | `Absent when dep.target_unit <> [] -> `Terminal
               | `Absent -> `Fallback
             with
             | `Resolved id ->
@@ -699,13 +755,19 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
            nothing (type_usage feeds no soundness closure and no consumer in
            bin/ reads it), so NULL is the honest answer rather than ⊤. *)
         let by_unit =
-          match
-            resolve_units usage.type_unit ~lookup:(fun p n ->
-                Hashtbl.find_opt type_by_unit (p, n))
-          with
-          | `Absent -> None
-          | `Ambiguous | `Missing -> Some None
-          | `One id -> Some (Some id)
+          if usage.type_unit = [] then None
+          else
+            match
+              resolve_units usage.type_unit ~lookup:(fun p n ->
+                  Hashtbl.find_opt type_by_unit (p, n))
+            with
+            (* Terminal here too: `Sqlite3.Rc.t` bound to a local `rc.ml`
+               through the basename map is the same forgery as on the call
+               path, and a review reproduced it on an ordinary opam
+               dependency. *)
+            | `Absent -> Some None
+            | `Ambiguous | `Missing -> Some None
+            | `One id -> Some (Some id)
         in
         match by_unit with
         | Some (Some id) -> incr n_type_usages_resolved ; Some id
