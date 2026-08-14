@@ -19,15 +19,18 @@ CREATE TABLE IF NOT EXISTS modules (
     -- and resolving a qualified reference by basename picks one at random.
     -- NULL on a producer that does not know it (the flat/LSP path).
     unit_name TEXT DEFAULT NULL,
-    -- The dune LIBRARY (or executable stanza) the unit was compiled into, read
-    -- off the object directory in the .cmt path ('.x.objs' -> 'x'). Two units
-    -- whose names look nested ('a' and 'a__Inner') need not belong to the same
-    -- library: a (wrapped false) library holding a.ml sits beside a wrapped
-    -- library literally named a. Preferring the nested reading there binds a
-    -- MUST edge into a library the caller never links, so the resolver only
-    -- prefers one reading over another WITHIN one library.
+    -- The dune COMPILATION SCOPE the unit was built in: the object directory
+    -- relative to the build context, 'xlib/.x.objs' or 'tezt/tests/.main.eobjs'.
+    -- The directory and not the stanza NAME, because two (executable (name main))
+    -- stanzas share a name and must still be told apart; and both suffixes,
+    -- because executables use .eobjs and are the majority of this tree.
+    -- Two units whose names look nested ('a' and 'a__Inner') need not share a
+    -- scope: a (wrapped false) library holding a.ml sits beside a wrapped library
+    -- literally named a. Preferring the nested reading there binds a MUST edge
+    -- into a library the caller never links, so the resolver only prefers one
+    -- reading over another WITHIN one scope.
     -- NULL on a producer that does not know it (the flat/LSP path).
-    library_name TEXT DEFAULT NULL,
+    compile_scope TEXT DEFAULT NULL,
     quint_module_raw TEXT DEFAULT NULL,     -- body of {quint-module} comment section (Quint preamble)
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
@@ -140,7 +143,11 @@ CREATE TABLE IF NOT EXISTS comment_db_meta (
     value TEXT
 );
 
--- Module dependencies (open, include, alias, local_open)
+-- Module dependencies. The OCaml producer emits 'open', 'include' and 'alias'
+-- only; 'local_open' has never been written by any producer and no consumer
+-- branches on it. Kept in the CHECK so an existing database stays loadable,
+-- but two independent reviews measured it vacuous — treat it as reserved, not
+-- as a value you can expect to find.
 CREATE TABLE IF NOT EXISTS module_deps (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     source_module INTEGER NOT NULL REFERENCES modules(id) ON DELETE CASCADE,

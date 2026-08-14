@@ -1634,18 +1634,37 @@ let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
               let unit_name =
                 Some (Filename.remove_extension (Filename.basename path))
               in
-              (* The library, from the object directory two levels up:
-                 `…/xlib/.x.objs/byte/x__B.cmt` → `x`. Same reason as above —
-                 dune names it after the LIBRARY, not the directory. It is what
-                 tells `a` (a `(wrapped false)` unit of library `flat`) apart
-                 from `a__Inner` (a member of a library literally named `a`),
-                 which look like one nesting but are two libraries. *)
-              let library_name =
-                let objs = Filename.basename (Filename.dirname (Filename.dirname path)) in
-                if Filename.check_suffix objs ".objs" && String.length objs > 6
-                   && objs.[0] = '.'
-                then Some (String.sub objs 1 (String.length objs - 6))
-                else None
+              (* The compilation scope: the object directory two levels up, cut
+                 down to its path inside the build context —
+                 `…/_build/default/xlib/.x.objs/byte/x__B.cmt` → `xlib/.x.objs`.
+
+                 The DIRECTORY, not the stanza name: two `(executable (name
+                 main))` stanzas share the name `main` and must still be told
+                 apart. And both suffixes — executables use `.eobjs`, and they
+                 are 53 of the 98 object directories in this repository alone,
+                 so matching only `.objs` left the majority of the tree with no
+                 scope at all and silently disabled the check below for it.
+
+                 This is what tells `a` (a `(wrapped false)` unit of library
+                 `flat`) apart from `a__Inner` (a member of a library literally
+                 named `a`): one nesting to look at, two scopes in fact. *)
+              let compile_scope =
+                let objdir = Filename.dirname (Filename.dirname path) in
+                let base = Filename.basename objdir in
+                if
+                  not
+                    (Filename.check_suffix base ".objs"
+                    || Filename.check_suffix base ".eobjs")
+                then None
+                else
+                  let rec after_build = function
+                    | "_build" :: _context :: rest -> rest
+                    | _ :: tl -> after_build tl
+                    | [] -> []
+                  in
+                  match after_build (String.split_on_char '/' objdir) with
+                  | [] -> Some base
+                  | rest -> Some (String.concat "/" rest)
               in
               let module_id =
                 insert_module
@@ -1655,7 +1674,7 @@ let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
                   ~lines
                   ~has_mli
                   ~unit_name
-                  ~library_name
+                  ~compile_scope
                   ?quint_module_raw:(Option.map Option.some quint_module_raw)
                   ()
               in

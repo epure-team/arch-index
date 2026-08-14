@@ -450,6 +450,27 @@ let homonym_libs =
        vanished into the encoding reserved for `Stdlib.+` — `arch-rules`
        answering pass, `unreachable` answering UNREACHABLE, about a call written
        in plain sight. A supported dune feature that appeared in no fixture. *)
+    (* An `Absent` GROUP is dropped as "the wrong guess being unavailable". That
+       is only true if the candidate enumeration is complete: with the unit
+       boundary tried at one component only, group `gfoo__`'s true unit
+       `gfoo____A__B` was never offered, the group went Absent, was dropped, and
+       the surviving group resolved alone — a MUST into library `gfoo`, which
+       `gc` does not link. Incompleteness upstream turns a safe-looking filter
+       into a forgery, so this pins the two together. *)
+    ("g1/dune", "(library (name gfoo))\n");
+    ("g1/a.ml", "module B = struct let grun (n : int) : int = n + 111 end\n");
+    ("g2/dune", "(include_subdirs qualified)\n(library (name gfoo__))\n");
+    ("g2/a/b.ml", "let grun (n : int) : int = n + 222\n");
+    ("gc/dune", "(library (name gc) (libraries gfoo__))\n");
+    ("gc/caller.ml", "let group_absent (n : int) : int = Gfoo__.A.B.grun n\n");
+    (* `open Rootlib` — a dep whose path has NO component after the root, so it
+       resolves through the `rest = []` branch of unit_of_module_path. Nothing
+       asserted it: a review mutated that branch to return [] and the whole
+       suite stayed green, the CI golden stayed byte-identical, and `arch-rules`
+       stayed exit 0, while resolved module_deps over the whole repository fell
+       from 62/87 to 37/87. Deps are what a path-shaped `forbid dep` reads. *)
+    ("rdep/dune", "(library (name rdep) (libraries rootlib))\n");
+    ("rdep/user.ml", "open Rootlib\n\nlet via_root_open (x : int) : int = Api.run x\n");
     ("isq/dune", "(include_subdirs qualified)\n(library (name isq))\n");
     ("isq/sub/leaf.ml", "let deep_target (n : int) : int = n + 5\n");
     (* The ASYMMETRIC form of the wf/wfa pair above, and the one that lied. When
@@ -569,6 +590,18 @@ let register_cross_library_homonyms () =
                lone survivor across them is a choice, not a deduction"
             (binding ~caller:"nested_inc" ~like:"%Inner.g")
             "1 row(s) -> UNRESOLVED:MAY_TOP" ;
+          Batch.eq_string b
+            ~msg:
+              "an Absent group may be an incomplete enumeration, not an unavailable guess: with \
+               gfoo__'s real unit offered, the two groups disagree and this must be ⊤"
+            (binding ~caller:"group_absent" ~like:"%B.grun")
+            "1 row(s) -> UNRESOLVED:MAY_TOP" ;
+          Batch.eq_string_opt b
+            ~msg:"`open Rootlib` has no component after the root and must still resolve"
+            (Db.string_opt conn
+               "SELECT COALESCE(mt.path, 'UNRESOLVED') FROM module_deps d LEFT JOIN modules mt \
+                ON d.target_module = mt.id WHERE d.target_path = 'Rootlib'")
+            (Some "rootlib/rootlib.ml") ;
           (* `(include_subdirs qualified)`: the unit boundary falls TWO
              components in. Both the call and the dep must find it — an
              external leaf here is the false-silence lie, not honest ignorance,

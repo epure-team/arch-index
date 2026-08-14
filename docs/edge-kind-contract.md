@@ -104,7 +104,7 @@ Both backends also share one **precision** limitation (not a soundness issue): w
 a branch calls the same target (`if b then f () else f ()`), the call is `MAY_ENUMERATED`, not
 `MUST` — neither backend reasons about callee-level coverage across mutually-exclusive blocks.
 
-**Precision status (self-index, 13 270 call edges):** `MUST` ≈ 38%, `MAY_ENUMERATED` ≈ 53%,
+**Precision status (self-index, 13 285 call edges):** `MUST` ≈ 38%, `MAY_ENUMERATED` ≈ 53%,
 `MAY_TOP` ≈ 9% (down from ~79% pre-CFG). The ⊤ frontier holds genuinely unknowable targets
 (computed heads, parameter calls, dynamic roots, FFI anchors) **and** the unit-identity
 degradations above: unit-identity resolution moved ~170 edges out of unresolved-leaf encoding and
