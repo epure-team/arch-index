@@ -497,6 +497,28 @@ let homonym_libs =
        collided and ⊤ came from the collision rule, not from uniqueness — the
        assertion passed while the arm it claims to pin was dead. Caught by the
        mutation, which stayed green until the rename. *)
+    (* ASYMMETRIC within ONE scope — the cell neither guard covers. The scope
+       straddle needs two scopes; the multi-hit rule needs two hits. Here there
+       is one scope and one hit, and the reading that hits is WRONG.
+
+       `Yy.Inner.hit3` really reaches `rb3.hit3`, because `yy.ml`'s `Inner` is an
+       `include`. Unit `yy` is live and holds no row for `Inner.hit3`; unit
+       `yy__Inner` is a SEPARATE FILE that happens to hold `hit3`. In a
+       `(wrapped false)` library those two are unrelated modules, not a module
+       and its member — the deeper reading is only a member when the shallower
+       one is the library WRAPPER. Preferring it bound the call to a function
+       that never runs, while the one that does run was reported UNREACHABLE and
+       offered as dead code, with `escapes` empty. `origin/main` recorded an
+       honest leaf. Named `yy`, not `zz`: `fl2` above already owns those units,
+       and a collision would make this pass through the collision rule instead —
+       the vacuity trap that has bitten this fixture twice. *)
+    ("fl3/dune", "(library (name fl3) (wrapped false))\n");
+    ( "fl3/rb3.ml",
+      "let really_runs (n : int) : int = n + 1\nlet hit3 (n : int) : int = really_runs n\n" );
+    ("fl3/yy.ml", "module Inner = struct include Rb3 end\n");
+    ( "fl3/yy__Inner.ml",
+      "let never_runs (n : int) : int = n - 1\nlet hit3 (n : int) : int = never_runs n\n" );
+    ("fl3/c3.ml", "let boom (n : int) : int = Yy.Inner.hit3 n\n");
     ("fl2/dune", "(library (name fl2) (wrapped false))\n");
     ("fl2/zz.ml", "module Inner = struct let hit (n : int) : int = n + 3 end\n");
     ("fl2/zz__Inner.ml", "let hit (n : int) : int = n + 4\n");
@@ -690,6 +712,12 @@ let register_cross_library_homonyms () =
             (Db.string_opt conn
                "SELECT COALESCE(compile_scope, 'NULL') FROM modules WHERE path = 'x1/xcaller.ml'")
             (Some "x1/.main.eobjs") ;
+          Batch.eq_string b
+            ~msg:
+              "one scope, one hit, and the hit is the WRONG file: a deeper reading is a member \
+               only when the shallower one is the library wrapper"
+            (binding ~caller:"boom" ~like:"%Inner.hit3")
+            "1 row(s) -> UNRESOLVED:MAY_TOP" ;
           Batch.eq_string b
             ~msg:
               "two readings that both hit inside ONE scope must be ambiguous on uniqueness \

@@ -362,52 +362,87 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
      `include` (so it owns no row for the name) and the other's defines it, the
      filter leaves exactly one survivor and elects a different program. A review
      produced precisely that: `MUST` from e1 into e2, which never links it. The
-     collision is the answer — filtering by name only picks a winner. *)
+     collision is the answer — filtering by name only picks a winner.
+
+     Honest note on its coverage: a later review showed this rule is MASKED on
+     every input the suite and this repository produce. Two modules can share a
+     unit name only if they come from different stanzas, hence different object
+     directories, so the scope-straddle check below would refuse anyway;
+     removing this rule leaves the whole suite green. It stops being redundant
+     exactly when scopes are absent — a producer that does not know them, or a
+     build layout the scope derivation cannot read — and the review measured
+     that case: with every scope NULL, this rule alone keeps the e3/e4 pair
+     honest. Kept as the defence it is, documented as masked rather than
+     presented as independently pinned. *)
+  (* Is unit [u], living at [p], the WRAPPER module of its own stanza? Dune
+     names a wrapped library's wrapper after the library (`.rootlib.objs` holds
+     unit `rootlib`) and an executable's after nothing at all (`dune__exe`).
+     Only for a wrapper is `u ^ "__" ^ comp` genuinely a MEMBER of `u`. *)
+  let is_wrapper_unit u p =
+    match Hashtbl.find_opt path_to_scope p with
+    | None -> false
+    | Some scope ->
+        let base = Filename.basename scope in
+        if Filename.check_suffix base ".eobjs" then u = "dune__exe"
+        else if
+          Filename.check_suffix base ".objs"
+          && String.length base > 6
+          && base.[0] = '.'
+        then u = String.sub base 1 (String.length base - 6)
+        else false
+  in
   let resolve_group ~lookup (cands : (string * string) list) =
-    let unit_hit = ref false in
     let collided = ref false in
-    (* Compilation scopes the LIVE readings belong to. Preferring the reading
+    (* Every reading whose unit is indexed, with what it resolved to. *)
+    let live = ref [] in
+    List.iter
+      (fun (u, inner) ->
+        match Hashtbl.find_opt unit_to_path u with
+        | None -> ()
+        | Some paths ->
+            if List.compare_length_with paths 1 > 0 then collided := true
+            else
+              List.iter (fun p -> live := (u, p, lookup p inner) :: !live) paths)
+      cands ;
+    let live = !live in
+    let hits =
+      List.sort_uniq
+        compare
+        (List.filter_map (fun (_, p, o) -> Option.map (fun id -> (p, id)) o) live)
+    in
+    (* Compilation scopes the live readings belong to. Preferring the reading
        that resolves is sound only inside one scope: there, a wrong pick still
        lands in a library the caller demonstrably links. Across scopes it is the
-       original defect. `A.Inner.f` reads as unit `a` name `Inner.f` and as unit
-       `a__Inner` name `f`; when `a` is a `(wrapped false)` module of library
-       `flat` and `a__Inner` belongs to a library literally named `a`, those are
-       two scopes, and `flat` need not link `a`. With `flat/a.ml` an `include`,
-       only the foreign reading held the name — one survivor, and a review
-       measured `reaches` answering PATH EXISTS through a library the caller
-       never links, with `escapes` empty so the proof looked total. *)
-    let scopes = ref [] in
-    let hits =
-      List.concat_map
-        (fun (u, inner) ->
-          match Hashtbl.find_opt unit_to_path u with
-          | None -> []
-          | Some paths ->
-              unit_hit := true ;
-              List.iter
-                (fun p ->
-                  match Hashtbl.find_opt path_to_scope p with
-                  | Some s when not (List.mem s !scopes) -> scopes := s :: !scopes
-                  | _ -> ())
-                paths ;
-              if List.compare_length_with paths 1 > 0 then (
-                collided := true ;
-                [])
-              else
-                List.filter_map
-                  (fun p -> Option.map (fun id -> (p, id)) (lookup p inner))
-                  paths)
-        cands
-      |> List.sort_uniq compare
+       original defect — `a` a `(wrapped false)` module of library `flat` beside
+       `a__Inner` in a library literally named `a`, `flat` not linking `a`. *)
+    let scopes =
+      List.sort_uniq
+        compare
+        (List.filter_map (fun (_, p, _) -> Hashtbl.find_opt path_to_scope p) live)
     in
     if !collided then `Ambiguous
     else
       match hits with
       | [(_, id)] ->
-          (* One reading resolved. If the live readings straddle two scopes,
-             that single hit is a choice between them, not a deduction. *)
-          if List.compare_length_with !scopes 1 > 0 then `Ambiguous else `One id
-      | [] -> if !unit_hit then `Missing else `Absent
+          if List.compare_length_with scopes 1 > 0 then `Ambiguous
+          else if
+            (* One scope is not enough. A live reading that does NOT hold the
+               name defers to a deeper one only when it is the library WRAPPER,
+               because only then is the deeper unit a member of it rather than
+               an unrelated file. In a `(wrapped false)` library, `zz.ml` and
+               `zz__Inner.ml` are two independent modules: reading `Zz.Inner.hit`
+               as unit `zz__Inner` name `hit` bound a call into a function that
+               never runs, while the one that does run was simultaneously
+               reported UNREACHABLE and offered as dead code. `origin/main`
+               recorded an honest leaf there — a regression this grouping
+               introduced, inside one library, where the scope check cannot see
+               it. *)
+            List.exists
+              (fun (u, p, o) -> o = None && not (is_wrapper_unit u p))
+              live
+          then `Ambiguous
+          else `One id
+      | [] -> if live <> [] then `Missing else `Absent
       | _ -> `Ambiguous
   in
   (* Combine the root spellings. A group naming no indexed unit at all is not
