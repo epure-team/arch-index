@@ -1,3 +1,24 @@
+(** [compile_scope_of_cmt_path p] is the dune compilation scope (object
+    directory, relative to the build context) of the unit whose [.cmt] is at
+    [p], or [None] outside an object directory.  Exposed for testing: its
+    no-[_build] fallback is unreachable from any fixture built under [_build],
+    and the property that matters — DISTINCT scopes for distinct object
+    directories — is a rule about strings, not about an index.
+
+    {pre}
+    (none)
+
+    {post}
+    [None] iff [p] is not inside a [.objs]/[.eobjs] directory; otherwise a
+    string that differs whenever the object directories differ.
+
+    {violators}
+    (none)
+
+    {violates}
+    (none) *)
+val compile_scope_of_cmt_path : string -> string option
+
 (******************************************************************************)
 (*                                                                            *)
 (* Copyright (c) 2026 Epure Team                                              *)

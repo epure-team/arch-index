@@ -574,6 +574,42 @@ let path_to_module_name path =
    Stripping unconditionally maps two different libraries onto one key, which is
    the collision this change exists to remove, re-created by its own fix. Both
    spellings are offered; the resolver decides which names a real unit. *)
+(** [compile_scope_of_cmt_path p] is the dune COMPILATION SCOPE of the unit
+    whose .cmt lives at [p]: the object directory two levels up, cut down to its
+    path inside the build context —
+    [.../_build/default/xlib/.x.objs/byte/x__B.cmt] gives [xlib/.x.objs].
+
+    Exported ONLY so it can be tested. Inline inside [process_cmt] its corrected
+    branch was unreachable from any fixture: every tezt fixture builds under
+    [_build], so the no-[_build] fallback never ran and reverting the fix left
+    the whole suite green. A pure function is the right granularity for a rule
+    about strings.
+
+    Two properties, and the second is the one that was broken:
+
+    - a non-object directory yields [None] — nothing to scope;
+    - the result is DISTINCT for distinct object directories. Cutting to the
+      basename satisfies every other assertion in the suite while collapsing
+      [bin1/.main.eobjs] and [bin2/.main.eobjs] onto one string, which lets the
+      straddle check in the resolver elect across two programs. Under a build
+      directory not named [_build] — [dune build --build-dir], [DUNE_BUILD_DIR],
+      a relocated tree — that produced a ⊤-free forged proof. *)
+let compile_scope_of_cmt_path path =
+  let objdir = Filename.dirname (Filename.dirname path) in
+  let base = Filename.basename objdir in
+  if
+    not (Filename.check_suffix base ".objs" || Filename.check_suffix base ".eobjs")
+  then None
+  else
+    let rec after_build = function
+      | "_build" :: _context :: rest -> rest
+      | _ :: tl -> after_build tl
+      | [] -> []
+    in
+    match after_build (String.split_on_char '/' objdir) with
+    | [] -> Some objdir
+    | rest -> Some (String.concat "/" rest)
+
 let unit_roots root =
   let n = String.length root in
   let low = String.uncapitalize_ascii root in
@@ -1664,24 +1700,7 @@ let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
                  This is what tells `a` (a `(wrapped false)` unit of library
                  `flat`) apart from `a__Inner` (a member of a library literally
                  named `a`): one nesting to look at, two scopes in fact. *)
-              let compile_scope =
-                let objdir = Filename.dirname (Filename.dirname path) in
-                let base = Filename.basename objdir in
-                if
-                  not
-                    (Filename.check_suffix base ".objs"
-                    || Filename.check_suffix base ".eobjs")
-                then None
-                else
-                  let rec after_build = function
-                    | "_build" :: _context :: rest -> rest
-                    | _ :: tl -> after_build tl
-                    | [] -> []
-                  in
-                  match after_build (String.split_on_char '/' objdir) with
-                  | [] -> Some objdir
-                  | rest -> Some (String.concat "/" rest)
-              in
+              let compile_scope = compile_scope_of_cmt_path path in
               let module_id =
                 insert_module
                   db

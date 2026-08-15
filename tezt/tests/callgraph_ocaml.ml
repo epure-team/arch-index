@@ -465,12 +465,23 @@ let homonym_libs =
        while this shape forged `MUST` from x1 into x2. It is the only case in
        this fixture where the scope is the sole separator: e1/e2 and e3/e4 are
        decided by the collided-key rule, which never consults the scope, and
-       wf/xflat/al are libraries in `.objs`. *)
-    ("x1/dune", "(executable (name main) (modules main base aa caller))\n");
+       wf/xflat/al are libraries in `.objs`.
+
+       Named `xcaller`, not `caller`: `e1/caller.ml` above is already
+       `dune__exe__Caller`, and a second one would be an accidental collided
+       key — the vacuity trap that has bitten this fixture twice.
+
+       WARNING for whoever fixes lot 0-bis (generated sources dropped
+       silently): dune also emits a group module `dune__exe__Aa` for x2's
+       `aa/` directory under `(include_subdirs qualified)`. It is absent from
+       `modules` only because its source is generated. Index it, and
+       `dune__exe__Aa` becomes a collided key, the collision rule fires first,
+       and this assertion goes vacuous without a word. Re-check it then. *)
+    ("x1/dune", "(executable (name main) (modules main base aa xcaller))\n");
     ("x1/base.ml", "let f (n : int) : int = n + 1\n");
     ("x1/aa.ml", "module Inner = struct include Base end\n");
-    ("x1/caller.ml", "let cross_exe (n : int) : int = Aa.Inner.f n\n");
-    ("x1/main.ml", "let () = ignore (Caller.cross_exe 1)\n");
+    ("x1/xcaller.ml", "let cross_exe (n : int) : int = Aa.Inner.f n\n");
+    ("x1/main.ml", "let () = ignore (Xcaller.cross_exe 1)\n");
     ("x2/dune", "(include_subdirs qualified)\n(executable (name main))\n");
     ("x2/aa/inner.ml", "let f (n : int) : int = n - 1\n");
     ("x2/main.ml", "let () = ignore (Aa.Inner.f 1)\n");
@@ -524,6 +535,44 @@ let homonym_libs =
     ( "isqc/user.ml",
       "open Isq.Sub.Leaf\n\nlet via_subdir (n : int) : int = deep_target n\n" );
   ]
+
+(* The compilation-scope derivation, tested as the pure string rule it is.
+   Every fixture in this file builds under `_build`, so the no-`_build` fallback
+   is unreachable from all of them: an adversarial review reverted that branch
+   and the whole suite stayed green while a relocated build directory produced a
+   ⊤-free forged proof again. The property under test is DISTINCTNESS, which no
+   behavioural assertion here can reach. *)
+let register_compile_scope () =
+  Test.register ~__FILE__
+    ~title:"cmt: the compilation scope stays distinct outside _build"
+    ~tags:["cmt"; "resolve"; "scope"]
+  @@ fun () ->
+  let scope p = Arch_index.compile_scope_of_cmt_path p in
+  Batch.run (fun b ->
+      Batch.eq_string_opt b
+        ~msg:"under _build the scope is the object directory relative to the context"
+        (scope "/w/proj/_build/default/xlib/.x.objs/byte/x__B.cmt")
+        (Some "xlib/.x.objs") ;
+      Batch.eq_string_opt b ~msg:"executables scope the same way, through .eobjs"
+        (scope "/w/proj/_build/default/tezt/tests/.main.eobjs/byte/dune__exe__Main.cmt")
+        (Some "tezt/tests/.main.eobjs") ;
+      (* The regression. Both stanzas are named `main`, so the basename is the
+         SAME string for both; only the directory tells them apart, and the
+         resolver's straddle check compares these values for equality. *)
+      let a = scope "/w/proj/out/default/bin1/.main.eobjs/byte/dune__exe__Aa.cmt" in
+      let c = scope "/w/proj/out/default/bin2/.main.eobjs/byte/dune__exe__Aa.cmt" in
+      Batch.eq_string_opt b
+        ~msg:
+          "with no _build component two same-named stanzas must NOT collapse onto one scope, \
+           and neither may be dropped — None collapses them just as badly"
+        (Some
+           (Printf.sprintf "distinct=%b both-present=%b"
+              (a <> c)
+              (a <> None && c <> None)))
+        (Some "distinct=true both-present=true") ;
+      Batch.eq_string_opt b ~msg:"a path outside any object directory has no scope"
+        (scope "/w/proj/src/foo.cmt") None) ;
+  Lwt.return_unit
 
 let register_cross_library_homonyms () =
   Test.register ~__FILE__
@@ -639,7 +688,7 @@ let register_cross_library_homonyms () =
           Batch.eq_string_opt b
             ~msg:"compile_scope keeps the object DIRECTORY, not just its basename"
             (Db.string_opt conn
-               "SELECT COALESCE(compile_scope, 'NULL') FROM modules WHERE path = 'x1/caller.ml'")
+               "SELECT COALESCE(compile_scope, 'NULL') FROM modules WHERE path = 'x1/xcaller.ml'")
             (Some "x1/.main.eobjs") ;
           Batch.eq_string b
             ~msg:

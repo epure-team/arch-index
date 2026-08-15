@@ -102,6 +102,14 @@ val collect_exposed :
 val extract_signatures_from_cmti_files :
   project_dir:string -> string list -> (string * string * string) list
 
+(** [compile_scope_of_cmt_path p] is the dune compilation scope (object
+    directory, relative to the build context) of the unit whose [.cmt] is at
+    [p], or [None] if [p] is not inside an object directory.  Exported for
+    testing: the no-[_build] fallback is unreachable from any fixture built
+    under [_build], and the property that matters — DISTINCT scopes for
+    distinct object directories — is a rule about strings. *)
+val compile_scope_of_cmt_path : string -> string option
+
 (** Collected module dependency information. *)
 type pending_dep = {
   source_module : string;

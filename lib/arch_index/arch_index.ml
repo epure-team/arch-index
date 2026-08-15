@@ -20,6 +20,13 @@ open Arch_index_cmt
 
 let count_code_lines = Arch_index_line_counter.run_count_code_lines
 
+(* Re-exported for the test suite only. `Arch_index_cmt` is a private module,
+   and this rule cannot be reached through the public entry points: it is the
+   no-`_build` fallback of the compilation-scope derivation, and every fixture
+   builds under `_build`. Reverting it left the whole suite green while a
+   relocated build directory produced a forged proof again. *)
+let compile_scope_of_cmt_path = Arch_index_cmt.compile_scope_of_cmt_path
+
 (* -------------------------------------------------------------------------- *)
 (* Preserve hand-written intent fields across re-index                        *)
 (* -------------------------------------------------------------------------- *)
