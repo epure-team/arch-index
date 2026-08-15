@@ -457,6 +457,39 @@ let homonym_libs =
        the surviving group resolved alone — a MUST into library `gfoo`, which
        `gc` does not link. Incompleteness upstream turns a safe-looking filter
        into a forgery, so this pins the two together. *)
+    (* Two EXECUTABLE stanzas, told apart by nothing but the compilation scope.
+       Executables live in `.eobjs`, libraries in `.objs`, and the commit that
+       introduced the scope column matched only the latter — leaving every
+       executable module unscoped and the straddle check below a no-op for most
+       of a real tree. Deleting `.eobjs` from that test left all 70 tests green
+       while this shape forged `MUST` from x1 into x2. It is the only case in
+       this fixture where the scope is the sole separator: e1/e2 and e3/e4 are
+       decided by the collided-key rule, which never consults the scope, and
+       wf/xflat/al are libraries in `.objs`. *)
+    ("x1/dune", "(executable (name main) (modules main base aa caller))\n");
+    ("x1/base.ml", "let f (n : int) : int = n + 1\n");
+    ("x1/aa.ml", "module Inner = struct include Base end\n");
+    ("x1/caller.ml", "let cross_exe (n : int) : int = Aa.Inner.f n\n");
+    ("x1/main.ml", "let () = ignore (Caller.cross_exe 1)\n");
+    ("x2/dune", "(include_subdirs qualified)\n(executable (name main))\n");
+    ("x2/aa/inner.ml", "let f (n : int) : int = n - 1\n");
+    ("x2/main.ml", "let () = ignore (Aa.Inner.f 1)\n");
+    (* Two readings that BOTH hit, inside ONE scope. Without it the "several
+       readings resolve" arm is pinned only through the straddle guard: electing
+       the first hit while leaving the guard in place left the resolve test
+       green. Here `zz.ml` holds a nested `Inner.hit` and `zz__Inner.ml` holds
+       `hit`, both in the same `(wrapped false)` library, so the guard cannot
+       help and uniqueness has to do the work.
+
+       Named `zz`, not `a`: with `a` this fixture was VACUOUS. Units `a` and
+       `a__Inner` already exist here (wf/a.ml and wfa/inner.ml), so the key
+       collided and ⊤ came from the collision rule, not from uniqueness — the
+       assertion passed while the arm it claims to pin was dead. Caught by the
+       mutation, which stayed green until the rename. *)
+    ("fl2/dune", "(library (name fl2) (wrapped false))\n");
+    ("fl2/zz.ml", "module Inner = struct let hit (n : int) : int = n + 3 end\n");
+    ("fl2/zz__Inner.ml", "let hit (n : int) : int = n + 4\n");
+    ("fl2/b3.ml", "let two_hits (n : int) : int = Zz.Inner.hit n\n");
     ("g1/dune", "(library (name gfoo))\n");
     ("g1/a.ml", "module B = struct let grun (n : int) : int = n + 111 end\n");
     ("g2/dune", "(include_subdirs qualified)\n(library (name gfoo__))\n");
@@ -589,6 +622,30 @@ let register_cross_library_homonyms () =
               "unit `aa` (library xflat) and unit `aa__Inner` (library aa) are TWO libraries: a \
                lone survivor across them is a choice, not a deduction"
             (binding ~caller:"nested_inc" ~like:"%Inner.g")
+            "1 row(s) -> UNRESOLVED:MAY_TOP" ;
+          Batch.eq_string b
+            ~msg:
+              "two executable stanzas are separated by the compilation scope alone (.eobjs, not \
+               .objs) — without it this forges MUST from one program into another"
+            (binding ~caller:"cross_exe" ~like:"%Inner.f")
+            "1 row(s) -> UNRESOLVED:MAY_TOP" ;
+          (* The scope VALUE, not merely its presence. Every assertion above is
+             satisfied by "some scope" versus "no scope", so reducing the scope
+             to the objdir BASENAME left them all green — and a basename is
+             exactly what collapses `bin1/.main.eobjs` and `bin2/.main.eobjs`
+             into one, which a review then turned into a ⊤-free forged proof
+             under a relocated build directory. The stored value must keep the
+             directory. *)
+          Batch.eq_string_opt b
+            ~msg:"compile_scope keeps the object DIRECTORY, not just its basename"
+            (Db.string_opt conn
+               "SELECT COALESCE(compile_scope, 'NULL') FROM modules WHERE path = 'x1/caller.ml'")
+            (Some "x1/.main.eobjs") ;
+          Batch.eq_string b
+            ~msg:
+              "two readings that both hit inside ONE scope must be ambiguous on uniqueness \
+               alone — the straddle guard cannot separate them"
+            (binding ~caller:"two_hits" ~like:"%Inner.hit")
             "1 row(s) -> UNRESOLVED:MAY_TOP" ;
           Batch.eq_string b
             ~msg:

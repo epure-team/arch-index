@@ -1641,9 +1641,25 @@ let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
                  The DIRECTORY, not the stanza name: two `(executable (name
                  main))` stanzas share the name `main` and must still be told
                  apart. And both suffixes — executables use `.eobjs`, and they
-                 are 53 of the 98 object directories in this repository alone,
-                 so matching only `.objs` left the majority of the tree with no
-                 scope at all and silently disabled the check below for it.
+                 are most of the object directories in this repository — 25 of
+                 33 after `dune build && dune build @check`, fewer if inline
+                 tests are not built, which is why the command matters more than
+                 the number: `find _build/default -name '*.cmt' | sed
+                 's|/byte/[^/]*$||' | sort -u`. Matching only `.objs` left most
+                 of the tree with no scope at all and silently disabled the
+                 check below for it.
+
+                 When there is no `_build` component the WHOLE objdir path is
+                 kept, never just its basename. `--build-dir` is a required
+                 user-facing flag with no `_build` validation, and
+                 `DUNE_BUILD_DIR` relocates the tree; falling back to the
+                 basename collapses `bin1/.main.eobjs` and `bin2/.main.eobjs`
+                 onto one string and hands the straddle check below a single
+                 scope — re-forging, under a merely relocated build, the
+                 cross-program MUST edge this column exists to stop. Returning
+                 [None] is no better: a missing scope contributes nothing to the
+                 straddle set, so the check passes just the same. The scope must
+                 stay DISTINCT, which is the one property the fallback owes.
 
                  This is what tells `a` (a `(wrapped false)` unit of library
                  `flat`) apart from `a__Inner` (a member of a library literally
@@ -1663,7 +1679,7 @@ let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
                     | [] -> []
                   in
                   match after_build (String.split_on_char '/' objdir) with
-                  | [] -> Some base
+                  | [] -> Some objdir
                   | rest -> Some (String.concat "/" rest)
               in
               let module_id =
