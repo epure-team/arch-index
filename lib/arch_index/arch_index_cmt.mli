@@ -194,9 +194,25 @@ type pending_type_usage = {
   position : int option;
 }
 
+(** A compilation unit's persistent identity, as an external qualified
+    reference's [Path.t] root names it — [Wrapped (library, local_name)] for
+    a module inside a wrapped dune library ([library] is the library's public
+    wrapper name), or [Standalone modname] when the module carries its own
+    name as its persistent identity (unwrapped library, or a library's sole
+    "main module"). See [module_identity_of_modname]. *)
+type module_identity = Wrapped of string * string | Standalone of string
+
+(** [module_identity_of_modname modname] splits a dune-mangled [cmt_modname]
+    on its first "__" — dune's wrapping separator — into [Wrapped (lib,
+    local)], or returns [Standalone modname] when no "__" is present. *)
+val module_identity_of_modname : string -> module_identity
+
 (** Process a .cmt file: index modules, functions, types.
-    Returns (pending_calls, pending_deps, pending_type_usages) for later resolution.
-    
+    Returns (pending_calls, pending_deps, pending_type_usages,
+    module_identity) for later resolution, where [module_identity] is
+    [Some (rel_path, identity)] identifying this file's own persistent
+    identity for the caller's project-wide library-scoped resolution maps.
+
     @param project_root Project root directory for relativizing paths
     @param source_path_of_cmt Function to resolve source path from cmt info
     @param count_code_lines Function to count code lines in a source file
@@ -205,7 +221,8 @@ type pending_type_usage = {
     The [.cmt] file path must be readable and valid.
 
     {post}
-    Returns a triple of pending call edges, module dependencies, and type usages for later resolution.
+    Returns pending call edges, module dependencies, type usages, and this
+    file's module identity, for later resolution.
 
     {violators}
     (none)
@@ -226,4 +243,7 @@ val process_cmt :
   stmt_fld:Sqlite3.stmt ->
   stmt_ctor:Sqlite3.stmt ->
   string ->
-  pending_call list * pending_dep list * pending_type_usage list
+  pending_call list
+  * pending_dep list
+  * pending_type_usage list
+  * (string * module_identity) option

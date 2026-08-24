@@ -220,10 +220,15 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
   let all_pending_calls = ref [] in
   let all_pending_deps = ref [] in
   let all_pending_type_usages = ref [] in
+  (* One (rel_path, module_identity) entry per successfully processed file —
+     the project-wide source of truth for "which dune library owns this
+     module", built without any ambiguous, order-dependent SQL query.  See
+     [Arch_index_cmt.module_identity]. *)
+  let all_module_identities = ref [] in
   List.iter
     (fun path ->
       try
-        let calls, deps, type_usages =
+        let calls, deps, type_usages, module_identity =
           process_cmt
             db
             ~project_root:!project_root
@@ -244,7 +249,10 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
         all_pending_calls := List.rev_append calls !all_pending_calls ;
         all_pending_deps := List.rev_append deps !all_pending_deps ;
         all_pending_type_usages :=
-          List.rev_append type_usages !all_pending_type_usages
+          List.rev_append type_usages !all_pending_type_usages ;
+        (match module_identity with
+        | Some entry -> all_module_identities := entry :: !all_module_identities
+        | None -> ())
       with exn ->
         Arch_io.eprintf
           "Warning: failed to process %s: %s\n"
@@ -252,6 +260,114 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
           (Printexc.to_string exn))
     cmt_files ;
   exec_exn db "COMMIT" ;
+
+  (* Library-scoped resolution maps, shared by all three resolution phases
+     below (calls, module deps, type usages).  Built once, from the
+     project-wide module identities collected above — never from a
+     [SELECT ... FROM modules] with no [ORDER BY], and never keyed by bare
+     file basename, which is what let a qualified reference into one dune
+     library silently resolve into an unrelated library's same-named file
+     (see specs/sound-qualified-name-resolution.md).
+
+     [wrapped_library_members]: library wrapper name -> (capitalised module
+     basename -> module path), scoped to exactly that library's own modules.
+     dune enforces a unique module namespace within one library, so this
+     table cannot itself collide.
+
+     [standalone_modname_to_paths]: a module's own persistent name -> every
+     module path that answers to it.  Most of the time this is exactly one
+     module (an unwrapped library, or a library's "main module").  When two
+     unrelated unwrapped modules across different libraries happen to share
+     a name, the list has more than one entry and resolution deliberately
+     refuses to pick one — that is the honest-degradation path (P2), not a
+     single-candidate guess (F2). *)
+  let wrapped_library_members : (string, (string, string) Hashtbl.t) Hashtbl.t
+      =
+    Hashtbl.create 32
+  in
+  let standalone_modname_to_paths : (string, string list) Hashtbl.t =
+    Hashtbl.create 32
+  in
+  List.iter
+    (fun (rel_path, identity) ->
+      match identity with
+      | Arch_index_cmt.Wrapped (lib, local) ->
+          let tbl =
+            match Hashtbl.find_opt wrapped_library_members lib with
+            | Some tbl -> tbl
+            | None ->
+                let tbl = Hashtbl.create 16 in
+                Hashtbl.add wrapped_library_members lib tbl ;
+                tbl
+          in
+          Hashtbl.replace tbl (String.capitalize_ascii local) rel_path
+      | Arch_index_cmt.Standalone modname ->
+          let existing =
+            Option.value
+              ~default:[]
+              (Hashtbl.find_opt standalone_modname_to_paths modname)
+          in
+          Hashtbl.replace
+            standalone_modname_to_paths
+            modname
+            (rel_path :: existing))
+    !all_module_identities ;
+  (* dune's wrapping scheme names the library wrapper after the library
+     itself (e.g. [Liba]) UNLESS one of the library's own modules already
+     has that exact name (a library's "main module", e.g. library [efxtest]
+     with a module [efxtest.ml]) — a real compiled unit already owns the
+     plain name, so the wrapper is disambiguated to [Lib__] (observed on
+     dune 3.x: the wrapper module for library [efxtest] there is literally
+     [Efxtest__], not [Efxtest]).  [wrapped_library_members] is keyed from
+     splitting the SUBMODULES' own mangled names (e.g. "Efxtest__Efxdeep"),
+     which yields the plain library name regardless of this case — so any
+     library name that collides with a standalone module name it also owns
+     is re-keyed here to the "__"-suffixed spelling external references
+     actually use, and the plain spelling is left exclusively for
+     [standalone_modname_to_paths] to resolve the main module itself. *)
+  Hashtbl.iter
+    (fun lib _ ->
+      if Hashtbl.mem standalone_modname_to_paths lib then (
+        match Hashtbl.find_opt wrapped_library_members lib with
+        | Some tbl ->
+            Hashtbl.remove wrapped_library_members lib ;
+            Hashtbl.replace wrapped_library_members (lib ^ "__") tbl
+        | None -> ()))
+    (Hashtbl.copy wrapped_library_members) ;
+  (* Resolve a dotted, persistently-rooted qualified name (as produced by
+     [Path.name] — e.g. ["Liba.Api"] or ["Qual.G1.B"]) to the exact module
+     file it names, scoped to the library the root positively identifies.
+     Returns [Some (mod_path, deeper)] where [deeper] is whatever remains
+     after the file itself — nested-module qualification within that one
+     file, or [] when the reference names the file directly.  Returns [None]
+     when the root names no known project library (a genuine external
+     dependency — Stdlib, a vendored path, an unindexed unit) or when it
+     names more than one candidate (the honest-degradation case above): in
+     neither case does this function fall back to guessing by basename. *)
+  let resolve_module_root segments =
+    match segments with
+    | [] -> None
+    | root :: rest -> (
+        match Hashtbl.find_opt wrapped_library_members root with
+        | Some basename_tbl -> (
+            match rest with
+            | [] -> None (* the wrapper itself defines no functions/types *)
+            | file_seg :: deeper -> (
+                match
+                  Hashtbl.find_opt
+                    basename_tbl
+                    (String.capitalize_ascii file_seg)
+                with
+                | Some mod_path -> Some (mod_path, deeper)
+                | None -> None))
+        | None -> (
+            match rest with
+            | [] -> (
+                match Hashtbl.find_opt standalone_modname_to_paths root with
+                | Some [mod_path] -> Some (mod_path, [])
+                | Some _ | None -> None)
+            | _ :: _ -> None))
+  in
 
   (* Resolve and insert calls *)
   Arch_io.printf
@@ -272,16 +388,6 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
          Hashtbl.replace fn_lookup (mod_path, fn_name) fn_id)
        "SELECT f.id, f.name, m.path FROM functions f JOIN modules m ON \
         f.module_id = m.id") ;
-  let mod_name_to_path = Hashtbl.create 128 in
-  ignore
-    (Sqlite3.exec_not_null
-       db
-       ~cb:(fun row _h ->
-         let path = row.(0) in
-         let base = Filename.basename path in
-         let name = Filename.remove_extension base |> String.capitalize_ascii in
-         Hashtbl.replace mod_name_to_path name path)
-       "SELECT path FROM modules") ;
   List.iter
     (fun (call : pending_call) ->
       match
@@ -307,34 +413,27 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
           let resolve_local name =
             Hashtbl.find_opt fn_lookup (call.caller_module, name)
           in
-          (* [Fx3.G1.B.f] can be read several ways: compilation unit [Fx3]
-             holding [G1.B.f], unit [G1] holding [B.f], or unit [B] holding
-             [f].  Keeping only the last component -- the previous behaviour --
-             picks the last reading, which binds to an unrelated [b.ml] that
-             happens to define an [f] whenever one exists: a confident MUST edge
-             to the wrong function.
-
-             Nested definitions are indexed under their path, so the readings
-             are tried from the most qualified function name to the least, and
-             the first that resolves wins.  A name that resolves under no
-             reading stays unresolved rather than being forced onto a homonym. *)
+          (* [Liba.Api.run]'s root is the PERSISTENT identity dune's wrapping
+             gives an external qualified reference — the owning library's
+             wrapper name (or the module's own name when unwrapped) — never a
+             bare basename.  [resolve_module_root] resolves that root within
+             the project-wide library-scoped maps built above; whatever
+             remains after the file itself is a nested-module qualification
+             looked up directly against that ONE file's functions, never
+             against every file in the project sharing a basename.  A root
+             that names no known library, or a standalone name shared by more
+             than one unrelated module, resolves to [None] here — the call
+             site below then falls back to its existing "unresolved external
+             leaf" treatment, exactly as it already does for e.g. Stdlib
+             calls.  There is deliberately no candidate-narrowing step that
+             could turn "no positively identified owner" into a guess (F2). *)
           let resolve_qualified mod_name name =
-            let parts = String.split_on_char '.' mod_name in
-            let rec try_from prefix rest =
-              match rest with
-              | [] -> None
-              | unit_name :: deeper -> (
-                  let qualified_name =
-                    String.concat "." (deeper @ [name])
-                  in
-                  match Hashtbl.find_opt mod_name_to_path unit_name with
-                  | Some mod_path -> (
-                      match Hashtbl.find_opt fn_lookup (mod_path, qualified_name) with
-                      | Some _ as found -> found
-                      | None -> try_from (prefix @ [unit_name]) deeper)
-                  | None -> try_from (prefix @ [unit_name]) deeper)
-            in
-            try_from [] parts
+            let segments = String.split_on_char '.' mod_name in
+            match resolve_module_root segments with
+            | None -> None
+            | Some (mod_path, deeper) ->
+                let qualified_name = String.concat "." (deeper @ [name]) in
+                Hashtbl.find_opt fn_lookup (mod_path, qualified_name)
           in
           let demoted = call.cond || call.partial in
           let callee_id, callee_display_name, kind =
@@ -425,10 +524,7 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
        ~cb:(fun row _h ->
          let mod_id = int_of_string row.(0) in
          let path = row.(1) in
-         Hashtbl.replace mod_path_to_id path mod_id ;
-         let base = Filename.basename path in
-         let name = Filename.remove_extension base |> String.capitalize_ascii in
-         Hashtbl.replace mod_name_to_path name path)
+         Hashtbl.replace mod_path_to_id path mod_id)
        "SELECT id, path FROM modules") ;
   List.iter
     (fun (dep : pending_dep) ->
@@ -441,11 +537,16 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
                 incr n_deps_resolved ;
                 Some id
             | None -> (
-                let parts = String.split_on_char '.' dep.target_path in
-                let name = List.hd (List.rev parts) in
-                match Hashtbl.find_opt mod_name_to_path name with
-                | Some path -> (
-                    match Hashtbl.find_opt mod_path_to_id path with
+                (* [dep.target_path] is a [Path.name]-shaped dotted string
+                   (e.g. "Liba.Api" or "Stdlib.List") — the same
+                   persistently-rooted shape a call's qualified name has, so
+                   the same library-scoped resolution applies: a homonymous
+                   [open]/[include]/module-alias target must never be
+                   attributed to the wrong library's same-named file. *)
+                let segments = String.split_on_char '.' dep.target_path in
+                match resolve_module_root segments with
+                | Some (mod_path, _deeper) -> (
+                    match Hashtbl.find_opt mod_path_to_id mod_path with
                     | Some id ->
                         incr n_deps_resolved ;
                         Some id
@@ -476,6 +577,11 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
   exec_exn db "BEGIN TRANSACTION" ;
   let n_type_usages = ref 0 in
   let n_type_usages_resolved = ref 0 in
+  (* Keyed by (module path, type name AS STORED — dotted nested-module
+     qualification within that one file, e.g. "Nested.story"), mirroring
+     [fn_lookup] above.  This key is exact and file-scoped, so — unlike the
+     capitalised-basename table it replaces — it cannot collide across two
+     libraries that each happen to have a same-named file. *)
   let type_lookup = Hashtbl.create 256 in
   ignore
     (Sqlite3.exec_not_null
@@ -484,40 +590,34 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
          let type_id = int_of_string row.(0) in
          let type_name = row.(1) in
          let mod_path = row.(2) in
-         let base = Filename.basename mod_path in
-         let mod_name =
-           Filename.remove_extension base |> String.capitalize_ascii
-         in
-         Hashtbl.replace type_lookup (mod_name, type_name) type_id)
+         Hashtbl.replace type_lookup (mod_path, type_name) type_id)
        "SELECT t.id, t.name, m.path FROM types t JOIN modules m ON t.module_id \
         = m.id") ;
   List.iter
     (fun (usage : pending_type_usage) ->
-      let mod_name, type_name =
-        match String.rindex_opt usage.type_path '.' with
-        | Some idx ->
-            let prefix = String.sub usage.type_path 0 idx in
-            let name =
-              String.sub
-                usage.type_path
-                (idx + 1)
-                (String.length usage.type_path - idx - 1)
-            in
-            let mod_name =
-              match String.rindex_opt prefix '.' with
-              | Some i ->
-                  String.sub prefix (i + 1) (String.length prefix - i - 1)
-              | None -> prefix
-            in
-            (mod_name, name)
-        | None -> ("", usage.type_path)
-      in
+      (* [usage.type_path] is a [Path.name]-shaped dotted string, exactly like
+         a call's [module . name] pair — split off the trailing type name and
+         resolve the remaining module path the same library-scoped way,
+         rather than keeping only the last two components (which is the same
+         "last component wins" collision this whole fix removes, just for
+         types instead of calls). *)
       let type_id =
-        match Hashtbl.find_opt type_lookup (mod_name, type_name) with
-        | Some id ->
-            incr n_type_usages_resolved ;
-            Some id
-        | None -> None
+        match List.rev (String.split_on_char '.' usage.type_path) with
+        | [] -> None (* unreachable: split_on_char always yields >= 1 part *)
+        | type_name :: rev_mod_segments -> (
+            match resolve_module_root (List.rev rev_mod_segments) with
+            | None -> None
+            | Some (mod_path, deeper) -> (
+                let qualified_type_name =
+                  String.concat "." (deeper @ [type_name])
+                in
+                match
+                  Hashtbl.find_opt type_lookup (mod_path, qualified_type_name)
+                with
+                | Some id ->
+                    incr n_type_usages_resolved ;
+                    Some id
+                | None -> None))
       in
       insert_type_usage
         db

@@ -58,6 +58,7 @@ let () =
   Lsp_languages.register_rust () ;
   Lsp_languages.register_typescript () ;
   Callgraph_nested.register () ;
+  Multi_lib_qualified.register () ;
   Impact.register_granularity () ;
   Impact.register_contract () ;
   Impact.register_no_spans () ;

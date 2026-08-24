@@ -509,6 +509,44 @@ let path_to_module_name path =
       (Some (module_path prefix), name)
   | Path.Papply _ | Path.Pextra_ty _ -> (None, Path.name path)
 
+(** A compilation unit's identity as seen by an external, qualified reference.
+
+    dune's wrapping scheme means every cross-file reference in the Typedtree
+    is rooted at a PERSISTENT [Path.Pident] whose name is either:
+    - the library's public wrapper module (e.g. [Liba] for library [liba]),
+      when the unit is one of several modules in a {i wrapped} library — dune
+      compiles [liba/api.ml] as unit [Liba__Api], so [modname] contains the
+      "__" separator dune reserves for this purpose; or
+    - the module's own name directly, when the library is unwrapped or has a
+      single "main module" matching the library name (dune does not mangle
+      this case: [modname] has no "__").
+
+    This is the persistent identity the raw [Path.t] carries but
+    [path_to_module_name] (correctly) does not itself resolve to a specific
+    file — resolving [Wrapped (lib, _)] or [Standalone _] to a file requires
+    knowing every module's identity project-wide, which the caller (this
+    module is invoked once per file) does not have. That resolution is the
+    responsibility of [arch_index.ml]'s call/dep/type-usage resolution phase,
+    which sees every module and can build the project-wide mapping this type
+    is designed to feed. *)
+type module_identity = Wrapped of string * string | Standalone of string
+
+(** Split a dune-mangled [cmt_modname] on its first "__" occurrence, dune's
+    wrapping separator. Absence of "__" means the module carries its own
+    name as its persistent external identity (unwrapped library, or a
+    library's sole "main module"). *)
+let module_identity_of_modname modname =
+  let len = String.length modname in
+  let rec find i =
+    if i + 1 >= len then None
+    else if modname.[i] = '_' && modname.[i + 1] = '_' then Some i
+    else find (i + 1)
+  in
+  match find 0 with
+  | Some i ->
+      Wrapped (String.sub modname 0 i, String.sub modname (i + 2) (len - i - 2))
+  | None -> Standalone modname
+
 (* -------------------------------------------------------------------------- *)
 (* Mutability metrics (R8)                                                    *)
 (* -------------------------------------------------------------------------- *)
@@ -1389,8 +1427,13 @@ let collect_calls_from_expr ~src_path ~caller_module ~caller_name
 (* -------------------------------------------------------------------------- *)
 
 (** Process a .cmt file: index modules, functions, types.
-    Returns (pending_calls, pending_deps, pending_type_usages) for later resolution.
-    
+    Returns (pending_calls, pending_deps, pending_type_usages, module_identity)
+    for later resolution. [module_identity] is [Some (rel_path, identity)] —
+    this file's own persistent identity (see [module_identity]) — so the
+    caller can build the project-wide library-scoped maps that
+    [Arch_index]'s call/dep/type-usage resolution phase needs to resolve a
+    qualified reference without guessing across a homonym.
+
     @param project_root Project root directory for relativizing paths
     @param source_path_of_cmt Function to resolve source path from cmt info
     @param count_code_lines Function to count code lines in a source file *)
@@ -1398,14 +1441,14 @@ let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
     ~exposed_tbl ~doc_tbl ~module_quint_tbl ~stmt_mod ~stmt_fn ~stmt_ty
     ~stmt_fld ~stmt_ctor path =
   match Cmt_format.read path with
-  | _, None -> ([], [], [])
+  | _, None -> ([], [], [], None)
   | _, Some info -> (
       (* Only process Implementation (not Interface -- we use .cmti for
        exposed-name detection only) *)
       match info.cmt_annots with
       | Implementation structure -> (
           match source_path_of_cmt info with
-          | None -> ([], [], [])
+          | None -> ([], [], [], None)
           | Some src_path ->
               let modname = info.cmt_modname in
               (* Store path relative to project root if possible *)
@@ -1829,5 +1872,8 @@ let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
                   | _ -> ()
               in
               iter_structure_items structure ~f:process_item ;
-              (!pending_calls, !pending_deps, !pending_type_usages))
-      | _ -> ([], [], []))
+              ( !pending_calls,
+                !pending_deps,
+                !pending_type_usages,
+                Some (rel_path, module_identity_of_modname modname) ))
+      | _ -> ([], [], [], None))
