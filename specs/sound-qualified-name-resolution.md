@@ -1,0 +1,80 @@
+# Spec — sound qualified-name resolution (arch-index)
+
+Adversarial spec for the `MUST`-to-wrong-homonym defect. PR #20 failed for lack of a stated
+property; this file states it, then states what would falsify it.
+
+## The property
+
+**P1 (soundness of MUST).** For every row in `calls` with `kind = 'MUST'`, the `callee_id` is the
+function that the OCaml compiler itself resolved at that call site. Formally: a `MUST` edge is
+emitted **only** when the producer can name the owning compilation unit of the callee; when it
+cannot, the edge is `MAY_ENUMERATED` (bounded candidate set) or `MAY_TOP` (unknown) — never absent,
+never `MUST`.
+
+This is not new policy: `docs/edge-kind-contract.md:5` already defines `MUST` as
+"uniquely-resolved", and `SPEC-sound-callgraph.md:44-46` already forbids collapsing a site to one
+target. P1 makes the *homonym* case explicit, which the contract left unsaid.
+
+**P2 (honest degradation).** Loss of library identity (dune `(wrapped false)`, LSP path, vendored
+sources) degrades the edge kind. It never degrades into a guess. `UNKNOWN ≠ NO`, and
+`UNKNOWN ≠ pick one`.
+
+**P3 (no regression of precision without cause).** Edges that are genuinely uniquely-resolved today
+stay `MUST`. A fix that made everything `MAY_TOP` would satisfy P1 vacuously and is rejected —
+see the falsifier F3.
+
+## GWT scenarios
+
+**S1 — cross-library homonym (the defect).**
+- *Given* two dune libraries, `liba` and `libc`, each with an `api.ml` defining `run`
+- *And* a third library `libb` whose `caller.ml` calls `Liba.Api.run ()`
+- *When* the OCaml CMT producer indexes the project
+- *Then* the `calls` row for that call site resolves to `run` in **`liba/api.ml`**
+- *And* if the producer cannot establish that, `kind` is `MAY_ENUMERATED` or `MAY_TOP`
+- *And* in no case is there a `MUST` row pointing at `run` in `libc/api.ml`
+
+**S2 — same-name module, single library (must not regress).**
+- *Given* one library where a qualified path is unambiguous (existing `arch_tezt_qual` shape)
+- *Then* the edge stays `MUST` and resolves as it does today
+
+**S3 — re-export and alias (already safe, must stay safe).**
+- *Given* `module A = Liba.Api` / `include A` and a call through the alias
+- *Then* the edge is `MAY_TOP` — never a `MUST` to any candidate
+
+**S4 — the three sites.**
+- *Given* the same cross-library homonym shape
+- *When* module dependencies (`arch_index.ml:421`) and type usages (`:479`) are resolved
+- *Then* neither attributes the dependency/usage to the wrong library
+
+**S5 — self-index integrity.**
+- *When* arch-index indexes itself after the change
+- *Then* `arch-rules … --on-vacuous fail` still passes, and the golden stats file is updated with
+  the edge-kind delta explained in the commit
+
+## Falsifiers (what would prove the fix wrong)
+
+- **F1** — any `MUST` row whose callee lives in a library other than the one named by the
+  qualified path's root. This is the defect; the red test asserts its absence.
+- **F2** — a single-candidate narrowing path that re-stamps `MUST` after filtering removed the true
+  owner. This is exactly why PR #20 was closed; any implementation reintroducing it fails.
+- **F3** — a collapse in `MUST` count on the self-index disproportionate to the correctness gain
+  (measured against `test/fixtures/self-index-stats.txt` and the current
+  MUST 1107 / MAY_ENUMERATED 2106 / MAY_TOP 178 distribution). Satisfying P1 by degrading
+  everything is a failure, not a pass.
+- **F4** — the new fixture passing before the fix. A test that is green on the defective code
+  proves nothing; the red run must be recorded.
+
+## Runnable checks
+
+- **CHECK-1** → S1: new multi-library Tezt fixture; assert `callee_id` is `liba`'s `run`, or
+  `kind ∈ {MAY_ENUMERATED, MAY_TOP}`; assert **no** `MUST` row to `libc`'s `run`.
+  Red-then-green: must fail on `main` before the fix.
+- **CHECK-2** → S3: assert the alias/include call site is `MAY_TOP` (guards against a fix that
+  over-reaches into re-exports).
+- **CHECK-3** → S5: `arch-callgraph-ocaml` on self + `arch-rules --on-vacuous fail` exit 0; golden
+  diff reviewed, not auto-accepted.
+
+## Explicitly not specified here
+
+The 4th site (`call_graph_extractor.ml` raw-function-name keying), `arch_query`'s `WHERE name=?`,
+the `is_dune_alias_module` wrapper shape, and the LSP nominal path. Same pattern, separate work.
