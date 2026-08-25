@@ -60,7 +60,26 @@ let name_column ~abs_path ~line ~name =
 (** [prepare_call_hierarchy client ~project_dir row] sends
     callHierarchy/prepare for the function at its location.  When the position
     the symbol reported yields nothing, it retries on the identifier itself. *)
-let prepare_call_hierarchy client ~project_dir (row : Lsp_extractor.fn_row) =
+(* One line per distinct fact, not per attempt. The diagnostics below sit inside
+   the warm-up retry loop ([attempt 20] in [extract_calls]), which re-sweeps every
+   function while the server loads — so a server that refuses
+   prepareCallHierarchy throughout emitted the identical line up to 21 times per
+   function: 315 lines on a 15-function fixture, ~9000 on this repo. That defeats
+   the reason the line is per-item at all, which is that the COUNT distinguishes
+   "one document refused" from "all of them".
+
+   The memo is created per run in [extract_calls] and threaded, rather than being
+   a module-level table: a global would leak between runs in a process that
+   indexes more than one project. *)
+let report_once seen ~method_ ~path msg =
+  let key = method_ ^ " " ^ path in
+  if not (Hashtbl.mem seen key) then begin
+    Hashtbl.replace seen key () ;
+    Arch_io.eprintf "arch_index: %s failed for %s — %s\n%!" method_ path msg
+  end
+
+let prepare_call_hierarchy ~seen client ~project_dir (row : Lsp_extractor.fn_row)
+    =
   let abs_path = Filename.concat project_dir row.file_path in
   let uri = Lsp_client.file_uri_of_path abs_path in
   let request_at character =
@@ -78,9 +97,10 @@ let prepare_call_hierarchy client ~project_dir (row : Lsp_extractor.fn_row) =
         ~params ()
     with
     | Error msg ->
-        Arch_io.eprintf
-          "arch_index: prepareCallHierarchy failed for %s — %s\n%!"
-          row.Lsp_extractor.file_path
+        report_once
+          seen
+          ~method_:"prepareCallHierarchy"
+          ~path:row.Lsp_extractor.file_path
           msg ;
         []
     | Ok `Null -> []
@@ -102,7 +122,8 @@ let prepare_call_hierarchy client ~project_dir (row : Lsp_extractor.fn_row) =
 
 (** [outgoing_calls client ~project_dir item] fetches outgoing calls for a
     CallHierarchyItem. *)
-let outgoing_calls client ~project_dir (item : Lsp_types.call_hierarchy_item) =
+let outgoing_calls ~seen client ~project_dir
+    (item : Lsp_types.call_hierarchy_item) =
   let params =
     `Assoc
       [
@@ -152,7 +173,7 @@ let outgoing_calls client ~project_dir (item : Lsp_types.call_hierarchy_item) =
     Lsp_client.request client ~method_:"callHierarchy/outgoingCalls" ~params ()
   with
   | Error msg ->
-      Arch_io.eprintf "arch_index: outgoingCalls failed — %s\n%!" msg ;
+      report_once seen ~method_:"outgoingCalls" ~path:item.name msg ;
       []
   | Ok `Null -> []
   | Ok (`List lst) ->
@@ -278,11 +299,11 @@ let extract_calls_from_cmts ~project_dir fn_rows =
    not help because each process reloads.  So an empty first sweep is not
    evidence of a call-free program: wait and sweep again, a bounded number of
    times, before believing it. *)
-let sweep client ~project_dir fn_rows =
+let sweep ~seen client ~project_dir fn_rows =
   List.concat_map
     (fun row ->
-      let items = prepare_call_hierarchy client ~project_dir row in
-      List.concat_map (outgoing_calls client ~project_dir) items)
+      let items = prepare_call_hierarchy ~seen client ~project_dir row in
+      List.concat_map (outgoing_calls ~seen client ~project_dir) items)
     fn_rows
 
 let extract_calls ?clock client ~project_dir fn_rows =
@@ -301,8 +322,9 @@ let extract_calls ?clock client ~project_dir fn_rows =
      ises the server, so the first non-empty sweep is taken as the answer; an
      index built against a project that has never been compiled may still be
      partial, which is why the selftest warms its fixture first. *)
+  let seen = Hashtbl.create 64 in
   let rec attempt n =
-    match sweep client ~project_dir fn_rows with
+    match sweep ~seen client ~project_dir fn_rows with
     | _ :: _ as calls -> calls
     | [] -> (
         match clock with
