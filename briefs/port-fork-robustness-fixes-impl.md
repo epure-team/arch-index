@@ -288,3 +288,32 @@ timeout is now 10 s, which keeps a margin over the 2-3 sweeps the separation nee
 shorter timeout AND against the rescoped assertion 6 — cutting the budget must not cost a mutant,
 and rescoping an assertion must not either. Same overstated-figure class as R3-3, caught the same way — by measuring instead
 of reasoning about it.
+
+## QA — verified by execution on real servers, not by reading the tests
+
+The first QA pass returned NO-GO on `Library "ppx_inline_test" not found`. That was the default
+opam switch, not the branch: reproduced both ways — default switch reproduces the exact message,
+local switch gives `dune clean && dune build` exit 0 in 2.6 s. **A build failure whose message is a
+missing library is an environment diagnosis, not a verdict on a branch.** The second pass, with the
+switch pinned as a precondition, returned GO on all gates.
+
+That pass verified three of the four ported behaviours by reading the tests that cover them rather
+than by running the behaviour, and took the brief's word on the timeout one — the thing it was told
+not to do. So the four were re-verified here directly, with real language servers
+(`gopls`, `ocamllsp` both present):
+
+| Behaviour | How it was exercised | Result |
+|---|---|---|
+| Absolute `file://` URIs | real `gopls`, **relative** `--project proj`, 2-function Go project | `found 2 functions`, `found 1 calls`; `file_path` stored as `main.go` — relative, machine-independent. Both halves of the fix at once: the rootUri had to be absolute for the document to open at all, and `relative_path` had to relativise for the path not to be absolute. |
+| Honest partial results on timeout | `EPURE_ARCH_INDEX_TIMEOUT_S=3` against this repo with `ocamllsp` | `timeout after 3s — using partial results (2603 functions, 0 calls)` and the DB holds **2603** rows. The fork returned `([], [])` here. |
+| Diagnostic volume, at real scale | same run | **91 `prepareCallHierarchy failed` lines, 91 distinct files** — exactly one per file, on 2603 functions, against an `ocamllsp` that answers `Request not supported yet!`. The fixture measured 3 on 3 files; this is the same property on two orders of magnitude more input, and it is the number the memo exists to produce. Unbounded it would be ~21 per function attempted. |
+| Unknown-language fallback | `--language cobol` | exit 0, no output — `Language_registry.lookup` rejects it before `scan_source_files` is reached, which is exactly the reachability claim made in round 1 and verified by review: the `| _ -> scan_ts_files` arm was dead for anything but TypeScript. |
+
+Per-file failure isolation remains covered by the two stub tests rather than by a real server —
+making a real server refuse exactly one document is not arrangeable without a proxy, and that is
+recorded as a gap, not converted into a pass.
+
+`scripts/check-copyright.sh` does **not** exist in this repo and CI does not reference it. It was
+listed as a passing gate earlier in this task; that was `tail`'s exit code inside a pipe, not the
+script's — the same defect class as the mutation table run by hand. Copyright headers are present in
+the new files regardless.
