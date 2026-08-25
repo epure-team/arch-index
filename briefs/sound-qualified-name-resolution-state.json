@@ -1,0 +1,32 @@
+{
+  "task": "sound-qualified-name-resolution",
+  "mode": "full",
+  "current_phase": "plan",
+  "events": [
+    {
+      "phase": "question",
+      "outcome": "COMPLETED",
+      "by": "roster-question"
+    },
+    {
+      "phase": "research",
+      "outcome": "COMPLETED",
+      "by": "roster-research"
+    },
+    {
+      "phase": "intake",
+      "outcome": "VALIDATED",
+      "by": "roster-intake"
+    },
+    {
+      "phase": "spec",
+      "outcome": "VALIDATED",
+      "by": "roster-spec"
+    },
+    {
+      "phase": "plan",
+      "outcome": "COMPLETED",
+      "by": "roster-plan"
+    }
+  ]
+}

@@ -40,9 +40,11 @@ re-exporting `Lsp_extractor`) would have added a public module for testability a
 a judgement call: it broadens `Lsp_client` from "the client handle" to "the client handle and its
 path/URI conventions".
 
-**Three duplicated functions collapsed into one copy each.** `strip_file_uri` existed in two
-modules and `relative_path` in two, all byte-identical, plus the URI construction inline at six
-sites. Deduplication is in scope rather than opportunistic: absolutising construction without
+**Duplicated functions collapsed.** `strip_file_uri` existed in **three** places — two named
+copies plus a fourth inline body in `read_file_text` that round 1 missed while the comment above
+it claimed the dedup was complete — and `relative_path` in two, all byte-identical, plus the URI
+construction inline at six sites. All now delegate; `grep -c 'String.sub uri 0 7 = "file://"'`
+across `lib/arch_index/*.ml` returns 0 outside the definition. Deduplication is in scope rather than opportunistic: absolutising construction without
 absolutising `relative_path` would leave the two halves disagreeing, and the task named
 `relative_path` explicitly.
 
@@ -54,9 +56,15 @@ thoroughly broken server produces one line per file. That is the signal, not noi
 
 ## Quality Gates
 
+Round 1 of this table listed the gates I knew about and called them all. Review found a CI gate
+I had never looked for, and it was red. The list is now derived from `.github/workflows/ci.yml`
+rather than from memory.
+
 - [x] Build: `dune build` → **exit 0**
-- [x] Tests: `dune test` → **exit 0** (70 tezt + the alcotest targets; 2 new: `test_lsp_uri` 9 cases, `lsp_error_diagnostics` 1 case)
-- [x] Unit target alone: `dune exec test/test_lsp_uri.exe` → `Test Successful … 9 tests run.`
+- [x] Tests: `dune test` → **exit 0** (70 tezt + the alcotest targets; 2 new files: `test_lsp_uri` 12 cases, `lsp_error_diagnostics` 1 case with 6 assertions)
+- [x] Unit target alone: `dune exec test/test_lsp_uri.exe` → `Test Successful … 12 tests run.`
+- [x] **Self-index golden** (`.github/workflows/ci.yml:74-87`): `arch_callgraph_ocaml --build-dir=_build/default/lib/arch_index` then `diff test/fixtures/self-index-stats.txt` → **exit 0** after regenerating the golden per `docs/adr/001-self-index-golden.md`. It was **exit 1** in round 1 (`functions: 426` golden vs `431` actual) and `dune build`/`dune test` were both 0, so this was the only gate that saw it. `calls` also moved 3391 → 3382, consistent with the deduplication removing duplicated bodies.
+- [x] `arch-rules /tmp/self.db arch-rules.txt --on-vacuous fail` → **exit 0** (`4 rule(s), 0 failing`)
 - [x] Format: `dune fmt` — **n/a**, no `.ocamlformat` in this repo (verified: `test -f .ocamlformat` false), so formatting is not a gate here
 
 ## Red-then-green
@@ -81,6 +89,13 @@ invalidated a mutation table earlier this week, so it was not used here.
 | M3 `.` segments stop collapsing | KILLED |
 | M4 `workspace/symbol` swallows the reason again | **SURVIVED**, then KILLED — see below |
 | M5 `documentSymbol` swallows the reason again | KILLED |
+| N1 `path_of_file_uri` strips unconditionally | KILLED (review) |
+| N2 `normalise_absolute` drops the leading `/` | KILLED (review) |
+| N3b `"typescript"` arm scans `.nope` | KILLED by the polyglot index test (review) |
+| **N4 `relative_path` `>` → `>=`** | **SURVIVED round 1** → KILLED (round 2) |
+| **N5 `relative_path` drops the `'/'` boundary check** | **SURVIVED round 1** → KILLED (round 2) |
+| N6 `rootUri` back to raw concatenation | not expressible in round 1 (byte-identical) → **KILLED** (round 2) |
+| N7 `".."` no longer resolved | KILLED (round 2) |
 
 **M4 survived the first version of the test, and that is the finding.** The test asserted only that
 the sentinel appeared *somewhere* in the output. The stub refuses every request after the
@@ -89,17 +104,59 @@ apart — it passed for the wrong reason. Tightened to one assertion per site (t
 the server's own message), M4 dies. Without the mutation pass this would have shipped as "diagnostics
 covered".
 
+## Round 2 — what review found and what changed
+
+Two blocking findings, both mine, both of the same shape: a claim about coverage that the coverage
+did not support.
+
+1. **A CI gate I never looked for was red.** The self-index golden. My gate table listed what I
+   knew and called it complete.
+2. **Two mutants survived `relative_path`'s guard.** N5 (dropping the `'/'` boundary check) is the
+   serious one: `project_dir=/home/me/proj` with `abs_path=/home/me/project-docs/x.ml` yields
+   `ct-docs/x.ml` — a silently corrupted path written to the database, reachable whenever a server
+   returns a symbol from a sibling directory sharing the root's prefix. My existing test used
+   `/elsewhere/x.ml`, which shares no prefix, so it exercised only one conjunct of the guard.
+
+Also fixed this round, from review's MEDIUM/LOW findings:
+
+- the three helpers had been inserted **inside the copyright banner**, splitting it; moved below
+  the banner and the module docstring as a named section
+- the **fourth inline copy** of the strip in `read_file_text`, while the comment above it and the
+  `.mli` both asserted the dedup was complete
+- **`..` was not resolved**, so `--project ../sibling` kept the exact defect the helper exists to
+  remove — the filter dropped `"."` and left `".."`. Now folded, with a test (N7)
+- `relative_path` normalised only one side, which **regressed** `~project_dir:"/a/./b"` (verbatim
+  prefix matching used to relativise it). Both sides normalised now
+- one of the nine unit cases asserted the **same input twice** under a label claiming two-slash
+  support the code does not have; replaced with an honest single assertion
+- the diagnostic-volume figure, understated ~40×
+
+Left as declared judgement calls: the unencoded URIs that `test_round_trip` pins (noted in the
+test — the coupling is intentional), and the `Lsp_client` placement, which review approved.
+
+Filed rather than folded in: **#23**, the runner's own failure diagnostics are all `--verbose`
+gated, so a missing LSP binary writes an empty database and exits 0 in silence — a strictly larger
+instance of this branch's own defect class, but outside its scope.
+
 ## Points of attention for review
 
 - **The `Lsp_client` placement** is the one real design call. If a reviewer prefers a dedicated
   module, the change is mechanical — but it costs a public module for testability alone.
-- **`lsp_client.ml:431`** (`rootUri`) is the highest-risk site of the six: a regression there breaks
-  every document URI downstream, silently. It has no direct test of its own; it is covered
-  transitively by `lsp_error_diagnostics` completing the handshake against the stub.
-- **The explicit language arm is not covered by a test, deliberately.** The arm is unreachable —
-  `lookup` gates the five registered languages and four have explicit arms. Asserting on an
-  unreachable branch would require either registering a sixth server or exposing
-  `scan_source_files`. Declared rather than faked.
+- **`rootUri` now has real coverage, and round 1's claim about it was false.** Round 1 said it was
+  "covered transitively by `lsp_error_diagnostics` completing the handshake". Review proved that to
+  be *zero* coverage, not merely weak: the stub answers `initialize` without reading `rootUri`, no
+  assertion inspected extracted content, and the test passed an absolute `Temp.dir` as `--project`
+  — so reverting the fix produced **byte-identical bytes on the wire**. The mutation could not
+  change anything observable. Fixed: the stub now records the `initialize` body it received, the
+  test drives the CLI with a **relative** `--project`, and two assertions check the wire form.
+  Mutant N6 (`rootUri` back to raw concatenation) now **dies**.
+- **Only the new unreachable arm is uncovered.** Round 1 said "the explicit language arm is not
+  covered by a test"; that was imprecise. The `"typescript"` arm **is** covered — review's mutant
+  making it scan `.nope` died on the polyglot index test. What is uncovered is the `other` arm,
+  which is the unreachable one (verified independently by review: `extract_symbols` is called only
+  at `runner.ml:290` inside `match cfg_opt with Some cfg`, `lookup` errors outside its five
+  entries, `run_multi` delegates to `run`, and `Lsp_extractor` is not re-exported). Declared rather
+  than faked.
 - **Diagnostic volume** on a fully broken server: one line per file. Intentional, argued above.
 
 ## Identified out-of-scope

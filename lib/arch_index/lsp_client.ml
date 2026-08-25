@@ -1,5 +1,14 @@
 (******************************************************************************)
 
+(*                                                                            *)
+(* Copyright (c) 2026 Epure Team                                              *)
+(* All rights reserved.                                                       *)
+(*                                                                            *)
+(******************************************************************************)
+
+(** LSP subprocess manager. Spawns child process directly to retain the
+    process handle, enabling [shutdown] to wait for clean exit. *)
+
 (* A [file://] URI must carry an absolute path. The project directory arrives as
    a Cmdliner [dir] argument, which returns the string exactly as typed, so
    `--project .` produced `file://./src/foo.ml`. That is not a valid file URI:
@@ -16,10 +25,21 @@ let normalise_absolute path =
     if Filename.is_relative path then Filename.concat (Sys.getcwd ()) path
     else path
   in
-  (* Collapse "." segments and doubled separators; keep the leading "/". *)
+  (* Collapse ".", doubled separators AND "..". Filtering "." alone left ".."
+     intact, so `--project ../sibling` still produced an unresolved
+     "file:///…/proj/../sibling/x.ml" and [relative_path] still failed to match
+     — the very defect this helper exists to remove, half-fixed. A ".." at the
+     root has nothing to pop and is dropped, matching the filesystem. *)
   "/"
   ^ (String.split_on_char '/' abs
-    |> List.filter (fun seg -> seg <> "." && seg <> "")
+    |> List.fold_left
+         (fun acc seg ->
+           match seg with
+           | "" | "." -> acc
+           | ".." -> ( match acc with [] -> [] | _ :: tl -> tl)
+           | seg -> seg :: acc)
+         []
+    |> List.rev
     |> String.concat "/")
 
 let file_uri_of_path path = "file://" ^ normalise_absolute path
@@ -46,14 +66,6 @@ let path_of_file_uri uri =
     String.sub uri plen (String.length uri - plen)
   else uri
 
-(*                                                                            *)
-(* Copyright (c) 2026 Epure Team                                              *)
-(* All rights reserved.                                                       *)
-(*                                                                            *)
-(******************************************************************************)
-
-(** LSP subprocess manager. Spawns child process directly to retain the
-    process handle, enabling [shutdown] to wait for clean exit. *)
 
 module Jc = Jsonrpc_client
 
