@@ -72,7 +72,7 @@ rather than from memory.
 
 - [x] Build: `dune build` → **exit 0**
 - [x] Tests: `dune test` → **exit 0** (70 tezt + the alcotest targets; 3 new files: `test_lsp_uri` 14 cases, `lsp_error_diagnostics` 1 case with 6 assertions, `lsp_call_diagnostics` 1 case with 7 assertions — 71 tezt tests, up from 70)
-- [x] Unit target alone: `dune exec test/test_lsp_uri.exe` → `Test Successful … 12 tests run.`
+- [x] Unit target alone: `dune exec test/test_lsp_uri.exe` → `Test Successful … 14 tests run.`
 - [x] **Self-index golden** (`.github/workflows/ci.yml:74-87`): `arch_callgraph_ocaml --build-dir=_build/default/lib/arch_index` then `diff test/fixtures/self-index-stats.txt` → **exit 0** after regenerating the golden per `docs/adr/001-self-index-golden.md`. It was **exit 1** in round 1 (`functions: 426` golden vs `431` actual) and `dune build`/`dune test` were both 0, so this was the only gate that saw it. The golden has moved three times across rounds and each delta was accounted for by diffing the edge multiset, not inferred: round 1 `426 → 431` functions / `3391 → 3382` calls (dedup collapsing duplicated bodies), round 3 `431 → 432` / `3382 → 3391` (`report_once` — its own node plus 8 edges; the return to main's original 3391 is arithmetic coincidence, verified as such by review), round 4 `432 → 432` / `3391 → 3393`, exactly `outgoing_calls -> relative_path` and `outgoing_calls -> strip_file_uri` from the R3-2 fix and nothing else (`comm` on the normalised edge sets, empty removed-side).
 - [x] `arch-rules /tmp/self.db arch-rules.txt --on-vacuous fail` → **exit 0** (`4 rule(s), 0 failing`)
 - [x] Format: `dune fmt` — **n/a**, no `.ocamlformat` in this repo (verified: `test -f .ocamlformat` false), so formatting is not a gate here
@@ -236,11 +236,23 @@ both sites rather than at one. This is the +2 in the golden.
 leak between the per-language `extract_calls` calls that `Runner.run_multi` makes in one process,
 because *function names* collide across languages far more readily than paths. R3-2 removed that
 argument: both sites now key on **paths**, and a file belongs to exactly one language pass, so the
-key space is naturally disjoint. There is no collision left to provoke, and therefore no test that
-can kill M-d. The threading stays — it is correct, free, and still guards the case of one process
-indexing the same project twice — but it is recorded here as an **untested design invariant, not a
-proven property.** The code comment has been corrected to say why rather than repeating the
-now-obsolete reason.
+key space is naturally disjoint.
+
+Round 4 review then showed my conclusion from that was wrong, and wrong in the direction this
+branch exists to reject. I wrote "there is no collision left to provoke, and therefore no test can
+kill M-d" — the second half does not follow from the first. Review supplied a *better* proof of the
+cross-pass half than I had (`Language_registry.detect_language_roots` keeps one root per language,
+`add_in` guarding on `Hashtbl.mem`, plus disjoint extension sets — so two passes can never share a
+file, which is stronger than "naturally disjoint"), and then pointed at the comment's own second
+scenario: one process indexing the same project twice. That is trivially constructible, and
+`Arch_index.run_lsp` is public, so a test needs no widening of the surface. **M-d is closable, not
+unclosable.**
+
+It is not closed, and that is a judgment rather than an oversight: no caller indexes the same
+project twice — `arch_index_cli` calls `run_lsp` or `run_lsp_multi` exactly once — so the test would
+pin behaviour no code path reaches. The guard stays because it is correct and free. Both the brief
+and the code comment now say *defensive and untested by choice*, never *untestable*. Claiming a
+guard cannot be tested is precisely the move that produces inert guards.
 
 **R3-4** — `relative_path`'s docstring still carried the one-sided "`project_dir` is absolutised
 first" that F-2 was the bug report for. It now states that both arguments are normalised, that
@@ -265,5 +277,14 @@ Mutants R3-1a / R3-1b / M-c were each run by rebuilding and executing the new te
 binary by `--title`; the suite as a whole was then re-run with `dune test` (exit 0) with every
 mutation restored. `git status --porcelain lib/ test/ tezt/` shows only this round's intended edits.
 
-**Cost of the new test: ~25 s.** The warm-up loop is 20 bounded 1 s sleeps, and the volume property
-is only observable across those sweeps — that is what separates 3 from 126. Tagged `slow`.
+**Cost of the new test: ~10 s** (was ~25 s; measured on this machine, not inferred from review's 3 s figure, which was taken at a 3 s timeout rather than the 10 s that shipped). The first version left the timeout at 60 s, which lets
+the warm-up run its full 21 sweeps, and the brief justified that by claiming the volume property is
+"only observable across those sweeps". Review measured that claim false: at a 3 s timeout the run
+does ~2 sweeps, the unbounded mutant yields 9 against an expected 3, and it still dies — and M-b,
+M-c and the two review-authored name-key mutants do not depend on sweep count at all. The memo caps
+the count at 3, so the assertion is invariant under sweep count; only the mutant's number moves. The
+timeout is now 10 s, which keeps a margin over the 2-3 sweeps the separation needs while dropping
+~60% of the wall clock. Both M-a and review's E-1 name-key mutant were re-verified dead at the
+shorter timeout AND against the rescoped assertion 6 — cutting the budget must not cost a mutant,
+and rescoping an assertion must not either. Same overstated-figure class as R3-3, caught the same way — by measuring instead
+of reasoning about it.
