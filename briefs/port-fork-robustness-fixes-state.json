@@ -1,1 +1,88 @@
-{"task": "port-fork-robustness-fixes", "mode": "fast", "current_phase": "implement", "events": [{"phase": "question", "outcome": "COMPLETED", "by": "roster-question"}, {"phase": "research", "outcome": "COMPLETED", "by": "roster-research"}, {"phase": "implement", "outcome": "COMPLETED", "by": "roster-implement"}, {"phase": "review", "outcome": "NO-GO", "reason": "CI self-index golden red (426 vs 431) and omitted from the gate table; two mutants surviving relative_path guard, one causing silent path corruption", "by": "roster-review"}, {"phase": "implement", "outcome": "COMPLETED", "reason": "round 2: golden regenerated per ADR, boundary+dotdot tests added (N4/N5/N7 killed), rootUri made observable (N6 killed), banner restored, 4th strip copy removed, brief corrected on six counts", "by": "roster-implement"}, {"phase": "review", "outcome": "NO-GO", "reason": "round 2: relative_path byte-identical to round 1 while the brief claimed both sides normalised; diagnostic volume 21 lines per function, not one per file; banner still split", "by": "roster-review"}, {"phase": "implement", "outcome": "COMPLETED", "reason": "round 3: symmetric normalisation for real (asserted anchors), filesystem-root case, diagnostic bounded per (method,path), banner contiguous, .mli documents .. semantics, F-5 killed, golden regenerated, F-6 filed as #24", "by": "roster-implement"}]}
+{
+ "task": "port-fork-robustness-fixes",
+ "mode": "fast",
+ "current_phase": "ship",
+ "events": [
+  {
+   "phase": "question",
+   "outcome": "COMPLETED",
+   "by": "roster-question"
+  },
+  {
+   "phase": "research",
+   "outcome": "COMPLETED",
+   "by": "roster-research"
+  },
+  {
+   "phase": "implement",
+   "outcome": "COMPLETED",
+   "by": "roster-implement"
+  },
+  {
+   "phase": "review",
+   "outcome": "NO-GO",
+   "reason": "CI self-index golden red (426 vs 431) and omitted from the gate table; two mutants surviving relative_path guard, one causing silent path corruption",
+   "by": "roster-review"
+  },
+  {
+   "phase": "implement",
+   "outcome": "COMPLETED",
+   "reason": "round 2: golden regenerated per ADR, boundary+dotdot tests added (N4/N5/N7 killed), rootUri made observable (N6 killed), banner restored, 4th strip copy removed, brief corrected on six counts",
+   "by": "roster-implement"
+  },
+  {
+   "phase": "review",
+   "outcome": "NO-GO",
+   "reason": "round 2: relative_path byte-identical to round 1 while the brief claimed both sides normalised; diagnostic volume 21 lines per function, not one per file; banner still split",
+   "by": "roster-review"
+  },
+  {
+   "phase": "implement",
+   "outcome": "COMPLETED",
+   "reason": "round 3: symmetric normalisation for real (asserted anchors), filesystem-root case, diagnostic bounded per (method,path), banner contiguous, .mli documents .. semantics, F-5 killed, golden regenerated, F-6 filed as #24",
+   "by": "roster-implement"
+  },
+  {
+   "phase": "review",
+   "outcome": "NO-GO",
+   "reason": "round 3: report_once shipped with zero coverage \u2014 the existing stub refuses every request so the call-hierarchy site is never executed; two one-line mutants green under dune test, one restoring the founding defect. Plus outgoingCalls keyed on a function name (432 lines, not 3) and two stale gate figures.",
+   "by": "roster-review"
+  },
+  {
+   "phase": "implement",
+   "outcome": "COMPLETED",
+   "reason": "round 4: lsp_call_diagnostics reaches the site with a split call-hierarchy stub so both methods fail on the same file (makes the key-collision mutant observable); count assertions not containments; outgoingCalls keyed on path; relative_path .mli contract; M-a/M-b/M-c killed; golden +2 verified by edge-set diff",
+   "by": "roster-implement"
+  },
+  {
+   "phase": "review",
+   "outcome": "GO",
+   "reason": "round 4: all four fixes verified independently; 5 non-blocking findings (M-d closable-not-unclosable, 25s budget unjustified, undocumented load-bearing stub property, one stale figure, one assertion that cannot fail)",
+   "by": "roster-review"
+  },
+  {
+   "phase": "implement",
+   "outcome": "COMPLETED",
+   "reason": "round 5: all five R4 findings addressed \u2014 M-d restated as defensive/untested-by-choice with review's stronger cross-pass proof, timeout 60s->10s with mutants re-verified dead, stub's constant-names property documented, assertion 6 scoped, figure corrected",
+   "by": "roster-implement"
+  },
+  {
+   "phase": "qa",
+   "outcome": "NO-GO",
+   "reason": "first pass: default opam switch, ppx_inline_test/caqti.classic absent \u2014 environment, not branch; reproduced both ways",
+   "by": "roster-qa"
+  },
+  {
+   "phase": "qa",
+   "outcome": "GO",
+   "reason": "second pass with switch pinned: all gates 0, 71/71, golden 19/432/3393, arch-rules 0. Four behaviours then re-verified by execution on real gopls/ocamllsp: 91 diagnostics across 91 files on 2603 functions; timeout yields 2603 rows where the fork returned ([],[])",
+   "by": "roster-qa"
+  },
+  {
+   "phase": "ship",
+   "outcome": "COMPLETED",
+   "reason": "branch pushed, PR #27 opened against main",
+   "by": "roster-ship"
+  }
+ ]
+}
