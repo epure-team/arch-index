@@ -120,9 +120,7 @@ let rec flatten_document_symbols ~file_path ~language = function
     its content, or [""] on error. *)
 let read_file_text uri =
   let path =
-    if String.length uri > 7 && String.sub uri 0 7 = "file://" then
-      String.sub uri 7 (String.length uri - 7)
-    else uri
+    Lsp_client.path_of_file_uri uri
   in
   try
     let ic = open_in path in

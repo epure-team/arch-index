@@ -1,0 +1,2 @@
+{"ts":"2026-08-25T10:38:28.394Z","task":"port-fork-robustness-fixes","cycle_round":1,"cycle":1,"runtime":"codex","digest":"codex:56176c084ec6a588","outcome":"degraded","reason":"tree-mutation","duration_s":149.311,"runtime_exit":3,"prompt_digest":"f351472844ff5fea"}
+{"ts":"2026-08-25T10:44:04.771Z","task":"port-fork-robustness-fixes","cycle_round":1,"cycle":1,"runtime":"opencode","digest":"opencode:fbe7ed81fce843de","outcome":"degraded","reason":"tree-mutation","duration_s":300.065,"runtime_exit":3,"prompt_digest":"f351472844ff5fea"}

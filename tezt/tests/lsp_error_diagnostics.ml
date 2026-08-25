@@ -29,10 +29,12 @@ let sentinel = "STUB_REFUSED_THE_SYMBOL_QUERY"
 let erroring_server () =
   let dir = Temp.dir "stub_erroring" in
   let path = Filename.concat dir "gopls" in
+  let handshake = Filename.concat dir "initialize.json" in
   write_exec
     path
     (Printf.sprintf
        {|#!/usr/bin/env bash
+HANDSHAKE=%s
 emit() { printf 'Content-Length: %%d\r\n\r\n%%s' "${#1}" "$1"; }
 
 BODY=""
@@ -56,16 +58,19 @@ while true; do
   [ -z "$id" ] && continue
   n=$((n+1))
   if [ "$n" -eq 1 ]; then
-    # initialize: succeed, so the client gets past the handshake and actually
-    # asks the questions this test is about.
+    # Record what the client actually sent. Without this the rootUri is
+    # unobservable: the stub answers the handshake regardless of its contents,
+    # so a malformed rootUri changes nothing a test can see.
+    printf '%%s' "$BODY" > "$HANDSHAKE"
     emit "{\"jsonrpc\":\"2.0\",\"id\":$id,\"result\":{\"capabilities\":{}}}"
   else
     emit "{\"jsonrpc\":\"2.0\",\"id\":$id,\"error\":{\"code\":-32000,\"message\":\"%s\"}}"
   fi
 done
 |}
+       (Filename.quote handshake)
        sentinel) ;
-  dir
+  (dir, handshake)
 
 let register () =
   Test.register
@@ -73,7 +78,7 @@ let register () =
     ~title:"lsp: a refused symbol query names itself in the output"
     ~tags:["lsp"; "diagnostics"]
   @@ fun () ->
-  let stub_dir = erroring_server () in
+  let stub_dir, handshake = erroring_server () in
   with_project
     ~name:"erroring"
     ~files:[("go.mod", "module stub\n\ngo 1.21\n"); ("main.go", "package main\n\nfunc main() {}\n")]
@@ -83,9 +88,10 @@ let register () =
     run_command
       ~env:[("PATH", path); ("EPURE_ARCH_INDEX_TIMEOUT_S", "30")]
       (arch_index_cli ())
+      ~cwd:(Filename.dirname project)
       [
         "--project";
-        project;
+        Filename.basename project;
         "--language";
         "go";
         "--output";
@@ -128,6 +134,25 @@ let register () =
            sentinel
            out)
       (contains ~needle:sentinel out) ;
+    (* The rootUri, observed on the wire. The run is driven with a RELATIVE
+       --project on purpose: with an absolute one, reverting the fix produces a
+       byte-identical rootUri and this assertion cannot fail — which is exactly
+       why the first version of this test proved nothing about it. *)
+    let sent = if Sys.file_exists handshake then read_file handshake else "" in
+    Batch.check
+      b
+      ~msg:
+        (Printf.sprintf
+           "the handshake rootUri is not an absolute file:/// URI, so the \
+            server cannot resolve documents against it:\n\
+            %s"
+           sent)
+      (contains ~needle:"\"rootUri\":\"file:///" sent) ;
+    Batch.check
+      b
+      ~msg:
+        (Printf.sprintf "the handshake rootUri carries a relative segment:\n%s" sent)
+      (not (contains ~needle:"file://." sent)) ;
     Batch.check
       b
       ~msg:(Printf.sprintf "the indexer never reported readiness:\n%s" out)
