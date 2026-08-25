@@ -68,6 +68,16 @@ let test_round_trip () =
         (U.path_of_file_uri (U.file_uri_of_path p)))
     paths
 
+(* The mirror of the length guard tested on relative_path: the same off-by-one
+   sits six lines below in path_of_file_uri, and a mutant of it survived the
+   suite. Degenerate input, degenerate outputs either way — but the boundary is
+   now pinned rather than argued about. *)
+let test_strip_does_not_consume_a_bare_scheme () =
+  Alcotest.(check string)
+    "a bare file:// is not consumed"
+    "file://"
+    (U.path_of_file_uri "file://")
+
 let test_strip_tolerates_a_non_uri () =
   Alcotest.(check string)
     "a bare path is returned unchanged rather than mangled"
@@ -145,6 +155,29 @@ let test_dotdot_resolves () =
     "x.ml"
     (U.relative_path ~project_dir:"/tmp/proj/../sibling" "/tmp/sibling/x.ml")
 
+(* Both sides must be normalised, and these are the four shapes that proved it
+   was not. Each was reported by review as a live consequence of normalising the
+   root alone; the second is the one that matters, because "/c.ml" is a
+   leading-slash "relative" path that looks plausible on its way to the
+   database — the same shape as the boundary defect above. *)
+let test_relative_path_normalises_both_sides () =
+  Alcotest.(check string)
+    "a dot segment in BOTH sides still relativises"
+    "c.ml"
+    (U.relative_path ~project_dir:"/a/./b" "/a/./b/c.ml") ;
+  Alcotest.(check string)
+    "a doubled separator does not leave a leading slash"
+    "c.ml"
+    (U.relative_path ~project_dir:"/a/b" "/a/b//c.ml") ;
+  Alcotest.(check string)
+    "a parent segment in abs_path resolves before comparison"
+    "c.ml"
+    (U.relative_path ~project_dir:"/a/b" "/a/b/../b/c.ml") ;
+  Alcotest.(check string)
+    "the filesystem root relativises like any other root"
+    "a/b.ml"
+    (U.relative_path ~project_dir:"/" "/a/b.ml")
+
 let test_relative_path_leaves_a_foreign_path_alone () =
   Alcotest.(check string)
     "a path outside the project is returned unchanged"
@@ -193,6 +226,10 @@ let () =
             `Quick
             test_dotdot_resolves;
           Alcotest.test_case
+            "both sides are normalised"
+            `Quick
+            test_relative_path_normalises_both_sides;
+          Alcotest.test_case
             "a foreign path is left alone"
             `Quick
             test_relative_path_leaves_a_foreign_path_alone;
@@ -200,6 +237,10 @@ let () =
       ( "path_of_file_uri",
         [
           Alcotest.test_case "round-trip" `Quick test_round_trip;
+          Alcotest.test_case
+            "a bare scheme is not consumed"
+            `Quick
+            test_strip_does_not_consume_a_bare_scheme;
           Alcotest.test_case
             "a non-URI is returned unchanged"
             `Quick

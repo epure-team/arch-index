@@ -8,8 +8,13 @@
 (** LSP subprocess manager built on jsonrpc_client/stdio_transport. *)
 
 (** [file_uri_of_path path] is the [file://] URI for [path], absolutised against
-    the current directory when [path] is relative, with "." segments and doubled
-    separators collapsed.
+    the current directory when [path] is relative, with ".", "..", and doubled
+    separators resolved.
+
+    ".." is resolved LEXICALLY, not through the filesystem: no symlink is
+    followed, so ["/link/../x"] becomes ["/x"] whatever [/link] points at. A
+    ".." with nothing left to pop saturates at the root rather than escaping
+    it.
 
     A [file://] URI must carry an absolute path. The project directory arrives as
     a Cmdliner [dir] argument, which returns the string exactly as typed, so
@@ -21,7 +26,7 @@
     (none)
 
     {post}
-    The result starts with [file:///] and contains no "." segment and no empty
+    The result starts with [file:///] and contains no ".", ".." or empty
     segment. [path_of_file_uri] of the result is the absolutised path.
 
     {violators}

@@ -1,5 +1,4 @@
 (******************************************************************************)
-
 (*                                                                            *)
 (* Copyright (c) 2026 Epure Team                                              *)
 (* All rights reserved.                                                       *)
@@ -51,12 +50,23 @@ let file_uri_of_path path = "file://" ^ normalise_absolute path
    duplicated copy of the same function. *)
 let relative_path ~project_dir abs_path =
   let root = normalise_absolute project_dir in
+  (* BOTH sides. Normalising only the root left the comparison asymmetric, so a
+     caller passing an un-normalised [abs_path] — and the .mli documents no
+     precondition — got wrong answers a verbatim prefix match used to get right:
+     [~project_dir:"/a/./b"] stopped relativising, and ["/a/b//c.ml"] returned
+     ["/c.ml"], a leading-slash "relative" path headed for the database. *)
+  let abs_path = normalise_absolute abs_path in
   let plen = String.length root in
+  (* The filesystem root is its own separator: [normalise_absolute "/"] is "/",
+     so demanding a separator AFTER the root would never match and a project
+     rooted at "/" would relativise nothing — contradicting the .mli's {post}. *)
+  let at_root = root = "/" in
+  let cut = if at_root then 1 else plen + 1 in
   if
     String.length abs_path > plen
     && String.sub abs_path 0 plen = root
-    && abs_path.[plen] = '/'
-  then String.sub abs_path (plen + 1) (String.length abs_path - plen - 1)
+    && (at_root || abs_path.[plen] = '/')
+  then String.sub abs_path cut (String.length abs_path - cut)
   else abs_path
 
 let path_of_file_uri uri =
