@@ -26,22 +26,14 @@ let is_function_kind = function
   | Lsp_types.Variable -> true
   | _ -> false
 
-(** [strip_file_uri uri] removes the "file://" prefix from a URI. *)
-let strip_file_uri uri =
-  if String.length uri > 7 && String.sub uri 0 7 = "file://" then
-    String.sub uri 7 (String.length uri - 7)
-  else uri
+(* [strip_file_uri] and the inline copy below were two of three duplicates of
+   the same strip, free to drift from the construction they mirror. Both now
+   delegate to [Lsp_client], which owns the pair. *)
+let strip_file_uri = Lsp_client.path_of_file_uri
 
 (** [relative_path ~project_dir abs_path] makes [abs_path] relative to
     [project_dir]. Returns [abs_path] unchanged if not a prefix. *)
-let relative_path ~project_dir abs_path =
-  let plen = String.length project_dir in
-  if
-    String.length abs_path > plen
-    && String.sub abs_path 0 plen = project_dir
-    && abs_path.[plen] = '/'
-  then String.sub abs_path (plen + 1) (String.length abs_path - plen - 1)
-  else abs_path
+let relative_path = Lsp_client.relative_path
 
 (** [is_exported ~language name] decides visibility from the name, using the
     rule the language actually defines rather than one convention for all.
@@ -65,7 +57,12 @@ let is_exported ~language name =
 let extract_from_workspace_symbol client ~project_dir ~language =
   let params = `Assoc [("query", `String "")] in
   match Lsp_client.request client ~method_:"workspace/symbol" ~params () with
-  | Error _ -> []
+  | Error msg ->
+      (* Never silent. An index of zero symbols and a run that reports success
+         are indistinguishable from a clean repository unless the reason is
+         printed here. *)
+      Arch_io.eprintf "arch_index: workspace/symbol failed — %s\n%!" msg ;
+      []
   | Ok `Null -> []
   | Ok (`List symbols) ->
       List.filter_map
@@ -174,7 +171,15 @@ let extract_from_document_symbols client ~project_dir ~file_uri ~language =
   match
     Lsp_client.request client ~method_:"textDocument/documentSymbol" ~params ()
   with
-  | Error _ -> []
+  | Error msg ->
+      (* Per file, deliberately: a server that refuses one document is a
+         different fact from one that refuses all of them, and only the count of
+         these lines distinguishes them. *)
+      Arch_io.eprintf
+        "arch_index: documentSymbol failed for %s — %s\n%!"
+        file_uri
+        msg ;
+      []
   | Ok `Null -> []
   | Ok (`List lst) ->
       let abs_path = strip_file_uri file_uri in
@@ -218,7 +223,7 @@ let collect_file_uris ~project_dir rows =
   List.filter_map
     (fun row ->
       let abs = Filename.concat project_dir row.file_path in
-      let uri = "file://" ^ abs in
+      let uri = Lsp_client.file_uri_of_path abs in
       if Hashtbl.mem seen uri then None
       else begin
         Hashtbl.add seen uri () ;
@@ -250,7 +255,7 @@ let scan_ts_files ~project_dir =
                    (String.length entry > 5
                    && String.sub entry (String.length entry - 5) 5 = ".d.ts")
             in
-            if is_ts_src then uris := ("file://" ^ path) :: !uris
+            if is_ts_src then uris := Lsp_client.file_uri_of_path path :: !uris
           end)
         entries
     with _ -> ()
@@ -276,7 +281,7 @@ let scan_ml_files ~project_dir =
               walk path
           end
           else if Filename.extension entry = ".ml" then
-            uris := ("file://" ^ path) :: !uris)
+            uris := Lsp_client.file_uri_of_path path :: !uris)
         entries
     with _ -> ()
   in
@@ -303,7 +308,7 @@ let scan_files_with_ext ~ext ~project_dir =
               walk path
           end
           else if Filename.extension entry = ext then
-            uris := ("file://" ^ path) :: !uris)
+            uris := Lsp_client.file_uri_of_path path :: !uris)
         entries
     with _ -> ()
   in
@@ -318,7 +323,24 @@ let scan_source_files ~language ~project_dir =
   | "rust" -> scan_files_with_ext ~ext:".rs" ~project_dir
   | "go" -> scan_files_with_ext ~ext:".go" ~project_dir
   | "python" -> scan_files_with_ext ~ext:".py" ~project_dir
-  | _ -> scan_ts_files ~project_dir
+  | "typescript" -> scan_ts_files ~project_dir
+  | other ->
+      (* Was `| _ -> scan_ts_files`. Not a live defect: this function is only
+         reached for a language [Language_registry.lookup] accepted, and all
+         five of those are named above — so the old catch-all was only ever
+         taken by "typescript", for which it was right.
+
+         It is a latent one. Registering a sixth server without adding a
+         scanner arm here would silently scan that language's project as
+         TypeScript and report the resulting empty symbol set as a clean
+         result. Naming the arm makes the omission say so instead. *)
+      Arch_io.eprintf
+        "arch_index: no file scanner for language %S — scanning nothing. A \
+         server is registered for it, so this is a missing scanner arm in \
+         scan_source_files, not an unknown language.\n\
+         %!"
+        other ;
+      []
 
 (** [merge_rows ws_rows doc_rows] merges workspace rows with document-symbol
     rows, preferring document-symbol rows (better line ranges) when available. *)

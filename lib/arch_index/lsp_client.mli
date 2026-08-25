@@ -7,6 +7,73 @@
 
 (** LSP subprocess manager built on jsonrpc_client/stdio_transport. *)
 
+(** [file_uri_of_path path] is the [file://] URI for [path], absolutised against
+    the current directory when [path] is relative, with "." segments and doubled
+    separators collapsed.
+
+    A [file://] URI must carry an absolute path. The project directory arrives as
+    a Cmdliner [dir] argument, which returns the string exactly as typed, so
+    `--project .` yielded [file://./src/foo.ml] — not a valid file URI. The
+    server then cannot open the document, every [textDocument/documentSymbol]
+    comes back empty, and the run writes an empty index while reporting success.
+
+    {pre}
+    (none)
+
+    {post}
+    The result starts with [file:///] and contains no "." segment and no empty
+    segment. [path_of_file_uri] of the result is the absolutised path.
+
+    {violators}
+    (none)
+
+    {violates}
+    (none) *)
+val file_uri_of_path : string -> string
+
+(** [relative_path ~project_dir abs_path] is [abs_path] made relative to
+    [project_dir], or [abs_path] unchanged when it lies outside it.
+
+    [project_dir] is absolutised first. Without that it was compared verbatim
+    against an absolute path from the server, so a relative [--project] never
+    matched and every stored path stayed absolute — making the index
+    machine-specific.
+
+    {pre}
+    (none)
+
+    {post}
+    Returns a path with no leading separator when [abs_path] is under
+    [project_dir]; returns [abs_path] unchanged otherwise.
+
+    {violators}
+    (none)
+
+    {violates}
+    (none) *)
+val relative_path : project_dir:string -> string -> string
+
+(** [path_of_file_uri uri] strips a leading [file://] if present, returning the
+    path. A string that is not a [file://] URI is returned unchanged rather than
+    mangled — the LSP peer is not obliged to echo the scheme.
+
+    The inverse of {!file_uri_of_path}. Both halves live together because they
+    were previously three separate copies of the strip in two modules, free to
+    drift apart from the construction they mirror.
+
+    {pre}
+    (none)
+
+    {post}
+    Returns [uri] without its [file://] prefix when it has one, else [uri].
+
+    {violators}
+    (none)
+
+    {violates}
+    (none) *)
+val path_of_file_uri : string -> string
+
 type t
 
 (** [start ~sw ~env ~command ~args ~project_dir ?init_options ()] spawns the
