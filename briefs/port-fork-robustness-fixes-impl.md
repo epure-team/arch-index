@@ -71,9 +71,9 @@ I had never looked for, and it was red. The list is now derived from `.github/wo
 rather than from memory.
 
 - [x] Build: `dune build` → **exit 0**
-- [x] Tests: `dune test` → **exit 0** (70 tezt + the alcotest targets; 2 new files: `test_lsp_uri` 12 cases, `lsp_error_diagnostics` 1 case with 6 assertions)
+- [x] Tests: `dune test` → **exit 0** (70 tezt + the alcotest targets; 3 new files: `test_lsp_uri` 14 cases, `lsp_error_diagnostics` 1 case with 6 assertions, `lsp_call_diagnostics` 1 case with 7 assertions — 71 tezt tests, up from 70)
 - [x] Unit target alone: `dune exec test/test_lsp_uri.exe` → `Test Successful … 12 tests run.`
-- [x] **Self-index golden** (`.github/workflows/ci.yml:74-87`): `arch_callgraph_ocaml --build-dir=_build/default/lib/arch_index` then `diff test/fixtures/self-index-stats.txt` → **exit 0** after regenerating the golden per `docs/adr/001-self-index-golden.md`. It was **exit 1** in round 1 (`functions: 426` golden vs `431` actual) and `dune build`/`dune test` were both 0, so this was the only gate that saw it. `calls` also moved 3391 → 3382, consistent with the deduplication removing duplicated bodies.
+- [x] **Self-index golden** (`.github/workflows/ci.yml:74-87`): `arch_callgraph_ocaml --build-dir=_build/default/lib/arch_index` then `diff test/fixtures/self-index-stats.txt` → **exit 0** after regenerating the golden per `docs/adr/001-self-index-golden.md`. It was **exit 1** in round 1 (`functions: 426` golden vs `431` actual) and `dune build`/`dune test` were both 0, so this was the only gate that saw it. The golden has moved three times across rounds and each delta was accounted for by diffing the edge multiset, not inferred: round 1 `426 → 431` functions / `3391 → 3382` calls (dedup collapsing duplicated bodies), round 3 `431 → 432` / `3382 → 3391` (`report_once` — its own node plus 8 edges; the return to main's original 3391 is arithmetic coincidence, verified as such by review), round 4 `432 → 432` / `3391 → 3393`, exactly `outgoing_calls -> relative_path` and `outgoing_calls -> strip_file_uri` from the R3-2 fix and nothing else (`comm` on the normalised edge sets, empty removed-side).
 - [x] `arch-rules /tmp/self.db arch-rules.txt --on-vacuous fail` → **exit 0** (`4 rule(s), 0 failing`)
 - [x] Format: `dune fmt` — **n/a**, no `.ocamlformat` in this repo (verified: `test -f .ocamlformat` false), so formatting is not a gate here
 
@@ -111,6 +111,10 @@ invalidated a mutation table earlier this week, so it was not used here.
 | **F-5 `path_of_file_uri` `>` → `>=`** | **SURVIVED round 2** → KILLED (round 3) |
 | F-2m `abs_path` no longer normalised | KILLED (round 3) |
 | F-2r the filesystem-root case removed | KILLED (round 3) |
+| **R3-1a `report_once` memo never records** | **SURVIVED round 3** → KILLED (round 4) — 3 lines become 126 |
+| **R3-1b `report_once` `eprintf` removed** | **SURVIVED round 3** → KILLED (round 4) — the founding defect, restored in one line |
+| **R3-2/M-c memo key drops the method** | **SURVIVED round 3** (unobservable then) → KILLED (round 4) |
+| M-d memo table module-level instead of per-run | **SURVIVES** — see below; not closable, and the reason matters |
 
 **M4 survived the first version of the test, and that is the finding.** The test asserted only that
 the sentinel appeared *somewhere* in the output. The stub refuses every request after the
@@ -190,3 +194,76 @@ instance of this branch's own defect class, but outside its scope.
 - 11 pre-existing untracked paths (briefs, `tools/`, `docs/plans/`) belong to other tasks and were
   left alone; the round's own work is committed, so `git status` is not empty by design rather than
   by omission.
+
+## Round 4 — what review found and what changed
+
+One HIGH, and it is the round's own headline change: **`report_once` shipped with zero test
+coverage.** The cause was structural, not an oversight of diligence: `lsp_error_diagnostics`'s stub
+refuses *every* request after the handshake, so `documentSymbol` fails, zero functions are
+extracted, and `extract_calls` is reached with `fn_rows = []`. The `prepareCallHierarchy` call site
+was never executed by any test in the suite. Review demonstrated it with two one-line mutants that
+both passed a green `dune test`, the second of which — deleting the `eprintf` — restores an empty
+call graph with no stated reason anywhere, which is precisely the defect this branch exists to
+remove.
+
+Review offered the escape hatch ("ship it, file the stub as follow-up, that is defensible"). It was
+declined. A guard whose founding defect a one-line mutant reinstates under a green suite is an inert
+guard, and this branch is about not shipping those.
+
+**The fix — `tezt/tests/lsp_call_diagnostics.ml`.** A second stub that answers the handshake,
+answers `workspace/symbol` with nothing and `documentSymbol` with two functions per file, then
+*splits* the call-hierarchy surface: the function at line 1 gets a prepare result whose
+`outgoingCalls` is refused, the function at line 5 has its prepare refused outright. Both refusals
+therefore land on the **same file**, which is the only arrangement under which a memo keyed on the
+path alone is observably wrong — review had flagged M-c as unobservable, and this is what makes it
+observable. Assertions are **counts, not containments**: `contains` cannot tell 3 from 126, and a
+containment-only assertion is exactly what let M4 survive in round 1.
+
+The first version of this test was red for a real reason: the stub matched
+`callHierarchy/prepareCallHierarchy` while the client sends `textDocument/prepareCallHierarchy`
+(`call_graph_extractor.ml:103`), so the request fell through to the default arm and no diagnostic
+fired. Recorded because it is the same class as round 2's silent `str.replace`: a step that appears
+to run and does not. Here the assertion caught it.
+
+**R3-2 — the `outgoingCalls` site was keyed on `item.name`, a function name.** Two consequences,
+both real: the line read "failed for alpha" where the reader expects a file, and the bound was one
+line per *function* — 432 on this repo, not the 3 the brief claimed. Now keyed on
+`relative_path ~project_dir (strip_file_uri item.uri)`, so "one line per (method, file)" is true at
+both sites rather than at one. This is the +2 in the golden.
+
+**M-d survives, and chasing it changed the design story rather than the coverage.** The threading of
+`~seen` was justified — by me, in the code comment — on the grounds that a module-level table would
+leak between the per-language `extract_calls` calls that `Runner.run_multi` makes in one process,
+because *function names* collide across languages far more readily than paths. R3-2 removed that
+argument: both sites now key on **paths**, and a file belongs to exactly one language pass, so the
+key space is naturally disjoint. There is no collision left to provoke, and therefore no test that
+can kill M-d. The threading stays — it is correct, free, and still guards the case of one process
+indexing the same project twice — but it is recorded here as an **untested design invariant, not a
+proven property.** The code comment has been corrected to say why rather than repeating the
+now-obsolete reason.
+
+**R3-4** — `relative_path`'s docstring still carried the one-sided "`project_dir` is absolutised
+first" that F-2 was the bug report for. It now states that both arguments are normalised, that
+matching is lexical and requires a segment boundary, the filesystem-root behaviour, and — as a
+`{pre}` rather than the previous `(none)` — that a relative `abs_path` is absolutised against the
+CWD and may then match, which is a behaviour change this round introduced.
+
+**R3-3** — two stale figures in the gate table, same class as rounds 1–3 at lower amplitude:
+`calls` and the `test_lsp_uri` case count. Both corrected above, and the golden's three moves are
+now each accounted for by an edge-set diff rather than by a plausible sentence.
+
+### Gates, round 4
+
+| Gate | Command | Exit |
+|---|---|---|
+| Build | `dune build` | 0 |
+| Tests | `dune test` | 0 — **71/71** (was 70) |
+| Self-index golden | index + `diff test/fixtures/self-index-stats.txt` | 0 (`19 / 432 / 3393`) |
+| arch-rules | `./arch-rules /tmp/selfg.db arch-rules.txt --on-vacuous fail` | 0 (`4 rule(s), 0 failing`) |
+
+Mutants R3-1a / R3-1b / M-c were each run by rebuilding and executing the new test through the tezt
+binary by `--title`; the suite as a whole was then re-run with `dune test` (exit 0) with every
+mutation restored. `git status --porcelain lib/ test/ tezt/` shows only this round's intended edits.
+
+**Cost of the new test: ~25 s.** The warm-up loop is 20 bounded 1 s sleeps, and the volume property
+is only observable across those sweeps — that is what separates 3 from 126. Tagged `slow`.

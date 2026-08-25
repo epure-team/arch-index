@@ -70,7 +70,17 @@ let name_column ~abs_path ~line ~name =
 
    The memo is created per run in [extract_calls] and threaded, rather than being
    a module-level table: a global would leak between runs in a process that
-   indexes more than one project. *)
+   indexes more than one project: [Runner.run_multi] calls [extract_calls] once
+   per language in one process, and one indexing the same project twice would
+   suppress the second run's diagnostics entirely. Note this is a DEFENSIVE
+   invariant, not a proven one — since both sites key on paths, and a file
+   belongs to exactly one language pass, no cross-pass collision can be
+   constructed, so no test kills a module-level table here.
+
+   [path] must be a path at BOTH call sites, so the bound is one line per
+   (method, file) and not one per function: keying the outgoingCalls site on
+   [item.name] would emit one line per function -- 432 on this repo -- and would
+   print "failed for <name>" where the reader expects a file. *)
 let report_once seen ~method_ ~path msg =
   let key = method_ ^ " " ^ path in
   if not (Hashtbl.mem seen key) then begin
@@ -173,7 +183,9 @@ let outgoing_calls ~seen client ~project_dir
     Lsp_client.request client ~method_:"callHierarchy/outgoingCalls" ~params ()
   with
   | Error msg ->
-      report_once seen ~method_:"outgoingCalls" ~path:item.name msg ;
+      report_once seen ~method_:"outgoingCalls"
+        ~path:(relative_path ~project_dir (strip_file_uri item.uri))
+        msg ;
       []
   | Ok `Null -> []
   | Ok (`List lst) ->
