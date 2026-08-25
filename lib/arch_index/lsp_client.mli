@@ -39,17 +39,28 @@ val file_uri_of_path : string -> string
 (** [relative_path ~project_dir abs_path] is [abs_path] made relative to
     [project_dir], or [abs_path] unchanged when it lies outside it.
 
-    [project_dir] is absolutised first. Without that it was compared verbatim
-    against an absolute path from the server, so a relative [--project] never
-    matched and every stored path stayed absolute — making the index
-    machine-specific.
+    BOTH arguments are normalised first (see {!file_uri_of_path} for what that
+    means: lexical [.]/[..] resolution, no symlink following, saturation at the
+    root). Normalising only [project_dir] was the original bug — it was compared
+    verbatim against an absolute path from the server, so a relative [--project]
+    never matched and every stored path stayed absolute, making the index
+    machine-specific. Normalising only one side leaves the same class of miss
+    whenever the server's path carries a [.] or [..] segment.
+
+    Matching is lexical and requires a segment boundary: [project_dir] of
+    [/a/b] does not capture [/a/bc.ml]. When [project_dir] normalises to the
+    filesystem root, the root IS the separator, so the result is [abs_path]
+    with its single leading [/] removed.
 
     {pre}
-    (none)
+    [abs_path] is expected to be absolute. A relative one is absolutised
+    against the process CWD, which may then match [project_dir] and yield a
+    plausible-looking but unintended relative result — callers pass paths
+    derived from server URIs, which are absolute.
 
     {post}
     Returns a path with no leading separator when [abs_path] is under
-    [project_dir]; returns [abs_path] unchanged otherwise.
+    [project_dir]; returns the normalised [abs_path] unchanged otherwise.
 
     {violators}
     (none)
