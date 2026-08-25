@@ -15,21 +15,11 @@ type call_row = {
   call_site : string;
 }
 
-(** [strip_file_uri uri] removes the "file://" prefix. *)
-let strip_file_uri uri =
-  if String.length uri > 7 && String.sub uri 0 7 = "file://" then
-    String.sub uri 7 (String.length uri - 7)
-  else uri
+(* Third duplicate of the strip; delegates to the module that owns the pair. *)
+let strip_file_uri = Lsp_client.path_of_file_uri
 
 (** [relative_path ~project_dir abs_path] makes path relative to project_dir. *)
-let relative_path ~project_dir abs_path =
-  let plen = String.length project_dir in
-  if
-    String.length abs_path > plen
-    && String.sub abs_path 0 plen = project_dir
-    && abs_path.[plen] = '/'
-  then String.sub abs_path (plen + 1) (String.length abs_path - plen - 1)
-  else abs_path
+let relative_path = Lsp_client.relative_path
 
 (** [call_site_label ~project_dir item range] creates a human-readable
     call site string from a file URI and line number. *)
@@ -72,7 +62,7 @@ let name_column ~abs_path ~line ~name =
     the symbol reported yields nothing, it retries on the identifier itself. *)
 let prepare_call_hierarchy client ~project_dir (row : Lsp_extractor.fn_row) =
   let abs_path = Filename.concat project_dir row.file_path in
-  let uri = "file://" ^ abs_path in
+  let uri = Lsp_client.file_uri_of_path abs_path in
   let request_at character =
     let params =
       `Assoc
@@ -87,7 +77,12 @@ let prepare_call_hierarchy client ~project_dir (row : Lsp_extractor.fn_row) =
       Lsp_client.request client ~method_:"textDocument/prepareCallHierarchy"
         ~params ()
     with
-    | Error _ -> []
+    | Error msg ->
+        Arch_io.eprintf
+          "arch_index: prepareCallHierarchy failed for %s — %s\n%!"
+          row.Lsp_extractor.file_path
+          msg ;
+        []
     | Ok `Null -> []
     | Ok (`List lst) ->
         List.filter_map
@@ -156,7 +151,9 @@ let outgoing_calls client ~project_dir (item : Lsp_types.call_hierarchy_item) =
   match
     Lsp_client.request client ~method_:"callHierarchy/outgoingCalls" ~params ()
   with
-  | Error _ -> []
+  | Error msg ->
+      Arch_io.eprintf "arch_index: outgoingCalls failed — %s\n%!" msg ;
+      []
   | Ok `Null -> []
   | Ok (`List lst) ->
       List.filter_map

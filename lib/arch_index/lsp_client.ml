@@ -1,4 +1,51 @@
 (******************************************************************************)
+
+(* A [file://] URI must carry an absolute path. The project directory arrives as
+   a Cmdliner [dir] argument, which returns the string exactly as typed, so
+   `--project .` produced `file://./src/foo.ml`. That is not a valid file URI:
+   the server cannot open the document, every documentSymbol comes back empty,
+   and the run writes an empty index while reporting success.
+
+   These two live here rather than in a new module because [Lsp_client] is
+   already a dependency-free leaf that every URI-building caller
+   ([Lsp_extractor], [Call_graph_extractor]) already depends on, and it is
+   already re-exported — so this adds no dependency edge and no public module. *)
+
+let normalise_absolute path =
+  let abs =
+    if Filename.is_relative path then Filename.concat (Sys.getcwd ()) path
+    else path
+  in
+  (* Collapse "." segments and doubled separators; keep the leading "/". *)
+  "/"
+  ^ (String.split_on_char '/' abs
+    |> List.filter (fun seg -> seg <> "." && seg <> "")
+    |> String.concat "/")
+
+let file_uri_of_path path = "file://" ^ normalise_absolute path
+
+(* The mirror of the URI defect on the way back in: this compared a possibly
+   relative [project_dir] against an absolute path from the server, so it never
+   matched and every file_path was stored absolute — machine-specific, and
+   unusable for any lookup keyed on a repo-relative path. It was also the third
+   duplicated copy of the same function. *)
+let relative_path ~project_dir abs_path =
+  let root = normalise_absolute project_dir in
+  let plen = String.length root in
+  if
+    String.length abs_path > plen
+    && String.sub abs_path 0 plen = root
+    && abs_path.[plen] = '/'
+  then String.sub abs_path (plen + 1) (String.length abs_path - plen - 1)
+  else abs_path
+
+let path_of_file_uri uri =
+  let prefix = "file://" in
+  let plen = String.length prefix in
+  if String.length uri > plen && String.sub uri 0 plen = prefix then
+    String.sub uri plen (String.length uri - plen)
+  else uri
+
 (*                                                                            *)
 (* Copyright (c) 2026 Epure Team                                              *)
 (* All rights reserved.                                                       *)
@@ -428,7 +475,9 @@ let start ~sw ~env ~command ~args ~project_dir ?(init_options = `Null)
   in
   let jcfg = Jc.{transport} in
   (* Send initialize request *)
-  let project_uri = "file://" ^ project_dir in
+  (* The handshake root: a relative --project made this the malformed
+     [file://./…], which every subsequent document URI then inherited. *)
+  let project_uri = file_uri_of_path project_dir in
   let init_params =
     `Assoc
       [
