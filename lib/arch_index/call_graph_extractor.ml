@@ -70,12 +70,17 @@ let name_column ~abs_path ~line ~name =
 
    The memo is created per run in [extract_calls] and threaded, rather than being
    a module-level table: a global would leak between runs in a process that
-   indexes more than one project: [Runner.run_multi] calls [extract_calls] once
-   per language in one process, and one indexing the same project twice would
-   suppress the second run's diagnostics entirely. Note this is a DEFENSIVE
-   invariant, not a proven one — since both sites key on paths, and a file
-   belongs to exactly one language pass, no cross-pass collision can be
-   constructed, so no test kills a module-level table here.
+   indexes more than one project. Two scenarios, and they are not equally
+   real. Cross-pass collision is IMPOSSIBLE, not merely unlikely:
+   [Language_registry.detect_language_roots] keeps one root per language
+   ([add_in] guards on [Hashtbl.mem]), the per-language extension sets are
+   disjoint, and both call sites key on paths — so two passes can never
+   produce the same (method, path). The remaining scenario is one process
+   indexing the same project twice, where a global table would suppress the
+   second run's diagnostics entirely. That one IS constructible, and
+   [Arch_index.run_lsp] is public, so a test could pin it; no current caller
+   does it ([arch_index_cli] calls [run_lsp] or [run_lsp_multi] exactly once),
+   so this guard is DEFENSIVE and untested by choice, not untestable.
 
    [path] must be a path at BOTH call sites, so the bound is one line per
    (method, file) and not one per function: keying the outgoingCalls site on

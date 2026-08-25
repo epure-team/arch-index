@@ -66,6 +66,18 @@ err() { emit "{\"jsonrpc\":\"2.0\",\"id\":$1,\"error\":{\"code\":-32000,\"messag
 
 # A function at line 1 and a function at line 5, so the client's prepare
 # position tells the stub which of the two it is being asked about.
+#
+# The names are the SAME in every file, deliberately, and that is load-bearing:
+# it is what makes a path-keyed memo distinguishable from a name-keyed one. With
+# constant names a name-keyed memo collapses to ONE entry across the three files
+# while a path-keyed one holds three, so reverting either call site to a
+# function-name key drops a count from 3 to 1 and the test fails. Give each file
+# distinct names and both of those mutants survive silently.
+#
+# The fixture's own .go sources declare alpha/beta, alpha2/beta2, alpha3/beta3
+# instead, because Go forbids duplicate function names in one package. The stub
+# is not a compiler and never reads them; do not "fix" the disagreement by
+# making the stub echo the real names.
 sym() {
   printf '%%s' "[{\"name\":\"alpha\",\"kind\":12,\"range\":{\"start\":{\"line\":1,\"character\":5},\"end\":{\"line\":3,\"character\":1}},\"selectionRange\":{\"start\":{\"line\":1,\"character\":5},\"end\":{\"line\":1,\"character\":10}}},{\"name\":\"beta\",\"kind\":12,\"range\":{\"start\":{\"line\":5,\"character\":5},\"end\":{\"line\":7,\"character\":1}},\"selectionRange\":{\"start\":{\"line\":5,\"character\":5},\"end\":{\"line\":5,\"character\":9}}}]"
 }
@@ -121,7 +133,7 @@ let register () =
   let path = stub_dir ^ ":" ^ Option.value ~default:"" (Sys.getenv_opt "PATH") in
   let _code, out =
     run_command
-      ~env:[("PATH", path); ("EPURE_ARCH_INDEX_TIMEOUT_S", "60")]
+      ~env:[("PATH", path); ("EPURE_ARCH_INDEX_TIMEOUT_S", "10")]
       (arch_index_cli ())
       ~cwd:(Filename.dirname project)
       [
@@ -191,19 +203,26 @@ let register () =
              prepare
              outgoing)
         (prepare = source_files && outgoing = source_files) ;
-      (* The diagnostic names a FILE. Keying the outgoingCalls site on the
+      (* The outgoingCalls diagnostic names a FILE. Keying that site on the
          function name printed "failed for alpha" and bounded per function
-         instead of per file — one line per function, 432 on this repo. *)
+         instead of per file. Scoped to the outgoing lines on purpose: an
+         unscoped containment cannot fail here, because the prepare site emits
+         all three filenames whatever the outgoing site prints. *)
       Batch.check
         b
         ~msg:
           (Printf.sprintf
-             "the diagnostics do not name their source files (a.go/b.go/c.go \
-              absent):\n\
+             "the outgoingCalls diagnostics do not name a .go file, so they are \
+              keyed on something other than the path:\n\
               %s"
              out)
-        (contains ~needle:"a.go" out && contains ~needle:"b.go" out
-        && contains ~needle:"c.go" out) ;
+        (count_lines ~needle:"outgoingCalls failed" out
+         = List.length
+             (List.filter
+                (fun l ->
+                  contains ~needle:"outgoingCalls failed" l
+                  && contains ~needle:".go" l)
+                (lines out))) ;
       (* And the server's own words, not only our label. *)
       Batch.check
         b
