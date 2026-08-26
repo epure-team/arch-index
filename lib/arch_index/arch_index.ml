@@ -48,6 +48,15 @@ type result = {
   n_deps_resolved : int;
   n_type_usages : int;
   n_type_usages_resolved : int;
+  n_statement_failures : int;
+      (** Prepared-statement steps that did not return [DONE] during this run.
+
+          [exec_stmt] prints such a failure and continues, so a run can reject
+          rows and still exit 0. When this is non-zero the other counts in this
+          record are ATTEMPTS, not stored rows, and a caller that owns an exit
+          status must fail. Measured before this field existed: indexing
+          épure's src/ rejected 238 type_usage inserts on a stale
+          [function_id] and reported them as written. *)
   db_path : string;
 }
 
@@ -605,6 +614,7 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
     n_deps_resolved = !n_deps_resolved;
     n_type_usages = !n_type_usages;
     n_type_usages_resolved = !n_type_usages_resolved;
+    n_statement_failures = !Arch_index_db.statement_failures;
     db_path;
   }
 

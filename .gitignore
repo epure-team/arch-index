@@ -7,3 +7,6 @@ _opam/
 *.db
 # MCP / tooling scratch
 .playwright-mcp/
+
+# Locally-built 23 MB artifact; never commit (CI cannot run a foreign-glibc binary)
+/bin/arch-callgraph-ocaml

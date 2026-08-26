@@ -54,6 +54,14 @@ val schema_path : string
 
     {violates}
     (none) *)
+val statement_failures : int ref
+(** Count of prepared-statement steps that did not return [DONE].
+
+    [exec_stmt] prints such a failure and continues, so a run can reject rows
+    and still exit 0 — which is how 238 rejected type_usage inserts went
+    unnoticed while the summary reported them as written. Callers that own a
+    run's exit status must consult this and fail when it is non-zero. *)
+
 val exec_exn : Sqlite3.db -> string -> unit
 
 (** Execute a prepared statement, reset on completion.
