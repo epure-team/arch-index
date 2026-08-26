@@ -1514,7 +1514,29 @@ let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
                       List.iter
                         (fun (vb : Typedtree.value_binding) ->
                           match vb.vb_pat.pat_desc with
-                          | Tpat_var (id, _, _) ->
+                          | Tpat_var (id, _, _)
+                            when Ident.name id <> "_" ->
+                              (* A binding the compiler named "_" is not a
+                                 function: it is a wildcard, and `_` is not a
+                                 valid OCaml identifier, so no hand-written
+                                 definition can produce one. In practice they
+                                 come from ppx-generated code — every
+                                 [@@deriving ...] emits some — and recording
+                                 them was actively destructive, not merely
+                                 noisy: `functions` carries a UNIQUE on
+                                 (module_id, name), so a module with several of
+                                 them re-inserted the same ("_") row, and
+                                 `INSERT OR REPLACE` turned each repeat into
+                                 DELETE-then-INSERT whose DELETE fired
+                                 ON DELETE CASCADE across the eight tables
+                                 that reference functions(id) — including
+                                 `calls` on both caller_id and callee_id.
+                                 Rows already written were deleted, silently:
+                                 nothing failed, so nothing was logged.
+                                 Measured on a 3-line fixture with three
+                                 [@@deriving yojson]: 15 type usages reported,
+                                 3 stored. On épure's src/: 96 re-inserts over
+                                 4 modules, all named "_". *)
                               let name = qualify ~prefix (Ident.name id) in
                               let signature =
                                 Some (type_to_string vb.vb_pat.pat_type)

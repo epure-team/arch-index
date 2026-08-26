@@ -68,6 +68,7 @@ let () =
   Callgraph_ocaml.register_soundness () ;
   Callgraph_ocaml.register_deferred_is_not_dead () ;
   Callgraph_soundness.register () ;
+  Reported_equals_stored.register () ;
   Effects.register_ocaml () ;
   Effects.register_go () ;
   Effects.register_rust_contract () ;
