@@ -1,5 +1,6 @@
 (library
  (name arch_index)
+ (public_name arch-index)
  ; R1 — the compiler already proves a `match` arm unreachable (warning 11) and
  ; a match inexhaustive (warning 8). Relying on dune's implicit dev-profile
  ; default means the guarantee vanishes under --profile release. Make it

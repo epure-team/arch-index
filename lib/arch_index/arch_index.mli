@@ -88,6 +88,19 @@ val run_lsp :
     See {!Lsp_client} for the full API. *)
 module Lsp_client = Lsp_client
 
+(** LSP wire types, re-exported so consumers can pin the protocol's own
+    numbering rather than this library's behaviour.
+
+    The [SymbolKind] table this exposes was transposed once — 6 mapped to
+    [Property] instead of [Method], 13 to [Property] instead of [Variable] —
+    and the indexer silently produced zero OCaml functions for four months as a
+    result: top-level [let]s are kind 13, which the wrong table filtered out.
+    TypeScript kept working by accident, since its functions are kind 12 and
+    landed on another accepted kind. A test asserting the numbering against the
+    LSP specification is the only thing that catches this class of defect, and
+    it cannot be written against an unexported module. *)
+module Lsp_types = Lsp_types
+
 (** OCaml CMT-based enrichment pass.
     See {!Ocaml_enricher} for the full API. *)
 module Ocaml_enricher = Ocaml_enricher
