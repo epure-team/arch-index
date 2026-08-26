@@ -39,10 +39,27 @@ let exec_exn db sql =
         sql ;
       exit 1
 
+(* Statement failures were printed and forgotten. [exec] immediately above
+   exits 1 on a failed script; [exec_stmt] did not, and nothing in this
+   repository ever gated on its message — `grep -rn "Statement error"` over
+   every .ml/.yml/.sh found exactly one hit, the eprintf itself. So a run could
+   reject rows and still exit 0, reporting counts it had not stored.
+
+   Measured before this counter existed: indexing épure's src/ produced 238
+   "FOREIGN KEY constraint failed" statement errors, reported 25151 type usages,
+   stored 24913 — and exited 0. The loss equalled the error count exactly.
+
+   The counter is the cheap general guard. It catches the wildcard-binding case
+   this commit fixes, the top-level-shadowing case it deliberately does not, and
+   any future route to reported <> stored — none of which a per-symptom test can
+   enumerate in advance. *)
+let statement_failures = ref 0
+
 let exec_stmt db stmt =
   match Sqlite3.step stmt with
   | Sqlite3.Rc.DONE -> ignore (Sqlite3.reset stmt)
   | rc ->
+      incr statement_failures ;
       Arch_io.eprintf
         "Statement error (%s): %s\n"
         (Sqlite3.Rc.to_string rc)

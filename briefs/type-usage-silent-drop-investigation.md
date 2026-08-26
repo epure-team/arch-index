@@ -30,9 +30,24 @@ destroying every row already attached to the previous `functions` row.
   | 11 | `src/tui/main_page_debug.ml` |
   | 1  | `src/types_base.ml` |
 
-- `grep -c "Statement error"` over a full run: **0**. `exec_stmt`
-  (`lib/arch_index/arch_index_db.ml:42-50`) prints on any non-`DONE` step, so
-  zero output proves no insert failed. The rows were written, then cascaded away.
+- ~~`grep -c "Statement error"` over a full run: **0** … the rows were written,
+  then cascaded away.~~ **WRONG — corrected 2026-08-26 after review.** That
+  measurement was taken on the wrong binaries: `arch_index_cli` takes the LSP
+  path, and `test_indexer_accuracy.exe` does not relay the indexer's stderr.
+  Run against the CMT binary directly — `arch_callgraph_ocaml --build-dir=…` on
+  épure's `src/`, `2>` a file — main `631bba3` emits **238**
+  `Statement error (CONSTRAINT): FOREIGN KEY constraint failed` lines on
+  **stderr** (0 on stdout), reports 25151 type usages, stores 24913. The loss
+  equals the error count exactly.
+
+  So the rows were **never written**: they were rejected, loudly, and the exit
+  code was 0 anyway. `pending_type_usages` is a deferred batch flushed at the
+  end of the run; by then `INSERT OR REPLACE` has replaced the `"_"` row and
+  the held `function_id`s are stale, so the deferred inserts violate the
+  foreign key. Nothing was cascaded away.
+
+  This makes H4 below CONFIRMED, not refuted — the first diagnosis was right
+  about the failure mode and was discarded on a bad measurement.
 
 **Introduced:** undetermined — `INSERT OR REPLACE` and the `_` recording both
 predate the history root available here. The defect is invisible without a
@@ -63,7 +78,7 @@ end in the same cascade.
 | H1 | `find_cmt_files` returns both `.cmt` and `.cmti` for one source, so each module is extracted twice | **REFUTED** | `arch_index.ml:83-88` filters `cmt_files` (`.cmt` only) for extraction; `cmti_files` feeds `collect_exposed` for exposed names and doc comments alone |
 | H2 | One CMT yields the same function name twice (shadowing, `let rec` groups, functors) | **CONFIRMED as a mechanism, REFUTED as the trigger here** | the 3-line fixture above shows the delta; but all 4 real pairs are `_`, not shadowed named functions |
 | H3 | Two modules collapse to one `module_id` | **NOT REACHED** | the 4 pairs span 4 distinct `module_id`s mapping to 4 distinct paths |
-| H4 | `insert_function` returns a stale `last_insert_rowid` after a failed insert, so `function_id` points at the wrong row | **REFUTED** | requires a failed insert; `Statement error` count is 0 |
+| H4 | the held `function_id` is stale by the time the deferred batch flushes, so the inserts are FK-rejected | **CONFIRMED** (was wrongly marked REFUTED) | 238 `Statement error (CONSTRAINT): FOREIGN KEY constraint failed` on stderr, main `631bba3`; loss (238) equals error count exactly |
 
 An earlier diagnosis (issue #29, original body) claimed FK rejection at insert
 time. Refuted by the same zero-`Statement error` measurement and corrected in a
@@ -71,11 +86,12 @@ comment on the issue.
 
 ## Impact scope — wider than the symptom
 
-`grep -nE "REFERENCES functions\(id\)" architecture-schema.sql` returns **8
-tables**, including `calls` on **both** `caller_id` and `callee_id`
-(`:107-108`). So the cascade does not only lose type usages: it deletes **call
-graph edges**, which is the library's primary output. The 345 figure is what one
-consumer's assertion happened to measure; it is not the size of the loss.
+Eight tables reference `functions(id)` with `ON DELETE CASCADE`, including
+`calls` on both `caller_id` and `callee_id` (`:107-108`), so a cascade *could*
+delete call-graph edges. **It does not here, and the earlier claim that it did
+was unsupported.** Measured: `calls` is 45377 reported and 45377 stored on both
+main and the fix. Not one edge was lost. The loss is confined to `type_usage`
+and equals the statement-failure count exactly.
 
 Two further consequences:
 

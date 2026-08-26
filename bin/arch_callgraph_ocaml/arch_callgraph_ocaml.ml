@@ -12,7 +12,18 @@ let run build_dir db_path schema_path =
     result.Arch_index.n_modules
     result.Arch_index.n_functions
     result.Arch_index.n_types
-    result.Arch_index.n_calls
+    result.Arch_index.n_calls ;
+  (* Fail on a run that rejected rows. [exec_stmt] prints a statement failure
+     and continues, so before this check the indexer could reject 238 inserts,
+     print 238 lines nobody reads, report the rejected rows as written, and
+     exit 0. A summary that overstates what it stored is worse than a crash:
+     every consumer downstream believes it. *)
+  if result.Arch_index.n_statement_failures > 0 then (
+    Printf.eprintf
+      "ERROR: %d statement(s) failed during indexing. The counts above are \
+       ATTEMPTS, not stored rows — the database is incomplete.\n%!"
+      result.Arch_index.n_statement_failures ;
+    exit 1)
 
 let build_dir_arg =
   let doc = "Path to the dune build directory (e.g., _build/default)." in
