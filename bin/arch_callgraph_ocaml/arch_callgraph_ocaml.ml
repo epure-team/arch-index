@@ -23,6 +23,13 @@ let run build_dir db_path schema_path =
       "ERROR: %d statement(s) failed during indexing. The counts above are \
        ATTEMPTS, not stored rows — the database is incomplete.\n%!"
       result.Arch_index.n_statement_failures ;
+    (* Name the destination tables. "437 statements failed" does not say
+       whether the run lost type usages (a metric input) or calls (a graph
+       edge, hence a reachability answer), and those have very different
+       consequences for anything reading the database afterwards. *)
+    List.iter
+      (fun (table, n) -> Printf.eprintf "ERROR:   %s: %d row(s) rejected\n%!" table n)
+      result.Arch_index.rejections_by_table ;
     exit 1)
 
 let build_dir_arg =

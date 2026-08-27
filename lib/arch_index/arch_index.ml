@@ -49,6 +49,10 @@ type result = {
   n_type_usages : int;
   n_type_usages_resolved : int;
   n_statement_failures : int;
+  (* Rejected rows per destination table. The scalar above says a run lost
+     rows; this says which table lost them, which is what decides whether the
+     loss invalidates a metric or a graph edge. *)
+  rejections_by_table : (string * int) list;
       (** Prepared-statement steps that did not return [DONE] during this run.
 
           [exec_stmt] prints such a failure and continues, so a run can reject
@@ -67,6 +71,16 @@ type result = {
 let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
   (* Reset global state for re-entrancy *)
   project_root := "" ;
+  (* [statement_failures] and [rejections_by_table] live at the
+     [Arch_index_db] module level, so they are process-cumulative, not
+     per-run. Now that this function is part of the published library
+     surface, a consumer calling [run] twice (or [run_lsp_multi] across
+     several languages) would otherwise read run 1's rejections folded into
+     run 2's report -- and [n_statement_failures] / [rejections_by_table] on
+     the result record are documented as THIS run's. Reset both here so the
+     record means what it says. *)
+  Arch_index_db.reset_rejections () ;
+  Arch_index_db.statement_failures := 0 ;
   (* Derive project root from build_dir: strip _build/default/... suffix *)
   (let abs_build =
      if Filename.is_relative build_dir then
@@ -398,7 +412,7 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
             Arch_index_db.bind_int stmt_dead 1 caller_id ;
             Arch_index_db.bind_text stmt_dead 2 call.call_site ;
             Arch_index_db.bind_text stmt_dead 3 callee_display_name ;
-            Arch_index_db.exec_stmt db stmt_dead ;
+            Arch_index_db.exec_stmt db ~what:"dead_code_sites" stmt_dead ;
             incr n_dead_sites
           end ;
           incr n_calls)
@@ -615,6 +629,7 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
     n_type_usages = !n_type_usages;
     n_type_usages_resolved = !n_type_usages_resolved;
     n_statement_failures = !Arch_index_db.statement_failures;
+    rejections_by_table = Arch_index_db.rejections_by_table ();
     db_path;
   }
 
@@ -626,6 +641,7 @@ module Language_registry = Language_registry
 module Lsp_client = Lsp_client
 module Lsp_types = Lsp_types
 module Ocaml_enricher = Ocaml_enricher
+module Db = Arch_index_db
 
 (* -------------------------------------------------------------------------- *)
 (* LSP-based run (Story #406 / #416)                                          *)
