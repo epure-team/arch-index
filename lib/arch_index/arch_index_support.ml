@@ -105,21 +105,21 @@ let restore_intents db backup =
     (fun (path, intent) ->
       bind_text stmt_mod 1 intent ;
       bind_text stmt_mod 2 path ;
-      exec_stmt db stmt_mod)
+      exec_stmt db ~what:"modules" stmt_mod)
     backup.module_intents ;
   List.iter
     (fun (path, name, intent) ->
       bind_text stmt_fn 1 intent ;
       bind_text stmt_fn 2 name ;
       bind_text stmt_fn 3 path ;
-      exec_stmt db stmt_fn)
+      exec_stmt db ~what:"functions" stmt_fn)
     backup.function_intents ;
   List.iter
     (fun (path, name, intent) ->
       bind_text stmt_ty 1 intent ;
       bind_text stmt_ty 2 name ;
       bind_text stmt_ty 3 path ;
-      exec_stmt db stmt_ty)
+      exec_stmt db ~what:"types" stmt_ty)
     backup.type_intents ;
   (* Finalize prepared statements *)
   ignore (Sqlite3.finalize stmt_mod) ;

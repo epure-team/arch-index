@@ -77,7 +77,43 @@ val exec_exn : Sqlite3.db -> string -> unit
 
     {violates}
     (none) *)
-val exec_stmt : Sqlite3.db -> Sqlite3.stmt -> unit
+val exec_stmt : Sqlite3.db -> what:string -> Sqlite3.stmt -> unit
+
+(** Rejected-row counts per destination table, sorted by table name. Empty when
+    the run rejected nothing.
+
+    {pre}
+    None.
+
+    {post}
+    The returned association list has one entry per table that rejected at
+    least one row, with a strictly positive count; the sum of counts equals the
+    scalar reported by the run's [n_statement_failures].
+
+    {violators}
+    (none)
+
+    {violates}
+    (none) *)
+val rejections_by_table : unit -> (string * int) list
+
+(** Clear the per-table rejected-row tally.
+
+    {pre}
+    None. Safe to call whether or not a run has happened yet.
+
+    {post}
+    [rejections_by_table ()] returns [[]] immediately after this call, until
+    the next call to [exec_stmt] that rejects a row. Does not touch
+    [statement_failures], which callers may reset directly since it is a
+    plain [int ref].
+
+    {violators}
+    (none)
+
+    {violates}
+    (none) *)
+val reset_rejections : unit -> unit
 
 (** Get the last inserted row ID.
 

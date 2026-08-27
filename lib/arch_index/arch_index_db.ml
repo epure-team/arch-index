@@ -55,14 +55,43 @@ let exec_exn db sql =
    enumerate in advance. *)
 let statement_failures = ref 0
 
-let exec_stmt db stmt =
+(* Per-table tally of rejected rows. The scalar [statement_failures] answers
+   "did this run lose rows"; this answers "which table lost them", which is the
+   question a consumer of the database actually needs. *)
+let rejections_by_table : (string, int) Hashtbl.t = Hashtbl.create 8
+
+let incr_rejection what =
+  Hashtbl.replace
+    rejections_by_table
+    what
+    (1 + Option.value ~default:0 (Hashtbl.find_opt rejections_by_table what))
+
+let reset_rejections () = Hashtbl.reset rejections_by_table
+
+let rejections_by_table () =
+  Hashtbl.fold (fun k v acc -> (k, v) :: acc) rejections_by_table []
+  |> List.sort (fun (a, _) (b, _) -> String.compare a b)
+
+(* [~what] names the table the rejected row was destined for. Without it the
+   diagnostic is "Statement error (CONSTRAINT): FOREIGN KEY constraint failed"
+   repeated N times, which identifies neither the table nor the pipeline stage
+   -- so a reader cannot tell whether the lost rows were type usages (a metric
+   input) or calls (a graph edge, and therefore a reachability answer). The
+   sqlite3 OCaml bindings expose no accessor for a prepared statement's SQL
+   text (checked: sqlite3.mli 5.4.1 has no `val sql`), so the label cannot be
+   recovered from the statement and must be passed in. It is a REQUIRED
+   argument rather than an optional one precisely so no future insert site can
+   silently opt back out of the diagnostic. *)
+let exec_stmt db ~what stmt =
   match Sqlite3.step stmt with
   | Sqlite3.Rc.DONE -> ignore (Sqlite3.reset stmt)
   | rc ->
       incr statement_failures ;
+      incr_rejection what ;
       Arch_io.eprintf
-        "Statement error (%s): %s\n"
+        "Statement error (%s) writing to %s: %s\n"
         (Sqlite3.Rc.to_string rc)
+        what
         (Sqlite3.errmsg db) ;
       ignore (Sqlite3.reset stmt)
 
@@ -107,7 +136,7 @@ let insert_module db stmt_mod ~path ~lines ~has_mli ?(quint_module_raw = None)
   bind_text stmt_mod 3 now ;
   bind_bool stmt_mod 4 has_mli ;
   bind_text_opt stmt_mod 5 quint_module_raw ;
-  exec_stmt db stmt_mod ;
+  exec_stmt db ~what:"modules" stmt_mod ;
   last_insert_rowid db
 
 let bind_int_opt stmt idx = function
@@ -137,7 +166,7 @@ let insert_function db stmt_fn ~module_id ~name ~signature ~line_start ~line_end
   bind_text_opt stmt_fn 16 quint_raw ;
   bind_int_opt stmt_fn 17 mutation_sites ;
   bind_int_opt stmt_fn 18 deref_sites ;
-  exec_stmt db stmt_fn ;
+  exec_stmt db ~what:"functions" stmt_fn ;
   last_insert_rowid db
 
 let insert_type db stmt_ty ~module_id ~name ~kind ~line_start ~line_end ~exposed
@@ -150,7 +179,7 @@ let insert_type db stmt_ty ~module_id ~name ~kind ~line_start ~line_end ~exposed
   bind_bool stmt_ty 6 exposed ;
   bind_text_opt stmt_ty 7 manifest ;
   bind_text_opt stmt_ty 8 intent ;
-  exec_stmt db stmt_ty ;
+  exec_stmt db ~what:"types" stmt_ty ;
   last_insert_rowid db
 
 let insert_field db stmt_fld ~type_id ~field_name ~field_type ~position =
@@ -158,7 +187,7 @@ let insert_field db stmt_fld ~type_id ~field_name ~field_type ~position =
   bind_text stmt_fld 2 field_name ;
   bind_text stmt_fld 3 field_type ;
   bind_int stmt_fld 4 position ;
-  exec_stmt db stmt_fld
+  exec_stmt db ~what:"type_fields" stmt_fld
 
 let insert_constructor db stmt_ctor ~type_id ~constructor_name ~position
     ~arg_types =
@@ -166,7 +195,7 @@ let insert_constructor db stmt_ctor ~type_id ~constructor_name ~position
   bind_text stmt_ctor 2 constructor_name ;
   bind_int stmt_ctor 3 position ;
   bind_text_opt stmt_ctor 4 arg_types ;
-  exec_stmt db stmt_ctor
+  exec_stmt db ~what:"type_constructors" stmt_ctor
 
 let insert_call db stmt_call ~caller_id ~callee_id ~callee_name ~call_site ~kind =
   bind_int stmt_call 1 caller_id ;
@@ -176,7 +205,7 @@ let insert_call db stmt_call ~caller_id ~callee_id ~callee_name ~call_site ~kind
   (match callee_id with
   | Some id -> bind_int stmt_call 2 id
   | None -> ignore (Sqlite3.bind stmt_call 2 Sqlite3.Data.NULL)) ;
-  exec_stmt db stmt_call
+  exec_stmt db ~what:"calls" stmt_call
 
 let insert_module_dep db stmt_dep ~source_module ~target_module ~target_path
     ~dep_kind ~alias_name ~line_number =
@@ -188,7 +217,7 @@ let insert_module_dep db stmt_dep ~source_module ~target_module ~target_path
   (match target_module with
   | Some id -> bind_int stmt_dep 2 id
   | None -> ignore (Sqlite3.bind stmt_dep 2 Sqlite3.Data.NULL)) ;
-  exec_stmt db stmt_dep
+  exec_stmt db ~what:"module_deps" stmt_dep
 
 let insert_type_usage db stmt_usage ~function_id ~type_id ~type_name ~usage_role
     ~position =
@@ -201,7 +230,7 @@ let insert_type_usage db stmt_usage ~function_id ~type_id ~type_name ~usage_role
   (match position with
   | Some p -> bind_int stmt_usage 5 p
   | None -> ignore (Sqlite3.bind stmt_usage 5 Sqlite3.Data.NULL)) ;
-  exec_stmt db stmt_usage
+  exec_stmt db ~what:"type_usage" stmt_usage
 
 (* -------------------------------------------------------------------------- *)
 (* Inline tests — happy paths only (exec_exn calls exit 1 on errors;         *)

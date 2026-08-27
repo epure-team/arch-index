@@ -25,6 +25,9 @@ type result = {
   n_type_usages : int;
   n_type_usages_resolved : int;
   n_statement_failures : int;
+      (** Rejected rows per destination table, sorted by table name, empty when
+          nothing was rejected. The counts sum to [n_statement_failures]. *)
+  rejections_by_table : (string * int) list;
       (** Prepared-statement steps that did not return [DONE] during this run.
 
           [exec_stmt] prints such a failure and continues, so a run can reject
@@ -132,6 +135,30 @@ module Arch_index_git = Arch_index_git
 
 (** Pure per-function CFG with post-dominance (dominance-MUST engine). *)
 module Arch_index_cfg = Arch_index_cfg
+
+(** Minimal re-export of the per-table rejected-row accounting from
+    {!Arch_index_db} (a [private_modules] library-internal module, invisible
+    outside this library). Exposed so a test can drive [exec_stmt] directly
+    against a hand-built SQLite fixture and assert the per-table breakdown it
+    produces, without duplicating [exec_stmt]'s logic. Deliberately narrow: it
+    is the accounting surface only, not the whole insert API. *)
+module Db : sig
+  val statement_failures : int ref
+  (** Count of prepared-statement steps that did not return [DONE]. See
+      {!Arch_index_db.statement_failures}. *)
+
+  val exec_stmt : Sqlite3.db -> what:string -> Sqlite3.stmt -> unit
+  (** Execute a prepared statement, reset on completion; on failure records
+      the rejection against [what] in both [statement_failures] and
+      [rejections_by_table]. See {!Arch_index_db.exec_stmt}. *)
+
+  val rejections_by_table : unit -> (string * int) list
+  (** Rejected-row counts per destination table, sorted by table name. See
+      {!Arch_index_db.rejections_by_table}. *)
+
+  val reset_rejections : unit -> unit
+  (** Clear the per-table tally. See {!Arch_index_db.reset_rejections}. *)
+end
 
 (** [run_lsp_multi ~languages] indexes a project holding several languages into
     a single database. *)
