@@ -15,17 +15,39 @@
  * 1975 to 2557 — 582 previously-resolved edges dropped — and the whole tezt suite
  * stayed green, because every fixture reference had the shape Wrapper.File.value.
  *
- * BASELINE is main's measured count. The invariant is one-directional: the count
- * may fall (that is a resolution gain), never rise. When it falls a long way,
- * lower the baseline in the same commit so the ratchet keeps its teeth.
+ * BASELINE is main's measured count plus HEADROOM. The invariant is
+ * one-directional: the count may fall (that is a resolution gain), never rise
+ * past BASELINE. When it falls a long way, lower CLEAN_MEASURED in the same
+ * commit so the ratchet keeps its teeth; a console warning below does that
+ * check automatically.
  *
  * Recalibrated 2026-09-01 (item 0.2, wiring this ratchet into CI): the original
  * baseline of 1975 was measured before six commits' worth of ordinary growth
  * landed on main (#37 fix, the dropped-node MAY_TOP fix, tools/, new tezt
- * suites). Re-measured on main at 161f3d7: 2024, spread across 70 modules with
- * no module contributing more than ~7% of the delta — diffuse repo growth, not
- * a localized resolver regression. Confirmed by nested-module-resolution.js
- * (the fixture-scale ratchet for the same review finding) passing clean.
+ * suites). Re-measured against a CLEAN checkout of main at 161f3d7 (a dirty
+ * working tree inflated a first attempt at this number to 2024 — see review
+ * round 1 of wire-checks-into-ci):
+ *
+ *   git worktree add --detach /tmp/clean <sha> && cd /tmp/clean && dune build \
+ *     && node checks/no-must-null-regression.js
+ *   => calls=9289  MUST-with-NULL-callee=2015
+ *
+ * The delta from 1975 is spread across ~70 modules with no module
+ * contributing more than ~7% of it — diffuse repo growth, not a localized
+ * resolver regression — reproducible via:
+ *
+ *   SELECT m.path, count(*) FROM calls c
+ *   JOIN functions f ON f.id = c.caller_id
+ *   JOIN modules m ON m.id = f.module_id
+ *   WHERE c.kind = 'MUST' AND c.callee_id IS NULL
+ *   GROUP BY m.path ORDER BY 2 DESC;
+ *
+ * Confirmed by nested-module-resolution.js (the fixture-scale ratchet for the
+ * same review finding) passing clean on the same checkout.
+ *
+ * HEADROOM absorbs ordinary future growth of this shape without demanding a
+ * recalibration commit for every unrelated PR; it is not slack for a real
+ * regression; a rise that exceeds it still fails.
  *
  * Runs against this repository's OWN _build/default — the widest, most varied
  * OCaml index available without a network.
@@ -38,7 +60,9 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const BASELINE = 2024;
+const CLEAN_MEASURED = 2015;
+const HEADROOM = 25;
+const BASELINE = CLEAN_MEASURED + HEADROOM;
 
 const REPO = path.resolve(__dirname, '..');
 const BUILD_DIR = path.join(REPO, '_build/default');
@@ -59,6 +83,7 @@ if (!fs.existsSync(SCHEMA)) setupFail('missing schema: ' + SCHEMA);
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'arch-mustnull-'));
 const db = path.join(tmp, 'self.db');
+let cleanupOnSuccess = true;
 
 try {
   execFileSync(BIN, [
@@ -67,13 +92,23 @@ try {
     '--schema-path=' + SCHEMA,
   ], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
 } catch (e) {
+  // Indexing failure is unambiguously a setup failure — the check never got
+  // to measure anything.
   setupFail('indexing ' + BUILD_DIR + ' failed:\n' + (e.stderr || e.message));
 }
 
+// Every sqlite3 invocation is a setup dependency, not part of the assertion
+// itself: an unguarded throw here (missing/broken sqlite3, a locked db) must
+// exit >=2, never 1 — exit 1 is reserved for the assertion actually firing.
 function count(query) {
-  const out = execFileSync('sqlite3', ['-noheader', db, query], {
-    encoding: 'utf8',
-  }).trim();
+  let out;
+  try {
+    out = execFileSync('sqlite3', ['-noheader', db, query], {
+      encoding: 'utf8',
+    }).trim();
+  } catch (e) {
+    setupFail('sqlite3 failed for ' + query + ':\n' + (e.stderr || e.message));
+  }
   const n = parseInt(out, 10);
   if (Number.isNaN(n)) setupFail('unexpected sqlite3 output for ' + query + ': ' + out);
   return n;
@@ -91,6 +126,7 @@ console.log(
 );
 
 if (mustNull > BASELINE) {
+  cleanupOnSuccess = false; // leave the db inspectable on a fired assertion
   console.error(
     'ASSERTION FAILED: ' +
       mustNull +
@@ -106,5 +142,20 @@ if (mustNull > BASELINE) {
   process.exit(1);
 }
 
+// Enforce the tightening half of the one-directional invariant: a count that
+// has fallen a long way below CLEAN_MEASURED means the baseline itself is
+// stale and should be lowered in this commit, per the policy stated above —
+// this is advisory only, never a failure.
+if (mustNull < CLEAN_MEASURED - HEADROOM) {
+  console.warn(
+    'NOTE: MUST-with-NULL-callee (' +
+      mustNull +
+      ') has fallen well below CLEAN_MEASURED (' +
+      CLEAN_MEASURED +
+      '). Consider lowering CLEAN_MEASURED in this commit so the ratchet keeps its teeth.'
+  );
+}
+
 console.log('OK no-must-null-regression');
+if (cleanupOnSuccess) fs.rmSync(tmp, { recursive: true, force: true });
 process.exit(0);
