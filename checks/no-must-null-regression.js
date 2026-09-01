@@ -32,9 +32,12 @@
  *     && node checks/no-must-null-regression.js
  *   => calls=9289  MUST-with-NULL-callee=2015
  *
- * The delta from 1975 is spread across ~70 modules with no module
- * contributing more than ~7% of it — diffuse repo growth, not a localized
- * resolver regression — reproducible via:
+ * The clean-checkout count is diffuse, not a localized resolver regression:
+ * on the same 161f3d7 checkout, the current per-module breakdown (NOT a diff
+ * against the 1975-era checkout — that would need this query run on both SHAs
+ * and diffed, which this comment does not claim to have done) spans 69
+ * modules, with no single module holding more than ~7% of the total
+ * (144 / 2015). Reproducible via:
  *
  *   SELECT m.path, count(*) FROM calls c
  *   JOIN functions f ON f.id = c.caller_id
@@ -83,7 +86,6 @@ if (!fs.existsSync(SCHEMA)) setupFail('missing schema: ' + SCHEMA);
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'arch-mustnull-'));
 const db = path.join(tmp, 'self.db');
-let cleanupOnSuccess = true;
 
 try {
   execFileSync(BIN, [
@@ -126,7 +128,7 @@ console.log(
 );
 
 if (mustNull > BASELINE) {
-  cleanupOnSuccess = false; // leave the db inspectable on a fired assertion
+  // leave the db inspectable on a fired assertion — no cleanup on this path
   console.error(
     'ASSERTION FAILED: ' +
       mustNull +
@@ -157,5 +159,10 @@ if (mustNull < CLEAN_MEASURED - HEADROOM) {
 }
 
 console.log('OK no-must-null-regression');
-if (cleanupOnSuccess) fs.rmSync(tmp, { recursive: true, force: true });
+// Cleanup failure must never change the verdict — warn and continue, not throw.
+try {
+  fs.rmSync(tmp, { recursive: true, force: true });
+} catch (e) {
+  console.warn('NOTE: cleanup of ' + tmp + ' failed: ' + e.message);
+}
 process.exit(0);
