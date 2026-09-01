@@ -1,0 +1,25 @@
+{
+  "task": "wire-checks-into-ci",
+  "round": 1,
+  "cycle": 1,
+  "qa_no_go_round": 0,
+  "rounds_audit": [
+    {
+      "round": 1,
+      "date": "2026-09-01",
+      "verdict": "GO",
+      "causes": [],
+      "qualifying": false
+    }
+  ],
+  "cross_runtime": {
+    "codex": {
+      "status": "skipped-degraded",
+      "reason": "runtime degraded during review with unchanged runtime version",
+      "config_digest": "codex:2702d145257b4beb",
+      "source": "review-go"
+    }
+  },
+  "status": "GO",
+  "date": "2026-09-01"
+}
