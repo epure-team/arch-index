@@ -71,6 +71,17 @@ jobs:
           # PATH in this shell, not only inside opam exec's child.
           eval "$(opam env)"
           dune test
+      - name: Soundness ratchets (checks/)
+        run: |
+          # checks/ are standalone node-runnable invariant ratchets, not part of `dune test` —
+          # see checks/README.md. Each honours a three-way exit code (0 pass, 1 the guarded bug
+          # is present, >=2 setup/error); a plain `node checks/<name>.js` step already fails on
+          # any non-zero exit, so a missing binary or build failure (>=2) reads as a CI failure
+          # exactly like a fired assertion (1), never as green.
+          eval "$(opam env)"
+          node checks/nested-module-resolution.js
+          node checks/no-must-null-regression.js
+
       - name: Self-index smoke test
         run: |
           BIN="./_build/default/bin/arch_callgraph_ocaml/arch_callgraph_ocaml.exe"
