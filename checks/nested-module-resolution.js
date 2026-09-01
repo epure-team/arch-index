@@ -4,8 +4,10 @@
 /*
  * Ratchet — nested-module qualified-name resolution.
  *
- * Guards two CRITICAL findings from
- * briefs/sound-qualified-name-resolution-review.json:
+ * Guards two CRITICAL findings raised in review round 1 of the
+ * sound-qualified-name-resolution task (that review.json was never committed
+ * to main — see briefs/sound-qualified-name-resolution-{intake,plan}.md for
+ * the surviving trail; the finding text below is preserved verbatim from it):
  *
  *   arch_index.ml:359 (dropped edges) — resolve_module_root's multi-segment arm
  *     only ever reconstructed `Root__File`. A reference into a nested module of a
@@ -57,19 +59,19 @@ function run(cmd, args, opts) {
   });
 }
 
+// A failed sqlite3 invocation is a setup dependency, never the assertion
+// itself — it must exit >=2, not 1 (exit 1 is reserved for a fired assertion).
 function sql(db, query) {
-  const out = run('sqlite3', ['-noheader', '-separator', '|', db, query]);
+  let out;
+  try {
+    out = run('sqlite3', ['-noheader', '-separator', '|', db, query]);
+  } catch (e) {
+    setupFail('sqlite3 failed for ' + query + ':\n' + (e.stderr || e.message));
+  }
   return out
     .split('\n')
     .filter((l) => l.length > 0)
     .map((l) => l.split('|'));
-}
-
-function scalar(db, query) {
-  const rows = sql(db, query);
-  if (rows.length === 0) return null;
-  const v = rows[0][0];
-  return v === '' ? null : v;
 }
 
 function writeProject(root, files) {
@@ -99,8 +101,11 @@ const DECOY_DUNE =
   '(library\n (name foo)\n (modules bar)\n (flags (:standard -w -a)))\n';
 const DECOY_BAR = 'let baz () : int = 1\n';
 
+const fixtureRoots = [];
+
 function buildAndIndex(label, files) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'arch-nested-' + label + '-'));
+  fixtureRoots.push(root);
   writeProject(root, files);
   try {
     run('dune', ['build', '--root', root]);
@@ -122,9 +127,12 @@ function buildAndIndex(label, files) {
   return { root, db };
 }
 
+// A multi-row match is a fixture bug, not a value to pick arbitrarily from —
+// same reasoning goCall applies below: a fixture that grows a second matching
+// row must not silently assert about whichever one sqlite3 returns first.
 function fnId(db, modLike, names) {
   const list = names.map((n) => "'" + n + "'").join(',');
-  return scalar(
+  const rows = sql(
     db,
     'SELECT f.id FROM functions f JOIN modules m ON m.id = f.module_id ' +
       "WHERE m.path LIKE '" +
@@ -133,6 +141,15 @@ function fnId(db, modLike, names) {
       list +
       ')'
   );
+  if (rows.length === 0) return null;
+  if (rows.length > 1) {
+    setupFail(
+      'fnId(' + modLike + ', [' + list + ']) matched ' + rows.length +
+      ' rows, expected at most 1 — fixture is ambiguous'
+    );
+  }
+  const v = rows[0][0];
+  return v === '' ? null : v;
 }
 
 // Exactly one call row for `go` is demanded: a fixture whose caller grew a second
@@ -241,8 +258,10 @@ function goCall(db, label) {
 }
 
 if (failures.length > 0) {
+  // Leave the fixture roots in place on a fired assertion — inspectable.
   for (const f of failures) console.error('ASSERTION FAILED: ' + f);
   process.exit(1);
 }
+for (const root of fixtureRoots) fs.rmSync(root, { recursive: true, force: true });
 console.log('OK nested-module-resolution: both scenarios hold');
 process.exit(0);

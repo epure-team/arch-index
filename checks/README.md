@@ -24,6 +24,8 @@ after `Build` and before `Self-index smoke test`. A `node checks/<name>.js` step
 any non-zero exit, so exit `1` (bug present) and exit `>=2` (setup failure) both fail the
 build — a missing binary never reads as green.
 
-These are ratchets, not a test suite: each one is linked to a specific review finding in
-`briefs/sound-qualified-name-resolution-impl.md` (`## Ratchet`) and was proven RED before
-the fix that made it green.
+These are ratchets, not a test suite: each one is linked to a specific review finding
+raised during the sound-qualified-name-resolution task (see
+`briefs/sound-qualified-name-resolution-{intake,plan}.md` for the surviving trail; the
+finding text itself is preserved in each check's own header comment) and was proven RED
+before the fix that made it green.

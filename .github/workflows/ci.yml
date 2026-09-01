@@ -60,6 +60,30 @@ jobs:
         run: opam install --deps-only --with-test --yes .
       - name: Build
         run: opam exec -- dune build
+      - name: Soundness ratchets (checks/)
+        run: |
+          # checks/ are standalone node-runnable invariant ratchets, not part of `dune test` —
+          # see checks/README.md. Each honours a three-way exit code (0 pass, 1 the guarded bug
+          # is present, >=2 setup/error); a plain `node checks/<name>.js` step already fails on
+          # any non-zero exit, so a missing binary or build failure (>=2) reads as a CI failure
+          # exactly like a fired assertion (1), never as green.
+          #
+          # Runs right after Build, before `dune test`: both checks measure the state of
+          # `_build/default` that Build alone produces, and neither needs the Tezt suite.
+          # Placing them here also means a later Tezt flake can never mask a fired ratchet.
+          #
+          # `opam env` is captured into a variable before `eval`, not inlined — under bash's
+          # default `-e` a failing `opam env` inside a bare `eval "$(opam env)"` would still
+          # `eval ""`, exit 0, and silently proceed with an unconfigured switch.
+          opam_env="$(opam env)"
+          eval "$opam_env"
+          # sqlite3 is a direct dependency of both checks and of the later self-index smoke
+          # test, but no step installs it explicitly — ubuntu-latest ships it, but relying on
+          # that implicitly is the same "green without data" shape this pipeline refuses
+          # everywhere else. Idempotent: a no-op if already present.
+          sudo apt-get update -qq && sudo apt-get install -y -qq sqlite3
+          node checks/nested-module-resolution.js
+          node checks/no-must-null-regression.js
       # `dune test` also runs the Tezt suite under tezt/, which covers the CMT
       # indexer's module-language shapes and, now that the servers above are
       # installed, the polyglot indexing path for real.
@@ -71,17 +95,6 @@ jobs:
           # PATH in this shell, not only inside opam exec's child.
           eval "$(opam env)"
           dune test
-      - name: Soundness ratchets (checks/)
-        run: |
-          # checks/ are standalone node-runnable invariant ratchets, not part of `dune test` —
-          # see checks/README.md. Each honours a three-way exit code (0 pass, 1 the guarded bug
-          # is present, >=2 setup/error); a plain `node checks/<name>.js` step already fails on
-          # any non-zero exit, so a missing binary or build failure (>=2) reads as a CI failure
-          # exactly like a fired assertion (1), never as green.
-          eval "$(opam env)"
-          node checks/nested-module-resolution.js
-          node checks/no-must-null-regression.js
-
       - name: Self-index smoke test
         run: |
           BIN="./_build/default/bin/arch_callgraph_ocaml/arch_callgraph_ocaml.exe"
