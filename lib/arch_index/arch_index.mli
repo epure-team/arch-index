@@ -158,6 +158,48 @@ module Db : sig
 
   val reset_rejections : unit -> unit
   (** Clear the per-table tally. See {!Arch_index_db.reset_rejections}. *)
+
+  val insert_function :
+    Sqlite3.db ->
+    Sqlite3.stmt ->
+    module_id:int ->
+    name:string ->
+    signature:string option ->
+    line_start:int ->
+    line_end:int ->
+    exposed:bool ->
+    intent:string option ->
+    ?comment_quality_score:int option ->
+    ?has_pre:bool ->
+    ?has_post:bool ->
+    ?has_violators:bool ->
+    ?has_violates:bool ->
+    ?violators_raw:string option ->
+    ?violates_raw:string option ->
+    ?tests_raw:string option ->
+    ?quint_raw:string option ->
+    ?mutation_sites:int option ->
+    ?deref_sites:int option ->
+    unit ->
+    int option
+  (** Insert a function row, returning its id — [None] when the row was
+      rejected. Exposed alongside [exec_stmt] so a test can check that a
+      rejected insert yields no id rather than the previous insert's, which
+      [last_insert_rowid] would happily supply. See
+      {!Arch_index_db.insert_function}. *)
+
+  val insert_type_usage :
+    Sqlite3.db ->
+    Sqlite3.stmt ->
+    function_id:int ->
+    type_id:int option ->
+    type_name:string ->
+    usage_role:string ->
+    position:int option ->
+    unit
+  (** Insert a type-usage row against [function_id]. The dependent insert whose
+      misattribution is the point of the check above. See
+      {!Arch_index_db.insert_type_usage}. *)
 end
 
 (** [run_lsp_multi ~languages] indexes a project holding several languages into

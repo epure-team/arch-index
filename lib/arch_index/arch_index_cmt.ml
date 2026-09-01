@@ -1433,7 +1433,7 @@ let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
               let quint_module_raw =
                 Hashtbl.find_opt module_quint_tbl modname
               in
-              let module_id =
+              match
                 insert_module
                   db
                   stmt_mod
@@ -1442,414 +1442,447 @@ let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
                   ~has_mli
                   ?quint_module_raw:(Option.map Option.some quint_module_raw)
                   ()
-              in
-              (* Collect calls, module deps, and type usages from value bindings *)
-              let pending_calls = ref [] in
-              let pending_deps = ref [] in
-              let pending_type_usages = ref [] in
-              let local_fn_stamps = build_local_fn_stamps structure in
-              let add_dep target_path dep_kind alias_name line_number =
-                pending_deps :=
-                  {
-                    source_module = rel_path;
-                    target_path;
-                    dep_kind;
-                    alias_name;
-                    line_number;
-                  }
-                  :: !pending_deps
-              in
-              (* Process structure items.
-                 [prefix] is the enclosing module path ("Make." inside
-                 [module Make (P : S) = struct ... end]), so a function defined
-                 in a nested structure is registered under its definition path
-                 rather than being dropped.  Qualifying by definition means a
-                 functor applied twice still yields one row per definition,
-                 which is what the CMT records. *)
-              let process_item ~prefix (item : Typedtree.structure_item) =
-                  (* Module dependencies are a property of the file, so only the
-                     toplevel contributes: an [open] or an alias local to a
-                     nested module is not a dependency of the compilation
-                     unit. *)
-                  let add_dep path kind alias line =
-                    if prefix = "" then add_dep path kind alias line
+              with
+              | None ->
+                  (* The modules row was rejected. Every function, type and dep
+                     below hangs off [module_id]; with no row of our own the
+                     only id available is another module's, so index nothing
+                     from this compilation unit rather than file it under a
+                     neighbour. *)
+                  ([], [], [])
+              | Some module_id ->
+                  (* Collect calls, module deps, and type usages from value bindings *)
+                  let pending_calls = ref [] in
+                  let pending_deps = ref [] in
+                  let pending_type_usages = ref [] in
+                  let local_fn_stamps = build_local_fn_stamps structure in
+                  let add_dep target_path dep_kind alias_name line_number =
+                    pending_deps :=
+                      {
+                        source_module = rel_path;
+                        target_path;
+                        dep_kind;
+                        alias_name;
+                        line_number;
+                      }
+                      :: !pending_deps
                   in
-                  match item.str_desc with
-                  | Tstr_open od -> (
-                      (* open Module *)
-                      match module_path_of_expr od.open_expr with
-                      | Some path ->
-                          add_dep
-                            path
-                            "open"
-                            None
-                            od.open_loc.loc_start.pos_lnum
-                      | None -> ())
-                  | Tstr_include id -> (
-                      (* include Module *)
-                      match module_path_of_expr id.incl_mod with
-                      | Some path ->
-                          add_dep
-                            path
-                            "include"
-                            None
-                            id.incl_loc.loc_start.pos_lnum
-                      | None -> ())
-                  | Tstr_module mb ->
-                      (* module M = SomeModule (alias) *)
-                      (match mb.mb_id with
-                      | Some id -> (
-                          match module_path_of_expr mb.mb_expr with
+                  (* Process structure items.
+                     [prefix] is the enclosing module path ("Make." inside
+                     [module Make (P : S) = struct ... end]), so a function defined
+                     in a nested structure is registered under its definition path
+                     rather than being dropped.  Qualifying by definition means a
+                     functor applied twice still yields one row per definition,
+                     which is what the CMT records. *)
+                  let process_item ~prefix (item : Typedtree.structure_item) =
+                      (* Module dependencies are a property of the file, so only the
+                         toplevel contributes: an [open] or an alias local to a
+                         nested module is not a dependency of the compilation
+                         unit. *)
+                      let add_dep path kind alias line =
+                        if prefix = "" then add_dep path kind alias line
+                      in
+                      match item.str_desc with
+                      | Tstr_open od -> (
+                          (* open Module *)
+                          match module_path_of_expr od.open_expr with
                           | Some path ->
                               add_dep
                                 path
-                                "alias"
-                                (Some (Ident.name id))
-                                mb.mb_expr.mod_loc.loc_start.pos_lnum
+                                "open"
+                                None
+                                od.open_loc.loc_start.pos_lnum
                           | None -> ())
-                      | None -> ())
-                      (* What the module itself defines is reached by
-                         [iter_structure_items], which walks into it. *)
-                  | Tstr_value (_, vbs) ->
-                      List.iter
-                        (fun (vb : Typedtree.value_binding) ->
-                          match vb.vb_pat.pat_desc with
-                          | Tpat_var (id, _, _)
-                            when Ident.name id <> "_" ->
-                              (* A binding the compiler named "_" is not a
-                                 function: it is a wildcard, and `_` is not a
-                                 valid OCaml identifier, so no hand-written
-                                 definition can produce one. In practice they
-                                 come from ppx-generated code — every
-                                 [@@deriving ...] emits some — and recording
-                                 them was actively destructive, not merely
-                                 noisy: `functions` carries a UNIQUE on
-                                 (module_id, name), so a module with several of
-                                 them re-inserted the same ("_") row, and
-                                 `INSERT OR REPLACE` turned each repeat into
-                                 DELETE-then-INSERT whose DELETE fired
-                                 ON DELETE CASCADE across the eight tables
-                                 that reference functions(id) — including
-                                 `calls` on both caller_id and callee_id.
-                                 Rows already written were deleted, silently:
-                                 nothing failed, so nothing was logged.
-                                 Measured on a 3-line fixture with three
-                                 [@@deriving yojson]: 15 type usages reported,
-                                 3 stored. On épure's src/: 96 re-inserts over
-                                 4 modules, all named "_". *)
-                              let name = qualify ~prefix (Ident.name id) in
-                              let signature =
-                                Some (type_to_string vb.vb_pat.pat_type)
-                              in
-                              let line_start = vb.vb_loc.loc_start.pos_lnum in
-                              let line_end = vb.vb_loc.loc_end.pos_lnum in
+                      | Tstr_include id -> (
+                          (* include Module *)
+                          match module_path_of_expr id.incl_mod with
+                          | Some path ->
+                              add_dep
+                                path
+                                "include"
+                                None
+                                id.incl_loc.loc_start.pos_lnum
+                          | None -> ())
+                      | Tstr_module mb ->
+                          (* module M = SomeModule (alias) *)
+                          (match mb.mb_id with
+                          | Some id -> (
+                              match module_path_of_expr mb.mb_expr with
+                              | Some path ->
+                                  add_dep
+                                    path
+                                    "alias"
+                                    (Some (Ident.name id))
+                                    mb.mb_expr.mod_loc.loc_start.pos_lnum
+                              | None -> ())
+                          | None -> ())
+                          (* What the module itself defines is reached by
+                             [iter_structure_items], which walks into it. *)
+                      | Tstr_value (_, vbs) ->
+                          List.iter
+                            (fun (vb : Typedtree.value_binding) ->
+                              match vb.vb_pat.pat_desc with
+                              | Tpat_var (id, _, _)
+                                when Ident.name id <> "_" ->
+                                  (* A binding the compiler named "_" is not a
+                                     function: it is a wildcard, and `_` is not a
+                                     valid OCaml identifier, so no hand-written
+                                     definition can produce one. In practice they
+                                     come from ppx-generated code — every
+                                     [@@deriving ...] emits some — and recording
+                                     them was actively destructive, not merely
+                                     noisy: `functions` carries a UNIQUE on
+                                     (module_id, name), so a module with several of
+                                     them re-inserted the same ("_") row, and
+                                     `INSERT OR REPLACE` turned each repeat into
+                                     DELETE-then-INSERT whose DELETE fired
+                                     ON DELETE CASCADE across the eight tables
+                                     that reference functions(id) — including
+                                     `calls` on both caller_id and callee_id.
+                                     Rows already written were deleted, silently:
+                                     nothing failed, so nothing was logged.
+                                     Measured on a 3-line fixture with three
+                                     [@@deriving yojson]: 15 type usages reported,
+                                     3 stored. On épure's src/: 96 re-inserts over
+                                     4 modules, all named "_". *)
+                                  let name = qualify ~prefix (Ident.name id) in
+                                  let signature =
+                                    Some (type_to_string vb.vb_pat.pat_type)
+                                  in
+                                  let line_start = vb.vb_loc.loc_start.pos_lnum in
+                                  let line_end = vb.vb_loc.loc_end.pos_lnum in
+                                  let exposed =
+                                    Hashtbl.mem exposed_tbl (modname, name)
+                                  in
+                                  (* Prefer .mli doc; fall back to .ml doc *)
+                                  let intent =
+                                    match
+                                      Hashtbl.find_opt doc_tbl (modname, name)
+                                    with
+                                    | Some _ as d -> d
+                                    | None -> extract_doc vb.vb_attributes
+                                  in
+                                  (* Parse doc comment for comment quality score *)
+                                  let parsed =
+                                    match intent with
+                                    | Some doc ->
+                                        Some (Arch_index_comment_parser.parse doc)
+                                    | None -> None
+                                  in
+                                  (* R8 mutability metrics: diagnostic only *)
+                                  let muts, derefs = count_mutability vb.vb_expr in
+                                  (match
+                                     insert_function
+                                      db
+                                      stmt_fn
+                                      ~module_id
+                                      ~name
+                                      ~signature
+                                      ~line_start
+                                      ~line_end
+                                      ~exposed
+                                      ~intent
+                                      ~mutation_sites:(Some muts)
+                                      ~deref_sites:(Some derefs)
+                                      ?comment_quality_score:
+                                        (Option.map
+                                           (fun p ->
+                                             Some p.Arch_index_comment_parser.score)
+                                           parsed)
+                                      ~has_pre:
+                                        (match parsed with
+                                        | Some p ->
+                                            p.Arch_index_comment_parser.sections.pre
+                                            <> Arch_index_comment_parser.Absent
+                                        | None -> false)
+                                      ~has_post:
+                                        (match parsed with
+                                        | Some p ->
+                                            p.Arch_index_comment_parser.sections
+                                              .post
+                                            <> Arch_index_comment_parser.Absent
+                                        | None -> false)
+                                      ~has_violators:
+                                        (match parsed with
+                                        | Some p ->
+                                            p.Arch_index_comment_parser.sections
+                                              .violators
+                                            <> Arch_index_comment_parser.Absent
+                                        | None -> false)
+                                      ~has_violates:
+                                        (match parsed with
+                                        | Some p ->
+                                            p.Arch_index_comment_parser.sections
+                                              .violates
+                                            <> Arch_index_comment_parser.Absent
+                                        | None -> false)
+                                      ?violators_raw:
+                                        (match parsed with
+                                        | Some p ->
+                                            let entries =
+                                              p.Arch_index_comment_parser.sections
+                                                .violators_entries
+                                            in
+                                            if entries = [] then None
+                                            else
+                                              Some
+                                                (Some
+                                                   (`List
+                                                      (List.map
+                                                         (fun e ->
+                                                           `Assoc
+                                                             [
+                                                               ( "name",
+                                                                 `String
+                                                                   e
+                                                                     .Arch_index_comment_parser
+                                                                      .qualified_name
+                                                               );
+                                                               ( "reason",
+                                                                 `String
+                                                                   e
+                                                                     .Arch_index_comment_parser
+                                                                      .reason );
+                                                             ])
+                                                         entries)
+                                                   |> Yojson.Basic.to_string))
+                                        | None -> None)
+                                      ?violates_raw:
+                                        (match parsed with
+                                        | Some p ->
+                                            let entries =
+                                              p.Arch_index_comment_parser.sections
+                                                .violates_entries
+                                            in
+                                            if entries = [] then None
+                                            else
+                                              Some
+                                                (Some
+                                                   (`List
+                                                      (List.map
+                                                         (fun e ->
+                                                           `Assoc
+                                                             [
+                                                               ( "name",
+                                                                 `String
+                                                                   e
+                                                                     .Arch_index_comment_parser
+                                                                      .qualified_name
+                                                               );
+                                                               ( "reason",
+                                                                 `String
+                                                                   e
+                                                                     .Arch_index_comment_parser
+                                                                      .reason );
+                                                             ])
+                                                         entries)
+                                                   |> Yojson.Basic.to_string))
+                                        | None -> None)
+                                      ?tests_raw:
+                                        (match parsed with
+                                        | Some p ->
+                                            let entries =
+                                              p.Arch_index_comment_parser.sections
+                                                .tests_entries
+                                            in
+                                            if entries = [] then None
+                                            else
+                                              Some
+                                                (Some
+                                                   (`List
+                                                      (List.map
+                                                         (fun (e :
+                                                                Arch_index_comment_parser
+                                                                .test_entry)
+                                                            ->
+                                                           `Assoc
+                                                             [
+                                                               ( "file",
+                                                                 `String e.file );
+                                                               ( "case",
+                                                                 `String e.case_name
+                                                               );
+                                                             ])
+                                                         entries)
+                                                   |> Yojson.Basic.to_string))
+                                        | None -> None)
+                                      ?quint_raw:
+                                        (match parsed with
+                                        | Some p -> (
+                                            match
+                                              p.Arch_index_comment_parser.sections
+                                                .quint
+                                            with
+                                            | Absent | Present_none -> None
+                                            | Present body -> Some (Some body))
+                                        | None -> None)
+                                      ()
+                                  with
+                                  | None ->
+                                      (* The functions row was rejected. Returning
+                                         an id here would be another function's id
+                                         — [last_insert_rowid] is per-connection
+                                         and survives a failed step — and this
+                                         binding's type usages would satisfy their
+                                         foreign key against it with no rejection
+                                         and no count. Drop them. Its calls go too:
+                                         they are resolved later by (module, name),
+                                         which now finds no row. *)
+                                      ()
+                                  | Some function_id ->
+                                      (* Collect type usages from this function's signature *)
+                                      let type_usages =
+                                        extract_types_from_signature vb.vb_pat.pat_type
+                                      in
+                                      List.iter
+                                        (fun (type_path, usage_role, position) ->
+                                          pending_type_usages :=
+                                            {
+                                              function_id;
+                                              type_path;
+                                              usage_role;
+                                              position;
+                                            }
+                                            :: !pending_type_usages)
+                                        type_usages ;
+                                      (* Collect calls (and promoted lambda nodes) from
+                                         this function's body *)
+                                      let calls, lam_nodes =
+                                        collect_calls_from_expr
+                                          ~src_path:rel_path
+                                          ~caller_module:rel_path
+                                          ~caller_name:name
+                                          ~local_fn_stamps
+                                          vb.vb_expr
+                                      in
+                                      (* Insert a synthetic functions row per nested
+                                         lambda literal: exposed=0, parent module,
+                                         comment fields empty — so parent→lambda and
+                                         lambda→callee edges resolve to real ids. *)
+                                      List.iter
+                                        (fun (l : lambda_node) ->
+                                          (* A rejected lambda row is not a misattribution
+                                             risk: lambda calls are resolved later by
+                                             (module, name) lookup, so an absent row
+                                             drops its edges rather than moving them
+                                             onto another function. *)
+                                          ignore
+                                            (insert_function
+                                               db
+                                               stmt_fn
+                                               ~module_id
+                                               ~name:l.lam_name
+                                               ~signature:None
+                                               ~line_start:l.lam_line_start
+                                               ~line_end:l.lam_line_end
+                                               ~exposed:false
+                                               ~intent:None
+                                               ()))
+                                        lam_nodes ;
+                                      pending_calls :=
+                                        List.rev_append calls !pending_calls)
+                              | _ -> ())
+                            vbs
+                      | Tstr_type (_, tds) ->
+                          List.iter
+                            (fun (td : Typedtree.type_declaration) ->
+                              let name = qualify ~prefix (Ident.name td.typ_id) in
+                              let line_start = td.typ_loc.loc_start.pos_lnum in
+                              let line_end = td.typ_loc.loc_end.pos_lnum in
                               let exposed =
                                 Hashtbl.mem exposed_tbl (modname, name)
                               in
-                              (* Prefer .mli doc; fall back to .ml doc *)
+                              let kind, manifest =
+                                match td.typ_type.type_kind with
+                                | Type_record _ -> ("record", None)
+                                | Type_variant _ -> ("variant", None)
+                                | Type_open -> ("open", None)
+                                | Type_abstract _ -> (
+                                    match td.typ_type.type_manifest with
+                                    | Some ty -> ("alias", Some (type_to_string ty))
+                                    | None -> ("abstract", None))
+                              in
                               let intent =
-                                match
-                                  Hashtbl.find_opt doc_tbl (modname, name)
-                                with
+                                match Hashtbl.find_opt doc_tbl (modname, name) with
                                 | Some _ as d -> d
-                                | None -> extract_doc vb.vb_attributes
+                                | None -> extract_doc td.typ_attributes
                               in
-                              (* Parse doc comment for comment quality score *)
-                              let parsed =
-                                match intent with
-                                | Some doc ->
-                                    Some (Arch_index_comment_parser.parse doc)
-                                | None -> None
-                              in
-                              (* R8 mutability metrics: diagnostic only *)
-                              let muts, derefs = count_mutability vb.vb_expr in
-                              let function_id =
-                                insert_function
+                              match
+                                insert_type
                                   db
-                                  stmt_fn
+                                  stmt_ty
                                   ~module_id
                                   ~name
-                                  ~signature
+                                  ~kind
                                   ~line_start
                                   ~line_end
                                   ~exposed
+                                  ~manifest
                                   ~intent
-                                  ~mutation_sites:(Some muts)
-                                  ~deref_sites:(Some derefs)
-                                  ?comment_quality_score:
-                                    (Option.map
-                                       (fun p ->
-                                         Some p.Arch_index_comment_parser.score)
-                                       parsed)
-                                  ~has_pre:
-                                    (match parsed with
-                                    | Some p ->
-                                        p.Arch_index_comment_parser.sections.pre
-                                        <> Arch_index_comment_parser.Absent
-                                    | None -> false)
-                                  ~has_post:
-                                    (match parsed with
-                                    | Some p ->
-                                        p.Arch_index_comment_parser.sections
-                                          .post
-                                        <> Arch_index_comment_parser.Absent
-                                    | None -> false)
-                                  ~has_violators:
-                                    (match parsed with
-                                    | Some p ->
-                                        p.Arch_index_comment_parser.sections
-                                          .violators
-                                        <> Arch_index_comment_parser.Absent
-                                    | None -> false)
-                                  ~has_violates:
-                                    (match parsed with
-                                    | Some p ->
-                                        p.Arch_index_comment_parser.sections
-                                          .violates
-                                        <> Arch_index_comment_parser.Absent
-                                    | None -> false)
-                                  ?violators_raw:
-                                    (match parsed with
-                                    | Some p ->
-                                        let entries =
-                                          p.Arch_index_comment_parser.sections
-                                            .violators_entries
-                                        in
-                                        if entries = [] then None
-                                        else
-                                          Some
-                                            (Some
-                                               (`List
-                                                  (List.map
-                                                     (fun e ->
-                                                       `Assoc
-                                                         [
-                                                           ( "name",
-                                                             `String
-                                                               e
-                                                                 .Arch_index_comment_parser
-                                                                  .qualified_name
-                                                           );
-                                                           ( "reason",
-                                                             `String
-                                                               e
-                                                                 .Arch_index_comment_parser
-                                                                  .reason );
-                                                         ])
-                                                     entries)
-                                               |> Yojson.Basic.to_string))
-                                    | None -> None)
-                                  ?violates_raw:
-                                    (match parsed with
-                                    | Some p ->
-                                        let entries =
-                                          p.Arch_index_comment_parser.sections
-                                            .violates_entries
-                                        in
-                                        if entries = [] then None
-                                        else
-                                          Some
-                                            (Some
-                                               (`List
-                                                  (List.map
-                                                     (fun e ->
-                                                       `Assoc
-                                                         [
-                                                           ( "name",
-                                                             `String
-                                                               e
-                                                                 .Arch_index_comment_parser
-                                                                  .qualified_name
-                                                           );
-                                                           ( "reason",
-                                                             `String
-                                                               e
-                                                                 .Arch_index_comment_parser
-                                                                  .reason );
-                                                         ])
-                                                     entries)
-                                               |> Yojson.Basic.to_string))
-                                    | None -> None)
-                                  ?tests_raw:
-                                    (match parsed with
-                                    | Some p ->
-                                        let entries =
-                                          p.Arch_index_comment_parser.sections
-                                            .tests_entries
-                                        in
-                                        if entries = [] then None
-                                        else
-                                          Some
-                                            (Some
-                                               (`List
-                                                  (List.map
-                                                     (fun (e :
-                                                            Arch_index_comment_parser
-                                                            .test_entry)
-                                                        ->
-                                                       `Assoc
-                                                         [
-                                                           ( "file",
-                                                             `String e.file );
-                                                           ( "case",
-                                                             `String e.case_name
-                                                           );
-                                                         ])
-                                                     entries)
-                                               |> Yojson.Basic.to_string))
-                                    | None -> None)
-                                  ?quint_raw:
-                                    (match parsed with
-                                    | Some p -> (
-                                        match
-                                          p.Arch_index_comment_parser.sections
-                                            .quint
-                                        with
-                                        | Absent | Present_none -> None
-                                        | Present body -> Some (Some body))
-                                    | None -> None)
+                              with
+                              | None ->
+                                  (* The types row was rejected, so no id of this
+                                     type exists. [last_insert_rowid] would hand
+                                     back some earlier row's id and every field and
+                                     constructor below would be silently filed
+                                     under that other type. Drop them instead. *)
                                   ()
-                              in
-                              (* Collect type usages from this function's signature *)
-                              let type_usages =
-                                extract_types_from_signature vb.vb_pat.pat_type
-                              in
-                              List.iter
-                                (fun (type_path, usage_role, position) ->
-                                  pending_type_usages :=
-                                    {
-                                      function_id;
-                                      type_path;
-                                      usage_role;
-                                      position;
-                                    }
-                                    :: !pending_type_usages)
-                                type_usages ;
-                              (* Collect calls (and promoted lambda nodes) from
-                                 this function's body *)
-                              let calls, lam_nodes =
-                                collect_calls_from_expr
-                                  ~src_path:rel_path
-                                  ~caller_module:rel_path
-                                  ~caller_name:name
-                                  ~local_fn_stamps
-                                  vb.vb_expr
-                              in
-                              (* Insert a synthetic functions row per nested
-                                 lambda literal: exposed=0, parent module,
-                                 comment fields empty — so parent→lambda and
-                                 lambda→callee edges resolve to real ids. *)
-                              List.iter
-                                (fun (l : lambda_node) ->
-                                  ignore
-                                    (insert_function
-                                       db
-                                       stmt_fn
-                                       ~module_id
-                                       ~name:l.lam_name
-                                       ~signature:None
-                                       ~line_start:l.lam_line_start
-                                       ~line_end:l.lam_line_end
-                                       ~exposed:false
-                                       ~intent:None
-                                       ()))
-                                lam_nodes ;
-                              pending_calls :=
-                                List.rev_append calls !pending_calls
-                          | _ -> ())
-                        vbs
-                  | Tstr_type (_, tds) ->
-                      List.iter
-                        (fun (td : Typedtree.type_declaration) ->
-                          let name = qualify ~prefix (Ident.name td.typ_id) in
-                          let line_start = td.typ_loc.loc_start.pos_lnum in
-                          let line_end = td.typ_loc.loc_end.pos_lnum in
-                          let exposed =
-                            Hashtbl.mem exposed_tbl (modname, name)
-                          in
-                          let kind, manifest =
-                            match td.typ_type.type_kind with
-                            | Type_record _ -> ("record", None)
-                            | Type_variant _ -> ("variant", None)
-                            | Type_open -> ("open", None)
-                            | Type_abstract _ -> (
-                                match td.typ_type.type_manifest with
-                                | Some ty -> ("alias", Some (type_to_string ty))
-                                | None -> ("abstract", None))
-                          in
-                          let intent =
-                            match Hashtbl.find_opt doc_tbl (modname, name) with
-                            | Some _ as d -> d
-                            | None -> extract_doc td.typ_attributes
-                          in
-                          let type_id =
-                            insert_type
-                              db
-                              stmt_ty
-                              ~module_id
-                              ~name
-                              ~kind
-                              ~line_start
-                              ~line_end
-                              ~exposed
-                              ~manifest
-                              ~intent
-                          in
-                          (* Insert record fields *)
-                          match td.typ_type.type_kind with
-                          | Type_record (labels, _) ->
-                              List.iteri
-                                (fun position (ld : Types.label_declaration) ->
-                                  let field_name = Ident.name ld.ld_id in
-                                  let field_type = type_to_string ld.ld_type in
-                                  insert_field
-                                    db
-                                    stmt_fld
-                                    ~type_id
-                                    ~field_name
-                                    ~field_type
-                                    ~position)
-                                labels
-                          | Type_variant (constrs, _) ->
-                              List.iteri
-                                (fun position
-                                     (cd : Types.constructor_declaration)
-                                   ->
-                                  let constructor_name = Ident.name cd.cd_id in
-                                  let arg_types =
-                                    match cd.cd_args with
-                                    | Cstr_tuple [] -> None
-                                    | Cstr_tuple args ->
-                                        Some
-                                          (String.concat
-                                             ", "
-                                             (List.map type_to_string args))
-                                    | Cstr_record labels ->
-                                        Some
-                                          (String.concat
-                                             ", "
-                                             (List.map
-                                                (fun (ld :
-                                                       Types.label_declaration)
-                                                   ->
-                                                  Printf.sprintf
-                                                    "%s: %s"
-                                                    (Ident.name ld.ld_id)
-                                                    (type_to_string ld.ld_type))
-                                                labels))
-                                  in
-                                  insert_constructor
-                                    db
-                                    stmt_ctor
-                                    ~type_id
-                                    ~constructor_name
-                                    ~position
-                                    ~arg_types)
-                                constrs
-                          | _ -> ())
-                        tds
-                  | _ -> ()
-              in
-              iter_structure_items structure ~f:process_item ;
-              (!pending_calls, !pending_deps, !pending_type_usages))
+                              | Some type_id -> (
+                                  (* Insert record fields *)
+                                  match td.typ_type.type_kind with
+                                  | Type_record (labels, _) ->
+                                      List.iteri
+                                        (fun position (ld : Types.label_declaration) ->
+                                          let field_name = Ident.name ld.ld_id in
+                                          let field_type = type_to_string ld.ld_type in
+                                          insert_field
+                                            db
+                                            stmt_fld
+                                            ~type_id
+                                            ~field_name
+                                            ~field_type
+                                            ~position)
+                                        labels
+                                  | Type_variant (constrs, _) ->
+                                      List.iteri
+                                        (fun position
+                                             (cd : Types.constructor_declaration)
+                                           ->
+                                          let constructor_name = Ident.name cd.cd_id in
+                                          let arg_types =
+                                            match cd.cd_args with
+                                            | Cstr_tuple [] -> None
+                                            | Cstr_tuple args ->
+                                                Some
+                                                  (String.concat
+                                                     ", "
+                                                     (List.map type_to_string args))
+                                            | Cstr_record labels ->
+                                                Some
+                                                  (String.concat
+                                                     ", "
+                                                     (List.map
+                                                        (fun (ld :
+                                                               Types.label_declaration)
+                                                           ->
+                                                          Printf.sprintf
+                                                            "%s: %s"
+                                                            (Ident.name ld.ld_id)
+                                                            (type_to_string ld.ld_type))
+                                                        labels))
+                                          in
+                                          insert_constructor
+                                            db
+                                            stmt_ctor
+                                            ~type_id
+                                            ~constructor_name
+                                            ~position
+                                            ~arg_types)
+                                        constrs
+                                  | _ -> ()))
+                            tds
+                      | _ -> ()
+                  in
+                  iter_structure_items structure ~f:process_item ;
+                  (!pending_calls, !pending_deps, !pending_type_usages))
       | _ -> ([], [], []))

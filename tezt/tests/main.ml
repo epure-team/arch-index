@@ -79,4 +79,5 @@ let () =
   Lsp_readiness.register_interphase_gap_is_not_completion () ;
   Lsp_readiness.register_silent_server () ;
   Rejection_attribution.register () ;
+  Insert_rowid_attribution.register () ;
   Tezt.Test.run ()
