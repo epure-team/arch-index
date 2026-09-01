@@ -54,13 +54,18 @@ val schema_path : string
 
     {violates}
     (none) *)
-val statement_failures : int ref
+val statement_failures : unit -> int
 (** Count of prepared-statement steps that did not return [DONE].
 
     [exec_stmt] prints such a failure and continues, so a run can reject rows
     and still exit 0 — which is how 238 rejected type_usage inserts went
     unnoticed while the summary reported them as written. Callers that own a
-    run's exit status must consult this and fail when it is non-zero. *)
+    run's exit status must consult this and fail when it is non-zero.
+
+    Read-only on purpose. This is the number the CMT CLI's completeness gate
+    exits 1 on, so a writable counter is a way for any library consumer to zero
+    it and turn a truncated index into a silent success. Clearing it is
+    {!reset_all}, which a run performs on itself. *)
 
 val exec_exn : Sqlite3.db -> string -> unit
 
@@ -78,25 +83,6 @@ val exec_exn : Sqlite3.db -> string -> unit
     {violates}
     (none) *)
 val exec_stmt : Sqlite3.db -> what:string -> Sqlite3.stmt -> unit
-
-(** Execute a prepared statement, reset on completion, and report whether the
-    row was actually stored.
-
-    {pre}
-    The statement must be fully bound before calling.
-
-    {post}
-    Returns [true] when the step returned [DONE]; on any other result records
-    the rejection against [what] in both [statement_failures] and
-    [rejections_by_table], prints the diagnostic, and returns [false].
-    [exec_stmt] is this function with the verdict dropped.
-
-    {violators}
-    (none)
-
-    {violates}
-    (none) *)
-val exec_stmt_ok : Sqlite3.db -> what:string -> Sqlite3.stmt -> bool
 
 (** Execute an insert whose rowid other rows will reference, returning that
     rowid only when the row was really stored.
@@ -145,9 +131,9 @@ val rejections_by_table : unit -> (string * int) list
 
     {post}
     [rejections_by_table ()] returns [[]] immediately after this call, until
-    the next call to [exec_stmt] that rejects a row. Does not touch
-    [statement_failures], which callers may reset directly since it is a
-    plain [int ref].
+    the next call to [exec_stmt] that rejects a row. Does not touch the scalar
+    [statement_failures], so the two disagree afterwards; use {!reset_all}
+    unless a test is deliberately isolating the breakdown.
 
     {violators}
     (none)
@@ -155,6 +141,24 @@ val rejections_by_table : unit -> (string * int) list
     {violates}
     (none) *)
 val reset_rejections : unit -> unit
+
+(** Clear both the scalar failure count and the per-table breakdown.
+
+    {pre}
+    None. Safe before any run.
+
+    {post}
+    [statement_failures () = 0] and [rejections_by_table () = []]. This is the
+    only way to clear the scalar: the two are one tally seen two ways, and
+    resetting them together is what keeps [rejections_by_table]'s documented
+    "counts sum to the scalar" true.
+
+    {violators}
+    (none)
+
+    {violates}
+    (none) *)
+val reset_all : unit -> unit
 
 (** Get the last inserted row ID.
 

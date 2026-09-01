@@ -71,16 +71,16 @@ type result = {
 let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
   (* Reset global state for re-entrancy *)
   project_root := "" ;
-  (* [statement_failures] and [rejections_by_table] live at the
-     [Arch_index_db] module level, so they are process-cumulative, not
-     per-run. Now that this function is part of the published library
-     surface, a consumer calling [run] twice (or [run_lsp_multi] across
-     several languages) would otherwise read run 1's rejections folded into
-     run 2's report -- and [n_statement_failures] / [rejections_by_table] on
-     the result record are documented as THIS run's. Reset both here so the
-     record means what it says. *)
-  Arch_index_db.reset_rejections () ;
-  Arch_index_db.statement_failures := 0 ;
+  (* The rejection tally and the dropped-node registry live at module level in
+     [Arch_index_db] and [Arch_index_cmt], so they are process-cumulative, not
+     per-run. Now that this function is part of the published library surface, a
+     consumer calling [run] twice would otherwise read run 1's rejections folded
+     into run 2's report -- and [n_statement_failures] / [rejections_by_table]
+     on the result record are documented as THIS run's. Reset here so the record
+     means what it says, and so run 2 does not resolve a callee to MAY_TOP on
+     the strength of a unit run 1 dropped. *)
+  Arch_index_db.reset_all () ;
+  Arch_index_cmt.reset_dropped () ;
   (* Derive project root from build_dir: strip _build/default/... suffix *)
   (let abs_build =
      if Filename.is_relative build_dir then
@@ -295,16 +295,27 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
          Hashtbl.replace fn_lookup (mod_path, fn_name) fn_id)
        "SELECT f.id, f.name, m.path FROM functions f JOIN modules m ON \
         f.module_id = m.id") ;
+  let module_name_of_path path =
+    Filename.basename path |> Filename.remove_extension
+    |> String.capitalize_ascii
+  in
   let mod_name_to_path = Hashtbl.create 128 in
   ignore
     (Sqlite3.exec_not_null
        db
        ~cb:(fun row _h ->
          let path = row.(0) in
-         let base = Filename.basename path in
-         let name = Filename.remove_extension base |> String.capitalize_ascii in
-         Hashtbl.replace mod_name_to_path name path)
+         Hashtbl.replace mod_name_to_path (module_name_of_path path) path)
        "SELECT path FROM modules") ;
+  (* Compilation units whose [modules] row was rejected have no path in
+     [mod_name_to_path] — the table is built from STORED rows — so they must be
+     recognised by name. Derived through the same function as the stored names
+     so the two agree by construction. *)
+  let dropped_unit_names = Hashtbl.create 8 in
+  List.iter
+    (fun path ->
+      Hashtbl.replace dropped_unit_names (module_name_of_path path) ())
+    (Arch_index_cmt.dropped_unit_paths ()) ;
   List.iter
     (fun (call : pending_call) ->
       match
@@ -359,6 +370,44 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
             in
             try_from [] parts
           in
+          (* "Not in [fn_lookup]" has two very different causes, and the
+             resolver above cannot tell them apart: the callee is genuinely
+             outside the index (Stdlib, a C stub — a real leaf, and a MUST edge
+             to it is honest), or it is an in-project body this run analysed and
+             then failed to store. The second is not a leaf. Its body exists,
+             nothing it calls is in the graph, and stopping reachability there
+             is precisely the unsound answer — an UNREACHABLE verdict backed by
+             a node whose code was never read.
+
+             [Arch_index_cmt] records every such drop, so the two cases are
+             distinguishable, and a known-dropped callee is recorded MAY_TOP:
+             the ⊤ frontier marker, which turns that verdict into UNKNOWN. *)
+          let dropped_local name =
+            Arch_index_cmt.is_dropped_node
+              ~module_path:call.caller_module
+              ~name
+          in
+          (* The same readings [resolve_qualified] tries, asked of the dropped
+             set instead of the stored one. A whole dropped unit is matched by
+             name because it has no stored path to match by. *)
+          let dropped_qualified mod_name name =
+            let parts = String.split_on_char '.' mod_name in
+            let rec try_from rest =
+              match rest with
+              | [] -> false
+              | unit_name :: deeper ->
+                  let qualified_name = String.concat "." (deeper @ [name]) in
+                  Hashtbl.mem dropped_unit_names unit_name
+                  || (match Hashtbl.find_opt mod_name_to_path unit_name with
+                     | Some mod_path ->
+                         Arch_index_cmt.is_dropped_node
+                           ~module_path:mod_path
+                           ~name:qualified_name
+                     | None -> false)
+                  || try_from deeper
+            in
+            try_from parts
+          in
           let demoted = call.cond || call.partial in
           let callee_id, callee_display_name, kind =
             match call.head with
@@ -370,7 +419,11 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
                    not, the candidate set is the same. *)
                 match resolve_local n with
                 | Some id -> incr n_resolved ; (Some id, n, "MAY_ENUMERATED")
-                | None -> (None, n, "MAY_ENUMERATED"))
+                | None ->
+                    (* A dropped candidate is not an enumerated one: its body is
+                       unknown, so the honest kind is ⊤. *)
+                    if dropped_local n then (None, n, "MAY_TOP")
+                    else (None, n, "MAY_ENUMERATED"))
             | Arch_index_cmt.Head_local n -> (
                 match resolve_local n with
                 | Some id ->
@@ -388,14 +441,25 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
                 | None -> (
                     match resolve_local n with
                     | Some id -> incr n_resolved ; (Some id, n, kind)
-                    | None -> (None, n, (if demoted then "MAY_ENUMERATED" else "MAY_TOP")))
+                    | None ->
+                        if dropped_local n then (None, n, "MAY_TOP")
+                        else
+                          ( None,
+                            n,
+                            (if demoted then "MAY_ENUMERATED" else "MAY_TOP") ))
                 | Some mod_name -> (
                     match resolve_qualified mod_name n with
                     | Some id -> incr n_resolved ; (Some id, display_name, kind)
                     | None ->
-                        (* Unresolved external: a leaf either way — MUST leaf
-                           when unconditional, enumerated leaf when demoted. *)
-                        (None, display_name, kind)))
+                        (* Unresolved. A genuine external is a leaf either way —
+                           MUST leaf when unconditional, enumerated leaf when
+                           demoted. A callee this run DROPPED only looks like
+                           one: it is the ⊤ frontier, not a leaf, and claiming
+                           MUST there would let a reachability query terminate
+                           on a body nobody analysed. *)
+                        if dropped_qualified mod_name n then
+                          (None, display_name, "MAY_TOP")
+                        else (None, display_name, kind)))
           in
           insert_call
             db
@@ -628,7 +692,7 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
     n_deps_resolved = !n_deps_resolved;
     n_type_usages = !n_type_usages;
     n_type_usages_resolved = !n_type_usages_resolved;
-    n_statement_failures = !Arch_index_db.statement_failures;
+    n_statement_failures = Arch_index_db.statement_failures ();
     rejections_by_table = Arch_index_db.rejections_by_table ();
     db_path;
   }

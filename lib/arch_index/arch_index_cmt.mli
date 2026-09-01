@@ -25,6 +25,66 @@
     (none) *)
 val type_to_string : Types.type_expr -> string
 
+(** Forget every node recorded as dropped so far.
+
+    {pre}
+    None. Safe before any run.
+
+    {post}
+    [is_dropped_node] answers [false] for every argument and
+    [dropped_unit_paths ()] is [[]], until the next rejected insert. The
+    registry is process-global, so {!Arch_index.run} calls this at entry for the
+    same reason it resets the rejection tally: a second run must not inherit the
+    first's frontier.
+
+    {violators}
+    (none)
+
+    {violates}
+    (none) *)
+val reset_dropped : unit -> unit
+
+(** Is [name] in [module_path] a body this run analysed but could not store?
+
+    {pre}
+    [module_path] is a module's rel_path as stored in [modules.path], and [name]
+    a function name as it would appear in [functions.name].
+
+    {post}
+    [true] when that function's own [functions] row was rejected, or when the
+    whole compilation unit's [modules] row was — in the latter case nothing from
+    the unit was indexed, so every name in it is dropped. [false] otherwise,
+    which for a name absent from the index means it is a genuine external.
+
+    The distinction is a soundness one: an unresolved callee that is external is
+    a leaf and a MUST edge to it is honest, while an unresolved callee that is
+    dropped has an unanalysed body and must be recorded as MAY_TOP so
+    reachability does not terminate on it.
+
+    {violators}
+    (none)
+
+    {violates}
+    (none) *)
+val is_dropped_node : module_path:string -> name:string -> bool
+
+(** Rel_paths of the compilation units whose [modules] row was rejected.
+
+    {pre}
+    None.
+
+    {post}
+    Sorted, one entry per dropped unit, empty when nothing was dropped. Nothing
+    at all was indexed from these units, so they carry no per-function entries
+    and a caller resolving a name against one of them must consult this list.
+
+    {violators}
+    (none)
+
+    {violates}
+    (none) *)
+val dropped_unit_paths : unit -> string list
+
 (** Extract doc comment from OCaml attributes.
 
     {pre}

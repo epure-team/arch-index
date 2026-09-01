@@ -30,22 +30,19 @@ open Arch_tezt
    [Arch_index.Arch_index_db] does not exist for an external consumer such as
    this test executable. [Arch_index.Db] is a minimal re-export added
    alongside this test (see [lib/arch_index/arch_index.ml]/[.mli]) that
-   exposes exactly the four names this test needs: [exec_stmt],
-   [statement_failures], [rejections_by_table], [reset_rejections]. *)
+   exposes exactly the names this test needs: [exec_stmt],
+   [statement_failures], [rejections_by_table], [reset_all]. *)
 module Db_under_test = Arch_index.Db
 
 (* [rejections_by_table] is backed by a single Hashtbl.t living at the
-   [Arch_index_db] module level — process-global state, not per-test state.
-   [main.ml] registers every test to run in one [Tezt.Test.run ()] call, and
-   nothing else in this suite touches [Arch_index_db] in-process (every other
-   test drives the pipeline out-of-process, through the built executables in
-   tezt/tests/dune's [(deps ...)]), so nothing else can leave a stale count
-   behind for this test to trip over, or vice versa. [reset_rejections] is
-   still called at the start rather than relying on that being permanently
-   true — a before/after diff would silently keep working if a future
-   in-process user showed up moments before this test ran; a reset makes the
-   fixture's baseline zero, and the assertions below are exact counts rather
-   than deltas, which is the stronger and more direct check of the two. *)
+   [Arch_index_db] module level — process-global state, not per-test state, and
+   [main.ml] registers every test in one [Tezt.Test.run ()] call. This test is
+   no longer the only in-process user of that state: the sibling
+   [insert_rowid_attribution.ml] and [dropped_node_dependents.ml] drive the same
+   module in the same process. So correctness here rests on the per-test
+   [reset_all] below, not on exclusivity — it zeroes both the scalar and the
+   breakdown, which is what lets the assertions be exact counts rather than
+   deltas around whatever a sibling happened to leave behind. *)
 
 let force_rejection conn ~table ~sql =
   let stmt =
@@ -61,8 +58,7 @@ let register () =
     ~tags:["indexer"; "consistency"; "rejections"]
   @@ fun () ->
   let db_path = Fixture.main ~name:"rejection_attribution" () in
-  Db_under_test.reset_rejections () ;
-  Db_under_test.statement_failures := 0 ;
+  Db_under_test.reset_all () ;
   Db.with_db_rw db_path (fun conn ->
       Db.exec conn "PRAGMA foreign_keys = ON;" ;
       (* Two rejections destined for [type_usage]: no [functions] row with
@@ -109,7 +105,7 @@ let register () =
          [statement_failures] reports for this run. *)
       let sum = List.fold_left (fun acc (_, n) -> acc + n) 0 counts in
       Batch.eq_int b ~msg:"breakdown total must equal statement_failures" sum
-        !Db_under_test.statement_failures ;
+        (Db_under_test.statement_failures ()) ;
       (* Sorted by table name — asserted independently of the literal above,
          so a future change to the fixture's table choices still exercises
          the ordering contract. *)
