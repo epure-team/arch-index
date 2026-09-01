@@ -82,9 +82,11 @@ let rejections_by_table () =
    recovered from the statement and must be passed in. It is a REQUIRED
    argument rather than an optional one precisely so no future insert site can
    silently opt back out of the diagnostic. *)
-let exec_stmt db ~what stmt =
+let exec_stmt_ok db ~what stmt =
   match Sqlite3.step stmt with
-  | Sqlite3.Rc.DONE -> ignore (Sqlite3.reset stmt)
+  | Sqlite3.Rc.DONE ->
+      ignore (Sqlite3.reset stmt) ;
+      true
   | rc ->
       incr statement_failures ;
       incr_rejection what ;
@@ -93,9 +95,29 @@ let exec_stmt db ~what stmt =
         (Sqlite3.Rc.to_string rc)
         what
         (Sqlite3.errmsg db) ;
-      ignore (Sqlite3.reset stmt)
+      ignore (Sqlite3.reset stmt) ;
+      false
+
+(* [exec_stmt] is [exec_stmt_ok] with the verdict dropped, not a second copy of
+   it: the tally, the diagnostic and the reset stay in exactly one place. Insert
+   sites whose row mints no id for anyone else to reference — fields,
+   constructors, calls, deps, usages — keep using it. *)
+let exec_stmt db ~what stmt = ignore (exec_stmt_ok db ~what stmt : bool)
 
 let last_insert_rowid db = Int64.to_int (Sqlite3.last_insert_rowid db)
+
+(* An insert whose rowid other rows will reference.
+
+   [last_insert_rowid] is per-CONNECTION and across all tables: it is not
+   cleared by a failed step. After a rejected insert it still returns whatever
+   the last SUCCESSFUL insert on this connection produced — a [types] or
+   [type_fields] rowid, or worse, a perfectly valid [functions] rowid belonging
+   to a DIFFERENT function. Handing that back as "the id of the row I just
+   wrote" makes every dependent insert satisfy its foreign key against the
+   wrong parent: no rejection, no count, silent misattribution. [None] is the
+   only honest answer, and it forces the caller to skip the dependents. *)
+let exec_stmt_rowid db ~what stmt =
+  if exec_stmt_ok db ~what stmt then Some (last_insert_rowid db) else None
 
 let bind_text stmt idx v = ignore (Sqlite3.bind stmt idx (Sqlite3.Data.TEXT v))
 
@@ -136,8 +158,7 @@ let insert_module db stmt_mod ~path ~lines ~has_mli ?(quint_module_raw = None)
   bind_text stmt_mod 3 now ;
   bind_bool stmt_mod 4 has_mli ;
   bind_text_opt stmt_mod 5 quint_module_raw ;
-  exec_stmt db ~what:"modules" stmt_mod ;
-  last_insert_rowid db
+  exec_stmt_rowid db ~what:"modules" stmt_mod
 
 let bind_int_opt stmt idx = function
   | Some v -> bind_int stmt idx v
@@ -166,8 +187,7 @@ let insert_function db stmt_fn ~module_id ~name ~signature ~line_start ~line_end
   bind_text_opt stmt_fn 16 quint_raw ;
   bind_int_opt stmt_fn 17 mutation_sites ;
   bind_int_opt stmt_fn 18 deref_sites ;
-  exec_stmt db ~what:"functions" stmt_fn ;
-  last_insert_rowid db
+  exec_stmt_rowid db ~what:"functions" stmt_fn
 
 let insert_type db stmt_ty ~module_id ~name ~kind ~line_start ~line_end ~exposed
     ~manifest ~intent =
@@ -179,8 +199,7 @@ let insert_type db stmt_ty ~module_id ~name ~kind ~line_start ~line_end ~exposed
   bind_bool stmt_ty 6 exposed ;
   bind_text_opt stmt_ty 7 manifest ;
   bind_text_opt stmt_ty 8 intent ;
-  exec_stmt db ~what:"types" stmt_ty ;
-  last_insert_rowid db
+  exec_stmt_rowid db ~what:"types" stmt_ty
 
 let insert_field db stmt_fld ~type_id ~field_name ~field_type ~position =
   bind_int stmt_fld 1 type_id ;

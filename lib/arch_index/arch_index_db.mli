@@ -79,6 +79,47 @@ val exec_exn : Sqlite3.db -> string -> unit
     (none) *)
 val exec_stmt : Sqlite3.db -> what:string -> Sqlite3.stmt -> unit
 
+(** Execute a prepared statement, reset on completion, and report whether the
+    row was actually stored.
+
+    {pre}
+    The statement must be fully bound before calling.
+
+    {post}
+    Returns [true] when the step returned [DONE]; on any other result records
+    the rejection against [what] in both [statement_failures] and
+    [rejections_by_table], prints the diagnostic, and returns [false].
+    [exec_stmt] is this function with the verdict dropped.
+
+    {violators}
+    (none)
+
+    {violates}
+    (none) *)
+val exec_stmt_ok : Sqlite3.db -> what:string -> Sqlite3.stmt -> bool
+
+(** Execute an insert whose rowid other rows will reference, returning that
+    rowid only when the row was really stored.
+
+    {pre}
+    The statement must be a fully bound INSERT.
+
+    {post}
+    [Some id] when the insert succeeded, where [id] is this connection's
+    [last_insert_rowid]; [None] when it was rejected. Never returns an id after
+    a rejection: [last_insert_rowid] is per-connection and across all tables,
+    so it survives a failed step and would otherwise hand back the previous
+    successful insert's rowid — possibly a valid row of the same table
+    belonging to a different entity, which dependent inserts would then satisfy
+    their foreign key against, silently.
+
+    {violators}
+    (none)
+
+    {violates}
+    (none) *)
+val exec_stmt_rowid : Sqlite3.db -> what:string -> Sqlite3.stmt -> int option
+
 (** Rejected-row counts per destination table, sorted by table name. Empty when
     the run rejected nothing.
 
@@ -190,13 +231,15 @@ val bind_bool : Sqlite3.stmt -> int -> bool -> unit
     (none) *)
 val bind_text_opt : Sqlite3.stmt -> int -> string option -> unit
 
-(** Insert a module record, return its ID.
+(** Insert a module record, return its ID, or [None] if the row was rejected.
 
     {pre}
     (none)
 
     {post}
-    Returns the integer rowid of the newly inserted module record.
+    [Some id] with the rowid of the newly inserted module record, or [None]
+    when the row was rejected — in which case nothing was stored and the
+    caller must not index anything under this module.
 
     {violators}
     (none)
@@ -211,15 +254,17 @@ val insert_module :
   has_mli:bool ->
   ?quint_module_raw:string option ->
   unit ->
-  int
+  int option
 
-(** Insert a function record, return its ID.
+(** Insert a function record, return its ID, or [None] if the row was rejected.
 
     {pre}
     [module_id] must reference an existing module row.
 
     {post}
-    Returns the integer rowid of the newly inserted function record.
+    [Some id] with the rowid of the newly inserted function record, or [None]
+    when the row was rejected — in which case the caller must drop this
+    function's dependent rows rather than attribute them to another id.
 
     {violators}
     (none)
@@ -248,15 +293,17 @@ val insert_function :
   ?mutation_sites:int option ->
   ?deref_sites:int option ->
   unit ->
-  int
+  int option
 
-(** Insert a type record, return its ID.
+(** Insert a type record, return its ID, or [None] if the row was rejected.
 
     {pre}
     [module_id] must reference an existing module row.
 
     {post}
-    Returns the integer rowid of the newly inserted type record.
+    [Some id] with the rowid of the newly inserted type record, or [None] when
+    the row was rejected — in which case its fields and constructors must be
+    dropped rather than attached to another type's id.
 
     {violators}
     (none)
@@ -274,7 +321,7 @@ val insert_type :
   exposed:bool ->
   manifest:string option ->
   intent:string option ->
-  int
+  int option
 
 (** Insert a record field.
 
