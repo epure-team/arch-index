@@ -262,6 +262,13 @@ if (failures.length > 0) {
   for (const f of failures) console.error('ASSERTION FAILED: ' + f);
   process.exit(1);
 }
-for (const root of fixtureRoots) fs.rmSync(root, { recursive: true, force: true });
+// Cleanup failure must never change the verdict — warn and continue, not throw.
+for (const root of fixtureRoots) {
+  try {
+    fs.rmSync(root, { recursive: true, force: true });
+  } catch (e) {
+    console.warn('NOTE: cleanup of ' + root + ' failed: ' + e.message);
+  }
+}
 console.log('OK nested-module-resolution: both scenarios hold');
 process.exit(0);
