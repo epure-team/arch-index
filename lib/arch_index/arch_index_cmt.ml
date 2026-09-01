@@ -19,6 +19,52 @@ open Arch_index_db
 let type_to_string ty = Format.asprintf "%a" Printtyp.type_expr ty
 
 (* -------------------------------------------------------------------------- *)
+(* Dropped-node registry                                                      *)
+(* -------------------------------------------------------------------------- *)
+
+(* When an insert is rejected the indexer skips the row's dependents rather
+   than filing them under a neighbour. That keeps the stored rows honest, but
+   it leaves a second problem behind: the call resolver later looks a callee up
+   in the STORED functions and, finding nothing, concludes "external" and emits
+   a MUST edge to a leaf. For a genuine external — Stdlib, a C stub — that is
+   correct: the body is outside the index and reachability legitimately stops.
+   For a node this run analysed and then dropped it is a false claim. The body
+   exists, it was never read into the graph, and anything it calls is invisible;
+   terminating reachability there is exactly the unsound answer.
+
+   So every drop is remembered here, and the resolver consults it: a callee it
+   cannot resolve but knows was dropped is the ⊤ frontier, recorded MAY_TOP, and
+   a query that reaches it answers UNKNOWN rather than UNREACHABLE.
+
+   Process-global, like [Arch_index_db.statement_failures], and reset per run by
+   [Arch_index.run] for the same reason. *)
+
+(* Individual (module rel_path, function name) pairs whose [functions] row was
+   refused. *)
+let dropped_nodes : (string * string, unit) Hashtbl.t = Hashtbl.create 16
+
+(* rel_paths of compilation units whose [modules] row was refused. Nothing at
+   all was indexed from these, so no per-function entry can exist: the unit as a
+   whole is the frontier. *)
+let dropped_units : (string, unit) Hashtbl.t = Hashtbl.create 8
+
+let reset_dropped () =
+  Hashtbl.reset dropped_nodes ;
+  Hashtbl.reset dropped_units
+
+let record_dropped_node ~module_path ~name =
+  Hashtbl.replace dropped_nodes (module_path, name) ()
+
+let record_dropped_unit ~rel_path = Hashtbl.replace dropped_units rel_path ()
+
+let is_dropped_node ~module_path ~name =
+  Hashtbl.mem dropped_nodes (module_path, name)
+  || Hashtbl.mem dropped_units module_path
+
+let dropped_unit_paths () =
+  Hashtbl.fold (fun k () acc -> k :: acc) dropped_units [] |> List.sort String.compare
+
+(* -------------------------------------------------------------------------- *)
 (* Nested-module indexing policy (issue #16)                                  *)
 (* -------------------------------------------------------------------------- *)
 
@@ -1448,7 +1494,22 @@ let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
                      below hangs off [module_id]; with no row of our own the
                      only id available is another module's, so index nothing
                      from this compilation unit rather than file it under a
-                     neighbour. *)
+                     neighbour.
+
+                     The per-table tally records ONE rejected row for this, and
+                     one rejected row is what an operator will read in the exit
+                     report — while what was actually lost is every function,
+                     type, dep and call of a whole compilation unit, which for a
+                     large unit is thousands of rows. The tally counts refused
+                     statements and cannot say otherwise, so the loss is named
+                     here instead, at the only place that knows its extent. *)
+                  Arch_io.eprintf
+                    "Dropped compilation unit %s (%s): its modules row was \
+                     rejected, so none of its functions, types, deps or calls \
+                     are indexed. Callers of it resolve to MAY_TOP.\n"
+                    modname
+                    rel_path ;
+                  record_dropped_unit ~rel_path ;
                   ([], [], [])
               | Some module_id ->
                   (* Collect calls, module deps, and type usages from value bindings *)
@@ -1727,8 +1788,16 @@ let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
                                          foreign key against it with no rejection
                                          and no count. Drop them. Its calls go too:
                                          they are resolved later by (module, name),
-                                         which now finds no row. *)
-                                      ()
+                                         which now finds no row.
+
+                                         Its callers are the remaining problem:
+                                         "no row" is also what a genuine external
+                                         looks like, and the resolver answers that
+                                         with a MUST edge to a leaf. Record the
+                                         drop so it can tell the two apart. *)
+                                      record_dropped_node
+                                        ~module_path:rel_path
+                                        ~name
                                   | Some function_id ->
                                       (* Collect type usages from this function's signature *)
                                       let type_usages =
@@ -1765,19 +1834,27 @@ let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
                                              risk: lambda calls are resolved later by
                                              (module, name) lookup, so an absent row
                                              drops its edges rather than moving them
-                                             onto another function. *)
-                                          ignore
-                                            (insert_function
-                                               db
-                                               stmt_fn
-                                               ~module_id
-                                               ~name:l.lam_name
-                                               ~signature:None
-                                               ~line_start:l.lam_line_start
-                                               ~line_end:l.lam_line_end
-                                               ~exposed:false
-                                               ~intent:None
-                                               ()))
+                                             onto another function. It is still a body
+                                             the graph no longer covers, so it joins the
+                                             dropped set like any other. *)
+                                          match
+                                            insert_function
+                                              db
+                                              stmt_fn
+                                              ~module_id
+                                              ~name:l.lam_name
+                                              ~signature:None
+                                              ~line_start:l.lam_line_start
+                                              ~line_end:l.lam_line_end
+                                              ~exposed:false
+                                              ~intent:None
+                                              ()
+                                          with
+                                          | Some _ -> ()
+                                          | None ->
+                                              record_dropped_node
+                                                ~module_path:rel_path
+                                                ~name:l.lam_name)
                                         lam_nodes ;
                                       pending_calls :=
                                         List.rev_append calls !pending_calls)
@@ -1825,8 +1902,25 @@ let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
                                      type exists. [last_insert_rowid] would hand
                                      back some earlier row's id and every field and
                                      constructor below would be silently filed
-                                     under that other type. Drop them instead. *)
-                                  ()
+                                     under that other type. Drop them instead.
+
+                                     One refused statement is one entry in the
+                                     tally, but a record with forty labels loses
+                                     forty-one rows. Name the type so the report
+                                     and the loss can be reconciled. *)
+                                  let n_dependents =
+                                    match td.typ_type.type_kind with
+                                    | Type_record (labels, _) -> List.length labels
+                                    | Type_variant (ctors, _) -> List.length ctors
+                                    | _ -> 0
+                                  in
+                                  Arch_io.eprintf
+                                    "Dropped type %s in %s: its types row was \
+                                     rejected, so its %d field(s)/constructor(s) \
+                                     are not indexed either.\n"
+                                    name
+                                    rel_path
+                                    n_dependents
                               | Some type_id -> (
                                   (* Insert record fields *)
                                   match td.typ_type.type_kind with

@@ -52,8 +52,15 @@ let exec_exn db sql =
    The counter is the cheap general guard. It catches the wildcard-binding case
    this commit fixes, the top-level-shadowing case it deliberately does not, and
    any future route to reported <> stored — none of which a per-symptom test can
-   enumerate in advance. *)
-let statement_failures = ref 0
+   enumerate in advance.
+
+   The ref is private to this module and read through [statement_failures ()].
+   It was published as a bare [int ref], and it is the exact value the CMT CLI's
+   completeness gate exits 1 on: any consumer of the library could set it to 0
+   and turn a truncated index into a silent success. A run's own reset is a
+   deliberate, named operation ([reset_all]), not a side effect anyone can
+   perform on the counter by hand. *)
+let n_statement_failures = ref 0
 
 (* Per-table tally of rejected rows. The scalar [statement_failures] answers
    "did this run lose rows"; this answers "which table lost them", which is the
@@ -67,6 +74,16 @@ let incr_rejection what =
     (1 + Option.value ~default:0 (Hashtbl.find_opt rejections_by_table what))
 
 let reset_rejections () = Hashtbl.reset rejections_by_table
+let statement_failures () = !n_statement_failures
+
+(* The scalar and the per-table breakdown are two views of one tally and must
+   agree -- [rejections_by_table]'s counts are documented as summing to the
+   scalar. Resetting them together, through one name, is what keeps that true:
+   two separate resets is two places for a caller to clear one and keep the
+   other. *)
+let reset_all () =
+  n_statement_failures := 0 ;
+  reset_rejections ()
 
 let rejections_by_table () =
   Hashtbl.fold (fun k v acc -> (k, v) :: acc) rejections_by_table []
@@ -88,7 +105,7 @@ let exec_stmt_ok db ~what stmt =
       ignore (Sqlite3.reset stmt) ;
       true
   | rc ->
-      incr statement_failures ;
+      incr n_statement_failures ;
       incr_rejection what ;
       Arch_io.eprintf
         "Statement error (%s) writing to %s: %s\n"

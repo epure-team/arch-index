@@ -11,9 +11,11 @@
     refused, and [Sqlite3.last_insert_rowid] is per-CONNECTION and across all
     tables. So
     [exec_stmt db ~what:"functions" stmt_fn ; last_insert_rowid db] returned an
-    id after a rejected insert too — the rowid the refused statement had
-    already allocated, which the NEXT successful function insert then takes for
-    itself, because a rolled-back statement does not advance the sequence.
+    id after a rejected insert too. Not the refused statement's own rowid —
+    SQLite does not advance [last_insert_rowid] on a failed step — but the last
+    SUCCESSFUL insert's, on that connection, from any table. Which is worse: it
+    is a live row's id, belonging to a different entity, so every dependent
+    insert made against it satisfies its foreign key.
 
     That is what makes the bug invisible. The indexer does not write type
     usages as it walks; it collects them with the [function_id] it was handed
@@ -25,10 +27,11 @@
     per-table rejection tally cannot see it — the [type_usage] insert
     succeeded. Only the attribution is wrong.
 
-    Measured on real runs: the self-index reports 475 rejected [functions]
-    rows; an Octez index (10 033 modules, 353 290 functions, 1 437 224 calls)
-    reports 9 629 rejected rows, all in [type_usage], with [type_usage]
-    resolution at 18.1%.
+    No corpus is known to exercise this today: the arch-index self-index
+    reports zero rejections at every scope, and an Octez index (10 033 modules)
+    reports rejections only in [type_usage], none in [functions]. The path is
+    latent, not active — which is exactly why it needs a test rather than a
+    measurement.
 
     The test drives [Arch_index.Db] directly against a fixture with
     [PRAGMA foreign_keys = ON] and replays exactly that order: store a
@@ -93,8 +96,7 @@ let register () =
     ~tags:["indexer"; "consistency"; "rejections"; "rowid"]
   @@ fun () ->
   let db_path = Fixture.main ~name:"insert_rowid_attribution" () in
-  Db_under_test.reset_rejections () ;
-  Db_under_test.statement_failures := 0 ;
+  Db_under_test.reset_all () ;
   (* What [insert_function] handed back for the rejected row, asserted after
      the database has been closed and re-read: the state of the stored rows is
      the primary evidence, and the returned value is what explains it. *)
@@ -110,6 +112,16 @@ let register () =
       in
       let stmt_fn = prepare conn functions_sql in
       let stmt_usage = prepare conn type_usage_sql in
+      (* A prepared statement left open holds the connection: [Sqlite3.db_close]
+         then returns BUSY, and the closer in [tezt/lib/arch_tezt.ml] ignores
+         that verdict, so the handle would leak silently and the assertions
+         below would read the database through a second one. [Fun.protect] so
+         the finalize happens on the [Test.fail] paths too. *)
+      Fun.protect
+        ~finally:(fun () ->
+          ignore (Sqlite3.finalize stmt_fn) ;
+          ignore (Sqlite3.finalize stmt_usage))
+      @@ fun () ->
       (* A real function, really stored: this is the row [last_insert_rowid]
          holds when the next statement is refused. *)
       (match insert_fn conn stmt_fn ~module_id ~name:"stored_before" with
@@ -120,9 +132,11 @@ let register () =
          key is the only reason it is refused. *)
       let orphan = insert_fn conn stmt_fn ~module_id:999999 ~name:"orphan" in
       returned := orphan ;
-      (* The next function stored takes the rowid the rejected statement was
-         handed — a rolled-back insert does not advance the sequence. This is
-         what turns a dangling id into a live, wrong one. *)
+      (* One more real insert. The id the rejected statement handed back is
+         [stored_before]'s, and it stays [stored_before]'s: the point is not
+         that the id is dangling — it never was — but that it names a real,
+         innocent function, which is what makes a misattributed dependent row
+         invisible to every constraint and every count. *)
       (match insert_fn conn stmt_fn ~module_id ~name:"stored_after" with
       | Some _ -> ()
       | None -> Test.fail "the fixture's second function insert was rejected") ;

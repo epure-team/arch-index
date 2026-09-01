@@ -143,9 +143,10 @@ module Arch_index_cfg = Arch_index_cfg
     produces, without duplicating [exec_stmt]'s logic. Deliberately narrow: it
     is the accounting surface only, not the whole insert API. *)
 module Db : sig
-  val statement_failures : int ref
-  (** Count of prepared-statement steps that did not return [DONE]. See
-      {!Arch_index_db.statement_failures}. *)
+  val statement_failures : unit -> int
+  (** Count of prepared-statement steps that did not return [DONE]. Read-only:
+      it is the value the CMT CLI's exit-1 completeness gate reads, so it is not
+      a consumer's to zero. See {!Arch_index_db.statement_failures}. *)
 
   val exec_stmt : Sqlite3.db -> what:string -> Sqlite3.stmt -> unit
   (** Execute a prepared statement, reset on completion; on failure records
@@ -158,6 +159,10 @@ module Db : sig
 
   val reset_rejections : unit -> unit
   (** Clear the per-table tally. See {!Arch_index_db.reset_rejections}. *)
+
+  val reset_all : unit -> unit
+  (** Clear both the scalar failure count and the per-table breakdown — the
+      only way to clear the scalar. See {!Arch_index_db.reset_all}. *)
 
   val insert_function :
     Sqlite3.db ->
