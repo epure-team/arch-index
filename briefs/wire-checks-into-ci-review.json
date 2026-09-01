@@ -1,0 +1,61 @@
+{
+  "task": "wire-checks-into-ci",
+  "date": "2026-09-01",
+  "mode": "fast",
+  "status": "GO",
+  "auto_fixes_applied": [],
+  "findings": [],
+  "cross_runtime_findings": [],
+  "cross_runtime": {
+    "codex": {
+      "status": "degraded",
+      "reason": "non-conforming-output",
+      "config_digest": "codex:bec3ccacdd6c8654",
+      "round": 1
+    }
+  },
+  "summary": "Round 2 fixed both HIGH findings (one via a fix + new ratchet check, one via human-accepted waiver backed by direct re-verification) and 9 of 11 MEDIUM/LOW round-1 findings, plus 4 of 5 new MEDIUM/LOW findings raised on re-review. 2 MEDIUM findings remain OPEN and non-blocking: architect-identified refactors (duplicate reindex with Self-index smoke test; baseline hardcoded rather than in a data file), both explicitly deferred as out of this task's scope. One HIGH (checks/ disconnected from dune test) was ACCEPTED by human decision in round 1, filed as a roadmap follow-up.",
+  "no_go_reason": null,
+  "no_go_round": 0,
+  "round": 2,
+  "cycle": 1,
+  "rounds_audit": [
+    {
+      "round": 1,
+      "reviewed_sha": "d735da8",
+      "fix_sha": "d735da8",
+      "specialists_run": [
+        {
+          "name": "reviewer",
+          "selection_reason": "always runs, round 1"
+        },
+        {
+          "name": "architect",
+          "selection_reason": "round 1 full fan-out, 4 files modified (>3), medium blast radius"
+        }
+      ],
+      "trace_schema_version": "1.0",
+      "strike": false
+    },
+    {
+      "round": 2,
+      "reviewed_sha": "a650003",
+      "fix_sha": "42ed9db",
+      "specialists_run": [
+        {
+          "name": "reviewer",
+          "selection_reason": "always re-runs on loop-back"
+        },
+        {
+          "name": "architect",
+          "selection_reason": "named specialist on OPEN round-1 findings (duplicate-reindex, baseline-data-file)"
+        }
+      ],
+      "trace_schema_version": "1.0",
+      "strike": false
+    }
+  ],
+  "escalation_needed": false,
+  "escalation_reason": null,
+  "normalized_by": "review-normalize.js@2.0.0"
+}

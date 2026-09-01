@@ -1,0 +1,27 @@
+{
+  "task": "wire-checks-into-ci",
+  "mode": "fast",
+  "current_phase": "review",
+  "events": [
+    {
+      "phase": "implement",
+      "outcome": "COMPLETED",
+      "by": "roster-implement"
+    },
+    {
+      "phase": "review",
+      "outcome": "NO-GO",
+      "by": "roster-review"
+    },
+    {
+      "phase": "implement",
+      "outcome": "COMPLETED",
+      "by": "roster-implement"
+    },
+    {
+      "phase": "review",
+      "outcome": "GO",
+      "by": "roster-review"
+    }
+  ]
+}
