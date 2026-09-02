@@ -1,8 +1,17 @@
 {
   "task": "fix-issues-33-34-35",
   "mode": "fast",
-  "current_phase": "implement",
+  "current_phase": "review",
   "events": [
-    { "phase": "implement", "outcome": "COMPLETED", "by": "roster-implement" }
+    {
+      "phase": "implement",
+      "outcome": "COMPLETED",
+      "by": "roster-implement"
+    },
+    {
+      "phase": "review",
+      "outcome": "GO",
+      "by": "roster-review"
+    }
   ]
 }

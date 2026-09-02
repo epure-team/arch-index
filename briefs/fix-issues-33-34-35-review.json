@@ -1,0 +1,44 @@
+{
+  "task": "fix-issues-33-34-35",
+  "date": "2026-09-02",
+  "mode": "fast",
+  "status": "GO",
+  "auto_fixes_applied": [],
+  "findings": [],
+  "cross_runtime_findings": [],
+  "cross_runtime": {
+    "codex": {
+      "status": "degraded",
+      "reason": "non-conforming-output",
+      "config_digest": "codex:bec3ccacdd6c8654",
+      "round": 1
+    }
+  },
+  "summary": "Round 1 found 1 HIGH (the -- exemption in limit_of leaked onto non-measure commands) and 4 MEDIUM, all same-round raise+resolve except one (a pre-existing sibling bug in a different file, accepted and filed as issue #47 rather than fixed here). All new/changed assertions confirmed red against pre-fix code (cf30125) and green after the fixes.",
+  "no_go_reason": null,
+  "no_go_round": 0,
+  "round": 1,
+  "cycle": 1,
+  "rounds_audit": [
+    {
+      "round": 1,
+      "reviewed_sha": "cf30125",
+      "fix_sha": "b89aa82",
+      "specialists_run": [
+        {
+          "name": "reviewer",
+          "selection_reason": "always runs, round 1"
+        },
+        {
+          "name": "architect",
+          "selection_reason": "round 1 full fan-out, 6+ non-brief files modified, medium blast radius"
+        }
+      ],
+      "trace_schema_version": "1.0",
+      "strike": false
+    }
+  ],
+  "escalation_needed": false,
+  "escalation_reason": null,
+  "normalized_by": "review-normalize.js@2.0.0"
+}
