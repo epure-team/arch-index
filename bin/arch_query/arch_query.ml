@@ -156,21 +156,31 @@ let () =
          "no argument given" sentinel used throughout this file, so it alone falls through
          to [default].
 
-         An argument starting with "--" is NOT the same mistake: these commands accept no
-         flags at all — "measures are never gates" (health.ml), so nothing here parses a
-         `--fail-on-...` threshold — and a stray option-shaped argument must stay silently
-         ignored, exactly as before, or the doctrine has a hole precisely where someone would
-         reach for it first. Only a value that reads as an attempted NUMBER and gets it wrong
-         (a typo, or a negative count) is refused. *)
+         Strict decimal digits only, not [int_of_string_opt] directly: that accepts OCaml
+         integer-literal syntax, so "0x10", "1_0" and "+5" would silently be reinterpreted as
+         16, 10 and 5 rather than refused — the exact residue of the hole this refusal exists
+         to close. Matches the shape PR #5's bash guard already used
+         ([[ "$v" =~ ^[0-9]+$ ]]). *)
+      let is_decimal s = s <> "" && String.for_all (fun c -> c >= '0' && c <= '9') s in
+      let strict_int_of s = if is_decimal s then int_of_string_opt s else None in
+      let refuse_limit s =
+        die 2 (Printf.sprintf "arch-query: expected a non-negative integer limit, got '%s'" s)
+      in
       let limit_of s default =
-        if s = "" || String.length s >= 2 && s.[0] = '-' && s.[1] = '-' then default
-        else
-          match int_of_string_opt s with
-          | Some n when n >= 0 -> n
-          | _ ->
-              die 2
-                (Printf.sprintf
-                   "arch-query: expected a non-negative integer limit, got '%s'" s)
+        if s = "" then default
+        else match strict_int_of s with Some n -> n | None -> refuse_limit s
+      in
+      (* Only the three MEASURE commands (large-files/large-functions/god-modules — the ones
+         whose own output states "measure only, no gate/threshold") accept a stray
+         `--`-shaped argument silently, per tezt/tests/health.ml's "measures are never gates"
+         invariant: these commands parse no flags at all, so a `--fail-on-...` a caller reaches
+         for must be ignored, never wired into a real threshold. Every OTHER command sharing
+         [limit_of]'s shape (fan-in, dead-blocks, useless-branches, mutation-density,
+         low-coverage) is NOT that doctrine's subject and must refuse a flag-shaped argument
+         exactly like any other garbage — silently defaulting there is the same false-green
+         hole #33 closes for a typo, just spelled with two dashes instead of letters. *)
+      let measure_limit_of s default =
+        if String.length s >= 2 && s.[0] = '-' && s.[1] = '-' then default else limit_of s default
       in
       let vis =
         if Arch_db.has_col t "functions" "exported" then "exported" else "exposed"
@@ -495,7 +505,7 @@ let () =
               ~text:"measure only — sorted by size, no gate/threshold" ;
             q ~h:[ "path"; "lines" ] ~shape:Arch_db.Rows.s_i ~cells:Arch_db.Rows.csi ~pty:unit_ty
               (Printf.sprintf "SELECT path, lines FROM modules ORDER BY lines DESC LIMIT %d"
-                 (limit_of a 25))
+                 (measure_limit_of a 25))
               ()
         | "large-functions" ->
             (* NOT `has_col t "functions" "line_count"`: line_count is a STORED GENERATED
@@ -514,7 +524,7 @@ let () =
               (Printf.sprintf
                  "SELECT m.path, f.name, f.line_count FROM functions f JOIN modules m ON \
                   f.module_id=m.id ORDER BY f.line_count DESC LIMIT %d"
-                 (limit_of a 25))
+                 (measure_limit_of a 25))
               ()
         | "god-modules" ->
             if not (Arch_db.has_table t "modules") then
@@ -533,7 +543,7 @@ let () =
                   count(DISTINCT caller_id) AS callers FROM calls WHERE callee_id IS NOT NULL \
                   GROUP BY callee_id) fi JOIN functions f ON f.id=fi.callee_id JOIN modules m ON \
                   m.id=f.module_id GROUP BY m.id ORDER BY fan_in DESC LIMIT %d"
-                 (limit_of a 25))
+                 (measure_limit_of a 25))
               ()
         (* ---- B2: read the curation ledgers written by arch-coverage-load / arch-curate. ---- *)
         | "low-coverage" ->
@@ -568,11 +578,19 @@ let () =
                      'open' (filtered out here) nor yet in gardening_log (the 'log' branch
                      above) — under the old filter it disappeared from every view, which is
                      exactly the "re-litigated every sprint" failure docs/curation-workflow.md
-                     exists to prevent. Anything not yet 'done' belongs in the open view. *)
+                     exists to prevent. Anything not yet 'done' belongs in the open view.
+
+                     COALESCE(t.status,'open'), not a bare `<>`: `status` has a DEFAULT but no
+                     NOT NULL, so an explicitly-NULLed row would otherwise satisfy `<>'done'`
+                     as false in SQL's three-valued logic and vanish from this view exactly
+                     like the bug this query already fixes once — reading an unset status as
+                     the schema's own documented default is the same fix applied consistently,
+                     not a new judgement call. *)
                   "SELECT t.github_issue, t.category, COALESCE(t.title,''), COALESCE(m.path,''), \
                    COALESCE(f.name,''), t.status, t.created_at FROM gardening_tasks t LEFT JOIN \
                    modules m ON t.target_module_id=m.id LEFT JOIN functions f ON \
-                   t.target_function_id=f.id WHERE t.status<>'done' ORDER BY t.created_at, t.id" ()
+                   t.target_function_id=f.id WHERE COALESCE(t.status,'open')<>'done' ORDER BY \
+                   t.created_at, t.id" ()
             | "log" ->
                 if not (Arch_db.has_table t "gardening_log") then
                   die 3 "arch-query: gardening log requires the gardening_log table." ;

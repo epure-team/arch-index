@@ -35,7 +35,7 @@ pile's existing sound gates — `arch-impact`, `arch-rules`) or a human decision
 
 ```sh
 ./arch-query docs/architecture.db low-coverage 20        # least-covered, latest snapshot only
-./arch-query docs/architecture.db gardening open          # open gardening tasks
+./arch-query docs/architecture.db gardening open          # tasks not yet done (open + in_progress)
 ./arch-query docs/architecture.db gardening log            # append-only history, newest first
 ./arch-query docs/architecture.db unsafe-params             # unfixed string-typed params (default)
 ./arch-query docs/architecture.db unsafe-params fixed        # ...or fixed|all
@@ -54,6 +54,15 @@ it:
 ```sh
 your-coverage-tool --format-per-function \
   | jq -c '{function: .name, covered_lines: .covered, total_lines: .total}' \
+  | ./arch-coverage-load docs/architecture.db
+```
+
+A function name shared by more than one module is silently IGNORED unless you also give
+`module` (a `modules.path` value) to disambiguate:
+
+```sh
+your-coverage-tool --format-per-function \
+  | jq -c '{function: .name, module: .file, covered_lines: .covered, total_lines: .total}' \
   | ./arch-coverage-load docs/architecture.db
 ```
 

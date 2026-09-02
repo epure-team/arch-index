@@ -108,3 +108,57 @@ reconfirmed all four green.
 ## Ratchet
 
 (First round — no loop-back yet, no ratchet-of-a-ratchet needed.)
+
+## Addendum — review round 1 fixes (2026-09-02)
+
+Review round 1 found 1 HIGH and 4 MEDIUM (one of which is a pre-existing, out-of-scope sibling
+bug), all addressed here except the sibling bug, which is deliberately filed rather than fixed.
+
+- **HIGH — the `--` exemption leaked onto non-measure commands.** `limit_of`'s exemption for
+  `--`-prefixed arguments (added to preserve `health.ml`'s "measures are never gates" doctrine)
+  had been applied to all 8 call sites sharing its shape, but the doctrine only covers the three
+  commands whose own output says "measure only" (`large-files`, `large-functions`,
+  `god-modules`). `low-coverage --fail-on-coverage 80` silently defaulted instead of refusing —
+  the exact false-green hole #33 exists to close. Split into two functions: `limit_of` (strict —
+  used by `fan-in`, `dead-blocks`, `useless-branches`, `mutation-density`, `low-coverage`) and
+  `measure_limit_of` (the `--`-exempt variant, used only by the three measure commands).
+- **MEDIUM — #34 was NULL-blind.** `t.status<>'done'` reads NULL as neither equal nor unequal to
+  `'done'` under SQL's three-valued logic, so an explicitly-NULL status vanished from the open
+  view exactly like the bug the query already fixes once. `gardening_tasks.status` has a
+  `DEFAULT` but no `NOT NULL`. Fixed to `COALESCE(t.status,'open')<>'done'`, and applied the same
+  fix to `architecture-schema.sql`'s `v_open_tasks` view (unused by any command today, but the
+  same bug class — fixed for consistency rather than left to reappear for its next consumer).
+- **MEDIUM — #35's dedup key allowed a same-input collision with a misleading diagnosis.** A
+  bare record and a module-qualified record for the same function name both passed phase-1
+  validation (different `(fn, module)` keys) but could resolve to the same `function_id`,
+  colliding on `coverage`'s `UNIQUE(function_id, recorded_at)` in phase 2 with a message telling
+  the caller to "run again in a moment" — advice that can never help, since the cause is two rows
+  in one input, not a prior run. Added a second pair of hash tables (`seen_bare`/`seen_scoped`,
+  keyed on function name alone) that reject mixing a bare and a scoped record for one name,
+  independent of `(fn, module)` exact-duplicate detection. Two *distinct* scoped records for one
+  name across different modules remain accepted, unchanged — that is the feature #35 added.
+- **MEDIUM — the ratchet's own coverage claim was wrong.** `query_limits.ml`'s comment claimed 6
+  of 8 `limit_of` call sites die with exit 3 before reaching the limit parse on the test fixture;
+  in fact only `useless-branches`/`mutation-density` do (they additionally gate on a non-zero row
+  count; `god-modules`/`low-coverage`/`dead-blocks` only check table *existence*, which is always
+  true on a main-schema fixture). Rewrote the file: explicit `measure_commands`/`strict_commands`
+  lists, assertions for both directions of the HIGH fix (measure commands still ignore `--...`,
+  strict commands now refuse it), and coverage of the OCaml-integer-literal syntax hole
+  (`0x10`/`1_0`/`+5` silently reinterpreted by `int_of_string_opt`) with a strict decimal-only
+  parse shared by both `limit_of` variants.
+- **Deliberately NOT fixed here — filed as issue #47:** `bin/arch_body_compare/arch_body_compare.ml`
+  has the identical silent-default-on-garbage shape #33 fixed in `arch_query.ml`. None of #33/#34/#35
+  named this file; fixing it here would be scope creep mid-branch. Filed as a fast follow-up,
+  matching how #33/#34/#35 themselves were filed from PR triage.
+- Also updated `docs/curation-workflow.md` (the `gardening open` one-liner and the coverage-load
+  jq recipe now mention the `module` field and `in_progress`) — `tezt/tests/curation_doc.ml` only
+  executes the doc's fenced ```sql``` blocks, so this prose edit does not risk that test.
+
+**Re-verified red-then-green against real pre-fix code** (a clean worktree at `cf30125`, the
+round-1 commit, with only the new/updated test files overlaid): all new/changed assertions failed
+with the exact pre-fix symptom described above, then passed clean after the fixes.
+
+**Quality gates (round 2):**
+- Build: `dune build` ✅
+- Tests: `dune test --force` ✅ 83/83, 0 failures
+- Format: clean on touched files; same 17-file pre-existing `dune`-fmt drift reverted, unrelated

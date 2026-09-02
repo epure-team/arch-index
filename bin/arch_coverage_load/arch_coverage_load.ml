@@ -16,9 +16,11 @@
     {1 Strictness, modelled on arch-load}
 
     The WHOLE input is read and validated before a single row is written — an unknown field, a
-    missing field, a non-integer count, [covered_lines > total_lines], or the same function name
-    twice in one input all ABORT before touching the DB. Once validation passes, the write is one
-    transaction: it all lands, or (on an unexpected SQL error) none of it does.
+    missing field, a non-integer count, [covered_lines > total_lines], the same (function, module)
+    pair twice, or a function named both bare and with a "module" elsewhere in the input (they may
+    be the same function — ambiguous, see below) all ABORT before touching the DB. Once validation
+    passes, the write is one transaction: it all lands, or (on an unexpected SQL error) none of it
+    does.
 
     Every row of one invocation shares ONE UTC timestamp, computed once via {!Unix.gmtime} (never
     localtime) rather than sampled per-row from sqlite's own [CURRENT_TIMESTAMP] default — so "the
@@ -74,6 +76,16 @@ type rec_t = { r_function : string; r_module : string option; r_covered : int; r
 let read_records ic =
   let recs = ref [] in
   let seen : (string * string option, unit) Hashtbl.t = Hashtbl.create 256 in
+  (* A bare record and a module-qualified record naming the SAME function are not necessarily
+     two distinct coverage facts — they may resolve to one function_id, which phase 2 would
+     then hit as a UNIQUE(function_id, recorded_at) collision reported as "a snapshot already
+     exists", an unactionable diagnosis for something this input alone caused (#35 review
+     finding). Catch the ambiguity here, where it is knowable without touching the DB: mixing
+     a bare and a scoped record for one name in one input is always rejected. Multiple SCOPED
+     records for the same name across different modules remain legitimate — that is the whole
+     point of the "module" field — and are still governed by [seen] above. *)
+  let seen_bare : (string, unit) Hashtbl.t = Hashtbl.create 256 in
+  let seen_scoped : (string, unit) Hashtbl.t = Hashtbl.create 256 in
   let lineno = ref 0 in
   (try
      while true do
@@ -117,7 +129,23 @@ let read_records ic =
                                one row per function"
              fn
              (match module_ with Some m -> Printf.sprintf " (module %S)" m | None -> "") ;
+         (match module_ with
+         | None ->
+             if Hashtbl.mem seen_scoped fn then
+               die ~line:!lineno
+                 "function %S appears both bare and with a \"module\" elsewhere in this input — \
+                  ambiguous: they may name the same function. Give \"module\" on every record for \
+                  this name, or none"
+                 fn
+         | Some _ ->
+             if Hashtbl.mem seen_bare fn then
+               die ~line:!lineno
+                 "function %S appears both bare and with a \"module\" elsewhere in this input — \
+                  ambiguous: they may name the same function. Give \"module\" on every record for \
+                  this name, or none"
+                 fn) ;
          Hashtbl.replace seen (fn, module_) () ;
+         Hashtbl.replace (match module_ with None -> seen_bare | Some _ -> seen_scoped) fn () ;
          recs := { r_function = fn; r_module = module_; r_covered = covered; r_total = total } :: !recs)
      done
    with End_of_file -> ()) ;
