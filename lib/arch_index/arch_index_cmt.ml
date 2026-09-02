@@ -686,6 +686,73 @@ let rec fn_arity (e : Typedtree.expression) =
   | Texp_function (params, Tfunction_cases _) -> List.length params + 1
   | _ -> 0
 
+(** Identity assigned to one top-level value binding when its qualified name
+    collides with another same-level binding in the same unit (issue #41: two
+    top-level [let f = ...] previously merged into one [functions] row via
+    [INSERT OR REPLACE] on [UNIQUE(module_id, name)], and both bodies' outbound
+    calls landed on whichever definition survived). [bind_name] is the name the
+    binding's [functions] row is written under: the LAST (source-order-final)
+    binding at a colliding position keeps the bare qualified name, and every
+    earlier binding takes a [#N] suffix (N counting up in source order among
+    the shadowed occurrences only) — mirroring [lambda_name]'s ordinal
+    precedent, but with the opposite occurrence kept bare. This direction is
+    required, not cosmetic: a cross-module caller can only ever reference the
+    bare syntactic name (see [add_path_call]), and [fn_lookup]
+    (arch_index.ml) resolves that name with no ordinal awareness, so the bare
+    name must denote whichever definition is actually reachable — the last
+    one, per OCaml's own same-level shadowing semantics. *)
+type binding_identity = { bind_name : string; bind_base : string; bind_last : bool }
+
+(** [build_binding_names structure] assigns a {!binding_identity} to every
+    top-level value binding, keyed by [Ident.unique_name]. A binding whose
+    qualified name has no same-level collision gets [bind_name = bind_base]
+    (byte-identical to pre-fix naming). *)
+let build_binding_names (structure : Typedtree.structure) =
+  let order : (string, string list ref) Hashtbl.t = Hashtbl.create 64 in
+  let record base stamp =
+    match Hashtbl.find_opt order base with
+    | Some occurrences -> occurrences := stamp :: !occurrences
+    | None -> Hashtbl.add order base (ref [ stamp ])
+  in
+  iter_structure_items structure ~f:(fun ~prefix (it : Typedtree.structure_item) ->
+      match it.str_desc with
+      | Tstr_value (_, vbs) ->
+          List.iter
+            (fun (vb : Typedtree.value_binding) ->
+              match vb.vb_pat.pat_desc with
+              | Tpat_var (id, _, _) when Ident.name id <> "_" ->
+                  record (qualify ~prefix (Ident.name id)) (Ident.unique_name id)
+              | _ -> ())
+            vbs
+      | _ -> ()) ;
+  let names = Hashtbl.create 64 in
+  Hashtbl.iter
+    (fun base occurrences_rev ->
+      let occurrences = List.rev !occurrences_rev in
+      let total = List.length occurrences in
+      List.iteri
+        (fun i stamp ->
+          let bind_last = i = total - 1 in
+          let bind_name =
+            if bind_last then base else Printf.sprintf "%s#%d" base (i + 1)
+          in
+          Hashtbl.replace names stamp { bind_name; bind_base = base; bind_last })
+        occurrences)
+    order ;
+  names
+
+(** [binding_identity names ~prefix id] looks up [id]'s assigned identity in
+    [names] (built by {!build_binding_names} over the same structure). Falls
+    back to the plain qualified name if [id] is absent from the table (should
+    not happen for a [Tpat_var] binding walked by both passes identically, but
+    keeps this total rather than partial). *)
+let binding_identity names ~prefix id =
+  match Hashtbl.find_opt names (Ident.unique_name id) with
+  | Some bid -> bid
+  | None ->
+      let base = qualify ~prefix (Ident.name id) in
+      { bind_name = base; bind_base = base; bind_last = true }
+
 (** Pre-pass shared by the main indexer and the LSP fallback: the table of
     top-level bindings whose RHS is a real function body, mapping the binder's
     [Ident.unique_name] stamp to its syntactic arity. A same-module unqualified
@@ -1517,6 +1584,7 @@ let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
                   let pending_deps = ref [] in
                   let pending_type_usages = ref [] in
                   let local_fn_stamps = build_local_fn_stamps structure in
+                  let binding_names = build_binding_names structure in
                   let add_dep target_path dep_kind alias_name line_number =
                     pending_deps :=
                       {
@@ -1606,7 +1674,16 @@ let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
                                      [@@deriving yojson]: 15 type usages reported,
                                      3 stored. On épure's src/: 96 re-inserts over
                                      4 modules, all named "_". *)
-                                  let name = qualify ~prefix (Ident.name id) in
+                                  (* Same-level shadowing (issue #41): the LAST
+                                     same-name binding keeps the bare qualified
+                                     name; earlier ones take a [#N] suffix. See
+                                     {!binding_identity} for why this direction
+                                     (not the reverse) is required for correct
+                                     cross-module call resolution. *)
+                                  let name =
+                                    (binding_identity binding_names ~prefix id)
+                                      .bind_name
+                                  in
                                   let signature =
                                     Some (type_to_string vb.vb_pat.pat_type)
                                   in
