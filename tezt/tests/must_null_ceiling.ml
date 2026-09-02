@@ -33,29 +33,48 @@
     PR; it is not slack for a real regression — a rise that exceeds it still
     fails.
 
-    Recalibrated twice on 2026-09-01/02. First (item 0.2, wiring this ratchet
-    into CI): the original baseline of 1975 predated six commits' worth of
-    ordinary growth on main (#37 fix, the dropped-node MAY_TOP fix, tools/,
-    new tezt suites) — re-measured clean at 2015 (a dirty working tree had
-    first inflated this to 2024 — see review round 1 of wire-checks-into-ci).
-    Second, migrating the ratchet itself from a standalone `checks/*.js`
-    script into this tezt test: doing so adds this file and
-    [nested_module_qualification.ml] to the very corpus the ratchet measures,
-    which raised the clean count again. Measured via:
+    Recalibrated three times, and once re-scoped, on 2026-09-01/02. First
+    (item 0.2, wiring this ratchet into CI): the original baseline of 1975
+    predated six commits' worth of ordinary growth on main (#37 fix, the
+    dropped-node MAY_TOP fix, tools/, new tezt suites) — re-measured clean at
+    2015 (a dirty working tree had first inflated this to 2024 — see review
+    round 1 of wire-checks-into-ci). Second, migrating the ratchet itself
+    from a standalone `checks/*.js` script into this tezt test: doing so adds
+    this file and [nested_module_qualification.ml] to the very corpus the
+    ratchet measures, raising the clean count again.
+
+    Third — a re-scope, not just a recalibration (review cycle 2 round 1):
+    the un-scoped [MUST]-with-NULL-callee count was ~87% calls into Stdlib
+    (`Stdlib.Printf.sprintf`, `Stdlib.&&`, `Stdlib.ref`, …), which can never
+    be anything BUT an external leaf — Stdlib is never part of this index, so
+    its presence here carries zero signal about a resolver miss. Worse, that
+    noise consumed nearly all of [headroom]: this migration's own two new
+    files added 45 rows against a headroom of 25, entirely from ordinary
+    Stdlib usage in test helper code, not from anything the ratchet exists to
+    catch. Excluding `Stdlib.%%` callees turns the ceiling back into a signal:
+    ~87% of the noise drops out, and the remaining rows are calls into other
+    opam-dependency libraries (`Sqlite3.*`, `Yojson.*`, `Unix.*`,
+    `Caqti_*`) that carry the same "never in this index" property, plus a
+    genuinely interesting residual of in-repo cross-module references (e.g.
+    `Arch_tezt.Temp.file`) that a future ratchet iteration could investigate
+    — out of this task's scope; filed as a note here rather than pursued.
+
+    Measured via, on the same clean checkout:
 
       git worktree add --detach /tmp/clean <sha> && cd /tmp/clean \
         && dune build && dune test --force
-      => calls=9406  MUST-with-NULL-callee=2060  (before headroom)
+      => calls=9406  MUST-with-NULL-callee (unscoped)=2060
+         MUST-with-NULL-callee (Stdlib excluded)=260
 
-    The clean-checkout count is diffuse, not a localized resolver regression:
-    on the same checkout, the per-module breakdown spans 71 modules, with no
-    single module holding more than ~7% of the total (144 / 2060).
-    Reproducible via:
+    The Stdlib-excluded count is diffuse, not a localized resolver
+    regression: on the same checkout, the per-module breakdown spans 44
+    modules, with no single module holding more than ~9% of the total
+    (24 / 260). Reproducible via:
 
       SELECT m.path, count( * ) FROM calls c
       JOIN functions f ON f.id = c.caller_id
       JOIN modules m ON m.id = f.module_id
-      WHERE c.kind = 'MUST' AND c.callee_id IS NULL
+      WHERE c.kind = 'MUST' AND c.callee_id IS NULL AND c.callee_name NOT LIKE 'Stdlib.%'
       GROUP BY m.path ORDER BY 2 DESC;
 
     Runs against this repository's OWN [_build/default] — the widest, most
@@ -63,9 +82,24 @@
 
 open Arch_tezt
 
-let clean_measured = 2060
+(* Stdlib is never part of this index, so a MUST-with-NULL-callee row naming
+   it carries zero signal about a resolver miss — see the recalibration note
+   above. Excluding it is what makes [ceiling] a signal rather than noise. *)
+let must_null_query =
+  "SELECT count(*) FROM calls WHERE kind = 'MUST' AND callee_id IS NULL AND callee_name NOT \
+   LIKE 'Stdlib.%'"
+
+let clean_measured = 260
 
 let headroom = 25
+
+(* A conservative floor on the TOTAL call count (not just the Stdlib-excluded
+   ceiling metric): an under-built [_build/default] indexes fewer calls
+   across the board, which would otherwise read as a comfortable pass on the
+   ceiling rather than as "nothing was measured". Set well below the clean
+   measurement (9406) to tolerate ordinary future growth without becoming its
+   own recalibration treadmill. *)
+let min_total_calls = 8000
 
 (* A merely positive headroom (e.g. 1) would satisfy a naive "> 0" check while
    still reproducing the exact failure mode this ratchet guards: the gate
@@ -79,9 +113,23 @@ let ceiling = clean_measured + headroom
    how [callgraph_ocaml ()] itself is located: it resolves to
    [<repo-build-default>/bin/arch_callgraph_ocaml/arch_callgraph_ocaml.exe],
    so stripping the same three path components off it gives
-   [<repo-build-default>] without introducing a second search. *)
+   [<repo-build-default>] without introducing a second search.
+
+   This derivation follows [ARCH_CALLGRAPH_OCAML] when it is set, same as
+   [callgraph_ocaml ()] itself — an override pointing at a binary outside this
+   tree would otherwise silently measure an unrelated directory. Guard against
+   that: [clean_measured]/[ceiling] are meaningful only for THIS repository,
+   so assert the derived directory actually looks like this repository's own
+   build output before indexing it. *)
 let repo_build_default () =
-  Filename.dirname (Filename.dirname (Filename.dirname (callgraph_ocaml ())))
+  let dir = Filename.dirname (Filename.dirname (Filename.dirname (callgraph_ocaml ()))) in
+  let marker = Filename.concat dir "lib/arch_index/.arch_index.objs/byte/arch_index.cmi" in
+  if not (Sys.file_exists marker) then
+    Test.fail
+      "repo_build_default resolved to %s, which does not look like this repository's own \
+       _build/default (missing %s) — is ARCH_CALLGRAPH_OCAML pointing outside this tree?"
+      dir marker ;
+  dir
 
 let index_repo () =
   let db = temp_db "must-null-ceiling" in
@@ -108,16 +156,22 @@ let register () =
   Db.with_db db (fun conn ->
       let total = Db.int conn "SELECT count(*) FROM calls" in
       if total = 0 then Test.fail "the index has no calls at all — nothing was measured" ;
-      let must_null =
-        Db.int conn "SELECT count(*) FROM calls WHERE kind = 'MUST' AND callee_id IS NULL"
-      in
-      Log.info "calls=%d  MUST-with-NULL-callee=%d  ceiling=%d" total must_null ceiling ;
+      if total < min_total_calls then
+        Test.fail
+          "only %d calls were indexed, below the floor of %d — _build/default looks under-built \
+           (run `dune build` for the whole project, not a partial target) rather than genuinely \
+           reflecting a shrunk codebase"
+          total min_total_calls ;
+      let must_null = Db.int conn must_null_query in
+      Log.info "calls=%d  MUST-with-NULL-callee(Stdlib excluded)=%d  ceiling=%d" total must_null
+        ceiling ;
       if must_null > ceiling then
         Test.fail
-          "%d calls rows are kind=MUST with callee_id IS NULL, above the ceiling of %d (+%d). \
-           Each one is a resolver miss stamped as a proven external leaf: arch_graph.ml emits no \
-           TOP marker for it, so the real callee is reported UNREACHABLE with confidence. Either \
-           resolve those references or emit them as MAY_TOP so the TOP frontier survives."
+          "%d calls rows are kind=MUST with callee_id IS NULL (Stdlib excluded), above the \
+           ceiling of %d (+%d). Each one is a resolver miss stamped as a proven external leaf: \
+           arch_graph.ml emits no TOP marker for it, so the real callee is reported UNREACHABLE \
+           with confidence. Either resolve those references or emit them as MAY_TOP so the TOP \
+           frontier survives."
           must_null ceiling (must_null - ceiling) ;
       (* Enforce the tightening half of the one-directional invariant: advisory
          only, never a failure. *)

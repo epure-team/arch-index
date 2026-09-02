@@ -58,39 +58,20 @@ jobs:
           rust-analyzer --version
       - name: Install deps
         run: opam install --deps-only --with-test --yes .
-      # sqlite3 is a direct dependency of checks/, the self-index smoke test further down, and
-      # the change-impact step — but no step installed it explicitly before this one; ubuntu-latest
+      # sqlite3 is a direct dependency of the self-index smoke test further down (it shells out
+      # to the CLI directly) — but no step installed it explicitly before this one; ubuntu-latest
       # ships it, but relying on that implicitly is the same "green without data" shape this
-      # pipeline refuses everywhere else. Its own named step, not folded into whichever step
-      # happens to need it first, so it stays load-bearing infrastructure independent of any one
-      # step's own fate (e.g. if checks/ is later restructured or removed). Idempotent.
+      # pipeline refuses everywhere else. Its own named step so it stays load-bearing
+      # infrastructure independent of any one other step's fate. Idempotent.
       - name: Install sqlite3
         run: sudo apt-get update -qq && sudo apt-get install -y -qq sqlite3
       - name: Build
         run: opam exec -- dune build
-      - name: Soundness ratchets (checks/)
-        run: |
-          # checks/ are standalone node-runnable invariant ratchets, not part of `dune test` —
-          # see checks/README.md. Each honours a three-way exit code (0 pass, 1 the guarded bug
-          # is present, >=2 setup/error); a plain `node checks/<name>.js` step already fails on
-          # any non-zero exit, so a missing binary or build failure (>=2) reads as a CI failure
-          # exactly like a fired assertion (1), never as green.
-          #
-          # Runs right after Build, before `dune test`: both checks measure the state of
-          # `_build/default` that Build alone produces, and neither needs the Tezt suite.
-          # Placing them here also means a later Tezt flake can never mask a fired ratchet.
-          #
-          # `opam env` is captured into a variable before `eval`, not inlined — under bash's
-          # default `-e` a failing `opam env` inside a bare `eval "$(opam env)"` would still
-          # `eval ""`, exit 0, and silently proceed with an unconfigured switch.
-          opam_env="$(opam env)"
-          eval "$opam_env"
-          node checks/nested-module-resolution.js
-          node checks/no-must-null-regression.js
-          node checks/baseline-has-headroom.js
       # `dune test` also runs the Tezt suite under tezt/, which covers the CMT
-      # indexer's module-language shapes and, now that the servers above are
-      # installed, the polyglot indexing path for real.
+      # indexer's module-language shapes — including the two soundness ratchets in
+      # tezt/tests/nested_module_qualification.ml and tezt/tests/must_null_ceiling.ml, migrated
+      # off a standalone checks/ Node runtime so they run here like everything else — and, now
+      # that the servers above are installed, the polyglot indexing path for real.
       - name: Unit and integration tests
         run: |
           # `eval opam env`, not just `opam exec --`: the Tezt suite drives `dune`
