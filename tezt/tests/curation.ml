@@ -307,6 +307,8 @@ INSERT INTO gardening_tasks(github_issue, category, title, status) VALUES
   (100, 'split-file', 'still open', 'open'),
   (101, 'type-safety', 'being worked', 'in_progress'),
   (102, 'coverage', 'already done', 'done');
+INSERT INTO gardening_tasks(github_issue, category, title, status) VALUES
+  (103, 'type-safety', 'never set', NULL);
 |}
       ()
   in
@@ -323,5 +325,75 @@ INSERT INTO gardening_tasks(github_issue, category, title, status) VALUES
       (* status is already in the header/select list — assert it is actually
          surfaced, not just present in the SQL. *)
       Batch.contains b ~msg:"the status column must be visible in the output" ~haystack:out
-        "in_progress") ;
+        "in_progress" ;
+      (* status has a DEFAULT but no NOT NULL — a row with status left NULL
+         (never set by any writer, but not forbidden by the schema) must read
+         as the documented default rather than satisfying `<>'done'` as false
+         and vanishing exactly like the bug this command already fixes once
+         (round-1 review MEDIUM finding). *)
+      Batch.contains b ~msg:"a NULL status must read as the default (open), not vanish"
+        ~haystack:out "never set") ;
+  Lwt.return_unit
+
+let register_load_ambiguous_module_mix () =
+  Test.register ~__FILE__
+    ~title:"curation: a bare and a module-qualified record for one name are rejected together"
+    ~tags:["curation"; "coverage"; "disambiguation"]
+  @@ fun () ->
+  let db = main_index () in
+  Batch.run (fun b ->
+      (* 'dup' bare and 'dup' scoped to lib/a.ml in the SAME input may name the
+         same function — accepting both would let them resolve to one
+         function_id and collide on the coverage table's own UNIQUE
+         constraint in phase 2, with a diagnosis ("a snapshot already
+         exists... run again in a moment") that can never be acted on, since
+         the true cause is this input, not a prior run (round-1 review MEDIUM
+         finding). Caught here, before either row is written. *)
+      let before = count db "SELECT count(*) FROM coverage" in
+      let outcome =
+        coverage_load
+          ~stdin:
+            {|{"function":"dup","covered_lines":1,"total_lines":2}
+{"function":"dup","module":"lib/a.ml","covered_lines":2,"total_lines":2}
+|}
+          db
+      in
+      Batch.exit_code b
+        ~msg:"a bare record and a module-qualified record for one name must abort the load"
+        ~expected:2 outcome ;
+      let _, out = outcome in
+      Batch.contains b ~msg:"the refusal must name the ambiguous function" ~haystack:out "dup" ;
+      Batch.eq_int b ~msg:"an aborted ambiguous-mix load must leave no row behind"
+        (count db "SELECT count(*) FROM coverage")
+        before ;
+
+      (* The order must not matter: scoped-then-bare is the same ambiguity as
+         bare-then-scoped. *)
+      let outcome =
+        coverage_load
+          ~stdin:
+            {|{"function":"dup","module":"lib/b.ml","covered_lines":1,"total_lines":1}
+{"function":"dup","covered_lines":1,"total_lines":2}
+|}
+          db
+      in
+      Batch.exit_code b ~msg:"scoped-then-bare must abort the load too, same as bare-then-scoped"
+        ~expected:2 outcome ;
+
+      (* Two DIFFERENT modules for the same name remain legitimate — that is
+         the whole point of the "module" field — and must NOT be rejected as
+         ambiguous. *)
+      let outcome =
+        coverage_load
+          ~stdin:
+            {|{"function":"dup","module":"lib/a.ml","covered_lines":2,"total_lines":2}
+{"function":"dup","module":"lib/b.ml","covered_lines":1,"total_lines":1}
+|}
+          db
+      in
+      Batch.exit_code b ~msg:"two distinct scoped records for one name are not ambiguous"
+        ~expected:0 outcome ;
+      Batch.eq_int b ~msg:"both scoped records for distinct modules must be written"
+        (count db "SELECT count(*) FROM coverage")
+        (before + 2)) ;
   Lwt.return_unit

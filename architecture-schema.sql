@@ -431,11 +431,14 @@ LEFT JOIN functions tf ON c.callee_id = tf.id
 LEFT JOIN modules tm ON tf.module_id = tm.id
 ORDER BY cm.path, cf.name;
 
--- Open gardening tasks by category
+-- Open gardening tasks by category. Not `status = 'open'`: a task moved to 'in_progress' is
+-- neither 'open' nor yet 'done', and a NULL status (no NOT NULL constraint, only a DEFAULT)
+-- reads as the documented default rather than vanishing — same fix as arch-query's `gardening
+-- open` command, applied here too so the two readings of "open tasks" cannot diverge (#34).
 CREATE VIEW IF NOT EXISTS v_open_tasks AS
 SELECT category, COUNT(*) as count, GROUP_CONCAT(github_issue) as issues
 FROM gardening_tasks
-WHERE status = 'open'
+WHERE COALESCE(status, 'open') <> 'done'
 GROUP BY category
 ORDER BY count DESC;
 

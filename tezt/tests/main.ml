@@ -25,6 +25,7 @@ let () =
   Curation.register_write () ;
   Curation.register_load_module_disambiguation () ;
   Curation.register_gardening_open_shows_in_progress () ;
+  Curation.register_load_ambiguous_module_mix () ;
   Mutants.register_plan () ;
   Mutants.register_cone_escape () ;
   Mutants.register_allowlist () ;
