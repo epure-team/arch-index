@@ -1,0 +1,133 @@
+{
+  "task": "fix-issues-33-34-35",
+  "date": "2026-09-02",
+  "mode": "fast",
+  "status": "GO",
+  "auto_fixes_applied": [],
+  "findings": [
+    {
+      "severity": "HIGH",
+      "confidence": 4,
+      "path": "bin/arch_query/arch_query.ml",
+      "line": 166,
+      "category": "correctness",
+      "summary": "The -- exemption in limit_of leaks onto non-measure commands, reopening the false-green hole #33 closes",
+      "evidence": "low-coverage --fail-on-coverage exits 0 with a silent default; only 3 of 8 call sites carry the measure-only doctrine.",
+      "fix": "Split into limit_of (strict) and measure_limit_of (exempt), scope to the 3 measure commands.",
+      "fingerprint": "bin/arch_query/arch_query.ml:166:correctness",
+      "specialist": "reviewer",
+      "fid": "bin/arch_query/arch_query.ml:166:correctness#0d60d456",
+      "status": "RESOLVED",
+      "first_seen_round": 1,
+      "pre_fix_sha": "cf3012533845934224faab83febc5c5fda26983e",
+      "resolved_round": 1
+    },
+    {
+      "severity": "MEDIUM",
+      "confidence": 5,
+      "path": "bin/arch_coverage_load/arch_coverage_load.ml",
+      "line": 115,
+      "category": "correctness",
+      "summary": "(function, module) dedup key lets a bare and scoped record for the same function collide in phase 2 with a misleading diagnosis",
+      "evidence": "Two records for 'dup' (bare + module-qualified) resolve to one function_id, hit UNIQUE(function_id, recorded_at), report 'run again in a moment' which cannot help.",
+      "fix": "Reject a bare+scoped mix for one name in phase 1.",
+      "fingerprint": "bin/arch_coverage_load/arch_coverage_load.ml:115:correctness",
+      "specialist": "reviewer",
+      "fid": "bin/arch_coverage_load/arch_coverage_load.ml:115:correctness#9b20862d",
+      "status": "RESOLVED",
+      "first_seen_round": 1,
+      "pre_fix_sha": "cf3012533845934224faab83febc5c5fda26983e",
+      "resolved_round": 1
+    },
+    {
+      "severity": "MEDIUM",
+      "confidence": 5,
+      "path": "bin/arch_query/arch_query.ml",
+      "line": 575,
+      "category": "correctness",
+      "summary": "#34's status<>'done' is NULL-blind, so a NULL-status task still vanishes",
+      "evidence": "gardening_tasks.status has a DEFAULT but no NOT NULL; a NULL row is absent from both 'open' and 'log'.",
+      "fix": "COALESCE(t.status,'open')<>'done'.",
+      "fingerprint": "bin/arch_query/arch_query.ml:575:correctness",
+      "specialist": "reviewer",
+      "fid": "bin/arch_query/arch_query.ml:575:correctness#33f084c1",
+      "status": "RESOLVED",
+      "first_seen_round": 1,
+      "pre_fix_sha": "cf3012533845934224faab83febc5c5fda26983e",
+      "resolved_round": 1
+    },
+    {
+      "severity": "MEDIUM",
+      "confidence": 5,
+      "path": "tezt/tests/query_limits.ml",
+      "line": 78,
+      "category": "spec",
+      "summary": "The ratchet's own comment about which call sites die exit 3 first is factually wrong, leaving half the reachable commands untested",
+      "evidence": "god-modules/low-coverage/dead-blocks reach limit_of on the test fixture (has_table only checks existence); only useless-branches/mutation-density die 3 first.",
+      "fix": "Correct the comment, extend coverage to the reachable commands.",
+      "fingerprint": "tezt/tests/query_limits.ml:78:spec",
+      "specialist": "reviewer",
+      "fid": "tezt/tests/query_limits.ml:78:spec#349ce40d",
+      "status": "RESOLVED",
+      "first_seen_round": 1,
+      "pre_fix_sha": "cf3012533845934224faab83febc5c5fda26983e",
+      "resolved_round": 1
+    },
+    {
+      "severity": "MEDIUM",
+      "confidence": 4,
+      "path": "bin/arch_body_compare/arch_body_compare.ml",
+      "line": 200,
+      "category": "correctness",
+      "summary": "Pre-existing sibling of #33's bug in a different file, unfixed",
+      "evidence": "Identical silent-default-on-garbage limit parse shape as arch_query.ml had before #33.",
+      "fix": "Factor #33's hardened parse out and reuse; filed separately as issue #47, not fixed on this branch (no issue named this file).",
+      "fingerprint": "bin/arch_body_compare/arch_body_compare.ml:200:correctness",
+      "specialist": "reviewer",
+      "fid": "bin/arch_body_compare/arch_body_compare.ml:200:correctness#895056e3",
+      "status": "ACCEPTED",
+      "first_seen_round": 1,
+      "pre_fix_sha": "cf3012533845934224faab83febc5c5fda26983e",
+      "resolved_round": 1,
+      "check": null,
+      "check_encodable": false,
+      "check_encodable_reason": "Pre-existing bug in a file none of #33/#34/#35 named \u2014 fixing it here would be scope creep mid-branch. Filed as issue #47 for a fast follow-up instead of a ratchet check on this branch."
+    }
+  ],
+  "cross_runtime_findings": [],
+  "cross_runtime": {
+    "codex": {
+      "status": "degraded",
+      "reason": "non-conforming-output",
+      "config_digest": "codex:bec3ccacdd6c8654",
+      "round": 1
+    }
+  },
+  "summary": "Round 1 found 1 HIGH (the -- exemption in limit_of leaked onto non-measure commands) and 4 MEDIUM, all same-round raise+resolve except one (a pre-existing sibling bug in a different file, accepted and filed as issue #47 rather than fixed here). All new/changed assertions confirmed red against pre-fix code (cf30125) and green after the fixes.",
+  "no_go_reason": null,
+  "no_go_round": 0,
+  "round": 1,
+  "cycle": 1,
+  "rounds_audit": [
+    {
+      "round": 1,
+      "reviewed_sha": "cf30125",
+      "fix_sha": "b89aa82",
+      "specialists_run": [
+        {
+          "name": "reviewer",
+          "selection_reason": "always runs, round 1"
+        },
+        {
+          "name": "architect",
+          "selection_reason": "round 1 full fan-out, 6+ non-brief files modified, medium blast radius"
+        }
+      ],
+      "trace_schema_version": "1.0",
+      "strike": false
+    }
+  ],
+  "escalation_needed": false,
+  "escalation_reason": null,
+  "normalized_by": "review-normalize.js@2.0.0"
+}
