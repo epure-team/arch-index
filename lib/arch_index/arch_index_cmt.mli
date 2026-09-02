@@ -222,27 +222,19 @@ val is_function_rhs : Typedtree.expression -> bool
     non-function expression has arity 0. *)
 val fn_arity : Typedtree.expression -> int
 
-(** Identity assigned to a top-level value binding whose qualified name
-    collides with another same-level binding in the same unit (issue #41).
-    [bind_name] is the name its [functions] row is written under: the LAST
-    (source-order-final) binding at a colliding position keeps [bind_base]
-    bare; every earlier one takes a [#N] suffix. [bind_last] is true only for
-    the bare-named occurrence. This direction is required for correctness: a
-    cross-module caller can only reference the bare name, so it must denote
-    the definition that is actually reachable. *)
-type binding_identity = { bind_name : string; bind_base : string; bind_last : bool }
+(** [build_binding_names structure] maps each top-level value binding's
+    [Ident.unique_name] (issue #41) to the name its [functions] row is
+    written under: the LAST (source-order-final) binding at a colliding
+    position keeps the bare qualified name; every earlier one takes a [#N]
+    suffix. This direction is required for correctness: a cross-module
+    caller can only reference the bare name, so it must denote the
+    definition that is actually reachable. A binding with no same-level
+    collision maps to its plain qualified name. *)
+val build_binding_names : Typedtree.structure -> (string, string) Hashtbl.t
 
-(** [build_binding_names structure] assigns a {!binding_identity} to every
-    top-level value binding in [structure], keyed by [Ident.unique_name]. A
-    binding with no same-level collision gets [bind_name = bind_base]. Used by
-    both the main indexer and [call_graph_extractor.ml] so the two paths agree
-    on a shadowed function's identity. *)
-val build_binding_names : Typedtree.structure -> (string, binding_identity) Hashtbl.t
-
-(** [binding_identity names ~prefix id] looks up [id]'s assigned identity in
-    [names] (from {!build_binding_names} over the same structure). *)
-val binding_identity :
-  (string, binding_identity) Hashtbl.t -> prefix:string -> Ident.t -> binding_identity
+(** [binding_name names ~prefix id] looks up [id]'s assigned name in [names]
+    (from {!build_binding_names} over the same structure). *)
+val binding_name : (string, string) Hashtbl.t -> prefix:string -> Ident.t -> string
 
 (** Shared pre-pass: top-level function-binder stamps ([Ident.unique_name]) →
     syntactic arity, over a whole structure (covers forward references and
