@@ -265,6 +265,14 @@ let extract_calls_from_cmts ~project_dir fn_rows =
                     let local_fn_stamps =
                       Arch_index_cmt.build_local_fn_stamps structure
                     in
+                    (* Same-level shadowing (issue #41): shared with the main
+                       indexer's binding-identity mechanism so a shadowed
+                       function is named identically on both paths — a
+                       cross-path naming disagreement would itself be a
+                       soundness gap. *)
+                    let binding_names =
+                      Arch_index_cmt.build_binding_names structure
+                    in
                     List.iter
                       (fun (item : Typedtree.structure_item) ->
                         match item.str_desc with
@@ -273,7 +281,13 @@ let extract_calls_from_cmts ~project_dir fn_rows =
                               (fun (vb : Typedtree.value_binding) ->
                                 match vb.vb_pat.pat_desc with
                                 | Typedtree.Tpat_var (id, _, _) ->
-                                    let caller_name = Ident.name id in
+                                    let caller_name =
+                                      (Arch_index_cmt.binding_identity
+                                         binding_names
+                                         ~prefix:""
+                                         id)
+                                        .bind_name
+                                    in
                                     let calls, _lam_nodes =
                                       Arch_index_cmt.collect_calls_from_expr
                                         ~src_path:rel_src
