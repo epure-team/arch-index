@@ -3,7 +3,7 @@
   "no_go_round": 0,
   "max_rounds": 5,
   "legacy_no_go_round": false,
-  "round": 2,
+  "round": 1,
   "legacy_round": false,
   "current_round_strike": false,
   "config": {
@@ -14,20 +14,10 @@
   "cause": null,
   "warnings": [],
   "violations": [],
-  "checks": [
-    {
-      "check": "checks/baseline-has-headroom.js",
-      "fingerprint": "checks/no-must-null-regression.js:41:architecture",
-      "fid": "checks/no-must-null-regression.js:41:architecture#04fc0aa4",
-      "red_verified": true,
-      "check_blob": "5032fb4a52a6db06a5fd5b24ba7aa7638abf6cbd",
-      "weakened": false,
-      "greenFailed": false
-    }
-  ],
+  "checks": [],
   "trace": {
     "obligated": true,
-    "lines_seen": 6,
+    "lines_seen": 3,
     "schema_version": "1.0",
     "skipped": false
   }

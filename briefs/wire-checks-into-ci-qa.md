@@ -91,3 +91,29 @@ impact per the breaker contract.
 ## Verdict
 
 **GO** — ready for `/roster-ship`
+
+## Addendum — post-migration re-verification (2026-09-02)
+
+Everything above describes the `checks/*.js` era of this branch, since superseded. After review
+cycle 2 (the ship-gate rework migrating both ratchets into `tezt/`, then a cycle-2 round-1 fix
+round that corrected a CRITICAL — the migration's CI-step removal never actually landed in the
+reviewed commit — and rescoped the ceiling metric to exclude Stdlib noise), QA re-ran against the
+final commit `91f25be` in a fresh clean worktree:
+
+| Gate | Command | Result |
+|---|---|---|
+| Build | `dune build` | ✅ PASS |
+| Tests | `dune test --force` | ✅ 79/79 passed (was 77/77 pre-migration; +2 for the migrated ratchets) |
+
+| Migrated ratchet | Result |
+|---|---|
+| `cmt: a nested-module reference resolves to the linked unit` (was `checks/nested-module-resolution.js`) | ✅ SUCCESS |
+| `cmt: the whole-repo MUST-with-NULL-callee count stays under its ceiling` (was `checks/no-must-null-regression.js` + `checks/baseline-has-headroom.js`) | ✅ SUCCESS — `calls=9405 MUST-with-NULL-callee(Stdlib excluded)=260 ceiling=285` |
+
+**Confirmed independently, not re-read from the impl brief:** the CI workflow file at commit
+`91f25be` contains no reference to `checks/` (grepped directly in the clean worktree), and the
+`checks/` directory does not exist in that worktree. This is the exact check that would have
+caught the CRITICAL finding cycle 2 round 1 fixed — the previous commit's `ci.yml` fix existed
+only in the working tree, never in the commit itself.
+
+**Verdict unchanged: GO** — ready for `/roster-ship`.
