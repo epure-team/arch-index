@@ -1,0 +1,40 @@
+{
+  "task": "shadowed-function-identity",
+  "mode": "full",
+  "schema_version": "1.0",
+  "steps": [
+    {
+      "id": "step-1",
+      "skill": "roster-implement",
+      "inputs": ["briefs/shadowed-function-identity-implementer.md"],
+      "outputs": ["lib/arch_index/arch_index_cmt.ml", "lib/arch_index/arch_index_cmt.mli", "lib/arch_index/call_graph_extractor.ml", "tezt/tests/shadowed_definitions.ml"],
+      "hook": false
+    },
+    {
+      "id": "step-2",
+      "skill": "roster-review",
+      "inputs": ["briefs/shadowed-function-identity-reviewer.md"],
+      "outputs": ["briefs/shadowed-function-identity-review.json"],
+      "hook": false
+    },
+    {
+      "id": "step-3",
+      "skill": "roster-qa",
+      "inputs": ["briefs/shadowed-function-identity-qa-scope.md"],
+      "outputs": ["briefs/shadowed-function-identity-qa.md"],
+      "hook": false
+    },
+    {
+      "id": "step-4",
+      "skill": "roster-ship",
+      "inputs": ["briefs/shadowed-function-identity-qa.md"],
+      "outputs": [],
+      "hook": false
+    }
+  ],
+  "quality_gates": {
+    "build": "dune build",
+    "test": "dune test --force",
+    "lint": "dune fmt"
+  }
+}

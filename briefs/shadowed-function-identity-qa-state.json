@@ -1,0 +1,31 @@
+{
+  "task": "shadowed-function-identity",
+  "status": "GO",
+  "date": "2026-09-02",
+  "round": 1,
+  "cycle": 1,
+  "qa_no_go_round": 0,
+  "rounds_audit": [
+    {
+      "round": 1,
+      "date": "2026-09-02",
+      "verdict": "GO",
+      "causes": [],
+      "qualifying": false
+    }
+  ],
+  "cross_runtime": {
+    "codex": {
+      "status": "available",
+      "reason": "usage-limit-exhausted (external, not code-related) \u2014 ERROR: You've hit your usage limit",
+      "config_digest": "codex:2702d145257b4beb",
+      "source": "qa-attempt"
+    },
+    "opencode": {
+      "status": "available",
+      "reason": "timed out after 180s (external/environmental, not a code discrepancy)",
+      "config_digest": "opencode:fbe7ed81fce843de",
+      "source": "qa-attempt"
+    }
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "mode": "full",
+  "no_go_round": 0,
+  "max_rounds": 5,
+  "legacy_no_go_round": false,
+  "round": 2,
+  "legacy_round": false,
+  "current_round_strike": false,
+  "config": {
+    "max_rounds": 5,
+    "strikes": 2,
+    "static": false
+  },
+  "cause": null,
+  "warnings": [],
+  "violations": [],
+  "checks": [
+    {
+      "check": "checks/mid-caller-shadow-attribution.js",
+      "fingerprint": "lib/arch_index/arch_index_cmt.ml:780:correctness",
+      "red_verified": null,
+      "flagged": "no pre_fix_sha recorded (uncommitted-tree task, FR-034)"
+    }
+  ],
+  "trace": {
+    "obligated": true,
+    "lines_seen": 10,
+    "schema_version": "1.0",
+    "skipped": false
+  }
+}

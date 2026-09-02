@@ -1,0 +1,10 @@
+{"schema_version":"1.0","ts":"2026-09-02T16:32:24.163Z","task":"shadowed-function-identity","round":1,"cycle":1,"event":"normalizer","actor":"review-normalize.js","outcome":"ran"}
+{"schema_version":"1.0","ts":"2026-09-02T17:14:23.459Z","task":"shadowed-function-identity","round":1,"cycle":1,"event":"scope-gate","actor":"check-scope-diff.sh","outcome":"skipped","detail":"no-manifest"}
+{"schema_version":"1.0","ts":"2026-09-02T17:14:23.499Z","task":"shadowed-function-identity","round":1,"cycle":1,"event":"specialist","actor":"reviewer","outcome":"ran"}
+{"schema_version":"1.0","ts":"2026-09-02T17:14:23.530Z","task":"shadowed-function-identity","round":1,"cycle":1,"event":"specialist","actor":"architect","outcome":"ran"}
+{"schema_version":"1.0","ts":"2026-09-02T17:14:23.557Z","task":"shadowed-function-identity","round":1,"cycle":1,"event":"cross-runtime","actor":"codex","outcome":"ran","digest":"codex:bec3ccacdd6c8654"}
+{"schema_version":"1.0","ts":"2026-09-02T17:33:19.415Z","task":"shadowed-function-identity","round":2,"cycle":1,"event":"normalizer","actor":"review-normalize.js","outcome":"ran"}
+{"schema_version":"1.0","ts":"2026-09-02T17:33:43.722Z","task":"shadowed-function-identity","round":2,"cycle":1,"event":"scope-gate","actor":"check-scope-diff.sh","outcome":"skipped","detail":"no-manifest"}
+{"schema_version":"1.0","ts":"2026-09-02T17:33:43.743Z","task":"shadowed-function-identity","round":2,"cycle":1,"event":"specialist","actor":"reviewer","outcome":"ran"}
+{"schema_version":"1.0","ts":"2026-09-02T17:33:43.766Z","task":"shadowed-function-identity","round":2,"cycle":1,"event":"specialist","actor":"architect","outcome":"ran"}
+{"schema_version":"1.0","ts":"2026-09-02T17:33:43.787Z","task":"shadowed-function-identity","round":2,"cycle":1,"event":"cross-runtime","actor":"codex","outcome":"ran","digest":"codex:bec3ccacdd6c8654"}

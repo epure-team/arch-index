@@ -1,0 +1,57 @@
+{
+  "task": "shadowed-function-identity",
+  "mode": "full",
+  "current_phase": "ship",
+  "events": [
+    {
+      "phase": "question",
+      "outcome": "COMPLETED",
+      "by": "roster-question"
+    },
+    {
+      "phase": "research",
+      "outcome": "COMPLETED",
+      "by": "roster-research"
+    },
+    {
+      "phase": "intake",
+      "outcome": "VALIDATED",
+      "by": "roster-intake"
+    },
+    {
+      "phase": "plan",
+      "outcome": "COMPLETED",
+      "by": "roster-plan"
+    },
+    {
+      "phase": "implement",
+      "outcome": "COMPLETED",
+      "by": "roster-implement"
+    },
+    {
+      "phase": "review",
+      "outcome": "NO-GO",
+      "by": "roster-review"
+    },
+    {
+      "phase": "implement",
+      "outcome": "COMPLETED",
+      "by": "roster-implement"
+    },
+    {
+      "phase": "review",
+      "outcome": "GO",
+      "by": "roster-review"
+    },
+    {
+      "phase": "qa",
+      "outcome": "GO",
+      "by": "roster-qa"
+    },
+    {
+      "phase": "ship",
+      "outcome": "COMPLETED",
+      "by": "roster-ship"
+    }
+  ]
+}

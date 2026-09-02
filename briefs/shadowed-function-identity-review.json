@@ -1,0 +1,258 @@
+{
+  "task": "shadowed-function-identity",
+  "date": "2026-09-02",
+  "status": "GO",
+  "auto_fixes_applied": [],
+  "findings": [
+    {
+      "severity": "HIGH",
+      "confidence": 5,
+      "path": "lib/arch_index/arch_index_cmt.ml",
+      "line": 780,
+      "category": "correctness",
+      "specialist": "reviewer",
+      "summary": "Intra-module call sites still name their target by the bare name, so a call that lexically resolves to an EARLIER shadowed binding gets a MUST edge to the LAST binding's row instead.",
+      "evidence": "build_local_fn_stamps stores (qualify ~prefix (Ident.name id), fn_arity vb.vb_expr) keyed by stamp but valued by the bare name; local_fn_name returns that bare name, feeding Head_local at lines 961 and 1317. resolve_local in arch_index.ml has no ordinal awareness. Probe: let f x = h1 x (row f#1); let mid_caller x = f x (line 4, lexically the f#1 binding); let f x = h2 x (row f). Indexed result: mid_caller's call lands on row f, not f#1.",
+      "fix": "Thread the binding_names table into build_local_fn_stamps so it stores bind_name (looked up by the same Ident.unique_name stamp key) instead of the bare qualified name. [Gate note: automated git-checkout-based red/green verification is structurally inapplicable here \u2014 the ratchet check (checks/mid-caller-shadow-attribution.js) was authored in the same review round as the fix it verifies, so no historical commit exists with the check present and the bug still active. pre_fix_sha intentionally left null (FR-034's flagged, non-blocking path) rather than pointing at a pre-check commit. Red-then-green verification was instead performed manually and is documented in briefs/shadowed-function-identity-impl.md and this review's specialist transcripts: reverting build_local_fn_stamps to the pre-fix bare-name behavior made the check's underlying tezt assertion fail with the exact wrong-attribution message; reverting back restored a pass.]",
+      "fingerprint": "lib/arch_index/arch_index_cmt.ml:780:correctness",
+      "fid": "lib/arch_index/arch_index_cmt.ml:780:correctness#8fa3fa75",
+      "status": "RESOLVED",
+      "first_seen_round": 1,
+      "resolved_round": 2,
+      "check": "checks/mid-caller-shadow-attribution.js",
+      "check_encodable": true,
+      "red_verified": null,
+      "pre_fix_sha": null,
+      "check_blob": null
+    },
+    {
+      "severity": "MEDIUM",
+      "confidence": 5,
+      "path": "lib/arch_index/arch_index_cmt.ml",
+      "line": 941,
+      "category": "correctness",
+      "specialist": "reviewer",
+      "summary": "The Head_enumerated arg-escape edge uses raw Ident.name id rather than local_fn_name id, so a shadowed function passed as a callback is enumerated onto the wrong (last) definition.",
+      "evidence": "add_call (Head_enumerated (Ident.name id)) loc bypasses local_fn_name, unlike every other local-target site on this path.",
+      "fix": "Use local_fn_name id at line 941 \u2014 resolved by the same change as the HIGH finding once local_fn_name is shadow-aware.",
+      "fingerprint": "lib/arch_index/arch_index_cmt.ml:941:correctness",
+      "fid": "lib/arch_index/arch_index_cmt.ml:941:correctness#25f03a74",
+      "status": "RESOLVED",
+      "first_seen_round": 1,
+      "resolved_round": 2
+    },
+    {
+      "severity": "MEDIUM",
+      "confidence": 5,
+      "path": "lib/arch_index/call_graph_extractor.ml",
+      "line": 284,
+      "category": "correctness",
+      "specialist": "reviewer",
+      "summary": "On the LSP/flat path this change produces orphan caller names: functions rows there come from LSP document symbols with bare names, never renamed by build_binding_names, so a caller_name of 'f#1' joins to no row and is silently dropped by name-joining consumers.",
+      "evidence": "The flat schema's calls.caller_name has no FK and functions.name has no UNIQUE, so issue #41's row-collapse never applied on this path. Consumers join by name (bin/arch_serve/arch_serve.ml:379, :189), which now misses for a suffixed caller_name.",
+      "fix": "Revert this hunk in call_graph_extractor.ml \u2014 that path has no collision problem to solve, and renaming only the call edges (not the function rows) breaks the name-based join.",
+      "fingerprint": "lib/arch_index/call_graph_extractor.ml:284:correctness",
+      "fid": "lib/arch_index/call_graph_extractor.ml:284:correctness#c782ece5",
+      "status": "RESOLVED",
+      "first_seen_round": 1,
+      "resolved_round": 2
+    },
+    {
+      "severity": "MEDIUM",
+      "confidence": 5,
+      "path": "tezt/tests/shadowed_definitions.ml",
+      "line": 75,
+      "category": "testing",
+      "specialist": "reviewer",
+      "summary": "Test coverage gaps: no fixture has a caller between the two definitions (the case that fails, see the HIGH finding), none has 3+ same-name bindings, none pins exposed/doc attribution, none covers nested-module shadowing.",
+      "evidence": "Fixtures 2 and 3 both put the two 'let f' adjacent with no intervening caller, so no test exercises an inbound intra-module edge to a shadowed binding.",
+      "fix": "Add a mid-caller fixture, a 3-way shadow fixture, an .mli exposed/doc-attribution fixture, and a nested-module shadow fixture.",
+      "fingerprint": "tezt/tests/shadowed_definitions.ml:75:testing",
+      "fid": "tezt/tests/shadowed_definitions.ml:75:testing#1866bb9c",
+      "status": "RESOLVED",
+      "first_seen_round": 1,
+      "resolved_round": 2
+    },
+    {
+      "severity": "LOW",
+      "confidence": 5,
+      "path": "tezt/tests/shadowed_definitions.ml",
+      "line": 148,
+      "category": "testing",
+      "specialist": "reviewer",
+      "summary": "Fixture 3's headline assertion cannot actually detect an inverted ordinal direction; the direction is pinned only by the follow-up assertion at line 157.",
+      "evidence": "callee_names db ~caller:\"use_a\" = [\"f\"] can only ever return [\"f\"] or [] since a qualified call can only spell the bare name \u2014 it tests resolution-liveness, not direction.",
+      "fix": "Re-label the comment/error message as a resolution-liveness check and move the direction claim onto line 157; optionally strengthen by also asserting line_start/module path.",
+      "fingerprint": "tezt/tests/shadowed_definitions.ml:148:testing",
+      "fid": "tezt/tests/shadowed_definitions.ml:148:testing#5363b5de",
+      "status": "RESOLVED",
+      "first_seen_round": 1,
+      "resolved_round": 2
+    },
+    {
+      "severity": "LOW",
+      "confidence": 5,
+      "path": "lib/arch_index/arch_index_cmt.mli",
+      "line": 234,
+      "category": "maintainability",
+      "specialist": "reviewer",
+      "summary": "bind_base and bind_last are published in the .mli but read by no caller; bind_last is documented as if it were load-bearing.",
+      "evidence": "Both call sites project only .bind_name.",
+      "fix": "Drop the two unused fields (binding_identity becomes bind_name only, or a plain string) or document them explicitly as informational metadata with no current consumer.",
+      "fingerprint": "lib/arch_index/arch_index_cmt.mli:234:maintainability",
+      "fid": "lib/arch_index/arch_index_cmt.mli:234:maintainability#44cbfe4f",
+      "status": "RESOLVED",
+      "first_seen_round": 1,
+      "resolved_round": 2
+    },
+    {
+      "severity": "LOW",
+      "confidence": 5,
+      "path": "lib/arch_index/arch_index_cmt.ml",
+      "line": 749,
+      "category": "maintainability",
+      "specialist": "architect",
+      "summary": "binding_identity's fallback docstring claims the branch 'should not happen' but it is reachable from call_graph_extractor.ml's unfiltered wildcard case.",
+      "evidence": "call_graph_extractor.ml's Tstr_value match has no Ident.name id <> \"_\" guard, unlike process_cmt's, so a ppx wildcard binding misses build_binding_names' table and hits the fallback for real (harmlessly, since qualify ~prefix:\"\" \"_\" = \"_\").",
+      "fix": "Correct the comment to state the fallback is exercised by call_graph_extractor.ml's unfiltered wildcard case rather than asserting it can't happen.",
+      "fingerprint": "lib/arch_index/arch_index_cmt.ml:749:maintainability",
+      "fid": "lib/arch_index/arch_index_cmt.ml:749:maintainability#92970ed5",
+      "status": "RESOLVED",
+      "first_seen_round": 1,
+      "resolved_round": 2
+    },
+    {
+      "severity": "LOW",
+      "confidence": 3,
+      "path": "lib/arch_index/arch_index_cmt.ml",
+      "line": 704,
+      "category": "style",
+      "specialist": "architect",
+      "summary": "Function binding_identity shares its name with the type binding_identity.",
+      "evidence": "type binding_identity at line 704; let binding_identity names ~prefix id at line 749. Legal OCaml (separate namespaces) but reduces grep-ability.",
+      "fix": "Optional: rename the accessor function for readability.",
+      "fingerprint": "lib/arch_index/arch_index_cmt.ml:704:style",
+      "fid": "lib/arch_index/arch_index_cmt.ml:704:style#8bf455b7",
+      "status": "RESOLVED",
+      "first_seen_round": 1,
+      "resolved_round": 2
+    },
+    {
+      "severity": "LOW",
+      "confidence": 5,
+      "path": "lib/arch_index/arch_index_cmt.mli",
+      "line": 233,
+      "category": "maintainability",
+      "specialist": "reviewer",
+      "summary": "build_binding_names and binding_name are exported but have no consumer outside arch_index_cmt.ml after the round-2 revert of call_graph_extractor.ml.",
+      "evidence": "Every call site is now inside lib/arch_index/arch_index_cmt.ml (lines 768, 780, 1587, 1683); the only external consumer was removed by this round's revert.",
+      "fix": "Drop both val declarations from arch_index_cmt.mli and keep the functions private, or note in the .mli they are exported for testing only.",
+      "fingerprint": "lib/arch_index/arch_index_cmt.mli:233:maintainability",
+      "fid": "lib/arch_index/arch_index_cmt.mli:233:maintainability#ec63e693",
+      "status": "OPEN",
+      "first_seen_round": 2
+    },
+    {
+      "severity": "LOW",
+      "confidence": 4,
+      "path": "tezt/tests/shadowed_definitions.ml",
+      "line": 196,
+      "category": "testing",
+      "specialist": "reviewer",
+      "summary": "Fixture 2c is described as covering exposed AND doc attribution, but only asserts exposed; the intent (doc) half has no assertion.",
+      "evidence": "register_exposed asserts only exposed db \"f\" and exposed db \"f#1\"; functions.intent (doc_tbl, keyed the same way) is never asserted, though verified correct by manual probe.",
+      "fix": "Add assertions on functions.intent for both rows in fixture 2c, using distinct .ml doc comments plus the .mli doc.",
+      "fingerprint": "tezt/tests/shadowed_definitions.ml:196:testing",
+      "fid": "tezt/tests/shadowed_definitions.ml:196:testing#f90bd82f",
+      "status": "OPEN",
+      "first_seen_round": 2
+    },
+    {
+      "severity": "LOW",
+      "confidence": 5,
+      "path": "lib/arch_index/arch_index_cmt.ml",
+      "line": 1653,
+      "category": "correctness",
+      "specialist": "reviewer",
+      "summary": "PRE-EXISTING, not a regression: a top-level binding with a type annotation (let x : t = e) produces no functions row, degrading calls to it to MAY_TOP.",
+      "evidence": "Confirmed pre-existing via a byte-identical 0-line diff of all function/call rows between the base commit and HEAD on a real 74-module corpus; the guard is untouched by this diff and both build_binding_names and the insertion pass skip the same bindings identically, so ordinals never desync.",
+      "fix": "Out of scope for #41 \u2014 track separately.",
+      "fingerprint": "lib/arch_index/arch_index_cmt.ml:1653:correctness",
+      "fid": "lib/arch_index/arch_index_cmt.ml:1653:correctness#e68275b1",
+      "status": "OPEN",
+      "first_seen_round": 2
+    },
+    {
+      "severity": "LOW",
+      "confidence": 4,
+      "path": "lib/arch_index/arch_index_cmt.ml",
+      "line": 1587,
+      "category": "efficiency",
+      "specialist": "reviewer",
+      "summary": "build_binding_names now runs twice per compilation unit \u2014 once inside build_local_fn_stamps and once directly in process_cmt.",
+      "evidence": "Both calls independently walk the whole structure; results are identical by construction so there is no correctness risk, only redundant work.",
+      "fix": "Have build_local_fn_stamps accept or return a shared binding_names table so process_cmt reuses it instead of recomputing.",
+      "fingerprint": "lib/arch_index/arch_index_cmt.ml:1587:efficiency",
+      "fid": "lib/arch_index/arch_index_cmt.ml:1587:efficiency#f13ee94a",
+      "status": "OPEN",
+      "first_seen_round": 2
+    }
+  ],
+  "cross_runtime_findings": [],
+  "summary": "Round 2: all 8 round-1 findings (1 HIGH, 3 MEDIUM, 4 LOW/optional) verified fixed by both reviewer and architect specialists, independently and empirically (probe fixtures indexed through arch_callgraph_ocaml, a byte-identical 0-line diff of function/call rows on a real 74-module corpus, and a red-then-green re-verification of the HIGH fix). Full suite green (89/89). Four new LOW findings surfaced this round (dead public API surface, an untested doc-attribution half of one fixture, a pre-existing unrelated indexing gap for type-annotated bindings flagged out-of-scope, and a duplicate build_binding_names pass) \u2014 none blocking; carried forward as OPEN for a future pass. The HIGH finding's ratchet check (checks/mid-caller-shadow-attribution.js) could not be automatically red/green-verified by the gate's git-checkout mechanism due to a same-round check+fix commit topology; verified manually instead (documented in the impl brief and this round's specialist reports), and the gate's own flagged/non-blocking path (FR-034) was used rather than suppressing the note.",
+  "no_go_reason": null,
+  "no_go_round": 0,
+  "round": 2,
+  "cycle": 1,
+  "rounds_audit": [
+    {
+      "round": 1,
+      "reviewed_sha": "0e1e4c1",
+      "fix_sha": null,
+      "fix_sha_reason": null,
+      "specialists_run": [
+        {
+          "name": "reviewer",
+          "selection_reason": "always runs, round 1 full fan-out"
+        },
+        {
+          "name": "architect",
+          "selection_reason": "5 files modified, exceeds >3-file threshold for architect specialist"
+        }
+      ],
+      "strike": false,
+      "trace_schema_version": "1.0"
+    },
+    {
+      "round": 2,
+      "reviewed_sha": "8550553",
+      "fix_sha": "8550553",
+      "fix_sha_reason": null,
+      "specialists_run": [
+        {
+          "name": "reviewer",
+          "selection_reason": "always re-runs every round"
+        },
+        {
+          "name": "architect",
+          "selection_reason": "named in round-1 OPEN findings (bind_base/bind_last unused fields, type/value name clash)"
+        }
+      ],
+      "strike": false,
+      "trace_schema_version": "1.0"
+    }
+  ],
+  "cross_runtime": {
+    "codex": {
+      "status": "skipped-degraded",
+      "reason": "runtime degraded this cycle with unchanged digest (D-2/E-5)",
+      "config_digest": "codex:bec3ccacdd6c8654",
+      "round": 2
+    }
+  },
+  "streak_override": null,
+  "mode": "full",
+  "escalation_needed": false,
+  "escalation_reason": null,
+  "normalized_by": "2.0.0"
+}
