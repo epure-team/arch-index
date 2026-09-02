@@ -1,7 +1,7 @@
 {
   "task": "fix-issues-33-34-35",
   "mode": "fast",
-  "current_phase": "qa",
+  "current_phase": "ship",
   "events": [
     {
       "phase": "implement",
@@ -17,6 +17,11 @@
       "phase": "qa",
       "outcome": "GO",
       "by": "roster-qa"
+    },
+    {
+      "phase": "ship",
+      "outcome": "COMPLETED",
+      "by": "roster-ship"
     }
   ]
 }
