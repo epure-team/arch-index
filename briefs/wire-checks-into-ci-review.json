@@ -1,6 +1,6 @@
 {
   "task": "wire-checks-into-ci",
-  "date": "2026-09-01",
+  "date": "2026-09-02",
   "mode": "fast",
   "status": "GO",
   "auto_fixes_applied": [],
@@ -14,41 +14,24 @@
       "round": 1
     }
   },
-  "summary": "Round 2 fixed both HIGH findings (one via a fix + new ratchet check, one via human-accepted waiver backed by direct re-verification) and 9 of 11 MEDIUM/LOW round-1 findings, plus 4 of 5 new MEDIUM/LOW findings raised on re-review. 2 MEDIUM findings remain OPEN and non-blocking: architect-identified refactors (duplicate reindex with Self-index smoke test; baseline hardcoded rather than in a data file), both explicitly deferred as out of this task's scope. One HIGH (checks/ disconnected from dune test) was ACCEPTED by human decision in round 1, filed as a roadmap follow-up.",
+  "summary": "Cycle 2 round 1: ship-gate rework migrated checks/*.js into tezt/, then this round fixed a CRITICAL (CI-step removal never actually committed) and a HIGH (ceiling metric was ~87% Stdlib noise, rescoped) found on re-review, plus 2 MEDIUM and 3 LOW, all same-round raise+resolve. Re-verified clean in a fresh worktree at the final commit.",
   "no_go_reason": null,
   "no_go_round": 0,
-  "round": 2,
-  "cycle": 1,
+  "round": 1,
+  "cycle": 2,
   "rounds_audit": [
     {
       "round": 1,
-      "reviewed_sha": "d735da8",
-      "fix_sha": "d735da8",
+      "reviewed_sha": "33775a8",
+      "fix_sha": "91f25be",
       "specialists_run": [
         {
           "name": "reviewer",
-          "selection_reason": "always runs, round 1"
+          "selection_reason": "always runs, round 1 of a fresh cycle"
         },
         {
           "name": "architect",
-          "selection_reason": "round 1 full fan-out, 4 files modified (>3), medium blast radius"
-        }
-      ],
-      "trace_schema_version": "1.0",
-      "strike": false
-    },
-    {
-      "round": 2,
-      "reviewed_sha": "a650003",
-      "fix_sha": "42ed9db",
-      "specialists_run": [
-        {
-          "name": "reviewer",
-          "selection_reason": "always re-runs on loop-back"
-        },
-        {
-          "name": "architect",
-          "selection_reason": "named specialist on OPEN round-1 findings (duplicate-reindex, baseline-data-file)"
+          "selection_reason": "fresh-cycle full fan-out, originating specialist for the finding that triggered this cycle"
         }
       ],
       "trace_schema_version": "1.0",
