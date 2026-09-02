@@ -146,36 +146,39 @@ let register () =
       Db.with_db db (fun conn ->
           let linked = fn_id conn ~mod_like:"%aaa/foo.ml" ~names:["Bar.baz"; "baz"] b ~label:"B" in
           let decoy = fn_id conn ~mod_like:"%foo/bar.ml" ~names:["baz"] b ~label:"B" in
-          (if linked = None then Batch.note b "B: aaa/foo.ml Bar.baz is not indexed") ;
-          (if decoy = None then Batch.note b "B: decoy foo/bar.ml baz is not indexed") ;
-          (if linked <> None && linked = decoy then
-             Batch.note b "B: fixture bug — both baz resolved to one row") ;
-          let callee, kind = go_call conn ~label:"B" in
-          Batch.check b
-            ~msg:
-              (Printf.sprintf
-                 "B: go -> Foo.Bar.baz was attributed to foo/bar.ml baz (%s, kind=%s), a library \
-                  callerlib does not link. The caller links only aaalib, whose foo.ml defines \
-                  module Bar (%s) — review CRITICAL :344"
-                 (Option.value decoy ~default:"<none>") kind
-                 (Option.value linked ~default:"<none>"))
-            (callee <> decoy) ;
-          Batch.check b
-            ~msg:
-              (Printf.sprintf
-                 "B: go -> Foo.Bar.baz is kind=MUST with callee_id=%s. Both readings of Foo.Bar \
-                  name an indexed unit here, so a MUST to anything other than the linked aaalib \
-                  (%s) is a guess presented as a proof"
-                 (Option.value callee ~default:"<none>")
-                 (Option.value linked ~default:"<none>"))
-            (kind <> "MUST" || callee = linked) ;
-          Batch.check b
-            ~msg:
-              (Printf.sprintf
-                 "B: go -> Foo.Bar.baz resolved kind=%s callee_id=%s. With two live readings the \
-                  only honest answers are MAY_TOP (carrying the TOP frontier marker downstream) \
-                  or a resolution to the linked library"
-                 kind
-                 (Option.value callee ~default:"<none>"))
-            (kind = "MAY_TOP" || (kind = "MUST" && callee = linked)))) ;
+          (match linked, decoy with
+          | None, _ -> Batch.note b "B: aaa/foo.ml Bar.baz is not indexed"
+          | _, None -> Batch.note b "B: decoy foo/bar.ml baz is not indexed"
+          | Some l, Some d when l = d -> Batch.note b "B: fixture bug — both baz resolved to one row"
+          | Some linked, Some decoy ->
+              (* Both preconditions hold — only now do the assertions below say
+                 something true about an actual attribution, rather than about
+                 a precondition failure dressed up as one. *)
+              let callee, kind = go_call conn ~label:"B" in
+              Batch.check b
+                ~msg:
+                  (Printf.sprintf
+                     "B: go -> Foo.Bar.baz was attributed to foo/bar.ml baz (%s, kind=%s), a \
+                      library callerlib does not link. The caller links only aaalib, whose \
+                      foo.ml defines module Bar (%s) — review CRITICAL :344"
+                     decoy kind linked)
+                (callee <> Some decoy) ;
+              Batch.check b
+                ~msg:
+                  (Printf.sprintf
+                     "B: go -> Foo.Bar.baz is kind=MUST with callee_id=%s. Both readings of \
+                      Foo.Bar name an indexed unit here, so a MUST to anything other than the \
+                      linked aaalib (%s) is a guess presented as a proof"
+                     (Option.value callee ~default:"<none>")
+                     linked)
+                (kind <> "MUST" || callee = Some linked) ;
+              Batch.check b
+                ~msg:
+                  (Printf.sprintf
+                     "B: go -> Foo.Bar.baz resolved kind=%s callee_id=%s. With two live readings \
+                      the only honest answers are MAY_TOP (carrying the TOP frontier marker \
+                      downstream) or a resolution to the linked library"
+                     kind
+                     (Option.value callee ~default:"<none>"))
+                (kind = "MAY_TOP" || (kind = "MUST" && callee = Some linked))))) ;
   Lwt.return_unit
