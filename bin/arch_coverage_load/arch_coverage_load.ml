@@ -32,17 +32,23 @@ Usage: arch-coverage-load <db> [input.ndjson]      (input defaults to stdin)
 
 NDJSON records (one JSON object per line, one per function):
   {"function":"install_node","covered_lines":12,"total_lines":20}
+  {"function":"run","module":"lib/a/dup.ml","covered_lines":3,"total_lines":5}
 
-Every field is required, no others allowed. covered_lines/total_lines must be integers with
-0 <= covered_lines <= total_lines. A function name may appear at most once per invocation — one
-snapshot, one row per function; run the loader again for the next snapshot.
+"function", "covered_lines" and "total_lines" are required; "module" (a modules.path value) is
+OPTIONAL and disambiguates a function name shared by more than one module. No field outside this
+set is allowed. covered_lines/total_lines must be integers with 0 <= covered_lines <= total_lines.
+A (function, module) pair may appear at most once per invocation — one snapshot, one row per
+function; run the loader again for the next snapshot.
 
-Name resolution is EXACTLY-ONE: a name absent from the index is SKIPPED (the coverage tool ran
-over more than this index covers, which is normal); a name shared by more than one function
-(ambiguous across modules) is IGNORED — never guessed at. Both are counted and reported.
+Name resolution: a name absent from the index (in the given module, if one was given) is SKIPPED
+(the coverage tool ran over more than this index covers, which is normal). Without a "module"
+field, a name shared by more than one function (ambiguous across modules) is IGNORED — never
+guessed at; give "module" to disambiguate instead. Both SKIPPED and IGNORED are counted and
+reported, never silently dropped.
 
 Any malformed record (bad JSON, missing/unknown field, wrong type, covered_lines > total_lines,
-or a duplicate function name within this input) ABORTS THE WHOLE LOAD before any row is written.|}
+or a duplicate (function, module) pair within this input) ABORTS THE WHOLE LOAD before any row is
+written.|}
 
 let die ?line fmt =
   Printf.ksprintf
@@ -53,9 +59,13 @@ let die ?line fmt =
       exit 2)
     fmt
 
-let fields = [ "function"; "covered_lines"; "total_lines" ]
+let required_fields = [ "function"; "covered_lines"; "total_lines" ]
 
-type rec_t = { r_function : string; r_covered : int; r_total : int }
+let optional_fields = [ "module" ]
+
+let allowed_fields = required_fields @ optional_fields
+
+type rec_t = { r_function : string; r_module : string option; r_covered : int; r_total : int }
 
 (* ------------------------------------------------------------------ *)
 (* phase 1: read the WHOLE input and validate before touching the DB    *)
@@ -63,7 +73,7 @@ type rec_t = { r_function : string; r_covered : int; r_total : int }
 
 let read_records ic =
   let recs = ref [] in
-  let seen : (string, unit) Hashtbl.t = Hashtbl.create 256 in
+  let seen : (string * string option, unit) Hashtbl.t = Hashtbl.create 256 in
   let lineno = ref 0 in
   (try
      while true do
@@ -76,16 +86,23 @@ let read_records ic =
          let assoc = match json with `Assoc a -> a | _ -> die ~line:!lineno "record is not a JSON object" in
          List.iter
            (fun (k, _) ->
-             if not (List.mem k fields) then
-               die ~line:!lineno "unknown field %S; the contract is [%s]" k (String.concat "; " fields))
+             if not (List.mem k allowed_fields) then
+               die ~line:!lineno "unknown field %S; the contract is [%s]" k
+                 (String.concat "; " allowed_fields))
            assoc ;
          List.iter
            (fun k -> if not (List.mem_assoc k assoc) then die ~line:!lineno "record missing field %S" k)
-           fields ;
+           required_fields ;
          let fn =
            match List.assoc "function" assoc with
            | `String s when s <> "" -> s
            | _ -> die ~line:!lineno "\"function\" must be a non-empty string"
+         in
+         let module_ =
+           match List.assoc_opt "module" assoc with
+           | None -> None
+           | Some (`String s) when s <> "" -> Some s
+           | Some _ -> die ~line:!lineno "\"module\" must be a non-empty string"
          in
          let int_field k =
            match List.assoc k assoc with `Int n -> n | _ -> die ~line:!lineno "%S must be an integer" k
@@ -95,11 +112,13 @@ let read_records ic =
            die ~line:!lineno "covered_lines/total_lines must be >= 0 (got %d/%d)" covered total ;
          if covered > total then
            die ~line:!lineno "covered_lines (%d) > total_lines (%d) for %S" covered total fn ;
-         if Hashtbl.mem seen fn then
-           die ~line:!lineno "function %S appears more than once in this input — one snapshot, one \
-                               row per function" fn ;
-         Hashtbl.replace seen fn () ;
-         recs := { r_function = fn; r_covered = covered; r_total = total } :: !recs)
+         if Hashtbl.mem seen (fn, module_) then
+           die ~line:!lineno "function %S%s appears more than once in this input — one snapshot, \
+                               one row per function"
+             fn
+             (match module_ with Some m -> Printf.sprintf " (module %S)" m | None -> "") ;
+         Hashtbl.replace seen (fn, module_) () ;
+         recs := { r_function = fn; r_module = module_; r_covered = covered; r_total = total } :: !recs)
      done
    with End_of_file -> ()) ;
   List.rev !recs
@@ -119,11 +138,25 @@ let has_table db name =
   ignore (Sqlite3.finalize stmt) ;
   r
 
-(** Every [functions.id] matching [name] — the caller decides skip/ignore/use from the shape of
-    the list, so "no match" and "ambiguous" can never be conflated. *)
-let resolve db name =
-  let stmt = Sqlite3.prepare db "SELECT id FROM functions WHERE name=?" in
+(** Every [functions.id] matching [name] (and [module_path], if given, via a join on
+    [modules.path]) — the caller decides skip/ignore/use from the shape of the list, so "no
+    match" and "ambiguous" can never be conflated. A record naming its module resolves scoped
+    to it, so a name shared by two modules never falls into the ambiguous/IGNORED path when the
+    caller already told us which one they meant (#35: coverage for any same-named function was
+    silently unattributable). A durable fix — a stable qualified identity shared by every loader,
+    not scoped resolution one loader at a time — is tracked as roadmap item 1.6. *)
+let resolve db ~module_path name =
+  let sql =
+    match module_path with
+    | None -> "SELECT id FROM functions WHERE name=?"
+    | Some _ -> "SELECT f.id FROM functions f JOIN modules m ON f.module_id=m.id WHERE f.name=? \
+                 AND m.path=?"
+  in
+  let stmt = Sqlite3.prepare db sql in
   ignore (Sqlite3.bind stmt 1 (Sqlite3.Data.TEXT name)) ;
+  (match module_path with
+  | Some p -> ignore (Sqlite3.bind stmt 2 (Sqlite3.Data.TEXT p))
+  | None -> ()) ;
   let ids = ref [] in
   let rec loop () =
     match Sqlite3.step stmt with
@@ -179,7 +212,7 @@ let () =
   let written = ref 0 and skipped = ref 0 and ignored = ref 0 in
   List.iter
     (fun r ->
-      match resolve db r.r_function with
+      match resolve db ~module_path:r.r_module r.r_function with
       | [] -> incr skipped
       | [ id ] -> (
           ignore (Sqlite3.reset ins) ;

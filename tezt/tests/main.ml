@@ -23,6 +23,8 @@ let () =
   Duplicates.register_refusals () ;
   Curation.register_load () ;
   Curation.register_write () ;
+  Curation.register_load_module_disambiguation () ;
+  Curation.register_gardening_open_shows_in_progress () ;
   Mutants.register_plan () ;
   Mutants.register_cone_escape () ;
   Mutants.register_allowlist () ;
@@ -85,4 +87,5 @@ let () =
   Dropped_node_dependents.register_dropped_type () ;
   Nested_module_qualification.register () ;
   Must_null_ceiling.register () ;
+  Query_limits.register () ;
   Tezt.Test.run ()

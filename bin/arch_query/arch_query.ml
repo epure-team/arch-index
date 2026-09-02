@@ -149,7 +149,29 @@ let () =
                 give a sound verdict about a name it does not know."
                role name cmd)
       in
-      let limit_of s default = match int_of_string_opt s with Some n -> n | None -> default in
+      (* A caller who typed a limit and got it wrong (not an integer, or negative — SQLite
+         reads `LIMIT -1` as unlimited, so a negative limit means "dump every row" while the
+         caller believes they asked for one) must not be met with a silent default: that
+         reads as "here are the top N" when N was never honoured. Empty string is the
+         "no argument given" sentinel used throughout this file, so it alone falls through
+         to [default].
+
+         An argument starting with "--" is NOT the same mistake: these commands accept no
+         flags at all — "measures are never gates" (health.ml), so nothing here parses a
+         `--fail-on-...` threshold — and a stray option-shaped argument must stay silently
+         ignored, exactly as before, or the doctrine has a hole precisely where someone would
+         reach for it first. Only a value that reads as an attempted NUMBER and gets it wrong
+         (a typo, or a negative count) is refused. *)
+      let limit_of s default =
+        if s = "" || String.length s >= 2 && s.[0] = '-' && s.[1] = '-' then default
+        else
+          match int_of_string_opt s with
+          | Some n when n >= 0 -> n
+          | _ ->
+              die 2
+                (Printf.sprintf
+                   "arch-query: expected a non-negative integer limit, got '%s'" s)
+      in
       let vis =
         if Arch_db.has_col t "functions" "exported" then "exported" else "exposed"
       in
@@ -541,10 +563,16 @@ let () =
                   ~h:[ "github_issue"; "category"; "title"; "module_path"; "function_name"; "status";
                        "created_at" ]
                   ~shape:Arch_db.Rows.task_shape ~cells:Arch_db.Rows.task_cells ~pty:unit_ty
+                  (* Not `status='open'`: architecture-schema.sql documents status as
+                     'open'|'in_progress'|'done'. A task moved to 'in_progress' is neither
+                     'open' (filtered out here) nor yet in gardening_log (the 'log' branch
+                     above) — under the old filter it disappeared from every view, which is
+                     exactly the "re-litigated every sprint" failure docs/curation-workflow.md
+                     exists to prevent. Anything not yet 'done' belongs in the open view. *)
                   "SELECT t.github_issue, t.category, COALESCE(t.title,''), COALESCE(m.path,''), \
                    COALESCE(f.name,''), t.status, t.created_at FROM gardening_tasks t LEFT JOIN \
                    modules m ON t.target_module_id=m.id LEFT JOIN functions f ON \
-                   t.target_function_id=f.id WHERE t.status='open' ORDER BY t.created_at, t.id" ()
+                   t.target_function_id=f.id WHERE t.status<>'done' ORDER BY t.created_at, t.id" ()
             | "log" ->
                 if not (Arch_db.has_table t "gardening_log") then
                   die 3 "arch-query: gardening log requires the gardening_log table." ;
