@@ -248,3 +248,80 @@ let register_write () =
           );
         ]) ;
   Lwt.return_unit
+
+let register_load_module_disambiguation () =
+  Test.register ~__FILE__
+    ~title:"curation: an optional module field disambiguates a same-named function (#35)"
+    ~tags:["curation"; "coverage"; "disambiguation"]
+  @@ fun () ->
+  let db = main_index () in
+  Batch.run (fun b ->
+      (* 'dup' is ambiguous across lib/a.ml and lib/b.ml — same fixture as
+         register_load's ignored-name case. Naming the module must resolve it
+         to exactly that module's row instead of falling into "ignored". A
+         durable fix (a stable qualified identity shared by every loader, not
+         scoped resolution one loader at a time) is tracked as roadmap item
+         1.6 — this is the minimal, per-loader fix for #35. *)
+      let _, out =
+        coverage_load
+          ~stdin:{|{"function":"dup","module":"lib/a.ml","covered_lines":2,"total_lines":2}|}
+          db
+      in
+      Batch.contains b ~msg:"a module-qualified name must resolve, not be ignored" ~haystack:out
+        "wrote 1, skipped 0 (not in index), ignored 0" ;
+      Batch.eq_int b ~msg:"exactly one coverage row after the module-qualified load"
+        (count db "SELECT count(*) FROM coverage") 1 ;
+      let dup_a_id =
+        Db.with_db db (fun conn ->
+            Db.int conn
+              "SELECT f.id FROM functions f JOIN modules m ON f.module_id=m.id WHERE f.name='dup' \
+               AND m.path='lib/a.ml'")
+      in
+      Batch.eq_int b
+        ~msg:"the coverage row must be attributed to lib/a.ml's dup, not b.ml's or neither"
+        (count db (Printf.sprintf "SELECT count(*) FROM coverage WHERE function_id=%d" dup_a_id))
+        1 ;
+
+      (* A module naming a function that does not exist there is SKIPPED (not
+         in the index under that module), never guessed at from another
+         module. *)
+      let _, out =
+        coverage_load
+          ~stdin:{|{"function":"dup","module":"lib/c.ml","covered_lines":1,"total_lines":1}|}
+          db
+      in
+      Batch.contains b ~msg:"a module that doesn't hold this function name must be skipped"
+        ~haystack:out "wrote 0, skipped 1") ;
+  Lwt.return_unit
+
+let register_gardening_open_shows_in_progress () =
+  Test.register ~__FILE__
+    ~title:"curation: gardening open must not drop in_progress tasks (#34)"
+    ~tags:["curation"; "gardening"]
+  @@ fun () ->
+  let db =
+    Fixture.main ~name:"gardening-status"
+      ~seed:
+        {|
+INSERT INTO gardening_tasks(github_issue, category, title, status) VALUES
+  (100, 'split-file', 'still open', 'open'),
+  (101, 'type-safety', 'being worked', 'in_progress'),
+  (102, 'coverage', 'already done', 'done');
+|}
+      ()
+  in
+  Batch.run (fun b ->
+      let out = query db ["gardening"; "open"] in
+      Batch.contains b ~msg:"an 'open' task must appear" ~haystack:out "still open" ;
+      Batch.contains b
+        ~msg:
+          "an 'in_progress' task must NOT vanish — it has left 'open' but has not yet reached \
+           gardening_log, so dropping it here means it appears nowhere"
+        ~haystack:out "being worked" ;
+      Batch.not_contains b ~msg:"a 'done' task must not appear in the open view" ~haystack:out
+        "already done" ;
+      (* status is already in the header/select list — assert it is actually
+         surfaced, not just present in the SQL. *)
+      Batch.contains b ~msg:"the status column must be visible in the output" ~haystack:out
+        "in_progress") ;
+  Lwt.return_unit
