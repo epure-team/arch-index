@@ -686,27 +686,22 @@ let rec fn_arity (e : Typedtree.expression) =
   | Texp_function (params, Tfunction_cases _) -> List.length params + 1
   | _ -> 0
 
-(** Identity assigned to one top-level value binding when its qualified name
-    collides with another same-level binding in the same unit (issue #41: two
-    top-level [let f = ...] previously merged into one [functions] row via
-    [INSERT OR REPLACE] on [UNIQUE(module_id, name)], and both bodies' outbound
-    calls landed on whichever definition survived). [bind_name] is the name the
-    binding's [functions] row is written under: the LAST (source-order-final)
-    binding at a colliding position keeps the bare qualified name, and every
-    earlier binding takes a [#N] suffix (N counting up in source order among
-    the shadowed occurrences only) — mirroring [lambda_name]'s ordinal
-    precedent, but with the opposite occurrence kept bare. This direction is
-    required, not cosmetic: a cross-module caller can only ever reference the
-    bare syntactic name (see [add_path_call]), and [fn_lookup]
-    (arch_index.ml) resolves that name with no ordinal awareness, so the bare
-    name must denote whichever definition is actually reachable — the last
-    one, per OCaml's own same-level shadowing semantics. *)
-type binding_identity = { bind_name : string; bind_base : string; bind_last : bool }
-
-(** [build_binding_names structure] assigns a {!binding_identity} to every
-    top-level value binding, keyed by [Ident.unique_name]. A binding whose
-    qualified name has no same-level collision gets [bind_name = bind_base]
-    (byte-identical to pre-fix naming). *)
+(** [build_binding_names structure] maps each top-level value binding's
+    [Ident.unique_name] to the name its [functions] row is written under
+    (issue #41: two top-level [let f = ...] previously merged into one
+    [functions] row via [INSERT OR REPLACE] on [UNIQUE(module_id, name)], and
+    both bodies' outbound calls landed on whichever definition survived). The
+    LAST (source-order-final) binding at a colliding position keeps the bare
+    qualified name; every earlier binding takes a [#N] suffix (N counting up
+    in source order among the shadowed occurrences only) — mirroring
+    [lambda_name]'s ordinal precedent, but with the opposite occurrence kept
+    bare. This direction is required, not cosmetic: a cross-module caller can
+    only ever reference the bare syntactic name (see [add_path_call]), and
+    [fn_lookup] (arch_index.ml) resolves that name with no ordinal awareness,
+    so the bare name must denote whichever definition is actually reachable —
+    the last one, per OCaml's own same-level shadowing semantics. A binding
+    with no same-level collision maps to its plain qualified name, byte-
+    identical to pre-fix naming. *)
 let build_binding_names (structure : Typedtree.structure) =
   let order : (string, string list ref) Hashtbl.t = Hashtbl.create 64 in
   let record base stamp =
@@ -732,26 +727,25 @@ let build_binding_names (structure : Typedtree.structure) =
       let total = List.length occurrences in
       List.iteri
         (fun i stamp ->
-          let bind_last = i = total - 1 in
           let bind_name =
-            if bind_last then base else Printf.sprintf "%s#%d" base (i + 1)
+            if i = total - 1 then base else Printf.sprintf "%s#%d" base (i + 1)
           in
-          Hashtbl.replace names stamp { bind_name; bind_base = base; bind_last })
+          Hashtbl.replace names stamp bind_name)
         occurrences)
     order ;
   names
 
-(** [binding_identity names ~prefix id] looks up [id]'s assigned identity in
-    [names] (built by {!build_binding_names} over the same structure). Falls
-    back to the plain qualified name if [id] is absent from the table (should
-    not happen for a [Tpat_var] binding walked by both passes identically, but
-    keeps this total rather than partial). *)
-let binding_identity names ~prefix id =
+(** [binding_name names ~prefix id] looks up [id]'s assigned name in [names]
+    (built by {!build_binding_names} over the same structure). Falls back to
+    the plain qualified name if [id] is absent — reachable in practice from
+    {!build_local_fn_stamps} below, whose own [Tpat_var] match filters on
+    [is_function_rhs] only (not on [Ident.name id <> "_"]), while
+    [build_binding_names] excludes wildcard bindings from [names]; harmless
+    since [qualify ~prefix "_" = "_"], matching pre-fix behavior. *)
+let binding_name names ~prefix id =
   match Hashtbl.find_opt names (Ident.unique_name id) with
-  | Some bid -> bid
-  | None ->
-      let base = qualify ~prefix (Ident.name id) in
-      { bind_name = base; bind_base = base; bind_last = true }
+  | Some name -> name
+  | None -> qualify ~prefix (Ident.name id)
 
 (** Pre-pass shared by the main indexer and the LSP fallback: the table of
     top-level bindings whose RHS is a real function body, mapping the binder's
@@ -766,6 +760,12 @@ let binding_identity names ~prefix id =
    records [Make.spawn], which is the row's name, instead of the bare [spawn],
    which is nothing's name. *)
 let build_local_fn_stamps (structure : Typedtree.structure) =
+  (* Same-level shadowing (issue #41): a call site must name its target the
+     way the target's OWN row is registered, or an intra-module call that
+     lexically resolves to an earlier (shadowed) binding gets attributed to
+     the later, unrelated one instead — the same misattribution class #41
+     fixes, on the inbound/intra-module edge instead of the outbound one. *)
+  let binding_names = build_binding_names structure in
   let local_fn_stamps = Hashtbl.create 64 in
   iter_structure_items structure ~f:(fun ~prefix (it : Typedtree.structure_item) ->
       match it.str_desc with
@@ -777,7 +777,7 @@ let build_local_fn_stamps (structure : Typedtree.structure) =
                   Hashtbl.replace
                     local_fn_stamps
                     (Ident.unique_name id)
-                    (qualify ~prefix (Ident.name id), fn_arity vb.vb_expr)
+                    (binding_name binding_names ~prefix id, fn_arity vb.vb_expr)
               | _ -> ())
             vbs
       | _ -> ()) ;
@@ -938,7 +938,7 @@ let collect_calls_from_expr ~src_path ~caller_module ~caller_name
                    row is REPLACED by that enumerated edge (FR-012). *)
                 ()
             | Texp_ident (Path.Pident id, _, _) when ident_is_local_fn id ->
-                add_call (Head_enumerated (Ident.name id)) loc
+                add_call (Head_enumerated (local_fn_name id)) loc
             | Texp_ident (Path.Pident id, _, _) when lam_stamp id <> None ->
                 (* Let-bound lambda passed by name: the generic Texp_ident
                    occurrence case emits the enumerated edge — nothing here. *)
@@ -1677,13 +1677,10 @@ let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
                                   (* Same-level shadowing (issue #41): the LAST
                                      same-name binding keeps the bare qualified
                                      name; earlier ones take a [#N] suffix. See
-                                     {!binding_identity} for why this direction
-                                     (not the reverse) is required for correct
-                                     cross-module call resolution. *)
-                                  let name =
-                                    (binding_identity binding_names ~prefix id)
-                                      .bind_name
-                                  in
+                                     {!build_binding_names} for why this
+                                     direction (not the reverse) is required
+                                     for correct cross-module call resolution. *)
+                                  let name = binding_name binding_names ~prefix id in
                                   let signature =
                                     Some (type_to_string vb.vb_pat.pat_type)
                                   in

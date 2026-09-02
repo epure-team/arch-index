@@ -265,14 +265,18 @@ let extract_calls_from_cmts ~project_dir fn_rows =
                     let local_fn_stamps =
                       Arch_index_cmt.build_local_fn_stamps structure
                     in
-                    (* Same-level shadowing (issue #41): shared with the main
-                       indexer's binding-identity mechanism so a shadowed
-                       function is named identically on both paths — a
-                       cross-path naming disagreement would itself be a
-                       soundness gap. *)
-                    let binding_names =
-                      Arch_index_cmt.build_binding_names structure
-                    in
+                    (* Issue #41's row-collapse (INSERT OR REPLACE on
+                       UNIQUE(module_id, name)) never applies on this path:
+                       this schema's `functions` rows come from LSP document
+                       symbols (Lsp_extractor), not from this CMT walk, and
+                       carry no UNIQUE(name) constraint — so there is no
+                       shadowed-binding identity problem here to fix. Naming
+                       a caller here with the main indexer's ordinal suffix
+                       would instead BREAK consumers that join calls.caller_name
+                       to functions.name by bare string (e.g. arch_serve.ml),
+                       since those rows are never renamed to match. Bare
+                       Ident.name id is deliberately kept, matching pre-#41
+                       behavior on this path. *)
                     List.iter
                       (fun (item : Typedtree.structure_item) ->
                         match item.str_desc with
@@ -281,13 +285,7 @@ let extract_calls_from_cmts ~project_dir fn_rows =
                               (fun (vb : Typedtree.value_binding) ->
                                 match vb.vb_pat.pat_desc with
                                 | Typedtree.Tpat_var (id, _, _) ->
-                                    let caller_name =
-                                      (Arch_index_cmt.binding_identity
-                                         binding_names
-                                         ~prefix:""
-                                         id)
-                                        .bind_name
-                                    in
+                                    let caller_name = Ident.name id in
                                     let calls, _lam_nodes =
                                       Arch_index_cmt.collect_calls_from_expr
                                         ~src_path:rel_src
