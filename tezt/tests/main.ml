@@ -83,4 +83,6 @@ let () =
   Dropped_node_dependents.register_dropped_function () ;
   Dropped_node_dependents.register_dropped_module () ;
   Dropped_node_dependents.register_dropped_type () ;
+  Nested_module_qualification.register () ;
+  Must_null_ceiling.register () ;
   Tezt.Test.run ()
