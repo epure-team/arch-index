@@ -1,7 +1,7 @@
 {
   "task": "wire-checks-into-ci",
   "mode": "fast",
-  "current_phase": "review",
+  "current_phase": "ship",
   "events": [
     {
       "phase": "implement",
@@ -33,6 +33,11 @@
       "outcome": "GO",
       "by": "roster-review",
       "reason": "cycle 2 round 1 \u2014 post-ship-gate rework"
+    },
+    {
+      "phase": "ship",
+      "outcome": "COMPLETED",
+      "by": "roster-ship"
     }
   ]
 }
