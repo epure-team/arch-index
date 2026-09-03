@@ -89,7 +89,12 @@ let must_null_query =
   "SELECT count(*) FROM calls WHERE kind = 'MUST' AND callee_id IS NULL AND callee_name NOT \
    LIKE 'Stdlib.%'"
 
-let clean_measured = 260
+(* Recalibrated 2026-09-03 (feat/exn-raise-sets): 260 → 289. The +29 rows are
+   the new [lib/arch_index/arch_index_exn.ml]'s calls into compiler-libs
+   ([Ident.*], [Path.*], [Types.get_desc], [Predef.*]) and [Tast_iterator] —
+   genuine external leaves of the same class as the existing rows, measured
+   on the branch's clean tree (self-index: 20 modules / 527 functions). *)
+let clean_measured = 289
 
 let headroom = 25
 

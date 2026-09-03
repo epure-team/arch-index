@@ -249,6 +249,30 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
       "INSERT INTO type_usage (function_id, type_id, type_name, usage_role, \
        position) VALUES (?, ?, ?, ?, ?)"
   in
+  (* Exception-identity rows (specs/exn-raise-sets.md). *)
+  let stmt_scope =
+    Sqlite3.prepare
+      db
+      "INSERT INTO exn_scopes (function_id, parent_id, form, line, col, \
+       catch_all) VALUES (?, ?, ?, ?, ?, ?)"
+  in
+  let stmt_catch =
+    Sqlite3.prepare db "INSERT INTO exn_scope_catches (scope_id, exn_path) VALUES (?, ?)"
+  in
+  let stmt_origin =
+    Sqlite3.prepare
+      db
+      "INSERT INTO exn_origins (function_id, scope_id, form, exn_path, escapes, \
+       line, col) VALUES (?, ?, ?, ?, ?, ?, ?)"
+  in
+  let stmt_rebind =
+    Sqlite3.prepare
+      db
+      "INSERT OR IGNORE INTO exn_rebinds (alias_path, target_path) VALUES (?, ?)"
+  in
+  let stmt_call_scope =
+    Sqlite3.prepare db "INSERT INTO call_exn_scopes (call_id, scope_id) VALUES (?, ?)"
+  in
 
   (* Process all .cmt files inside a transaction *)
   exec_exn db "BEGIN TRANSACTION" ;
@@ -277,6 +301,10 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
             ~stmt_ty
             ~stmt_fld
             ~stmt_ctor
+            ~stmt_scope
+            ~stmt_catch
+            ~stmt_origin
+            ~stmt_rebind
             path
         in
         all_pending_calls := List.rev_append calls !all_pending_calls ;
@@ -476,14 +504,25 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
                           (None, display_name, "MAY_TOP")
                         else (None, display_name, kind)))
           in
-          insert_call
-            db
-            stmt_call
-            ~caller_id
-            ~callee_id
-            ~callee_name:callee_display_name
-            ~call_site:(Some call.call_site)
-            ~kind ;
+          (match
+             insert_call_rowid
+               db
+               stmt_call
+               ~caller_id
+               ~callee_id
+               ~callee_name:callee_display_name
+               ~call_site:(Some call.call_site)
+               ~kind
+           with
+          | Some call_id -> (
+              (* The handler scope enclosing THIS call site, linked to this
+                 call's own rowid — the pair is written back to back so no
+                 other insert can slip in between. *)
+              match call.exn_scope with
+              | Some scope_id ->
+                  Arch_index_db.insert_call_exn_scope db stmt_call_scope ~call_id ~scope_id
+              | None -> ())
+          | None -> ()) ;
           (* R2: the call sits in a block unreachable from its function's CFG
              entry, so it can never execute. Recorded with its location — that
              is what makes the finding actionable. *)
@@ -503,10 +542,17 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
      roots that simply were not indexed. *)
   (* fn_lookup holds one entry per indexed function; use it as the "non-empty
      universe" test — the n_functions counter is not populated until later. *)
-  if Hashtbl.length fn_lookup > 0 then
+  if Hashtbl.length fn_lookup > 0 then begin
     exec_exn db
       "INSERT OR REPLACE INTO comment_db_meta (key, value) VALUES \
        ('callgraph_contract', 'v1')" ;
+    (* Exception sites were emitted for every indexed node by this same
+       producer; the flag is what lets a query tell "nothing raises" from
+       "nobody looked" (specs/exn-raise-sets.md). *)
+    exec_exn db
+      "INSERT OR REPLACE INTO comment_db_meta (key, value) VALUES \
+       ('exn_contract', 'v1')"
+  end ;
   exec_exn db "COMMIT" ;
   Arch_io.printf
     "Inserted %d calls (%d resolved to known functions)\n%!"

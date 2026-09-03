@@ -33,6 +33,13 @@ Subcommands:
   reaches      <from> <to>     MUST-only: does a definite call path exist?
   unreachable  <from> <to>     SOUND dual (requires ⊤-marking): REACHABLE | UNREACHABLE | UNKNOWN
   escapes      <from>          the MAY_TOP (⊤) edges reachable from FROM
+  raises       <fn> [--assume-externals-pure]
+                               exceptions that may ESCAPE fn, transitively, minus what
+                               handlers around each call site catch; BOUNDED | UNBOUNDED (⊤)
+  raisers-of   <Exn> [--assume-externals-pure]
+                               functions whose may-raise set contains Exn (⊤ nodes listed apart)
+  exn-stats    [--assume-externals-pure]
+                               bounded/unbounded share of every node, ⊤ reasons, origin counts
   fan-in       [N]             top-N most-called functions
   exported                     all exported functions
   useless-branches [limit]     decisions with an actionable verdict — dead logic
@@ -624,6 +631,101 @@ let () =
                   f.name, u.param_name"
                  where)
               ()
+        | "raises" | "raisers-of" | "exn-stats" ->
+            (* Exception-identity may-raise sets (specs/exn-raise-sets.md).
+               The hypothesis flag may sit anywhere after the subcommand; the
+               first non-flag argument is the name. *)
+            let hyp = List.mem "--assume-externals-pure" rest in
+            let positional = List.filter (fun x -> x <> "--assume-externals-pure") rest in
+            let a = match positional with x :: _ -> x | [] -> "" in
+            need_contract () ;
+            (* NOT_ANALYSED refusal comes from [load] itself, before any answer. *)
+            let g = Arch_exn.load t in
+            let t0 = Unix.gettimeofday () in
+            let sol = Arch_exn.solve ~assume_externals_pure:hyp g in
+            let fixpoint_seconds = Unix.gettimeofday () -. t0 in
+            let hyp_line () =
+              if hyp then
+                preamble ~h:[ "hypothesis" ] ~cells:[ "externals_pure" ]
+                  ~text:"hypothesis: externals_pure — callees outside the index assumed not to raise"
+            in
+            let cell s = Arch_db.Text s in
+            (match cmd with
+            | "raises" ->
+                need_known "function" a ;
+                hyp_line () ;
+                List.iter
+                  (fun key ->
+                    let set = match Arch_exn.SM.find_opt key sol with Some s -> s | None -> Arch_exn.Known Arch_exn.SS.empty in
+                    Arch_fmt.print fmt [ "exception"; "via"; "how" ]
+                      (Arch_exn.rows_for g ~assume_externals_pure:hyp sol key) ;
+                    let v = Arch_exn.verdict ~assume_externals_pure:hyp set in
+                    let label = match Arch_exn.name_of g key with Some n -> n | None -> key in
+                    Arch_fmt.print fmt [ "verdict" ]
+                      ([ [ cell (Printf.sprintf "%s: %s" label v) ] ]
+                      @ List.map (fun r -> [ cell ("  reason: " ^ r) ]) (Arch_exn.reasons_of set)))
+                  (Arch_exn.keys_of_name g a)
+            | "raisers-of" ->
+                if a = "" then die 2 "arch-query: raisers-of needs an exception path (e.g. Not_found)" ;
+                hyp_line () ;
+                let target = Arch_exn.canon g a in
+                let bounded, top =
+                  List.fold_left
+                    (fun (bounded, top) key ->
+                      match Arch_exn.SM.find_opt key sol with
+                      | Some (Arch_exn.Known s) when Arch_exn.SS.mem target s ->
+                          let how =
+                            if
+                              List.exists
+                                (fun r -> match r with [ Arch_db.Text p; _; Arch_db.Text h ] -> p = target && h = "direct" | _ -> false)
+                                (Arch_exn.rows_for g ~assume_externals_pure:hyp sol key)
+                            then "direct"
+                            else "transitive"
+                          in
+                          ((key, how) :: bounded, top)
+                      | Some (Arch_exn.Top _ as s) -> (bounded, (key, s) :: top)
+                      | _ -> (bounded, top))
+                    ([], []) (Arch_exn.all_keys g)
+                in
+                let name k = match Arch_exn.name_of g k with Some n -> n | None -> k in
+                let file k = match Arch_exn.file_of g k with Some f -> f | None -> "" in
+                Arch_fmt.print fmt [ "function"; "file"; "how" ]
+                  (List.rev_map (fun (k, how) -> [ cell (name k); cell (file k); cell how ]) bounded) ;
+                Arch_fmt.print fmt [ "top_function"; "file"; "reason" ]
+                  (List.rev_map
+                     (fun (k, s) ->
+                       [ cell (name k); cell (file k);
+                         cell (match Arch_exn.dominant_reason s with Some r -> Arch_exn.reason_kind_to_string r | None -> "") ])
+                     top)
+            | _ ->
+                (* exn-stats *)
+                hyp_line () ;
+                let n = ref 0 and nb = ref 0 and by_reason = Hashtbl.create 4 in
+                Arch_exn.SM.iter
+                  (fun _ s ->
+                    incr n ;
+                    match s with
+                    | Arch_exn.Known _ -> incr nb
+                    | Arch_exn.Top _ ->
+                        let r = match Arch_exn.dominant_reason s with Some r -> Arch_exn.reason_kind_to_string r | None -> "none" in
+                        Hashtbl.replace by_reason r (1 + try Hashtbl.find by_reason r with Not_found -> 0))
+                  sol ;
+                let elapsed = fixpoint_seconds in
+                let pct x = if !n = 0 then "0.0%" else Printf.sprintf "%.1f%%" (100.0 *. float_of_int x /. float_of_int !n) in
+                let nt = !n - !nb in
+                let rows =
+                  [ [ cell "nodes"; cell (string_of_int !n) ];
+                    [ cell "bounded"; cell (Printf.sprintf "%d (%s)" !nb (pct !nb)) ];
+                    [ cell "unbounded"; cell (Printf.sprintf "%d (%s)" nt (pct nt)) ] ]
+                  @ List.map
+                      (fun r -> [ cell ("unbounded." ^ r); cell (string_of_int (Hashtbl.find by_reason r)) ])
+                      (List.sort compare (Hashtbl.fold (fun k _ acc -> k :: acc) by_reason []))
+                  @ [ [ cell "origins"; cell (string_of_int (Arch_exn.n_origins g)) ];
+                      [ cell "escaping_origins"; cell (string_of_int (Arch_exn.n_escaping g)) ];
+                      [ cell "scopes"; cell (string_of_int (Arch_exn.n_scopes g)) ];
+                      [ cell "fixpoint_seconds"; cell (Printf.sprintf "%.3f" elapsed) ] ]
+                in
+                Arch_fmt.print fmt [ "metric"; "value" ] rows)
         | _ -> Arch_effects_queries.dispatch t fmt ~cmd ~a ~b ~flat ~usage) ;
         exit 0
       with

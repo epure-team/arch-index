@@ -16,7 +16,7 @@
   eio
   eio.unix
   yojson)
- (private_modules arch_index_db arch_index_cmt)
+ (private_modules arch_index_db arch_index_cmt arch_index_exn)
  (inline_tests)
  (preprocessor_deps
   (file ts_shim.js)

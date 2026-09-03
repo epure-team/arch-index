@@ -352,6 +352,53 @@ let insert_call db stmt_call ~caller_id ~callee_id ~callee_name ~call_site ~kind
   | None -> ignore (Sqlite3.bind stmt_call 2 Sqlite3.Data.NULL)) ;
   exec_stmt db ~what:"calls" stmt_call
 
+(* Same binds as [insert_call], but the rowid is handed back so a dependent
+   row ([call_exn_scopes]) can reference THIS call — [None] on rejection, so
+   nothing links to another call's id. *)
+let insert_call_rowid db stmt_call ~caller_id ~callee_id ~callee_name ~call_site ~kind =
+  bind_int stmt_call 1 caller_id ;
+  bind_text stmt_call 3 callee_name ;
+  bind_text_opt stmt_call 4 call_site ;
+  bind_text stmt_call 5 kind ;
+  (match callee_id with
+  | Some id -> bind_int stmt_call 2 id
+  | None -> ignore (Sqlite3.bind stmt_call 2 Sqlite3.Data.NULL)) ;
+  exec_stmt_rowid db ~what:"calls" stmt_call
+
+let insert_call_exn_scope db stmt ~call_id ~scope_id =
+  bind_int stmt 1 call_id ;
+  bind_int stmt 2 scope_id ;
+  exec_stmt db ~what:"call_exn_scopes" stmt
+
+let insert_exn_scope db stmt ~function_id ~parent_id ~form ~line ~col ~catch_all =
+  bind_int stmt 1 function_id ;
+  bind_int_opt stmt 2 parent_id ;
+  bind_text stmt 3 form ;
+  bind_int stmt 4 line ;
+  bind_int stmt 5 col ;
+  bind_bool stmt 6 catch_all ;
+  exec_stmt_rowid db ~what:"exn_scopes" stmt
+
+let insert_exn_scope_catch db stmt ~scope_id ~exn_path =
+  bind_int stmt 1 scope_id ;
+  bind_text stmt 2 exn_path ;
+  exec_stmt db ~what:"exn_scope_catches" stmt
+
+let insert_exn_origin db stmt ~function_id ~scope_id ~form ~exn_path ~escapes ~line ~col =
+  bind_int stmt 1 function_id ;
+  bind_int_opt stmt 2 scope_id ;
+  bind_text stmt 3 form ;
+  bind_text_opt stmt 4 exn_path ;
+  bind_bool stmt 5 escapes ;
+  bind_int stmt 6 line ;
+  bind_int stmt 7 col ;
+  exec_stmt db ~what:"exn_origins" stmt
+
+let insert_exn_rebind db stmt ~alias_path ~target_path =
+  bind_text stmt 1 alias_path ;
+  bind_text stmt 2 target_path ;
+  exec_stmt db ~what:"exn_rebinds" stmt
+
 let insert_module_dep db stmt_dep ~source_module ~target_module ~target_path
     ~dep_kind ~alias_name ~line_number =
   bind_int stmt_dep 1 source_module ;

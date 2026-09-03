@@ -92,7 +92,11 @@ prevent it from running:
   detects only the structurally exit-less `for {}`).
 - **After an ordinary call that may raise/panic** — `g (); f ()` marks `f` `MUST` though `g` may
   divert. Only *syntactic noreturn heads* (`raise`/`failwith`/… in OCaml; terminal panic blocks in
-  Go) terminate blocks — that part of the former residual is **closed**.
+  Go) terminate blocks — that part of the former residual is **closed**. The *identity* of what
+  may be raised is a separate, additive analysis on the OCaml backend — `exn_origins` /
+  `exn_scopes` / `call_exn_scopes` and `arch-query raises`, with handler subtraction at call
+  sites and its own ⊤ reasons (`docs/exception-raise-sets.md`, `comment_db_meta.exn_contract`).
+  It does not change any edge kind.
 - An `assert cond` condition (other than `assert false`) is conditional (`MAY_ENUMERATED`/demoted)
   since `-noassert` elides it — a mild under-claim, the safe direction.
 

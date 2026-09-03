@@ -260,6 +260,56 @@ JOIN functions f ON f.id = d.function_id
 JOIN modules m ON m.id = f.module_id
 ORDER BY m.path, f.name, d.call_site;
 
+-- Exception-identity may-raise sets (specs/exn-raise-sets.md). Written by the
+-- CMT producer only; a DB without comment_db_meta('exn_contract','v1') is
+-- NOT_ANALYSED for the raises / raisers-of / exn-stats queries — never an
+-- empty set read as "raises nothing".
+--
+-- exn_scopes: one row per `try` body / `match … with exception` scrutinee in a
+-- function node (lambda nodes included), with the enclosing scope of the same
+-- node as parent. catch_all = some unguarded, non-re-raising catch-all arm.
+CREATE TABLE IF NOT EXISTS exn_scopes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    function_id INTEGER NOT NULL REFERENCES functions(id) ON DELETE CASCADE,
+    parent_id INTEGER REFERENCES exn_scopes(id) ON DELETE CASCADE,
+    form TEXT NOT NULL CHECK(form IN ('try','match_exception')),
+    line INTEGER NOT NULL,
+    col INTEGER NOT NULL,
+    catch_all BOOLEAN NOT NULL DEFAULT 0
+);
+-- Canonical constructor paths caught by a scope's closing arms.
+CREATE TABLE IF NOT EXISTS exn_scope_catches (
+    scope_id INTEGER NOT NULL REFERENCES exn_scopes(id) ON DELETE CASCADE,
+    exn_path TEXT NOT NULL
+);
+-- exn_origins: a raise-head application, an assert, or a Partial match.
+-- exn_path NULL = unknown value (⊤) for 'unknown', informational for 'reraise'.
+-- scope_id = innermost enclosing scope of the same node ('reraise': the scope
+-- whose arm bound the re-raised variable). escapes = not closed by the chain.
+CREATE TABLE IF NOT EXISTS exn_origins (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    function_id INTEGER NOT NULL REFERENCES functions(id) ON DELETE CASCADE,
+    scope_id INTEGER REFERENCES exn_scopes(id) ON DELETE SET NULL,
+    form TEXT NOT NULL CHECK(form IN ('raise','reraise','unknown','failwith','invalid_arg','assert','partial_match','compare','division','index')),
+    exn_path TEXT,
+    escapes BOOLEAN NOT NULL DEFAULT 1,
+    line INTEGER NOT NULL,
+    col INTEGER NOT NULL
+);
+-- The innermost scope enclosing a call site (absent = no scope).
+CREATE TABLE IF NOT EXISTS call_exn_scopes (
+    call_id INTEGER NOT NULL PRIMARY KEY REFERENCES calls(id) ON DELETE CASCADE,
+    scope_id INTEGER NOT NULL REFERENCES exn_scopes(id) ON DELETE CASCADE
+);
+-- `exception Alias = Target`: queries canonicalise alias_path to target_path.
+CREATE TABLE IF NOT EXISTS exn_rebinds (
+    alias_path TEXT NOT NULL PRIMARY KEY,
+    target_path TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_exn_scopes_fn ON exn_scopes(function_id);
+CREATE INDEX IF NOT EXISTS idx_exn_origins_fn ON exn_origins(function_id);
+CREATE INDEX IF NOT EXISTS idx_exn_scope_catches_scope ON exn_scope_catches(scope_id);
+
 -- Test coverage tracking
 CREATE TABLE IF NOT EXISTS coverage (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

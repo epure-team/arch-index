@@ -1,0 +1,40 @@
+{
+  "task": "exn-raise-sets",
+  "mode": "full",
+  "current_phase": "plan",
+  "events": [
+    {
+      "phase": "question",
+      "outcome": "COMPLETED",
+      "at": "2026-09-03T15:21:37Z",
+      "by": "roster-question"
+    },
+    {
+      "phase": "research",
+      "outcome": "COMPLETED",
+      "at": "2026-09-03T15:28:08Z",
+      "by": "roster-research"
+    },
+    {
+      "phase": "intake",
+      "outcome": "VALIDATED",
+      "at": "2026-09-03T15:31:08Z",
+      "by": "roster-intake",
+      "reason": "autonomous mode: human gate treated as validated per user instruction; Type=feature, Trust boundary=no (heuristic false positive on evidence)"
+    },
+    {
+      "phase": "spec",
+      "outcome": "VALIDATED",
+      "at": "2026-09-03T15:38:31Z",
+      "by": "roster-spec",
+      "reason": "autonomous mode; 19 challenges resolved from sources, 2 design decisions recorded"
+    },
+    {
+      "phase": "plan",
+      "outcome": "COMPLETED",
+      "at": "2026-09-03T15:43:00Z",
+      "by": "roster-plan",
+      "reason": "autonomous: quiz/final gate pre-approved; no DISAGREE/USER-CHALLENGE"
+    }
+  ]
+}

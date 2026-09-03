@@ -1,0 +1,16 @@
+{
+  "task": "exn-raise-sets",
+  "mode": "full",
+  "schema_version": "1.0",
+  "steps": [
+    {"id":"step-1","skill":"roster-implement","inputs":["briefs/exn-raise-sets-implementer.md","specs/exn-raise-sets.md"],"outputs":["briefs/exn-raise-sets-impl.md"],"hook":false},
+    {"id":"step-2","skill":"roster-review","inputs":["briefs/exn-raise-sets-reviewer.md","briefs/exn-raise-sets-impl.md"],"outputs":["briefs/exn-raise-sets-review.json"],"hook":false},
+    {"id":"step-3","skill":"roster-qa","inputs":["briefs/exn-raise-sets-qa-scope.md"],"outputs":["briefs/exn-raise-sets-qa.md"],"hook":false},
+    {"id":"step-4","skill":"roster-ship","inputs":["briefs/exn-raise-sets-qa.md"],"outputs":["briefs/exn-raise-sets-ship-gate.md"],"hook":false}
+  ],
+  "quality_gates": {
+    "build": "eval \"$(opam env --switch=/home/mathias/dev/arch-index --set-switch)\" && dune build",
+    "test": "eval \"$(opam env --switch=/home/mathias/dev/arch-index --set-switch)\" && dune test --force",
+    "lint": ""
+  }
+}
