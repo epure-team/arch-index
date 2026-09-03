@@ -304,6 +304,74 @@ INSERT INTO calls VALUES ('pure.calc','src/pure/calc.ts','pure.inner','src/pure/
             (verdict_of j ~prefix:"m" <> Some "PASS")) ;
   Lwt.return_unit
 
+let witness_of j ~prefix =
+  match Json.member "results" j with
+  | Some (`List rs) ->
+      List.find_map
+        (function
+          | `Assoc f -> (
+              match List.assoc_opt "rule" f with
+              | Some (`String r) when has_prefix ~prefix r -> (
+                  match List.assoc_opt "witness" f with
+                  | Some (`List w) ->
+                      Some (List.filter_map (function `String s -> Some s | _ -> None) w)
+                  | _ -> None)
+              | _ -> None)
+          | _ -> None)
+        rs
+  | _ -> None
+
+let register_witness () =
+  Test.register ~__FILE__
+    ~title:"rules: VIOLATION/POSSIBLE/UNKNOWN carry a concrete witness path; PASS carries none"
+    ~tags:["rules"; "witness"]
+  @@ fun () ->
+  let db = Fixture.flat ~name:"rules_witness" layered_stream in
+  let rf = rule_file "four_w" four_rules in
+  Batch.run (fun b ->
+      match rules_json b ~what:"witness" [db; rf; "--format"; "json"] with
+      | None -> ()
+      | Some j ->
+          (* VIOLATION: ui.handle --MUST--> db.write. The witness is the proof itself, not
+             just the offender name. *)
+          (match witness_of j ~prefix:"ui must" with
+          | Some w ->
+              Batch.eq_int b ~msg:"VIOLATION witness has exactly the two hops of the MUST edge"
+                (List.length w) 2 ;
+              Batch.contains b ~msg:"VIOLATION witness starts at the source" ~haystack:(String.concat "," w)
+                "ui.handle" ;
+              Batch.contains b ~msg:"VIOLATION witness ends at the target" ~haystack:(String.concat "," w)
+                "db.write"
+          | None -> Batch.note b "no witness field for the VIOLATION rule") ;
+          (* POSSIBLE: api.serve --MAY_ENUMERATED--> db.write. *)
+          (match witness_of j ~prefix:"api must" with
+          | Some w ->
+              Batch.eq_int b ~msg:"POSSIBLE witness has exactly the two hops of the MAY_ENUMERATED edge"
+                (List.length w) 2 ;
+              Batch.contains b ~msg:"POSSIBLE witness starts at the source" ~haystack:(String.concat "," w)
+                "api.serve" ;
+              Batch.contains b ~msg:"POSSIBLE witness ends at the target" ~haystack:(String.concat "," w)
+                "db.write"
+          | None -> Batch.note b "no witness field for the POSSIBLE rule") ;
+          (* UNKNOWN: job.run --MUST--> util.helper --MAY_TOP--> ⊤. The escape happens AT
+             util.helper (it is the caller that holds the ⊤ edge), so the witness is the path
+             from job.run to util.helper, not to some further, nonexistent node. *)
+          (match witness_of j ~prefix:"jobs must" with
+          | Some w ->
+              Batch.eq_int b ~msg:"UNKNOWN witness has exactly the two hops to the ⊤-holding caller"
+                (List.length w) 2 ;
+              Batch.contains b ~msg:"UNKNOWN witness starts at the source" ~haystack:(String.concat "," w)
+                "job.run" ;
+              Batch.contains b ~msg:"UNKNOWN witness ends at the node that escapes" ~haystack:(String.concat "," w)
+                "util.helper"
+          | None -> Batch.note b "no witness field for the UNKNOWN rule") ;
+          (* PASS: a real proof carries no reachability claim beyond the closed cone itself —
+             no witness is needed or produced. *)
+          (match witness_of j ~prefix:"pure code" with
+          | Some w -> Batch.eq_int b ~msg:"PASS carries no witness" (List.length w) 0
+          | None -> Batch.note b "no witness field for the PASS rule")) ;
+  Lwt.return_unit
+
 let register_not_computed () =
   Test.register ~__FILE__ ~title:"rules: a rule that was never evaluated is not a passing rule"
     ~tags:["rules"; "policy"]

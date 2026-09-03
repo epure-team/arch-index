@@ -154,6 +154,11 @@ type result = {
   (* True for the rule forms that need NO reachability — `exported` and `dep` read a fact
      directly, so their verdict is exact on any backend, including one with no edge kinds. *)
   exact : bool;
+  (* A concrete witness path (labels, source-to-target order) for VIOLATION/POSSIBLE, or
+     source-to-⊤-frontier for UNKNOWN — the offender LIST already says a path exists somewhere;
+     this is the path, checkable by a reviewer without re-deriving it by hand. Every other
+     verdict form carries no reachability claim, so [[]] there. *)
+  witness : string list;
 }
 
 (** Order matters: a definite path is VIOLATION even when the source ALSO reaches a ⊤ edge.
@@ -224,8 +229,34 @@ let eval (t : Arch_db.t) (g : Arch_graph.t) ~sound r =
                to get a real PASS."
         | _ -> None
       in
+      (* The offender list already says a path exists somewhere; this is the path itself, so a
+         reviewer can check the verdict without re-deriving it by hand. VIOLATION's self-overlap
+         sub-case (src ∩ dst nonempty) is membership, not a call path — no witness there. *)
+      let witness =
+        match v with
+        | "VIOLATION" when not (SS.is_empty (SS.inter src dst)) -> []
+        | "VIOLATION" -> (
+            match hit with
+            | target :: _ -> (
+                match Arch_graph.shortest_path_from_set ~adj:g.must_fwd ~from:src ~to_:target with
+                | Some path -> List.map lbl path
+                | None -> [])
+            | [] -> [])
+        | "POSSIBLE" -> (
+            match hit with
+            | target :: _ -> (
+                match Arch_graph.shortest_path_from_set ~adj:g.fwd ~from:src ~to_:target with
+                | Some path -> List.map lbl path
+                | None -> [])
+            | [] -> [])
+        | "UNKNOWN" -> (
+            match Arch_graph.witness_to_top_from_set g ~from:src with
+            | Some path -> List.map lbl path
+            | None -> [])
+        | _ -> []
+      in
       { rule = r.name; kind = kind_of r.body; exact = false; verdict = v; detail = List.map lbl (take 20 hit);
-        detail_total = List.length hit; note; sizes = Some (SS.cardinal src, SS.cardinal dst) }
+        detail_total = List.length hit; note; sizes = Some (SS.cardinal src, SS.cardinal dst); witness }
   | Exported s ->
       let allowed = Arch_sel.select g s in
       let offenders =
@@ -233,7 +264,7 @@ let eval (t : Arch_db.t) (g : Arch_graph.t) ~sound r =
           (Arch_graph.nodes g)
         |> List.sort (fun (a : Arch_graph.node) b -> compare a.name b.name)
       in
-      { rule = r.name; kind = kind_of r.body; exact = true;
+      { rule = r.name; kind = kind_of r.body; exact = true; witness = [];
         sizes = Some (SS.cardinal allowed, 0);
         verdict = (if offenders = [] then "PASS" else "VIOLATION");
         detail = List.map (fun (n : Arch_graph.node) -> lbl n.key) (take 20 offenders);
@@ -249,7 +280,7 @@ let eval (t : Arch_db.t) (g : Arch_graph.t) ~sound r =
   | Effect (s, kind) ->
       if not (Arch_db.nonempty t "function_effects") then
         { rule = r.name; kind = kind_of r.body; exact = false; verdict = "NOT_COMPUTED"; detail = [];
-          detail_total = 0; sizes = None;
+          detail_total = 0; sizes = None; witness = [];
           note =
             Some
               "this index has no effects data — 'no effect found' would be a lie. Effects are \
@@ -276,14 +307,14 @@ let eval (t : Arch_db.t) (g : Arch_graph.t) ~sound r =
         in
         let escaping = SS.filter (fun k -> Arch_graph.SM.mem k g.tops) cone in
         if hits <> [] then
-          { rule = r.name; kind = kind_of r.body; exact = false; verdict = "VIOLATION"; sizes = None;
+          { rule = r.name; kind = kind_of r.body; exact = false; verdict = "VIOLATION"; sizes = None; witness = [];
             detail =
               take 20
                 (List.map (fun row -> String.concat " " (List.map Arch_db.string_of_cell row)) hits);
             detail_total = List.length hits; note = None }
         else if not (SS.is_empty escaping) then
           { rule = r.name; kind = kind_of r.body; exact = false; verdict = "UNKNOWN"; detail = [];
-            detail_total = 0; sizes = None;
+            detail_total = 0; sizes = None; witness = [];
             note =
               Some
                 (Printf.sprintf
@@ -293,11 +324,11 @@ let eval (t : Arch_db.t) (g : Arch_graph.t) ~sound r =
         else
           { rule = r.name; kind = kind_of r.body; exact = false;
             verdict = (if sound then "PASS" else "UNKNOWN_NO_CONTRACT");
-            detail = []; detail_total = 0; note = None; sizes = None }
+            detail = []; detail_total = 0; note = None; sizes = None; witness = [] }
   | Dep (s, d) ->
       if (not (Arch_db.has_table t "module_deps")) || t.schema = Arch_db.Flat then
         { rule = r.name; kind = kind_of r.body; exact = false; verdict = "NOT_COMPUTED"; detail = [];
-          detail_total = 0; sizes = None;
+          detail_total = 0; sizes = None; witness = [];
           note =
             Some
               "this index has no module_deps — declared-dependency rules are produced today only by \
@@ -322,7 +353,7 @@ let eval (t : Arch_db.t) (g : Arch_graph.t) ~sound r =
               | _ -> None)
             rows
         in
-        { rule = r.name; kind = kind_of r.body; exact = true;
+        { rule = r.name; kind = kind_of r.body; exact = true; witness = [];
           verdict = (if hits = [] then "PASS" else "VIOLATION");
           detail = take 20 hits; detail_total = List.length hits; sizes = None;
           note =
@@ -436,6 +467,7 @@ let () =
                            ("verdict", `String r.verdict);
                            ("detail", `List (List.map (fun d -> `String d) r.detail));
                            ("detail_total", `Int r.detail_total);
+                           ("witness", `List (List.map (fun w -> `String w) r.witness));
                            ("note", (match r.note with Some n -> `String n | None -> `Null)) ]
                          @ (match (r.sizes, r.kind) with
                            | Some (sn, _), "exported" -> [ ("source_size", `Int sn) ]
@@ -456,6 +488,10 @@ let () =
             else Printf.sprintf "[%s] %s" (Printf.sprintf "%*s%*s" ((7 + String.length tag) / 2) tag
                                              (7 - ((7 + String.length tag) / 2)) "") r.rule) ;
          List.iter (fun d -> print_endline (if md then "    - " ^ d else "           " ^ d)) r.detail ;
+         (if r.witness <> [] then
+            print_endline
+              (if md then "    - witness: " ^ String.concat " → " r.witness
+               else "           witness: " ^ String.concat " -> " r.witness)) ;
          match r.note with
          | Some n -> print_endline (if md then "    > " ^ n else "           note: " ^ n)
          | None -> ())
