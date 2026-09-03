@@ -586,8 +586,20 @@ fn walk_instance<'tcx>(tcx: TyCtxt<'tcx>, instance: Instance<'tcx>, emit: &mut E
             Some(t) => t,
             None => continue,
         };
-        if let TerminatorKind::Call { func, fn_span, .. } = &term.kind {
-            let site = span_site(tcx, *fn_span, caller_def_span);
+        // FIX (rust-cg-tailcall-terminator-dropped, MEDIUM): `TerminatorKind::
+        // TailCall` (the unstable `become f()` syntax, reachable because the
+        // harness sets RUSTC_BOOTSTRAP=1 for every compiled crate) has the
+        // same `func`/`fn_span` shape as `Call` but is a DISTINCT terminator
+        // kind the walk previously never matched — a `become` call site was
+        // silently skipped, zero edges emitted, a concrete FR-002 violation
+        // rather than merely an InstanceKind classification gap.
+        let call_shape = match &term.kind {
+            TerminatorKind::Call { func, fn_span, .. } => Some((func, *fn_span)),
+            TerminatorKind::TailCall { func, fn_span, .. } => Some((func, *fn_span)),
+            _ => None,
+        };
+        if let Some((func, fn_span)) = call_shape {
+            let site = span_site(tcx, fn_span, caller_def_span);
             match classify_callee(tcx, typing_env, instance, func, body) {
                 Callee::Must { name, file } => {
                     emit.call(&caller_name, caller_file.as_deref(), &name, file.as_deref(), &site, "MUST");
