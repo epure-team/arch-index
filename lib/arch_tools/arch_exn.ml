@@ -63,6 +63,7 @@ type edge = {callee : string; kind : string; scope : int option; site : string}
 type origin = {o_node : string; o_form : string; o_path : string option; o_escapes : bool}
 
 type t = {
+  channel : string;
   names : string SM.t;  (** key → display name *)
   files : string SM.t;
   by_name : string list SM.t;  (** name → keys *)
@@ -70,6 +71,12 @@ type t = {
   scopes : scope SM.t;  (** scope id (as string) → scope *)
   origins : origin list SM.t;  (** node key → origins *)
   rebinds : string SM.t;
+  carriers : unit SM.t;
+      (** node keys marked a c-carrier of [channel] in [channel_carriers]
+          (specs/error-channels.md "Carrier check"). Only populated — and
+          only meaningful — for a value channel; the [exception] channel has
+          no such table (every node may raise) so {!is_carrier} always
+          answers [true] for it. *)
   n_origins : int;
   n_scopes : int;
   n_escaping : int;
@@ -113,12 +120,48 @@ let known_leaf name =
 
 let text = function Some s -> s | None -> ""
 
-let load (t : Arch_db.t) =
+(* [channel]: the exception channel keeps "every edge in [calls]" (FR-029's
+   byte-identical requirement — its rows and query output must not move) and
+   its [exn_origins]/[exn_scopes]/[exn_scope_catches] rows are those tagged
+   [channel='exception'] (the ones this channel has ALWAYS written, slices
+   0-1 included). A value channel's origins/scopes are the rows tagged with
+   its own name, and its edges come from [exn_edges] rows with
+   [role='propagates'] on that channel — NOT from [calls] directly, since an
+   unrelated call inside a c-carrier node that is not itself a propagating
+   fact must contribute nothing (specs/error-channels.md "Propagating
+   edges"). *)
+let not_analysed_channel channel error_contract =
+  Printf.sprintf
+    "NOT_ANALYSED: channel %s was not emitted by the producer (error_contract = %s)"
+    channel
+    (match error_contract with Some s -> s | None -> "<absent>")
+
+let load ?(channel = "exception") (t : Arch_db.t) =
   if t.schema = Arch_db.Flat then Arch_db.refuse "%s" not_analysed ;
-  (match Arch_db.meta t "exn_contract" with
-  | Some _ when Arch_db.has_table t "exn_origins" -> ()
-  | _ -> Arch_db.refuse "%s" not_analysed) ;
+  if channel = "exception" then
+    match Arch_db.meta t "exn_contract" with
+    | Some _ when Arch_db.has_table t "exn_origins" -> ()
+    | _ -> Arch_db.refuse "%s" not_analysed
+  else (
+    (* A value channel's contract lives in [error_contract]
+       ("v1:exception,result,option,…") — FR-032: a channel absent there
+       MUST refuse NOT_ANALYSED, distinctly from the [exception] channel's
+       own (unchanged) check above. *)
+    if not (Arch_db.has_table t "exn_origins") then Arch_db.refuse "%s" not_analysed ;
+    let ec = Arch_db.meta t "error_contract" in
+    let emitted =
+      match ec with
+      | None -> false
+      | Some s -> (
+          match String.index_opt s ':' with
+          | None -> false
+          | Some i ->
+              let rest = String.sub s (i + 1) (String.length s - i - 1) in
+              List.mem channel (String.split_on_char ',' rest))
+    in
+    if not emitted then Arch_db.refuse "%s" (not_analysed_channel channel ec)) ;
   let q shape sql = Arch_db.collect t (Arch_db.dyn Arch_db.Ty.unit shape sql) () in
+  let qc shape sql = Arch_db.collect t (Arch_db.dyn Arch_db.Ty.string shape sql) channel in
   let s = Arch_db.Rows.s and i = Arch_db.Rows.i in
   let names, files, by_name =
     List.fold_left
@@ -139,13 +182,23 @@ let load (t : Arch_db.t) =
         let e = {callee = text callee; kind = text kind; scope; site = text site} in
         SM.update (text caller) (function None -> Some [e] | Some l -> Some (e :: l)) acc)
       SM.empty
-      (q
-         Arch_db.Ty.(t2 (t3 s s s) (t2 i s))
-         (Printf.sprintf
-            "SELECT '#'||c.caller_id, CASE WHEN c.callee_id IS NULL THEN 'ext:'||c.callee_name \
-             ELSE '#'||c.callee_id END, %s, l.scope_id, COALESCE(c.call_site,'') FROM calls c \
-             LEFT JOIN call_exn_scopes l ON l.call_id=c.id ORDER BY c.id"
-            (Arch_db.kind_sql t)))
+      (if channel = "exception" then
+         q
+           Arch_db.Ty.(t2 (t3 s s s) (t2 i s))
+           (Printf.sprintf
+              "SELECT '#'||c.caller_id, CASE WHEN c.callee_id IS NULL THEN 'ext:'||c.callee_name \
+               ELSE '#'||c.callee_id END, %s, l.scope_id, COALESCE(c.call_site,'') FROM calls c \
+               LEFT JOIN call_exn_scopes l ON l.call_id=c.id ORDER BY c.id"
+              (Arch_db.kind_sql t))
+       else
+         qc
+           Arch_db.Ty.(t2 (t3 s s s) (t2 i s))
+           (Printf.sprintf
+              "SELECT '#'||c.caller_id, CASE WHEN c.callee_id IS NULL THEN 'ext:'||c.callee_name \
+               ELSE '#'||c.callee_id END, %s, l.scope_id, COALESCE(c.call_site,'') FROM calls c \
+               JOIN exn_edges ee ON ee.call_id=c.id AND ee.role='propagates' AND ee.channel=? \
+               LEFT JOIN call_exn_scopes l ON l.call_id=c.id ORDER BY c.id"
+              (Arch_db.kind_sql t)))
   in
   (* edges were consed in reverse; restore call order for deterministic provenance *)
   let edges = SM.map List.rev edges in
@@ -189,7 +242,7 @@ let load (t : Arch_db.t) =
               }
               acc)
       SM.empty
-      (q Arch_db.Ty.(t3 i i i) "SELECT id, parent_id, catch_all FROM exn_scopes")
+      (qc Arch_db.Ty.(t3 i i i) "SELECT id, parent_id, catch_all FROM exn_scopes WHERE channel=?")
   in
   let n_origins = ref 0 and n_escaping = ref 0 in
   let origins =
@@ -204,10 +257,20 @@ let load (t : Arch_db.t) =
             let o = {o_node = "#" ^ string_of_int fid; o_form = text form; o_path = path; o_escapes} in
             SM.update o.o_node (function None -> Some [o] | Some l -> Some (o :: l)) acc)
       SM.empty
-      (q Arch_db.Ty.(t2 (t2 i s) (t2 s i))
-         "SELECT function_id, form, exn_path, escapes FROM exn_origins ORDER BY id")
+      (qc Arch_db.Ty.(t2 (t2 i s) (t2 s i))
+         "SELECT function_id, form, exn_path, escapes FROM exn_origins WHERE channel=? ORDER BY id")
+  in
+  let carriers =
+    if channel = "exception" || not (Arch_db.has_table t "channel_carriers") then SM.empty
+    else
+      List.fold_left
+        (fun acc fid ->
+          match fid with None -> acc | Some fid -> SM.add ("#" ^ string_of_int fid) () acc)
+        SM.empty
+        (qc i "SELECT function_id FROM channel_carriers WHERE channel=?")
   in
   {
+    channel;
     names;
     files;
     by_name;
@@ -215,10 +278,13 @@ let load (t : Arch_db.t) =
     scopes;
     origins;
     rebinds;
+    carriers;
     n_origins = !n_origins;
     n_scopes = SM.cardinal scopes;
     n_escaping = !n_escaping;
   }
+
+let is_carrier t key = t.channel = "exception" || SM.mem key t.carriers
 
 (** Follow [exception A = B] chains (bounded, in case of a cycle). *)
 let canon t p =

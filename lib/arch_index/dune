@@ -17,7 +17,7 @@
   eio.unix
   yojson
   otoml)
- (private_modules arch_index_db arch_index_cmt arch_index_exn arch_errors_config)
+ (private_modules arch_index_db arch_index_cmt arch_index_exn arch_index_errch arch_errors_config)
  (inline_tests)
  (preprocessor_deps
   (file ts_shim.js)

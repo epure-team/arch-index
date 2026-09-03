@@ -406,12 +406,12 @@ let unmatched (s : seen) : string list =
   Hashtbl.iter (fun p flag -> if not !flag then acc := p :: !acc) s.types ;
   List.sort compare !acc
 
-let validate (t : t) (s : seen) ~strict : (unit, string) result =
+let validate (t : t) (s : seen) ~strict ?(builtin_names = []) () : (unit, string) result =
   let warnings = ref [] in
   let fatal = ref None in
   List.iter
     (fun (c : channel) ->
-      (if c.type_paths <> [] && !fatal = None then
+      (if c.type_paths <> [] && !fatal = None && not (List.mem c.name builtin_names) then
          let all_missed =
            List.for_all
              (fun p ->
@@ -537,22 +537,22 @@ let%test "digest: changes when a declared list changes" =
 let%test "validate: an unseen non-carrier path is a warning, not fatal" =
   let cfg = { channels = [{ exception_channel with name = "e"; sinks = ["Stdlib.ignore"] }]; summaries = [] } in
   let s = create cfg in
-  match validate cfg s ~strict:false with
+  match validate cfg s ~strict:false () with
   | Ok () -> unmatched s = ["Stdlib.ignore"]
   | Error _ -> false
 
 let%test "validate: --errors-strict promotes a miss to fatal" =
   let cfg = { channels = [{ exception_channel with name = "e"; sinks = ["Stdlib.ignore"] }]; summaries = [] } in
   let s = create cfg in
-  match validate cfg s ~strict:true with Error _ -> true | Ok () -> false
+  match validate cfg s ~strict:true () with Error _ -> true | Ok () -> false
 
 let%test "validate: a channel whose carrier type matches nothing is always fatal" =
   let cfg = { channels = [{ result_channel with name = "r" }]; summaries = [] } in
   let s = create cfg in
-  match validate cfg s ~strict:false with Error _ -> true | Ok () -> false
+  match validate cfg s ~strict:false () with Error _ -> true | Ok () -> false
 
 let%test "validate: a matched carrier type is not fatal" =
   let cfg = { channels = [{ result_channel with name = "r" }]; summaries = [] } in
   let s = create cfg in
   note_type_path s "result" ;
-  match validate cfg s ~strict:false with Ok () -> true | Error _ -> false
+  match validate cfg s ~strict:false () with Ok () -> true | Error _ -> false

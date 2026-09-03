@@ -286,7 +286,7 @@ let extract_calls_from_cmts ~project_dir fn_rows =
                                 match vb.vb_pat.pat_desc with
                                 | Typedtree.Tpat_var (id, _, _) ->
                                     let caller_name = Ident.name id in
-                                    let calls, _lam_nodes, _exn_facts =
+                                    let calls, _lam_nodes, _exn_facts, _errch_facts =
                                       Arch_index_cmt.collect_calls_from_expr
                                         ~src_path:rel_src
                                         ~caller_module:rel_src

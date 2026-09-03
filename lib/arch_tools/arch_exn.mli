@@ -26,9 +26,16 @@ type t
 val not_analysed : string
 
 (** Loads functions, calls (with their handler scopes), scopes, origins and
-    rebinds. Raises [Arch_db.Refused] with {!not_analysed} when the DB is on
-    the Flat schema or carries no [exn_contract] meta flag. *)
-val load : Arch_db.t -> t
+    rebinds. [channel] (default ["exception"]) selects which error channel:
+    ["exception"] keeps its historical shape — every [calls] row is an edge,
+    and its [exn_origins]/[exn_scopes] are the [channel='exception'] rows
+    (FR-029's byte-identical requirement); any other channel's edges are the
+    [exn_edges] rows with [role='propagates'] on that channel, and its
+    origins/scopes are the rows tagged with that channel name
+    (specs/error-channels.md). Raises [Arch_db.Refused] with
+    {!not_analysed} when the DB is on the Flat schema or carries no
+    [exn_contract] meta flag. *)
+val load : ?channel:string -> Arch_db.t -> t
 
 (** Every function-row key ([#id]) with a given display name. *)
 val keys_of_name : t -> string -> string list
@@ -66,3 +73,10 @@ val dominant_reason : set -> reason_kind option
 
 (** Canonicalise through [exception A = B] rebinds. *)
 val canon : t -> string -> string
+
+(** [is_carrier t key]: is the function-key node a c-carrier of [t]'s loaded
+    channel (specs/error-channels.md "Carrier check")? Always [true] for the
+    [exception] channel (every node may raise); for a value channel, exactly
+    the nodes marked in [channel_carriers] — [may-fail] answers
+    [NOT_A_CARRIER(c)] instead of a verdict when this is [false]. *)
+val is_carrier : t -> string -> bool

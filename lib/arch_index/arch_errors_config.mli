@@ -98,6 +98,11 @@ val unmatched : seen -> string list
 (** Per-path miss (declared path never seen) is a warning, printed here and
     reflected in {!unmatched}. A channel with a non-empty {!channel.type_paths}
     none of which was ever seen as a type is FATAL regardless of [strict]
-    (the "declaration matching nothing" bug class). [~strict:true] also
-    turns any per-path miss into a fatal error. *)
-val validate : t -> seen -> strict:bool -> (unit, string) result
+    (the "declaration matching nothing" bug class) — UNLESS its name is in
+    [builtin_names] (default [[]]): a built-in channel whose carrier type is
+    simply absent from a small/non-matching corpus is not a declaration bug
+    (Clarifications: "Built-in channels that match nothing"), so it is only
+    ever a warning, per-channel, independent of whether OTHER channels in
+    the same effective config came from a file. [~strict:true] also turns
+    any per-path miss into a fatal error. *)
+val validate : t -> seen -> strict:bool -> ?builtin_names:string list -> unit -> (unit, string) result
