@@ -333,43 +333,93 @@ let register_witness () =
       | None -> ()
       | Some j ->
           (* VIOLATION: ui.handle --MUST--> db.write. The witness is the proof itself, not
-             just the offender name. *)
+             just the offender name — checked POSITIONALLY (index 0 = source, index 1 =
+             target), not merely "both names appear somewhere", so a reversed or shuffled
+             path fails this test even though both names are still present. *)
           (match witness_of j ~prefix:"ui must" with
-          | Some w ->
-              Batch.eq_int b ~msg:"VIOLATION witness has exactly the two hops of the MUST edge"
-                (List.length w) 2 ;
-              Batch.contains b ~msg:"VIOLATION witness starts at the source" ~haystack:(String.concat "," w)
+          | Some [ hop0; hop1 ] ->
+              Batch.contains b ~msg:"VIOLATION witness hop 0 is the source, ui.handle" ~haystack:hop0
                 "ui.handle" ;
-              Batch.contains b ~msg:"VIOLATION witness ends at the target" ~haystack:(String.concat "," w)
+              Batch.contains b ~msg:"VIOLATION witness hop 1 is the target, db.write" ~haystack:hop1
                 "db.write"
+          | Some w ->
+              Batch.note b "VIOLATION witness has %d hop(s), expected exactly 2" (List.length w)
           | None -> Batch.note b "no witness field for the VIOLATION rule") ;
           (* POSSIBLE: api.serve --MAY_ENUMERATED--> db.write. *)
           (match witness_of j ~prefix:"api must" with
-          | Some w ->
-              Batch.eq_int b ~msg:"POSSIBLE witness has exactly the two hops of the MAY_ENUMERATED edge"
-                (List.length w) 2 ;
-              Batch.contains b ~msg:"POSSIBLE witness starts at the source" ~haystack:(String.concat "," w)
+          | Some [ hop0; hop1 ] ->
+              Batch.contains b ~msg:"POSSIBLE witness hop 0 is the source, api.serve" ~haystack:hop0
                 "api.serve" ;
-              Batch.contains b ~msg:"POSSIBLE witness ends at the target" ~haystack:(String.concat "," w)
+              Batch.contains b ~msg:"POSSIBLE witness hop 1 is the target, db.write" ~haystack:hop1
                 "db.write"
+          | Some w ->
+              Batch.note b "POSSIBLE witness has %d hop(s), expected exactly 2" (List.length w)
           | None -> Batch.note b "no witness field for the POSSIBLE rule") ;
           (* UNKNOWN: job.run --MUST--> util.helper --MAY_TOP--> ⊤. The escape happens AT
              util.helper (it is the caller that holds the ⊤ edge), so the witness is the path
              from job.run to util.helper, not to some further, nonexistent node. *)
           (match witness_of j ~prefix:"jobs must" with
-          | Some w ->
-              Batch.eq_int b ~msg:"UNKNOWN witness has exactly the two hops to the ⊤-holding caller"
-                (List.length w) 2 ;
-              Batch.contains b ~msg:"UNKNOWN witness starts at the source" ~haystack:(String.concat "," w)
+          | Some [ hop0; hop1 ] ->
+              Batch.contains b ~msg:"UNKNOWN witness hop 0 is the source, job.run" ~haystack:hop0
                 "job.run" ;
-              Batch.contains b ~msg:"UNKNOWN witness ends at the node that escapes" ~haystack:(String.concat "," w)
-                "util.helper"
+              Batch.contains b ~msg:"UNKNOWN witness hop 1 is the ⊤-holding caller, util.helper"
+                ~haystack:hop1 "util.helper"
+          | Some w ->
+              Batch.note b "UNKNOWN witness has %d hop(s), expected exactly 2" (List.length w)
           | None -> Batch.note b "no witness field for the UNKNOWN rule") ;
           (* PASS: a real proof carries no reachability claim beyond the closed cone itself —
              no witness is needed or produced. *)
           (match witness_of j ~prefix:"pure code" with
           | Some w -> Batch.eq_int b ~msg:"PASS carries no witness" (List.length w) 0
           | None -> Batch.note b "no witness field for the PASS rule")) ;
+  Lwt.return_unit
+
+(* chain.a --MUST--> chain.mid --MUST--> chain.target   the ONLY all-MUST path, 2 hops
+   chain.a --MAY_ENUMERATED--> chain.target              a shorter, mixed-kind shortcut, 1 hop
+   A rule from chain.a to chain.target is VIOLATION (a MUST path exists) — {!layered_stream}'s
+   own cases never put a shorter non-MUST edge alongside a longer all-MUST one for the SAME
+   src/dst pair, so nothing in that fixture can tell "VIOLATION's witness walks must_fwd" apart
+   from "VIOLATION's witness walks fwd and got lucky": both adjacency choices would return some
+   2-key path when only one edge kind exists per hop. Here they diverge in LENGTH, so a witness
+   walking `fwd` (which would take the shorter shortcut) is observably distinguishable from one
+   walking `must_fwd` (which is forced through the long way, since the shortcut is not MUST). *)
+let adjacency_stream =
+  {|{"type":"function","name":"chain.a","file_path":"src/chain/a.ts"}
+{"type":"function","name":"chain.mid","file_path":"src/chain/mid.ts"}
+{"type":"function","name":"chain.target","file_path":"src/chain/target.ts"}
+{"type":"call","caller_name":"chain.a","caller_file":"src/chain/a.ts","callee_name":"chain.mid","callee_file":"src/chain/mid.ts","call_site":"src/chain/a.ts:2","kind":"MUST"}
+{"type":"call","caller_name":"chain.mid","caller_file":"src/chain/mid.ts","callee_name":"chain.target","callee_file":"src/chain/target.ts","call_site":"src/chain/mid.ts:2","kind":"MUST"}
+{"type":"call","caller_name":"chain.a","caller_file":"src/chain/a.ts","callee_name":"chain.target","callee_file":"src/chain/target.ts","call_site":"src/chain/a.ts:5","kind":"MAY_ENUMERATED"}
+|}
+
+let register_witness_adjacency () =
+  Test.register ~__FILE__
+    ~title:"rules: VIOLATION's witness walks must_fwd even when a shorter fwd path exists"
+    ~tags:["rules"; "witness"]
+  @@ fun () ->
+  let db = Fixture.flat ~name:"rules_witness_adjacency" adjacency_stream in
+  let rf =
+    rule_file "chain" "rule \"chain\"\n  forbid reach from fn:chain.a to fn:chain.target\n"
+  in
+  Batch.run (fun b ->
+      match rules_json b ~what:"chain" [db; rf; "--format"; "json"] with
+      | None -> ()
+      | Some j ->
+          Batch.eq_string_opt b ~msg:"a MUST path exists, so the verdict is VIOLATION"
+            (verdict_of j ~prefix:"chain") (Some "VIOLATION") ;
+          (match witness_of j ~prefix:"chain" with
+          | Some [ hop0; hop1; hop2 ] ->
+              Batch.contains b ~msg:"witness hop 0 is the source, chain.a" ~haystack:hop0 "chain.a" ;
+              Batch.contains b ~msg:"witness hop 1 is the MUST-only intermediate, chain.mid"
+                ~haystack:hop1 "chain.mid" ;
+              Batch.contains b ~msg:"witness hop 2 is the target, chain.target" ~haystack:hop2
+                "chain.target"
+          | Some w ->
+              Batch.note b
+                "witness has %d hop(s) — expected the 3-hop all-MUST path, not the 1-hop \
+                 MAY_ENUMERATED shortcut (which would produce 2)"
+                (List.length w)
+          | None -> Batch.note b "no witness field for the chain rule")) ;
   Lwt.return_unit
 
 let register_not_computed () =

@@ -135,6 +135,7 @@ floats. Absence of data is stated, never implied.
 | `results[].verdict` | string | the per-rule verdict, unchanged (`VIOLATION`/`POSSIBLE`/`UNKNOWN`/`UNKNOWN_NO_CONTRACT`/`PASS`/`NO_SOURCE`/`NO_TARGET`/`NOT_COMPUTED`) |
 | `results[].detail` | array of string | the offending call paths / functions / dependencies, capped at 20 |
 | `results[].detail_total` | int | the untruncated count `detail` was capped from — equal to `len(detail)` when nothing was cut, so a consumer never has to guess whether "20 shown" means "20 total" or "20 of 200" |
+| `results[].witness` | array of string | for a `reach` rule verdicted `VIOLATION`/`POSSIBLE`/`UNKNOWN`, the concrete call path (source-to-target order) that produced the verdict — `VIOLATION` walks the same MUST-only edges its own proof used, `POSSIBLE` the wider MUST ∪ MAY_ENUMERATED cone, `UNKNOWN` the path to the nearest ⊤-holding caller (the same function `detail`'s first entry names). `[]` on every other verdict and every non-`reach` rule form, since none of those carry a reachability claim a path could illustrate |
 | `failed` | array of string | rule names counted failing — `failing` is its length, kept as a separate int field so a gate does not need to count an array |
 
 **`verdict` is only ever `"pass"` or `"fail"`, never `"refused"`.** Unlike `arch-impact`,

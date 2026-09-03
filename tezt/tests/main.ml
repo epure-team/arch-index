@@ -52,6 +52,7 @@ let () =
   Rules.register_no_contract () ;
   Rules.register_not_computed () ;
   Rules.register_witness () ;
+  Rules.register_witness_adjacency () ;
   Pcc.register_index () ;
   Pcc.register_index_infra_failure () ;
   Pcc.register_dossier () ;

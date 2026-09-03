@@ -3,6 +3,14 @@
 ## [Unreleased]
 
 ### Added
+- Witness paths (roadmap 1.5): `arch-rules` `VIOLATION`/`POSSIBLE`/`UNKNOWN` verdicts now carry a
+  concrete call path (`results[].witness` in `--format json`, also shown in text/md output) instead
+  of only a rule name and an offender list — the path a reviewer would otherwise have to
+  reconstruct by hand from the graph. `Arch_graph` gains `shortest_path`/`witness_to_top`
+  (single-source) and `shortest_path_from_set` (multi-source — used internally by `arch-rules`,
+  since a rule's source selector resolves to a set of seeds, not one), sharing one BFS core.
+  `PASS` and every non-`reach` rule form carry no witness, since none of them assert a
+  reachability claim a path could illustrate.
 - Exception-identity may-raise sets for OCaml (roadmap 3.4): the CMT producer records raise
   origins with the resolved constructor path, handler scopes with their caught sets, and the
   handler scope enclosing **each call site** (`exn_origins` / `exn_scopes` /
