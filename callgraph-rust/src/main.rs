@@ -200,6 +200,18 @@ impl Emitter {
     /// unseen crate) — see specs/rust-soundcg-whole-program.md's
     /// publish-boundary safety gate. Emitted regardless of whether anything
     /// downstream reads it yet (spec's explicit US-1/US-2 coupling).
+    /// `impl_fn_stable_name` is the CRATE-INDEPENDENT name of the impl method
+    /// itself (via `stable_def_path`, always crate-qualified) — the merge
+    /// pass's join key into a `function` record. It is NOT the same string
+    /// the single-crate walker's own `instance_name`/`def_name` would use for
+    /// this DefId (that rendering is relative to whichever crate is currently
+    /// compiling: bare for a local trait, qualified for a foreign one), so it
+    /// cannot be reconstructed post-hoc from `trait_path` + `self_type_path`.
+    /// The caller (`emit_trait_impl_facts`) also emits a matching `function`
+    /// row under this exact name, guaranteeing the merge pass's enumerated
+    /// MAY_ENUMERATED edges always resolve to a real node even when it
+    /// duplicates (harmlessly — same DefId, same file/line) a row the main
+    /// walk already emitted under the crate-relative name.
     fn trait_impl_fact(
         &mut self,
         trait_path: &str,
@@ -208,16 +220,18 @@ impl Emitter {
         impl_crate: &str,
         publish_false: bool,
         is_blanket: bool,
+        impl_fn_stable_name: &str,
     ) {
         let _ = writeln!(
             self.out,
-            "{{\"type\":\"trait_impl_fact\",{},{},{},{},\"publish_false\":{},\"is_blanket\":{}}}",
+            "{{\"type\":\"trait_impl_fact\",{},{},{},{},\"publish_false\":{},\"is_blanket\":{},{}}}",
             json_str_field("trait_path", trait_path),
             json_str_field("self_type_path", self_type_path),
             json_str_field("method_name", method_name),
             json_str_field("impl_crate", impl_crate),
             publish_false,
-            is_blanket
+            is_blanket,
+            json_str_field("impl_fn_stable_name", impl_fn_stable_name)
         );
         self.n_facts += 1;
     }
@@ -698,6 +712,7 @@ fn emit_trait_impl_facts<'tcx>(tcx: TyCtxt<'tcx>, emit: &mut Emitter) {
             for assoc_def_id in tcx.associated_item_def_ids(impl_def_id) {
                 let assoc = tcx.associated_item(*assoc_def_id);
                 if assoc.is_fn() {
+                    let impl_fn_stable_name = stable_def_path(tcx, *assoc_def_id);
                     emit.trait_impl_fact(
                         &trait_path,
                         &self_type_path,
@@ -705,6 +720,15 @@ fn emit_trait_impl_facts<'tcx>(tcx: TyCtxt<'tcx>, emit: &mut Emitter) {
                         &impl_crate,
                         publish_false,
                         is_blanket,
+                        &impl_fn_stable_name,
+                    );
+                    let (line_start, line_end) = def_line_range(tcx, *assoc_def_id);
+                    emit.function(
+                        &impl_fn_stable_name,
+                        def_file(tcx, *assoc_def_id).as_deref(),
+                        line_start,
+                        line_end,
+                        is_exported(tcx, *assoc_def_id),
                     );
                 }
             }
