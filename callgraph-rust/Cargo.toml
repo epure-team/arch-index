@@ -1,0 +1,18 @@
+[package]
+name = "arch-callgraph-rust"
+version = "0.1.0"
+edition = "2021"
+description = "Sound (over-approximate) Rust call-graph producer for arch-index (rustc_private MIR driver)"
+publish = false
+
+[[bin]]
+name = "arch-callgraph-rust"
+path = "src/main.rs"
+
+# No third-party deps: NDJSON is emitted by hand (tiny escaper) and the rustc_*
+# crates come from the pinned nightly's `rustc-dev` component, linked via the
+# `extern crate` + `#![feature(rustc_private)]` mechanism (same as clippy/miri).
+[dependencies]
+
+[profile.release]
+opt-level = 2
