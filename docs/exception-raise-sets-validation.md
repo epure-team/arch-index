@@ -45,3 +45,52 @@ opposite of over-specialisation:
    code the analysis has never seen. ✔
 
 No answer contradicted the source on any corpus.
+
+---
+
+## Re-validation after the error-channels merge (2026-09-03)
+
+Re-run of the **exception** channel on the two external corpora after merging `origin/main`
+(schema 1.6) and landing the error-channels feature. These corpora are the binding gate precisely
+because this repository's own counts move whenever code is added to it.
+
+| measure | octez-manager | proto_alpha | vs. baseline |
+|---|---|---|---|
+| nodes | 12 317 | 14 452 | exact |
+| bounded | 3 024 (24.6 %) | 3 436 (23.8 %) | exact |
+| bounded under `--assume-externals-pure` | 5 858 (47.6 %) | 6 705 (46.4 %) | exact |
+| ⊤ external | 2 834 | 3 273 | exact |
+| ⊤ may_top_edge | 6 459 | 7 743 | exact |
+| origins | 765 | 1 219 | exact |
+| exception-channel scopes | 491 | **19** | +1 on proto_alpha — attributed below |
+| exception-channel links | 2 245 | 35 | exact |
+
+Every verdict-bearing number is unchanged. **Count scopes and links with a `channel` filter**: both
+tables are now shared with the value channels (octez-manager also holds 1 104 option and 1 063
+result scopes), so a channel-blind `SELECT count(*) FROM call_exn_scopes` reads 4 346 rather than
+2 245 and looks like a regression when nothing moved.
+
+### The one delta, attributed
+
+`proto_alpha` gains exactly one exception-channel scope: id 258, `catch_all = 1`, on
+`Script_repr.force_bytes` at `script_repr.ml:264`, covering **zero** calls. This is the converter
+rule doing what it is specified to do — `Error_monad.catch_f` closes the exception channel and
+opens `tzresult` — at the only `catch_f` site in all 276 units of `lib_protocol`. It covers no
+call because of the documented residual: the guarded thunk becomes its own lambda node and the
+scope minted on the enclosing node cannot reach into it. So the scope exists, closes nothing, and
+changes no verdict, which is why every other number is identical.
+
+Oracle row O-5 confirms both halves: `may-fail force_bytes --channel tzresult` →
+`BOUNDED: {…Script_repr.Lazy_script_decode}` (expected exactly); `--channel exception` → ⊤ with
+`external Data_encoding.force_bytes` / `external Error_monad.catch_f` rather than the hoped-for
+`BOUNDED: {}` — the residual, not a rule gap.
+
+### Fixed while re-validating: the shipped profile was undiscoverable
+
+`--errors-profile tezos` failed on `proto_alpha` with "no profiles/tezos-errors.toml found". Two
+compounding causes: the `<project root>/profiles` candidate is rooted at the **analysed** project
+(`/home/mathias/dev/tezos/tezos`), not at arch-index, and the exe-relative fallback was off by one
+— `dirname³` of `_build/default/bin/<tool>/<tool>.exe` is `_build/`, not the repository root. The
+shipped profile was therefore unreachable in exactly the situation it exists for: analysing an
+external corpus. Discovery now walks the executable's ancestors looking for `profiles/`, which
+also survives an installed layout. The resolved path is printed on every run.

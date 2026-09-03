@@ -46,10 +46,24 @@ must match *exactly*; any drift there is a real regression in the exception chan
 | corpus | build dir | expected nodes / bounded / under-hyp / scopes / links | rule |
 |---|---|---|---|
 | octez-manager | `~/dev/octez-manager/_build/default` | 12 317 / 24.6 % / 47.6 % / 491 / 2 245 | **exact — any drift is a NO-GO** |
-| proto_alpha | `/home/mathias/dev/tezos/tezos/_build/default/src/proto_alpha/lib_protocol` | 14 452 / 23.8 % / 46.4 % / 18 / 35 | **exact — any drift is a NO-GO** |
+| proto_alpha | `/home/mathias/dev/tezos/tezos/_build/default/src/proto_alpha/lib_protocol` | 14 452 / 23.8 % / 46.4 % / **19** / 35 | exact — the scope count is 19, not the pre-feature 18; see the attribution note below. Any OTHER drift is a NO-GO |
 | arch-index (whole repo) | `_build/default` | baseline 1 765 / 18.4 % / 44.4 % / 106 / 389 | may grow; every delta must be attributable to modules this branch adds — state the attribution, do not just update the number |
 
-(Verified at slices 0–1: both external corpora reproduced the baseline to the digit.)
+(Verified at slices 0–1: both external corpora reproduced the baseline to the digit. Re-verified
+after the origin/main merge — see `docs/exception-raise-sets-validation.md`.)
+
+**Attribution for proto_alpha's 18 → 19 scopes (do not "fix" this by reverting):** the converter
+rule mints one catch-all exception scope at `Script_repr.force_bytes` (`script_repr.ml:264`), the
+only `catch_f` site in `lib_protocol`. It links to zero calls (the documented cross-node residual),
+so no verdict changes and every other number is identical.
+
+**Count with a channel filter.** `exn_scopes` and `call_exn_scopes` are now shared with the value
+channels. A channel-blind count reads 4 346 links on octez-manager instead of 2 245 and looks like
+a regression when nothing moved:
+```sql
+SELECT count(*) FROM call_exn_scopes l JOIN exn_scopes s ON s.id = l.scope_id
+ WHERE s.channel = 'exception';
+```
 
 ```bash
 for c in arch-index octez-manager proto-alpha; do : ; done   # see the table for --build-dir
