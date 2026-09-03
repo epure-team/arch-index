@@ -524,9 +524,149 @@ let register_reindex () =
         first) ;
   Lwt.return_unit
 
+(* Review round 1, HIGH — "--errors-strict can never succeed".
+   [lift]/[unwrap] name TYPE constructors but were seeded into the
+   validator's VALUE-path set, which only [note_value_path] can flip; and an
+   untouched built-in's own Stdlib paths counted towards the strict verdict,
+   one of which ([Stdlib.option]) is a spelling the compiler never prints.
+   Between them, [--errors-strict] exited 1 for every config and every
+   corpus. This fixture declares a channel whose carrier, [lift] wrapper and
+   [unwrap] wrapper are ALL present, and every declared value path is
+   exercised — so exit 0 is now reachable, and the assertion is that it is
+   actually reached. *)
+let strict_ok_files =
+  [
+    Fixture.dune_project;
+    ( "dune",
+      "(library\n\
+      \ (name errch_strictok)\n\
+      \ (wrapped false)\n\
+      \ (modules es_ok)\n\
+      \ (flags (:standard -w -8-11-21-26-27-32-33-37-39)))\n" );
+    ( "arch-errors.toml",
+      "[channel.myres]\n\
+       type = \"res\"\n\
+       error_arg = 2\n\
+       error_type = \"myerr\"\n\
+       lift = [\"wrap\"]\n\
+       unwrap = [\"box\"]\n\
+       origins = [{path = \"Bad\", arg = 1}]\n" );
+    ( "es_ok.ml",
+      {|type myerr = E1 | E2
+
+(* [unwrap]: the error slot is [myerr] inside a [box] container, exactly the
+   shape the Tezos profile's [...Error_monad.trace] wrapper has. *)
+type 'e box = Box of 'e
+
+(* [lift]: an outer wrapper stripped before the carrier check, the shape the
+   Tezos profile's [Lwt.t] has. *)
+type 'a wrap = W of 'a
+
+type ('a, 'e) res = Good of 'a | Bad of 'e
+
+(* Carrier, unlifted: the [unwrap] container is what makes error_arg=2 agree
+   with error_type=myerr. *)
+let plain () : (int, myerr box) res = Bad (Box E1)
+
+(* Carrier under the [lift] wrapper. *)
+let lifted () : (int, myerr box) res wrap = W (Bad (Box E2))
+|} );
+  ]
+
+let register_strict_success () =
+  Test.register ~__FILE__
+    ~title:"error-channels: --errors-strict succeeds when every declaration matches"
+    ~tags:["cmt"; "error_channels"; "config"; "strict"]
+  @@ fun () ->
+  with_fixture ~name:"errch_strict_ok" ~files:strict_ok_files @@ fun fixture ->
+  let code, out, db = Arch_tezt.index_raw ~extra_args:["--errors-strict"] fixture in
+  Batch.run (fun b ->
+      Batch.eq_int b ~msg:"--errors-strict exits 0 when nothing the operator declared missed" code 0 ;
+      if code <> 0 then Batch.note b "indexer output:\n%s" out ;
+      if code = 0 then (
+        (* The lift/unwrap paths must be FOUND, not merely non-fatal: a
+           regression that stopped seeding them at all would also exit 0. *)
+        let unmatched =
+          Db.with_db db (fun conn ->
+              Db.string_opt conn
+                "SELECT value FROM comment_db_meta WHERE key='error_config_unmatched'")
+        in
+        (* Split on the separator rather than substring-searching: the
+           untouched built-ins DO still contribute misses here (they are
+           warnings, not strict failures), and 'Stdlib.result' contains
+           "res". *)
+        let unmatched =
+          String.split_on_char ',' (Option.value ~default:"" unmatched)
+        in
+        List.iter
+          (fun p ->
+            Batch.check b
+              ~msg:(Printf.sprintf "%S is reported as matched, not unmatched" p)
+              (not (List.mem p unmatched)))
+          ["wrap"; "box"; "res"; "Bad"] ;
+        (* And the lift wrapper really is stripped: without it [lifted]'s
+           return type has head [wrap], matches no declared carrier, and the
+           answer is NOT_A_CARRIER instead of a set. The identity is the
+           [box] container's head — the origin is the literal at the
+           declared [arg], and [unwrap] is a rule for the carrier CHECK, not
+           for naming an error. *)
+        Batch.contains b ~msg:"the lifted carrier is analysed on the myres channel"
+          ~haystack:(query db ["may-fail"; "lifted"; "--channel"; "myres"])
+          "BOUNDED: {Es_ok.Box}")) ;
+  Lwt.return_unit
+
+(* Review round 1, HIGH (FR-027) — a channel shadowed by an earlier one.
+   Carrier selection is first-match-wins, so the second declaration below can
+   never own a carrier; shipping it would publish a channel in
+   [error_contract] that answers NOT_A_CARRIER about code it never examined.
+   The config layer refuses it at load time instead. *)
+let register_unreachable_channel () =
+  Test.register ~__FILE__
+    ~title:"error-channels: a channel shadowed by an earlier one is refused at load time"
+    ~tags:["cmt"; "error_channels"; "config"]
+  @@ fun () ->
+  with_fixture ~name:"errch_shadowed"
+    ~files:
+      [
+        Fixture.dune_project;
+        ( "dune",
+          "(library\n\
+          \ (name errch_shadow)\n\
+          \ (wrapped false)\n\
+          \ (modules es_sh)\n\
+          \ (flags (:standard -w -8-11-21-26-27-32-33-37-39)))\n" );
+        (* [second] carries the same [myopt] type as [first] and applies no
+           narrower argument test, so it is structurally unreachable. *)
+        ( "arch-errors.toml",
+          "[channel.first]\n\
+           type = \"myopt\"\n\
+           error_type = \"\"\n\
+           origins = [{path = \"Nothing\", arg = 0}]\n\
+           [channel.second]\n\
+           type = \"myopt\"\n\
+           error_type = \"\"\n\
+           origins = [{path = \"Nothing\", arg = 0}]\n" );
+        ("es_sh.ml", "type 'a myopt = Nothing | Just of 'a\n\nlet f () : int myopt = Nothing\n");
+      ]
+  @@ fun fixture ->
+  let code, out, _db = Arch_tezt.index_raw fixture in
+  Batch.run (fun b ->
+      Batch.eq_int b ~msg:"a shadowed channel makes the run exit 1" code 1 ;
+      Batch.check b ~msg:"the refusal names the shadowed channel"
+        (Batch.has_substring ~needle:"channel second" out) ;
+      Batch.check b ~msg:"the refusal names the channel that shadows it"
+        (Batch.has_substring ~needle:"'first'" out) ;
+      Batch.check b ~msg:"the refusal names the contested carrier type"
+        (Batch.has_substring ~needle:"'myopt'" out) ;
+      Batch.check b ~msg:"the refusal tells the operator what to do about it"
+        (Batch.has_substring ~needle:"Reorder" out)) ;
+  Lwt.return_unit
+
 let register () =
   register_producer () ;
   register_reindex () ;
+  register_strict_success () ;
+  register_unreachable_channel () ;
   register_query () ;
   register_config () ;
   register_strict () ;

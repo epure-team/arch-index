@@ -227,6 +227,17 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
   let errors_effective, error_config_source =
     load_errors_config ~project_root:!project_root ~errors_config ~errors_profile
   in
+  (* Reachability is a property of the CONFIG alone, so it is decided before
+     a single .cmt is read — unlike the found-flag validation below, which
+     needs the whole corpus walked first. A channel shadowed by an earlier
+     one would otherwise be published in [error_contract] and answer
+     NOT_A_CARRIER for every function in the corpus: a claim about the code,
+     from a channel that was never applicable (review round 1, HIGH). *)
+  (match Arch_errors_config.check_reachable errors_effective with
+  | Error msg ->
+      Arch_io.eprintf "%s\n" msg ;
+      exit 1
+  | Ok () -> ()) ;
   let errors_seen = Arch_errors_config.create errors_effective in
   Arch_index_cmt.set_seen_collector (Some errors_seen) ;
   Arch_io.printf
