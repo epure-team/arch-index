@@ -12,30 +12,52 @@ let rec strip_arrows ty =
 
 let is_type_var ty = match Types.get_desc ty with Tvar _ | Tunivar _ -> true | _ -> false
 
+let matches_any (patterns : string list) (actual : string) =
+  List.exists (fun pat -> Arch_errors_config.path_matches pat actual) patterns
+
+(** Strip zero or more single-argument [Tconstr] wrappers whose path matches
+    one of [paths] (e.g. [Lwt.t] for [lift], [...Error_monad.trace] for
+    [unwrap]) — slice 4 "Carrier check" / "unwrap". *)
+let rec strip_wrapper (paths : string list) ty =
+  if paths = [] then ty
+  else
+    match Types.get_desc ty with
+    | Tconstr (p, [arg], _) when matches_any paths (Path.name p) -> strip_wrapper paths arg
+    | _ -> ty
+
+(** [error_arg_ok c args]: [args] is the (already lift-stripped) carrier
+    type's argument list. When [args] is too short for [c.error_arg] (e.g.
+    the alias [...Error_monad.tzresult] takes ONE type argument while its
+    [underlying] spelling [...Pervasives.result] takes TWO), the error type
+    is implied by the declaration itself and the check does not apply — see
+    specs/error-channels.md slice 4, "underlying"/"aliases" arity note. When
+    the argument IS present, its head is compared to [c.error_type] after
+    stripping any [c.unwrap] container (e.g. [...Error_monad.trace<error>]). *)
 let error_arg_ok (c : Arch_errors_config.channel) args =
   match c.error_arg with
   | None -> true (* alias carrier / identity channel: not applicable *)
   | Some pos -> (
       match List.nth_opt args (pos - 1) with
-      | None -> false
+      | None -> true (* shorter-arity alias: error type implied by the declaration *)
       | Some argty ->
           if is_type_var argty then true
           else (
             match c.error_type with
             | None | Some "" -> true (* unset/identity: any argument matches *)
             | Some et -> (
-                match Types.get_desc argty with
-                | Tconstr (ep, _, _) -> Path.name ep = et
+                match Types.get_desc (strip_wrapper c.unwrap argty) with
+                | Tconstr (ep, _, _) -> matches_any [et] (Path.name ep)
                 | _ -> false)))
 
 let carrier_channel_of_type ~channels ty =
-  match Types.get_desc (strip_arrows ty) with
-  | Tconstr (p, args, _) ->
-      let pname = Path.name p in
-      List.find_opt
-        (fun (c : Arch_errors_config.channel) -> List.mem pname c.type_paths && error_arg_ok c args)
-        channels
-  | _ -> None
+  let base = strip_arrows ty in
+  List.find_opt
+    (fun (c : Arch_errors_config.channel) ->
+      match Types.get_desc (strip_wrapper c.Arch_errors_config.lift base) with
+      | Tconstr (p, args, _) ->
+          matches_any c.Arch_errors_config.type_paths (Path.name p) && error_arg_ok c args
+      | _ -> false)
+    channels
 
 (** [bind_shape_channel ~channels ty]: [ty] has "bind shape" over some
     declared channel [c] — [c -> ('a -> c) -> c] — iff, without stripping any

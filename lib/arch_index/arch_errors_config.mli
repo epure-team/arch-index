@@ -56,6 +56,13 @@ type t = {
     [option] ([option], identity [None]). *)
 val builtin : t
 
+(** [path_matches pattern actual]: [pattern] may contain [*] wildcards
+    (matching zero or more characters, no other glob syntax) — used so one
+    profile path such as [Tezos_protocol_environment_*.Error_monad.tzfail]
+    covers every protocol instance (slice 4, "Profile-path wildcards"). A
+    pattern with no [*] matches only the identical string. *)
+val path_matches : string -> string -> bool
+
 (** Parse one TOML 1.0 document (already read from disk) into a config. An
     unknown key anywhere in the [\[channel.*\]]/[\[summaries\]] shape is an
     error naming it; a TOML syntax error is passed through as-is. *)

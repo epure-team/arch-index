@@ -97,6 +97,25 @@ let option_channel =
 let builtin = { channels = [exception_channel; result_channel; option_channel]; summaries = [] }
 
 (* -------------------------------------------------------------------------- *)
+(* Wildcard path matching — [*] in the UNIT component of a profile path      *)
+(* -------------------------------------------------------------------------- *)
+
+let has_wildcard s = String.contains s '*'
+
+let path_matches (pattern : string) (actual : string) : bool =
+  if not (has_wildcard pattern) then pattern = actual
+  else
+    let plen = String.length pattern and alen = String.length actual in
+    let rec go pi si =
+      if pi = plen then si = alen
+      else
+        match pattern.[pi] with
+        | '*' -> go (pi + 1) si || (si < alen && go pi (si + 1))
+        | c -> si < alen && actual.[si] = c && go (pi + 1) (si + 1)
+    in
+    go 0 0
+
+(* -------------------------------------------------------------------------- *)
 (* TOML parsing                                                               *)
 (* -------------------------------------------------------------------------- *)
 
@@ -370,6 +389,8 @@ let digest (t : t) : string =
 type seen = {
   values : (string, bool ref) Hashtbl.t;
   types : (string, bool ref) Hashtbl.t;
+  values_wild : string list;  (** subset of [values]' keys containing [*] *)
+  types_wild : string list;  (** subset of [types]' keys containing [*] *)
 }
 
 let declared_value_paths (c : channel) =
@@ -392,13 +413,24 @@ let create (t : t) : seen =
         (fun p -> if not (Hashtbl.mem types p) then Hashtbl.replace types p (ref false))
         c.type_paths)
     t.channels ;
-  { values; types }
+  let wild_keys tbl = Hashtbl.fold (fun k _ acc -> if has_wildcard k then k :: acc else acc) tbl [] in
+  { values; types; values_wild = wild_keys values; types_wild = wild_keys types }
 
 let note_value_path (s : seen) (p : string) =
-  match Hashtbl.find_opt s.values p with Some flag -> flag := true | None -> ()
+  match Hashtbl.find_opt s.values p with
+  | Some flag -> flag := true
+  | None ->
+      List.iter
+        (fun pat -> if path_matches pat p then (Hashtbl.find s.values pat) := true)
+        s.values_wild
 
 let note_type_path (s : seen) (p : string) =
-  match Hashtbl.find_opt s.types p with Some flag -> flag := true | None -> ()
+  match Hashtbl.find_opt s.types p with
+  | Some flag -> flag := true
+  | None ->
+      List.iter
+        (fun pat -> if path_matches pat p then (Hashtbl.find s.types pat) := true)
+        s.types_wild
 
 let unmatched (s : seen) : string list =
   let acc = ref [] in
