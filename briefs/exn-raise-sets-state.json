@@ -1,7 +1,7 @@
 {
   "task": "exn-raise-sets",
   "mode": "full",
-  "current_phase": "review",
+  "current_phase": "qa",
   "events": [
     {
       "phase": "question",
@@ -48,6 +48,13 @@
       "at": "2026-09-03T16:21:13Z",
       "by": "roster-review",
       "reason": "round 1: 3 HIGH + 5 correctness MEDIUM fixed in-round; 2 architecture MEDIUM + 2 LOW + 1 INFO open, non-blocking; gate exit 0"
+    },
+    {
+      "phase": "qa",
+      "outcome": "GO",
+      "at": "2026-09-03T16:24:49Z",
+      "by": "roster-qa",
+      "reason": "all gates green; proto_alpha CHECK-3 measured, 6 spot checks consistent with source"
     }
   ]
 }

@@ -1,0 +1,25 @@
+{
+  "task": "exn-raise-sets",
+  "status": "GO",
+  "date": "2026-09-03",
+  "round": 1,
+  "cycle": 1,
+  "qa_no_go_round": 0,
+  "rounds_audit": [
+    {
+      "round": 1,
+      "date": "2026-09-03",
+      "verdict": "GO",
+      "causes": [],
+      "qualifying": false
+    }
+  ],
+  "cross_runtime": {
+    "codex": {
+      "status": "skipped-degraded",
+      "reason": "runtime degraded during review with unchanged runtime version",
+      "config_digest": "codex:bec3ccacdd6c8654",
+      "source": "qa-check-availability"
+    }
+  }
+}
