@@ -310,10 +310,14 @@ Honest limits, so nobody reads more into a verdict than it carries:
   fresh index of `tezos/_build/default/src/proto_alpha/lib_protocol`, `--errors-profile tezos
   --errors-strict` exits 1 on 11 declared paths that never appear in that corpus: ten
   `Error_monad…return_none/return_true/return_unit/return_false` sinks and the
-  `…Error_monad.Pervasives.result` underlying spelling. The identifiers themselves are used
-  heavily there (`return_unit` alone occurs 888 times in the sources), so they resolve under a
-  different qualified spelling than the profile declares — a path-inventory question about the
-  profile, not a bug in strict, which is reporting exactly what it is for. Without
+  `…Error_monad.Pervasives.result` underlying spelling. The identifiers are used heavily in the
+  sources, but that is not why the declarations miss, and the distinction matters to anyone
+  fixing the profile: **`return_unit` and its siblings are values, not functions** (`return_unit
+  = return ()`), so they are *referenced*, never *applied*. A `sinks` entry matches the head of a
+  call, and these never appear as one — the indexed corpus records no `return_unit` callee at all.
+  Declaring them as sinks was a category error in the profile, not a spelling mismatch, and no
+  amount of requalifying the path will make them match. Strict is reporting exactly what it is
+  for. Without
   `--errors-strict` the run exits 0 and those declarations are simply inert; the misses are listed
   in `comment_db_meta.error_config_unmatched`.
 - **Point-free re-exports (`let f = M.g`) record no call edge**, so they carry no error set. This
