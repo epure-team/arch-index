@@ -29,6 +29,11 @@ DISAGREE was settled by a reachability probe, not by argument — see
    plain propagating edges, sinks; `may-fail`/`fails-with`/`error-stats --channel result|option`
    through `Arch_exn` generalised by channel. **Done when:** AC-16 scenarios 1–6, 10 green, and
    the **early real-corpus smoke** below is clean. **Lands:** FR-025 (partial), 026, 027, 030.
+2b. **Polymorphic-variant errors (inserted 2026-09-03 after the slice-2 smoke).** `Texp_variant`
+   origins and `Tpat_variant` handler arms, identity = the bare label. Cheap, and without it the
+   `result` channel is ⊤ on ~85 % of octez-manager's error sites (394 `Error \`X` vs 71 ordinary).
+   **Done when:** the three smoke functions (`run_out_silent_blocking`, `run_out_silent`,
+   `download_file`) report `` `Msg `` instead of ⊤ `unknown_error_value`, and their sources agree.
 3. **Binds, transforms, converters, alias chains.** `Texp_letop`: walk `let_.bop_exp` (bound
    expression) and each `and*` separately from `body` (continuation) — structurally explicit, no
    ambiguity; `Res.bind`-style applications; single-`let` alias chains; `transforms.mode`
