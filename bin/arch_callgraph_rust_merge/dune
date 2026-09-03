@@ -1,0 +1,5 @@
+(executable
+ (name arch_callgraph_rust_merge)
+ (public_name arch_callgraph_rust_merge)
+ (flags (:standard -w +8+11+26+27 -warn-error +8+11))
+ (libraries yojson))
