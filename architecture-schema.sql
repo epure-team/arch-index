@@ -372,6 +372,9 @@ ORDER BY m.path, f.name, d.call_site;
 -- exn_scopes: one row per `try` body / `match … with exception` scrutinee in a
 -- function node (lambda nodes included), with the enclosing scope of the same
 -- node as parent. catch_all = some unguarded, non-re-raising catch-all arm.
+-- channel: specs/error-channels.md — which channel this scope belongs to.
+-- The producer emits only 'exception' rows as of schema 1.3 (slices 0-1);
+-- the column exists so a later producer can widen without another migration.
 CREATE TABLE IF NOT EXISTS exn_scopes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     function_id INTEGER NOT NULL REFERENCES functions(id) ON DELETE CASCADE,
@@ -379,7 +382,8 @@ CREATE TABLE IF NOT EXISTS exn_scopes (
     form TEXT NOT NULL CHECK(form IN ('try','match_exception')),
     line INTEGER NOT NULL,
     col INTEGER NOT NULL,
-    catch_all BOOLEAN NOT NULL DEFAULT 0
+    catch_all BOOLEAN NOT NULL DEFAULT 0,
+    channel TEXT NOT NULL DEFAULT 'exception'
 );
 -- Canonical constructor paths caught by a scope's closing arms.
 CREATE TABLE IF NOT EXISTS exn_scope_catches (
@@ -390,6 +394,7 @@ CREATE TABLE IF NOT EXISTS exn_scope_catches (
 -- exn_path NULL = unknown value (⊤) for 'unknown', informational for 'reraise'.
 -- scope_id = innermost enclosing scope of the same node ('reraise': the scope
 -- whose arm bound the re-raised variable). escapes = not closed by the chain.
+-- channel: see exn_scopes.channel above — same schema-1.3 note applies.
 CREATE TABLE IF NOT EXISTS exn_origins (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     function_id INTEGER NOT NULL REFERENCES functions(id) ON DELETE CASCADE,
@@ -398,9 +403,12 @@ CREATE TABLE IF NOT EXISTS exn_origins (
     exn_path TEXT,
     escapes BOOLEAN NOT NULL DEFAULT 1,
     line INTEGER NOT NULL,
-    col INTEGER NOT NULL
+    col INTEGER NOT NULL,
+    channel TEXT NOT NULL DEFAULT 'exception'
 );
--- The innermost scope enclosing a call site (absent = no scope).
+-- The innermost scope enclosing a call site (absent = no scope). Unlike
+-- exn_scopes/exn_origins, this carries no channel of its own — the scope it
+-- points at already does (specs/error-channels.md Clarifications: "Schema").
 CREATE TABLE IF NOT EXISTS call_exn_scopes (
     call_id INTEGER NOT NULL PRIMARY KEY REFERENCES calls(id) ON DELETE CASCADE,
     scope_id INTEGER NOT NULL REFERENCES exn_scopes(id) ON DELETE CASCADE
@@ -410,9 +418,23 @@ CREATE TABLE IF NOT EXISTS exn_rebinds (
     alias_path TEXT NOT NULL PRIMARY KEY,
     target_path TEXT NOT NULL
 );
+-- exn_edges: per-call-site value-channel classification (propagates / a bind's
+-- bound-or-continuation argument / sink / transform / convert —
+-- specs/error-channels.md Clarifications: "Schema"). Additive, unused as of
+-- schema 1.3: the producer emits every fact through exn_origins/exn_scopes/
+-- call_exn_scopes on the 'exception' channel only (FR-029's byte-identical
+-- requirement); value channels (result/option/...) start writing rows here in
+-- a later slice.
+CREATE TABLE IF NOT EXISTS exn_edges (
+    call_id INTEGER NOT NULL REFERENCES calls(id) ON DELETE CASCADE,
+    channel TEXT NOT NULL,
+    role TEXT NOT NULL CHECK(role IN ('propagates','bind_arg','sink','transform_add','transform_replace','convert')),
+    PRIMARY KEY (call_id, channel, role)
+);
 CREATE INDEX IF NOT EXISTS idx_exn_scopes_fn ON exn_scopes(function_id);
 CREATE INDEX IF NOT EXISTS idx_exn_origins_fn ON exn_origins(function_id);
 CREATE INDEX IF NOT EXISTS idx_exn_scope_catches_scope ON exn_scope_catches(scope_id);
+CREATE INDEX IF NOT EXISTS idx_exn_edges_channel ON exn_edges(channel);
 
 -- Test coverage tracking
 CREATE TABLE IF NOT EXISTS coverage (

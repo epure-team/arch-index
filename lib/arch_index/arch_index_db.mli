@@ -572,7 +572,9 @@ val insert_call_exn_scope : Sqlite3.db -> Sqlite3.stmt -> call_id:int -> scope_i
     {pre}
     [function_id] references an existing functions row; [parent_id], when
     given, an existing [exn_scopes] row of the same function; [form] is
-    ["try"] or ["match_exception"].
+    ["try"] or ["match_exception"]; [channel] names the error channel this
+    scope belongs to (specs/error-channels.md — the producer writes only
+    ["exception"] as of schema 1.3, FR-029's byte-identical requirement).
 
     {post}
     One [exn_scopes] row and its rowid, or [None] and a counted rejection.
@@ -591,6 +593,7 @@ val insert_exn_scope :
   line:int ->
   col:int ->
   catch_all:bool ->
+  channel:string ->
   int option
 
 (** One caught canonical path of a scope's closing arms.
@@ -612,7 +615,9 @@ val insert_exn_scope_catch : Sqlite3.db -> Sqlite3.stmt -> scope_id:int -> exn_p
 
     {pre}
     [function_id] references an existing functions row; [form] is one of the
-    [exn_origins.form] CHECK values.
+    [exn_origins.form] CHECK values; [channel] names the error channel this
+    origin belongs to (specs/error-channels.md — the producer writes only
+    ["exception"] as of schema 1.3, FR-029's byte-identical requirement).
 
     {post}
     One [exn_origins] row, or a counted rejection.
@@ -632,6 +637,7 @@ val insert_exn_origin :
   escapes:bool ->
   line:int ->
   col:int ->
+  channel:string ->
   unit
 
 (** [exception Alias = Target], both canonical.

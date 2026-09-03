@@ -2179,6 +2179,12 @@ let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
                                                            s.s_form)
                                                       ~line:s.s_line ~col:s.s_col
                                                       ~catch_all:s.s_catch_all
+                                                      (* Slices 0-1: the producer
+                                                         emits only the
+                                                         [exception] channel
+                                                         (specs/error-channels.md
+                                                         FR-029). *)
+                                                      ~channel:"exception"
                                                   with
                                                   | Some sid ->
                                                       Hashtbl.replace scope_ids (node, s.s_id) sid ;
@@ -2199,7 +2205,8 @@ let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
                                                     ~scope_id
                                                     ~form:(Arch_index_exn.form_to_string o.o_form)
                                                     ~exn_path:o.o_path ~escapes:o.o_escapes
-                                                    ~line:o.o_line ~col:o.o_col)
+                                                    ~line:o.o_line ~col:o.o_col
+                                                    ~channel:"exception")
                                                 origins)
                                         exn_by_node ;
                                       (* Calls carry the walker's LOCAL scope id;

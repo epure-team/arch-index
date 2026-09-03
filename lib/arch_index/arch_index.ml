@@ -407,7 +407,7 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
     Sqlite3.prepare
       db
       "INSERT INTO exn_scopes (function_id, parent_id, form, line, col, \
-       catch_all) VALUES (?, ?, ?, ?, ?, ?)"
+       catch_all, channel) VALUES (?, ?, ?, ?, ?, ?, ?)"
   in
   let stmt_catch =
     Sqlite3.prepare db "INSERT INTO exn_scope_catches (scope_id, exn_path) VALUES (?, ?)"
@@ -416,7 +416,7 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
     Sqlite3.prepare
       db
       "INSERT INTO exn_origins (function_id, scope_id, form, exn_path, escapes, \
-       line, col) VALUES (?, ?, ?, ?, ?, ?, ?)"
+       line, col, channel) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
   in
   let stmt_rebind =
     Sqlite3.prepare
