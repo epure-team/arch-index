@@ -51,6 +51,14 @@ let literal_ctor_path_of_expr ~canon_type ~canon_exn (e : Typedtree.expression) 
   | Texp_construct (_, {cstr_tag = Cstr_extension (p, _); _}, _) -> Some (canon_exn p)
   | Texp_construct (_, cstr_desc, _) ->
       Some (constructor_canonical_path ~canon_type cstr_desc.cstr_res cstr_desc.cstr_name)
+  | (* Polymorphic-variant errors (specs/error-channels.md Clarifications,
+       "Polymorphic-variant errors" — 2b, REQUIRED not optional): identity is
+       the bare label with a leading backtick, e.g. [`Msg] -> ["`Msg"].
+       OCaml's polymorphic variants are structural, so no unit qualification
+       and no canonicalisation table — the bare label IS the global
+       identity. *)
+    Texp_variant (label, _) ->
+      Some ("`" ^ label)
   | _ -> None
 
 let literal_ctor_path_of_pat ~canon_type ~canon_exn (p : Typedtree.value Typedtree.general_pattern) =
@@ -58,6 +66,7 @@ let literal_ctor_path_of_pat ~canon_type ~canon_exn (p : Typedtree.value Typedtr
   | Tpat_construct (_, {cstr_tag = Cstr_extension (path, _); _}, _, _) -> Some (canon_exn path)
   | Tpat_construct (_, cstr_desc, _, _) ->
       Some (constructor_canonical_path ~canon_type cstr_desc.cstr_res cstr_desc.cstr_name)
+  | Tpat_variant (label, _, _) -> Some ("`" ^ label)
   | _ -> None
 
 let rec pat_bound_idents (p : Typedtree.value Typedtree.general_pattern) =
