@@ -1,7 +1,7 @@
 {
   "task": "exn-raise-sets",
   "mode": "full",
-  "current_phase": "implement",
+  "current_phase": "review",
   "events": [
     {
       "phase": "question",
@@ -41,6 +41,13 @@
       "outcome": "COMPLETED",
       "at": "2026-09-03T16:02:16Z",
       "by": "roster-implement"
+    },
+    {
+      "phase": "review",
+      "outcome": "GO",
+      "at": "2026-09-03T16:21:13Z",
+      "by": "roster-review",
+      "reason": "round 1: 3 HIGH + 5 correctness MEDIUM fixed in-round; 2 architecture MEDIUM + 2 LOW + 1 INFO open, non-blocking; gate exit 0"
     }
   ]
 }
