@@ -86,6 +86,17 @@ multi-day scope and accepted as-is rather than deferred without a record.
    Accepted given how narrow the practical impact is; filtering on
    `std::env::var("CARGO_CRATE_NAME") == Ok("build_script_build")` is a cheap follow-up if it ever
    matters in practice.
+7. **Self-referential single-manifest workspace inheritance is not resolved.** Cargo allows one
+   `Cargo.toml` to be simultaneously a workspace root (`[workspace]`/`[workspace.package]`) AND a
+   package (`[package]`) in the very same file, with the package's own `publish.workspace = true`
+   referring to that same file's `[workspace.package]`. `source_crate_sets_publish_false`'s
+   inheritance walk starts at the CURRENT directory's PARENT when resolving `.workspace = true`, so
+   it never re-checks the current file's own `[workspace.package]` table for this specific
+   single-manifest pattern — resolution falls through to the safe default (`publish_false: false`,
+   not proven closed) rather than correctly inheriting `true`. Safe direction only (over-cautious,
+   never unsound); accepted given how uncommon a self-referential single-manifest workspace is in
+   practice, compared to the standard multi-file `[workspace.package]`-at-the-root pattern this round
+   already fixed.
 
 ## CI wiring
 

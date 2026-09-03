@@ -410,6 +410,50 @@ else
     || note "pubcomment: expected publish_false:false (crate_a is actually publish=true; the comment must not fool the scanner), got: $raw_pubcomment"
 fi
 
+# ── Scenario 11 (review round 2 regression): Cargo's restricted-registry
+# `publish = ["registry-name"]` array form must NOT be misread as a literal
+# `publish = false` just because the registry name happens to contain the
+# substring "false" — this is the DANGEROUS direction (a registry-restricted
+# crate is still consumable within that registry, not proven closed). ──
+mkdir -p "$WS/pubarray/crate_a/src" "$WS/pubarray/crate_b/src"
+cat >"$WS/pubarray/Cargo.toml" <<'EOF'
+[workspace]
+members = ["crate_a", "crate_b"]
+resolver = "2"
+EOF
+cat >"$WS/pubarray/crate_a/Cargo.toml" <<'EOF'
+[package]
+name = "crate_a"
+version = "0.1.0"
+edition = "2021"
+publish = ["always-false-registry"]
+EOF
+cat >"$WS/pubarray/crate_a/src/lib.rs" <<'EOF'
+pub trait Doer { fn do_it(&self); }
+impl Doer for i32 { fn do_it(&self) {} }
+pub fn use_dyn(d: &dyn Doer) { d.do_it(); }
+EOF
+cat >"$WS/pubarray/crate_b/Cargo.toml" <<'EOF'
+[package]
+name = "crate_b"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+crate_a = { path = "../crate_a" }
+EOF
+cat >"$WS/pubarray/crate_b/src/lib.rs" <<'EOF'
+pub fn entry(x: &i32) { crate_a::use_dyn(x); }
+EOF
+raw_pubarray="$(ARCH_CG_RUST_NO_MERGE=1 "$DRIVER_HARNESS" "$WS/pubarray" 2>/tmp/selftest-cg-rust-pubarray.stderr)"
+if [ -z "$raw_pubarray" ]; then
+  note "pubarray: producer emitted nothing (see /tmp/selftest-cg-rust-pubarray.stderr)"
+else
+  printf '%s\n' "$raw_pubarray" | grep -q '"publish_false":false' \
+    || note "pubarray: expected publish_false:false (crate_a uses restricted-registry array form, not a literal false), got: $raw_pubarray"
+fi
+
 if [ "$fails" -eq 0 ]; then
   echo "selftest-callgraph-rust: OK"
   exit 0

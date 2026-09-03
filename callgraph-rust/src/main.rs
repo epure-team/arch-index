@@ -700,6 +700,18 @@ fn source_crate_sets_publish_false(source_file: &str) -> bool {
 /// value here" (returns `None` for THIS section, letting the caller's
 /// workspace-resolution logic actually execute) rather than pattern-matching
 /// its substrings as if it were a literal `true`/`false`.
+///
+/// FIX (rust-cg-toml-publish-array-form-misread, HIGH, review round 2):
+/// `contains("false")`/`contains("true")` matched those substrings ANYWHERE
+/// on the line, so Cargo's restricted-registry form
+/// `publish = ["some-registry-named-false"]` was misread as a literal
+/// `publish = false` (the DANGEROUS direction — a registry-restricted crate
+/// is still consumable by external crates on that registry, not proven
+/// closed). Fixed by requiring the value after `=` to be EXACTLY `true` or
+/// `false` (trimmed, nothing else) rather than substring-matching the whole
+/// line; any other shape (an array, a quoted string) now correctly falls
+/// through to `None` — the same safe "not a literal boolean here" fallback
+/// already used for `.workspace` delegation.
 fn toml_publish_false(contents: &str, section: &str) -> Option<bool> {
     let header = format!("[{section}]");
     let mut in_section = false;
@@ -714,11 +726,12 @@ fn toml_publish_false(contents: &str, section: &str) -> Option<bool> {
             if trimmed.contains(".workspace") {
                 continue;
             }
-            if trimmed.contains("false") {
-                return Some(true);
-            }
-            if trimmed.contains("true") {
-                return Some(false);
+            if let Some(eq_pos) = trimmed.find('=') {
+                match trimmed[eq_pos + 1..].trim() {
+                    "false" => return Some(true),
+                    "true" => return Some(false),
+                    _ => {}
+                }
             }
         }
     }
@@ -726,11 +739,16 @@ fn toml_publish_false(contents: &str, section: &str) -> Option<bool> {
 }
 
 fn toml_key_is_workspace_true(contents: &str, key: &str) -> bool {
+    let target_key = format!("{key}.workspace");
     for line in contents.lines() {
         let before_comment = line.split('#').next().unwrap_or("");
         let trimmed = before_comment.trim();
-        if trimmed.starts_with(key) && trimmed.contains(".workspace") && trimmed.contains("true") {
-            return true;
+        if let Some(eq_pos) = trimmed.find('=') {
+            let lhs = trimmed[..eq_pos].trim();
+            let rhs = trimmed[eq_pos + 1..].trim();
+            if lhs == target_key && rhs == "true" {
+                return true;
+            }
         }
     }
     false
