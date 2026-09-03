@@ -1,7 +1,7 @@
 {
   "task": "provenance-columns",
   "mode": "fast",
-  "current_phase": "qa",
+  "current_phase": "ship",
   "events": [
     {
       "phase": "intake",
@@ -26,6 +26,12 @@
       "outcome": "GO",
       "reason": "Build clean, 96/96 tests. No spec exists (Fast mode) so Step 3 was substituted with independent fresh-fixture reverification of all three provenance mechanisms, outside the review round's own test files: main schema (double-invocation against a fresh fixture confirms exactly one producer_runs row and correct FK on functions/calls), flat LSP schema (fresh Go fixture confirms all four comment_db_meta keys), bin/arch_load (four scenarios: declared flags, default, invalid soundness-class rejected exit 2, empty --producer= rejected exit 2). Every review-round fix independently confirmed to hold under fresh exercise. Cross-runtime QA skipped (breaker: codex degraded, unchanged since review).",
       "by": "roster-qa"
+    },
+    {
+      "phase": "ship",
+      "outcome": "COMPLETED",
+      "reason": "PR #56 merged (rebase-merge, 44d2c6b). CI green on first attempt. Worktree/branch cleaned up post-merge.",
+      "by": "roster-ship"
     }
   ]
 }
