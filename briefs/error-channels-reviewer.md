@@ -50,3 +50,57 @@ evidence — read the transcripts, do not take "green" on faith); profile portab
 wildcard); fixture cross-contamination between the two libraries; `otoml` decoding of
 array-of-tables; and whether any `NOT_A_CARRIER` is being emitted where a real carrier was meant
 (a silent way to under-report).
+
+---
+
+## Addendum — what the implementation actually did (written 2026-09-03, after slices 0–3)
+
+The audit list above was written before any code existed. These are the decisions the
+implementers actually took, each of which the review must reach a verdict on. They are recorded
+here so the reviewer does not have to reconstruct them from the diff.
+
+### Decisions to accept or reject explicitly
+
+1. **Value-channel scopes reuse `exn_scopes`/`exn_origins` with the `form` column carrying
+   channel-dependent meanings** (`'match_exception'`, `'raise'`, `'unknown'` reused for value
+   channels; scopes are flat, unparented "point facts" about one call's head, with no lexical
+   nesting). Rationale given: the query only reads `form` for `reraise`/`unknown`. **Verify that
+   claim by grep** — if anything else ever branches on `form`, this is a latent bug, and even if
+   not, judge whether a `kind` column or distinct form values would be worth the migration now
+   rather than after a second consumer appears.
+2. **Calls to a declared `binds` path are excluded from propagating-edge candidacy** (slice 2,
+   deliberately narrow). Without it `Stdlib.Option.bind`'s own external-⊤ status made ordinary
+   option-bind code spuriously `UNBOUNDED`. Check this is implemented as "the bind call itself is
+   plumbing" and not as "anything named like a bind is ignored".
+3. **`head_qualified_name` was widened to also match `Head_local`** (slice 3), because a declared
+   path in the same module is indexed under its bare name. Justified as safe "since no existing
+   declared path is spelled that way" — **that is an assumption about configs, not about code**.
+   Check what happens when a user declares a bare name that collides with a same-module function.
+4. **The `replace` transform with a non-lambda mapper always yields ⊤**, rather than resolving a
+   named mapper whose set is Known. A deliberate, sound over-approximation — confirm it is
+   documented in the spec/doc and not silently narrower than FR-025.
+5. **Polymorphic-variant identity is the bare label** (`` `Msg ``), with no unit qualification.
+   This is correct OCaml semantics (structural typing), but confirm the query's canonicalisation
+   does not accidentally send it through the rebind table.
+
+### Regression found and fixed in-flight — check it cannot recur
+
+`Arch_exn.load` read `exn_origins`/`exn_scopes` **without a channel filter**, so slice-2's new
+value-channel rows leaked into the exception channel's results. It was caught only because the
+anti-regression gate asserts exact numbers on the two external corpora. **Grep every SQL statement
+in `lib/arch_tools/arch_exn.ml` for a missing `channel` predicate**, and check the same class of
+bug in `bin/arch_query` and anywhere `exn_edges` is read.
+
+### Environment caveat for whoever re-runs the gates
+
+A sub-agent symlinked `_build` to `/var/tmp`, which silently broke the four tests that search
+upward from the build directory for repository files (`curation_doc`, `pcc`); the failures were
+then reported as "pre-existing". They were not. If tests fail in those four, check
+`ls -ld _build` before believing any diagnosis. With `_build` inside the worktree the suite is
+94/94, exit 0.
+
+### Stale-golden caveat
+
+`test/fixtures/self-index-stats.txt` records modules **and functions and calls**: any added code
+invalidates it, not just an added module. One slice skipped regenerating it on the wrong
+reasoning and left CI red.
