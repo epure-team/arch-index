@@ -68,9 +68,22 @@ cross-unit `let*` chain, and `main.ml`'s `begin_application` / `apply_operation`
 *first*; then run `may-fail … --channel tzresult` and compare. A mismatch is a soundness NO-GO,
 not a note.
 
-| function | file:line | expected | why (from source) | actual | verdict |
-|---|---|---|---|---|---|
-| _(fill before running)_ | | | | | |
+**Written 2026-09-03 from source, before any `may-fail` run** (unit prefix
+`Tezos_raw_protocol_alpha` elided as `…`; canonical paths per the exception channel's rule).
+
+| # | function | file:line | expected `may-fail … --channel tzresult` | why (read from source) | actual | verdict |
+|---|---|---|---|---|---|---|
+| O-1 | `Period_repr.of_seconds` | `period_repr.ml:135-139` | `BOUNDED: {….Period_repr.Malformed_period}` | `match Internal.create secs with Some v -> return v \| None -> tzfail (Malformed_period secs)` — one literal origin via `Result_syntax.tzfail`, no bind of a carrier callee, `Internal.create` returns an `option` (not a `tzresult` carrier ⇒ no `tzresult` propagation). | | |
+| O-2 | `Tez_repr.( -? )` | `tez_repr.ml:125-130` | `BOUNDED: {….Tez_repr.Subtraction_underflow}` | same shape: one `tzfail` with a literal constructor, no carrier callee. Also checks that an operator name round-trips as a function node. | | |
+| O-3 | `Time_repr.( -? )` | `time_repr.ml:72-73` | `BOUNDED: {….Time_repr.Timestamp_sub, ….Period_repr.Malformed_period}` — the `Period_repr` element marked *wrapped* | `record_trace Timestamp_sub (Period_repr.of_seconds (…))`. `record_trace` is `mode = add`: the inner set (O-1, **cross-unit**) survives and the literal argument is added. This single row exercises the transform's add-semantics, cross-unit canonical-path agreement, and the fact that the inner set is not replaced. **If `Malformed_period` is missing, the transform was implemented as `replace` — a CRITICAL omission.** | | |
+| O-4 | `Contract_storage.spend_from_balance` | `contract_storage.ml:674-676` | `BOUNDED: {….Contract_storage.Balance_too_low, ….Tez_repr.Subtraction_underflow}` (second wrapped) | `record_trace (Balance_too_low …) Tez_repr.(balance -? amount)` — same add-semantics over O-2, a second cross-unit chain, and a locally-qualified operator call (`Tez_repr.( -? )` under a local open). | | |
+| O-5 | `Script_repr.force_bytes` | `script_repr.ml:264-266` | `tzresult`: `BOUNDED: {….Script_repr.Lazy_script_decode}`; `exception`: `BOUNDED: {}` | `Error_monad.catch_f (fun () -> Data_encoding.force_bytes expr) (fun _ -> Lazy_script_decode)` — the **converter** case: the thunk is a catch-all handler scope on the *exception* channel (so whatever `Data_encoding.force_bytes` may raise is closed, ⊤ included) and an origin on `tzresult` named by the handler's literal return. Checks both halves of `converters` in one function. | | |
+| O-6 | `Main.begin_application` | `main.ml` (exposed) | `UNBOUNDED (⊤)` on `tzresult`, with reasons naming `may_top_edge` sites in `alpha_context.ml`; the *known* part must be non-empty | An entry point behind the functor-parameter frontier: the honest answer is ⊤ with witnesses, and the known part must still be listed (the `Top (known, reasons)` shape). A `BOUNDED` verdict here would be a soundness failure — the cone provably reaches unresolved edges. | | |
+| O-7 | `Main.apply_operation`, `Main.finalize_block` | `main.ml` (exposed) | as O-6 | Same rationale; recorded so the entry-point escape set is on file for the protocol invariant "nothing escapes to the shell". | | |
+
+Filling `actual`/`verdict` is QA's job; any mismatch is a **soundness NO-GO**, not a note. O-3 and
+O-4 are the load-bearing rows (transform semantics + cross-unit identity); O-5 is the only
+cross-channel row.
 
 Record `error-stats --channel tzresult` with and without `--assume-externals-pure`,
 `fixpoint_seconds`, and the rejected-row count (must be 0).
