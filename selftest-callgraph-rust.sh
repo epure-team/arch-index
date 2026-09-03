@@ -115,6 +115,46 @@ if [ -n "${raw:-}" ]; then
   grep -q "fallback" /tmp/selftest-cg-rust-missing.stderr || note "missing-facts: fallback message not printed to stderr"
 fi
 
+# ── Scenario 4 (CHECK-6): trait-defining crate omits publish=false → stays MAY_TOP ──
+mkdir -p "$WS/nopublish/crate_a/src" "$WS/nopublish/crate_b/src"
+cat >"$WS/nopublish/Cargo.toml" <<'EOF'
+[workspace]
+members = ["crate_a", "crate_b"]
+resolver = "2"
+EOF
+cat >"$WS/nopublish/crate_a/Cargo.toml" <<'EOF'
+[package]
+name = "crate_a"
+version = "0.1.0"
+edition = "2021"
+EOF
+cat >"$WS/nopublish/crate_a/src/lib.rs" <<'EOF'
+pub trait Doer { fn do_it(&self); }
+impl Doer for i32 { fn do_it(&self) {} }
+pub fn use_dyn(d: &dyn Doer) { d.do_it(); }
+EOF
+cat >"$WS/nopublish/crate_b/Cargo.toml" <<'EOF'
+[package]
+name = "crate_b"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+crate_a = { path = "../crate_a" }
+EOF
+cat >"$WS/nopublish/crate_b/src/lib.rs" <<'EOF'
+pub fn entry(x: &i32) { crate_a::use_dyn(x); }
+EOF
+raw_nopub="$("$DRIVER_HARNESS" "$WS/nopublish" 2>/tmp/selftest-cg-rust-nopublish.stderr)"
+if [ -z "$raw_nopub" ]; then
+  note "nopublish: producer emitted nothing (see /tmp/selftest-cg-rust-nopublish.stderr)"
+else
+  merged="$(printf '%s\n' "$raw_nopub" | "$MERGE" --expected-crates crate_a,crate_b 2>/dev/null)"
+  n_enum=$(printf '%s\n' "$merged" | grep -c '"kind":"MAY_ENUMERATED"')
+  [ "$n_enum" -eq 0 ] || note "nopublish: expected 0 MAY_ENUMERATED edges (publish-boundary gate must force MAY_TOP), got $n_enum"
+fi
+
 if [ "$fails" -eq 0 ]; then
   echo "selftest-callgraph-rust: OK"
   exit 0
