@@ -196,6 +196,11 @@ type pending_call = {
           execute (R2). Under-approximate — unmodelled constructs stay
           reachable, so this never over-claims. *)
   call_site : string;
+  exn_scope : int option;
+      (** innermost exception-handler scope enclosing the call site in the
+          caller node — a walker-local id inside [collect_calls_from_expr],
+          the [exn_scopes] row id once [process_cmt] has stored the scope
+          (specs/exn-raise-sets.md). *)
 }
 
 (** Flat [(name, module)] display of a pending call's callee, for kind-less
@@ -253,12 +258,19 @@ val build_local_fn_stamps :
     same-module top-level function-binder stamps ([Ident.unique_name]) to their
     syntactic arity. *)
 val collect_calls_from_expr :
+  ?canon_exn:(Path.t -> string) ->
   src_path:string ->
   caller_module:string ->
   caller_name:string ->
   local_fn_stamps:(string, string * int) Hashtbl.t ->
   Typedtree.expression ->
-  pending_call list * lambda_node list
+  pending_call list
+  * lambda_node list
+  * (string * (Arch_index_exn.scope list * Arch_index_exn.origin list)) list
+(** The third component holds each node's exception facts (handler scopes and
+    raise origins), keyed by the node name its calls are attributed to.
+    [canon_exn] canonicalises exception constructor paths (default:
+    [Path.name] — the LSP fallback path, which stores no exception rows). *)
 
 (** Collected type usage information. *)
 type pending_type_usage = {
@@ -299,5 +311,9 @@ val process_cmt :
   stmt_ty:Sqlite3.stmt ->
   stmt_fld:Sqlite3.stmt ->
   stmt_ctor:Sqlite3.stmt ->
+  stmt_scope:Sqlite3.stmt ->
+  stmt_catch:Sqlite3.stmt ->
+  stmt_origin:Sqlite3.stmt ->
+  stmt_rebind:Sqlite3.stmt ->
   string ->
   pending_call list * pending_dep list * pending_type_usage list

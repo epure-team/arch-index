@@ -485,6 +485,10 @@ type pending_call = {
          degrade to opaque straight-line nodes, so they stay reachable — the
          analysis under-reports dead code and never over-claims. *)
   call_site : string; (* file:line *)
+  exn_scope : int option;
+      (* innermost exception-handler scope enclosing the call site, in the
+         caller node ([Arch_index_exn] local id during the walk, rewritten to
+         the [exn_scopes] row id by [process_cmt] before resolution). *)
 }
 
 (** Flat display of a pending call's callee: [(name, module)] — the qualified
@@ -519,6 +523,9 @@ type lctx = {
          default. They must stay unreachable (that is what demotes their calls
          to conditional) while not counting as dead code. *)
   lcaller : string; (* attribution: top-level name or lambda chain *)
+  lexn : Arch_index_exn.acc;
+      (* exception origins / handler scopes of THIS node: a lambda literal gets
+         a fresh, empty accumulator, so a parent's [try] never covers its body *)
 }
 
 (** Collected type usage information.
@@ -789,8 +796,8 @@ let build_local_fn_stamps (structure : Typedtree.structure) =
     resolvable (MUST-candidate) call only if its stamp is in this set —
     otherwise it is a parameter / local binding / closure and is MAY_TOP.
     Returns a list of pending calls. *)
-let collect_calls_from_expr ~src_path ~caller_module ~caller_name
-    ~local_fn_stamps (expr : Typedtree.expression) =
+let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ~src_path ~caller_module
+    ~caller_name ~local_fn_stamps (expr : Typedtree.expression) =
   (* Per-node CFG: every function — the top-level binding AND each nested
      lambda node — gets its own lowering context with its own graph, current
      block, and try-dispatch stack. Calls record their (context, block); after
@@ -810,6 +817,7 @@ let collect_calls_from_expr ~src_path ~caller_module ~caller_name
       lhandlers = [];
       ldeferred = [];
       lcaller = caller;
+      lexn = Arch_index_exn.create ();
     }
   in
   let root_ctx = new_ctx caller_name in
@@ -822,7 +830,8 @@ let collect_calls_from_expr ~src_path ~caller_module ~caller_name
     let line = loc.Location.loc_start.pos_lnum in
     let call_site = Printf.sprintf "%s:%d" src_path line in
     let c = !cur in
-    raw := (c.cid, c.lblk, c.lcaller, head, partial, call_site) :: !raw
+    let exn_scope = Arch_index_exn.current_scope c.lexn in
+    raw := (c.cid, c.lblk, c.lcaller, head, partial, call_site, exn_scope) :: !raw
   in
   (* Current-context CFG shorthands. *)
   let blk () = (!cur).lblk in
@@ -1153,7 +1162,19 @@ let collect_calls_from_expr ~src_path ~caller_module ~caller_name
                  are legitimately MUST. A [Partial] match (refutable pattern /
                  guard) additionally gets a Match_failure BYPASS edge so a
                  lone arm can never forge a MUST. *)
+              (* Exception arms cover the SCRUTINEE only: the scope is entered
+                 around it and left before any arm walks. *)
+              let exn_arms = Arch_index_exn.exception_arms comp_cases in
+              let scoped = exn_arms <> [] in
+              if scoped then
+                ignore
+                  (Arch_index_exn.enter_scope (!cur).lexn ~canon:canon_exn
+                     ~form:Arch_index_exn.Match_exception ~loc:expr.exp_loc ~arms:exn_arms
+                    : int) ;
               self.expr self scrut ;
+              if scoped then Arch_index_exn.leave_scope (!cur).lexn ;
+              if partiality = Partial then
+                Arch_index_exn.record_partial (!cur).lexn ~loc:expr.exp_loc ;
               let s_end = (blk ()) in
               let join = new_blk () in
               if partiality = Partial then edge s_end join ;
@@ -1177,7 +1198,16 @@ let collect_calls_from_expr ~src_path ~caller_module ~caller_name
                  virtual exit: it may not match. *)
               let dispatch = new_blk () in
               (!cur).lhandlers <- dispatch :: (!cur).lhandlers ;
+              (* The exception scope is the BODY, lexically — pushed and popped
+                 in lockstep with the CFG dispatch block so the two cannot
+                 drift. Effect arms are not exception handlers. *)
+              ignore
+                (Arch_index_exn.enter_scope (!cur).lexn ~canon:canon_exn
+                   ~form:Arch_index_exn.Try ~loc:expr.exp_loc
+                   ~arms:(Arch_index_exn.value_arms val_cases)
+                  : int) ;
               self.expr self body ;
+              Arch_index_exn.leave_scope (!cur).lexn ;
               (match (!cur).lhandlers with
               | _ :: tl -> (!cur).lhandlers <- tl
               | [] -> ()) ;
@@ -1229,6 +1259,7 @@ let collect_calls_from_expr ~src_path ~caller_module ~caller_name
               edge (blk ()) head ;
               set_blk after
           | Texp_assert (e, _) -> (
+              Arch_index_exn.record_assert (!cur).lexn ~loc:expr.exp_loc ;
               match e.exp_desc with
               | Texp_construct (_, {cstr_name = "false"; _}, _) ->
                   (* [assert false] is NEVER elided by -noassert (compiler
@@ -1386,6 +1417,19 @@ let collect_calls_from_expr ~src_path ~caller_module ~caller_name
                      the call; nested constructs split blocks), then record. *)
                   default_iterator.expr self expr ;
                   record_head () ;
+                  (* Exception origin (identity-aware; primitive-keyed for
+                     [raise], Stdlib-path-keyed for failwith/invalid_arg). *)
+                  if Arch_index_exn.is_raise_head fn_expr then
+                    Arch_index_exn.record_raise_head (!cur).lexn ~canon:canon_exn ~args
+                      ~loc:expr.exp_loc
+                  else (
+                    match Arch_index_exn.stdlib_head fn_expr with
+                    | Some head ->
+                        Arch_index_exn.record_stdlib_head (!cur).lexn ~canon:canon_exn ~head
+                          ~args ~loc:expr.exp_loc
+                    | None ->
+                        Arch_index_exn.record_prim_head (!cur).lexn ~fn:fn_expr ~args
+                          ~loc:expr.exp_loc) ;
                   (* Diverging head (raise/failwith/…): terminate AFTER the
                      head call was recorded in this block (the raise itself
                      runs), so post-divergence code lands entry-unreachable. *)
@@ -1431,19 +1475,32 @@ let collect_calls_from_expr ~src_path ~caller_module ~caller_name
           | Tparam_pat _ -> ())
         params
     in
+    (* A refutable parameter pattern ([fun (Some x) -> …]) raises
+       Match_failure on the function's own entry: an origin of this node. *)
+    let record_param_partials params =
+      List.iter
+        (fun (p : Typedtree.function_param) ->
+          if p.fp_partial = Partial then
+            Arch_index_exn.record_partial (!cur).lexn ~loc:p.fp_loc)
+        params
+    in
     let rec peel (e : Typedtree.expression) =
       match e.exp_desc with
       | Texp_function (params, Tfunction_body b) ->
           collect_param_defaults params ;
+          record_param_partials params ;
           peel b
       | Texp_function (params, Tfunction_cases _) ->
           collect_param_defaults params ;
+          record_param_partials params ;
           e
       | _ -> e
     in
     let root = peel e0 in
     (match root.exp_desc with
     | Texp_function (_, Tfunction_cases {cases; partial; _}) ->
+        if partial = Partial then
+          Arch_index_exn.record_partial (!cur).lexn ~loc:root.exp_loc ;
         let s_end = blk () in
         let join = new_blk () in
         if partial = Partial then edge s_end join ;
@@ -1476,7 +1533,7 @@ let collect_calls_from_expr ~src_path ~caller_module ~caller_name
     !all_ctxs ;
   let calls =
     List.rev_map
-      (fun (cid, block, caller, head, partial, call_site) ->
+      (fun (cid, block, caller, head, partial, call_site, exn_scope) ->
         let cond =
           match Hashtbl.find_opt verdicts cid with
           | Some v -> not (Arch_index_cfg.always_exec v block)
@@ -1492,10 +1549,15 @@ let collect_calls_from_expr ~src_path ~caller_module ~caller_name
           | Some v -> not (Arch_index_cfg.may_run v block)
           | None -> false (* unknown ctx: never claim dead *)
         in
-        {caller_module; caller_name = caller; head; partial; cond; dead; call_site})
+        {caller_module; caller_name = caller; head; partial; cond; dead; call_site; exn_scope})
       !raw
   in
-  (calls, List.rev !lambdas)
+  (* Exception facts per node, keyed by the node name the calls are attributed
+     to — the same key [process_cmt] uses to find the node's [functions] row. *)
+  let exn_by_node =
+    List.rev_map (fun c -> (c.lcaller, Arch_index_exn.finalize c.lexn)) !all_ctxs
+  in
+  (calls, List.rev !lambdas, exn_by_node)
 
 (* -------------------------------------------------------------------------- *)
 (* Process a single .cmt file                                                 *)
@@ -1509,7 +1571,7 @@ let collect_calls_from_expr ~src_path ~caller_module ~caller_name
     @param count_code_lines Function to count code lines in a source file *)
 let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
     ~exposed_tbl ~doc_tbl ~module_quint_tbl ~stmt_mod ~stmt_fn ~stmt_ty
-    ~stmt_fld ~stmt_ctor path =
+    ~stmt_fld ~stmt_ctor ~stmt_scope ~stmt_catch ~stmt_origin ~stmt_rebind path =
   match Cmt_format.read path with
   | _, None -> ([], [], [])
   | _, Some info -> (
@@ -1585,6 +1647,52 @@ let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
                   let pending_type_usages = ref [] in
                   let local_fn_stamps = build_local_fn_stamps structure in
                   let binding_names = build_binding_names structure in
+                  (* Exception identity (specs/exn-raise-sets.md): the idents a
+                     structure item of THIS unit declares — exceptions,
+                     extension constructors, modules — map to the module-
+                     qualified name a cross-unit reference would print, so a
+                     raise site here and a handler elsewhere spell the same
+                     canonical path. Built over the whole structure first,
+                     since a binding may raise an exception declared below
+                     it. [exception Alias = Target] is recorded for query-time
+                     canonicalisation. *)
+                  let unit_declared = Hashtbl.create 16 in
+                  let rebinds = ref [] in
+                  iter_structure_items structure
+                    ~f:(fun ~prefix (it : Typedtree.structure_item) ->
+                      let declare (ext : Typedtree.extension_constructor) =
+                        let q = qualify ~prefix (Ident.name ext.ext_id) in
+                        Hashtbl.replace unit_declared (Ident.unique_name ext.ext_id) q ;
+                        match Arch_index_exn.rebind_of ext with
+                        | Some target -> rebinds := (modname ^ "." ^ q, target) :: !rebinds
+                        | None -> ()
+                      in
+                      match it.str_desc with
+                      | Tstr_exception te -> declare te.tyexn_constructor
+                      | Tstr_typext te -> List.iter declare te.tyext_constructors
+                      | Tstr_module {mb_id = Some id; _} ->
+                          Hashtbl.replace unit_declared (Ident.unique_name id)
+                            (qualify ~prefix (Ident.name id))
+                      | Tstr_recmodule mbs ->
+                          List.iter
+                            (fun (mb : Typedtree.module_binding) ->
+                              match mb.mb_id with
+                              | Some id ->
+                                  Hashtbl.replace unit_declared (Ident.unique_name id)
+                                    (qualify ~prefix (Ident.name id))
+                              | None -> ())
+                            mbs
+                      | _ -> ()) ;
+                  let canon_exn =
+                    Arch_index_exn.canonical_path
+                      ~unit_declared:(Hashtbl.find_opt unit_declared)
+                      ~cmt_modname:modname
+                  in
+                  List.iter
+                    (fun (alias_path, target) ->
+                      insert_exn_rebind db stmt_rebind ~alias_path
+                        ~target_path:(canon_exn target))
+                    (List.rev !rebinds) ;
                   let add_dep target_path dep_kind alias_name line_number =
                     pending_deps :=
                       {
@@ -1873,6 +1981,10 @@ let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
                                         ~module_path:rel_path
                                         ~name
                                   | Some function_id ->
+                                      (* node name → functions row id, for the
+                                         parent and (below) each lambda node *)
+                                      let node_ids = Hashtbl.create 4 in
+                                      Hashtbl.replace node_ids name function_id ;
                                       (* Collect type usages from this function's signature *)
                                       let type_usages =
                                         extract_types_from_signature vb.vb_pat.pat_type
@@ -1890,8 +2002,9 @@ let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
                                         type_usages ;
                                       (* Collect calls (and promoted lambda nodes) from
                                          this function's body *)
-                                      let calls, lam_nodes =
+                                      let calls, lam_nodes, exn_by_node =
                                         collect_calls_from_expr
+                                          ~canon_exn
                                           ~src_path:rel_path
                                           ~caller_module:rel_path
                                           ~caller_name:name
@@ -1924,12 +2037,81 @@ let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
                                               ~intent:None
                                               ()
                                           with
-                                          | Some _ -> ()
+                                          | Some lam_id ->
+                                              Hashtbl.replace node_ids l.lam_name lam_id
                                           | None ->
                                               record_dropped_node
                                                 ~module_path:rel_path
                                                 ~name:l.lam_name)
                                         lam_nodes ;
+                                      (* Exception facts, per node, once every
+                                         node's row exists: scopes first (minted
+                                         parent-before-child, so the parent's
+                                         row id is known), then their caught
+                                         paths, then origins. A node whose row
+                                         was rejected takes its facts with it —
+                                         they must not land on another id. *)
+                                      let scope_ids = Hashtbl.create 8 in
+                                      List.iter
+                                        (fun (node, (scopes, origins)) ->
+                                          match Hashtbl.find_opt node_ids node with
+                                          | None -> ()
+                                          | Some fid ->
+                                              List.iter
+                                                (fun (s : Arch_index_exn.scope) ->
+                                                  let parent_id =
+                                                    Option.bind s.s_parent (fun p ->
+                                                        Hashtbl.find_opt scope_ids (node, p))
+                                                  in
+                                                  match
+                                                    insert_exn_scope db stmt_scope
+                                                      ~function_id:fid ~parent_id
+                                                      ~form:
+                                                        (Arch_index_exn.scope_form_to_string
+                                                           s.s_form)
+                                                      ~line:s.s_line ~col:s.s_col
+                                                      ~catch_all:s.s_catch_all
+                                                  with
+                                                  | Some sid ->
+                                                      Hashtbl.replace scope_ids (node, s.s_id) sid ;
+                                                      List.iter
+                                                        (fun exn_path ->
+                                                          insert_exn_scope_catch db stmt_catch
+                                                            ~scope_id:sid ~exn_path)
+                                                        s.s_caught
+                                                  | None -> ())
+                                                scopes ;
+                                              List.iter
+                                                (fun (o : Arch_index_exn.origin) ->
+                                                  let scope_id =
+                                                    Option.bind o.o_scope (fun p ->
+                                                        Hashtbl.find_opt scope_ids (node, p))
+                                                  in
+                                                  insert_exn_origin db stmt_origin ~function_id:fid
+                                                    ~scope_id
+                                                    ~form:(Arch_index_exn.form_to_string o.o_form)
+                                                    ~exn_path:o.o_path ~escapes:o.o_escapes
+                                                    ~line:o.o_line ~col:o.o_col)
+                                                origins)
+                                        exn_by_node ;
+                                      (* Calls carry the walker's LOCAL scope id;
+                                         rewrite to the row id (None if the
+                                         scope row was rejected: an unlinked
+                                         call over-approximates — sound). *)
+                                      let calls =
+                                        List.map
+                                          (fun (c : pending_call) ->
+                                            match c.exn_scope with
+                                            | None -> c
+                                            | Some local ->
+                                                {
+                                                  c with
+                                                  exn_scope =
+                                                    Hashtbl.find_opt scope_ids
+                                                      (c.caller_name, local);
+                                                })
+                                          calls
+                                      in
                                       pending_calls :=
                                         List.rev_append calls !pending_calls)
                               | _ -> ())

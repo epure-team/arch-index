@@ -1,0 +1,15 @@
+<!-- No title: the path already identifies this file. -->
+
+_Generated: 2026-09-03_
+_DO NOT include the task description in this file or share it with the researcher._
+
+1. How are exception constructors, exception declarations (`exception E`, `type t += ...`) and `raise`/`failwith`/`invalid_arg`/`assert` expressions currently recognised or represented during the `.cmt` Typedtree walk in `lib/arch_index/`, if at all? Cite file:line for every recogniser.
+2. Where in the codebase are `try ... with` and `match ... with exception` boundaries currently analysed, and what information about handler scope (which patterns, which enclosing function) is preserved versus discarded?
+3. How are top-level bindings and promoted nested-lambda nodes distinguished and represented as separate indexed entities — how are lambda nodes named, when is their `functions` row inserted relative to the walk of the parent body, and how do their call edges get attributed?
+4. What are the precise definitions and generation rules for the three edge kinds (MUST, MAY_ENUMERATED, MAY_TOP) in the Typedtree walk and in `docs/edge-kind-contract.md`, and how does a callee that is not in the index (NULL `callee_id`) appear in `calls` and in `lib/arch_tools/arch_graph.ml`?
+5. How does `bin/arch_query` compute transitive call-graph properties today (`reaches`, `unreachable`, `escapes`, `dead-code`, effects queries) — which SQL/OCaml idioms, which contract checks (`need_contract`, `need_known`), and how are ⊤ edges surfaced in the output?
+6. How are per-function attribute tables (e.g. `function_effects`, `dead_code_sites`, `decisions`) declared in `architecture-schema.sql` / the migration files, inserted from `lib/arch_index/arch_index.ml` and `arch_index_cmt.ml` (prepared statements, `exec_stmt ~what`), and read back by `lib/arch_tools`?
+7. How does the Flat/NDJSON schema in `lib/arch_db` and `lib/arch_tools/arch_db.ml` behave for tables or columns a producer did not populate — what does a query report when a table is absent versus empty, and what precedent exists for a "not analysed" answer?
+8. What test fixtures and helpers exist under `tezt/` for indexing a small OCaml project and querying the resulting DB (`with_fixture`, `index`, `query`, `Db`, `Batch`), how are tests registered, and what does `docs/adr/001-self-index-golden.md` require when a new module is added to `lib/arch_index`?
+9. [ecosystem] How do existing static-analysis tools for OCaml and other languages with unchecked exceptions (e.g. OCaml's historical exception analysers, Infer, Java/Kotlin analyzers, Python/Go linters) represent exception identity and handler coverage in their call-graph or effect models, and what do they report when the exception value is not statically known?
+10. [ecosystem] Which OCaml 5.3 `Typedtree` / `Types` constructors encode exception constructors (`Cstr_extension`), exception patterns in handlers (`Tpat_construct`, `Tpat_exception`, `Tpat_or`, guards), local exceptions (`Texp_letexception`) and partial matches, according to the compiler's own `typedtree.mli` / `types.mli` and published documentation?

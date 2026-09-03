@@ -470,3 +470,126 @@ val insert_type_usage :
   usage_role:string ->
   position:int option ->
   unit
+
+(** {2 Exception-identity rows (specs/exn-raise-sets.md)} *)
+
+(** [insert_call] with the rowid handed back ([None] on rejection), so a
+    dependent [call_exn_scopes] row can reference this call and never another.
+
+    {pre}
+    Same as {!insert_call}.
+
+    {post}
+    Same row as {!insert_call}; returns its rowid, or [None] if rejected.
+
+    {violators}
+    (none)
+
+    {violates}
+    (none) *)
+val insert_call_rowid :
+  Sqlite3.db ->
+  Sqlite3.stmt ->
+  caller_id:int ->
+  callee_id:int option ->
+  callee_name:string ->
+  call_site:string option ->
+  kind:string ->
+  int option
+
+(** Link a call to the innermost handler scope enclosing its site.
+
+    {pre}
+    [call_id] and [scope_id] reference existing rows.
+
+    {post}
+    One [call_exn_scopes] row, or a counted rejection.
+
+    {violators}
+    (none)
+
+    {violates}
+    (none) *)
+val insert_call_exn_scope : Sqlite3.db -> Sqlite3.stmt -> call_id:int -> scope_id:int -> unit
+
+(** Insert a handler scope; returns its rowid ([None] on rejection).
+
+    {pre}
+    [function_id] references an existing functions row; [parent_id], when
+    given, an existing [exn_scopes] row of the same function; [form] is
+    ["try"] or ["match_exception"].
+
+    {post}
+    One [exn_scopes] row and its rowid, or [None] and a counted rejection.
+
+    {violators}
+    (none)
+
+    {violates}
+    (none) *)
+val insert_exn_scope :
+  Sqlite3.db ->
+  Sqlite3.stmt ->
+  function_id:int ->
+  parent_id:int option ->
+  form:string ->
+  line:int ->
+  col:int ->
+  catch_all:bool ->
+  int option
+
+(** One caught canonical path of a scope's closing arms.
+
+    {pre}
+    [scope_id] references an existing [exn_scopes] row.
+
+    {post}
+    One [exn_scope_catches] row, or a counted rejection.
+
+    {violators}
+    (none)
+
+    {violates}
+    (none) *)
+val insert_exn_scope_catch : Sqlite3.db -> Sqlite3.stmt -> scope_id:int -> exn_path:string -> unit
+
+(** One raise origin.
+
+    {pre}
+    [function_id] references an existing functions row; [form] is one of the
+    [exn_origins.form] CHECK values.
+
+    {post}
+    One [exn_origins] row, or a counted rejection.
+
+    {violators}
+    (none)
+
+    {violates}
+    (none) *)
+val insert_exn_origin :
+  Sqlite3.db ->
+  Sqlite3.stmt ->
+  function_id:int ->
+  scope_id:int option ->
+  form:string ->
+  exn_path:string option ->
+  escapes:bool ->
+  line:int ->
+  col:int ->
+  unit
+
+(** [exception Alias = Target], both canonical.
+
+    {pre}
+    None.
+
+    {post}
+    One [exn_rebinds] row, or a counted rejection (duplicate alias).
+
+    {violators}
+    (none)
+
+    {violates}
+    (none) *)
+val insert_exn_rebind : Sqlite3.db -> Sqlite3.stmt -> alias_path:string -> target_path:string -> unit

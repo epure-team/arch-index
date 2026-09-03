@@ -90,4 +90,5 @@ let () =
   Nested_module_qualification.register () ;
   Must_null_ceiling.register () ;
   Query_limits.register () ;
+  Exn_raise_sets.register () ;
   Tezt.Test.run ()
