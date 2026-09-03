@@ -713,3 +713,10 @@ module Db = Arch_index_db
 
 let run_lsp = Runner.run
 let run_lsp_multi = Runner.run_multi
+
+(* -------------------------------------------------------------------------- *)
+(* Schema version and shipped schema text (#51 part 1)                        *)
+(* -------------------------------------------------------------------------- *)
+
+let schema_version = Arch_index_db.current_schema_version
+let schema_sql = Arch_index_db.schema_sql

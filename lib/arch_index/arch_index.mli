@@ -45,7 +45,7 @@ type result = {
     @param db_path Path to the SQLite database (default: from ARCH_DB_PATH env
       or [docs/architecture.db])
     @param schema_path Path to the SQL schema file (default: from
-      ARCH_SCHEMA_PATH env or [docs/architecture-schema.sql])
+      ARCH_SCHEMA_PATH env or [architecture-schema.sql])
     @param build_dir Directory to scan (e.g., [_build/default])
     @return Statistics about what was indexed
 
@@ -219,3 +219,15 @@ val run_lsp_multi :
   ?verbose:bool ->
   unit ->
   (unit, string) Stdlib.result
+
+(** Current schema version, ["<major>.<minor>"] — what
+    [comment_db_meta.schema_version] is stamped with by every run above.
+    History and the table/column set each version added:
+    [docs/schema-versions.md]. (#51 part 1.) *)
+val schema_version : string
+
+(** [architecture-schema.sql]'s contents, embedded at compile time — lets a
+    consumer of this library diff against the exact schema text a given build
+    promises without opening a database or resolving an install-time
+    filesystem path. (#51 part 1.) *)
+val schema_sql : string

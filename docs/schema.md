@@ -89,3 +89,36 @@ the flat one, behind one node type.
 mis-map every hunk in the file, which is worse than having no span at all.
 
 See [`architecture-schema.sql`](../architecture-schema.sql) for full column definitions, indices, and triggers.
+
+## Schema version history
+
+`comment_db_meta.schema_version` is stamped `"<major>.<minor>"` at every index run — read from
+`Arch_index_db.current_schema_version` (re-exported as `Arch_index.schema_version`), the single
+source of truth every write site uses. Bump the **minor** component for an additive change (new
+nullable column, table, or index — every version below is this kind); bump the **major** component
+for a breaking one (a column/table removal, or a type change an existing consumer's query could
+not survive unmodified). A consumer that only understands version `N.x` can safely read a `N.y`
+database (every `N.*` schema is a superset of `N.0`); it must refuse a database whose major version
+it does not recognize, since some table or column it depends on may be gone.
+
+This versions the **main** schema (`architecture-schema.sql`, above) only. The flat schema (see
+"The flat schema" above) is a fixed, deliberately minimal 3-table shape that has never changed —
+it shares the same `comment_db_meta.schema_version` key, but a version bump here does not imply
+anything about the flat schema, and vice versa. A consumer must check which schema it opened (`Arch_db.schema`
+probes for `calls.caller_name`, per [`lib/arch_tools/arch_db.ml`](../lib/arch_tools/arch_db.ml)) before
+treating a version number as informative for that shape.
+
+| Version | Added | Migration |
+|---|---|---|
+| `1.0` | The base 16-table schema (`functions`, `calls`, `modules`, `comment_db_meta`, and the rest listed above) | `architecture-schema.sql` (baseline) |
+| `1.1` | `function_effects`, `value_kinds` — mutation/effect tracking (Phase 1 capability A) | `effects-schema-migration.sql` |
+| `1.2` | `reachability_class`, `actor_role`, `temporal_class`, `gating`, `value_touched`, `precondition` columns on `function_effects`; `attack_edges` table and `from_path`/`to_path` columns — attack-surface capability layer (Phase 2) | `capabilities-schema-migration.sql` |
+
+Versions `1.1` and `1.2` are retroactive: both migrations were applied to `main` before this
+versioning mechanism existed, so `schema_version` never actually recorded them at the time — this
+table is the authoritative record now. Every schema change from here on must add a row before
+merging, per `docs/schema.md`'s own discipline: a query written against an earlier assumption must
+have a version to refuse against, not degrade silently into a null or a zero (#51 part 1).
+
+For out-of-band inspection (without opening a database), the exact schema text a given library
+build promises is also available at compile time as `Arch_index.schema_sql : string`.

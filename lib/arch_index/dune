@@ -19,6 +19,7 @@
  (private_modules arch_index_db arch_index_cmt)
  (inline_tests)
  (preprocessor_deps
-  (file ts_shim.js))
+  (file ts_shim.js)
+  (file ../../architecture-schema.sql))
  (preprocess
   (pps ppx_blob ppx_deriving_yojson ppx_inline_test ppx_assert)))

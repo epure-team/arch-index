@@ -332,7 +332,7 @@ let run ~sw ~env ~project_dir ~language ~output ?(no_enrich = false)
      write_functions db fn_rows ;
      write_calls db call_rows ;
      exec_exn db "COMMIT" ;
-     set_meta db "schema_version" "1" ;
+     set_meta db "schema_version" Arch_index_db.current_schema_version ;
      set_meta db "language" language
    with exn ->
      ignore (Sqlite3.db_close db) ;
@@ -465,7 +465,7 @@ let run_multi ~sw ~env ~project_dir ~languages ~output ?(no_enrich = false)
                    q) ;
               exec_exn db "DETACH DATABASE src")
             tmp_dbs ;
-          set_meta db "schema_version" "1" ;
+          set_meta db "schema_version" Arch_index_db.current_schema_version ;
           set_meta
             db
             "language"
