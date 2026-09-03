@@ -393,14 +393,32 @@ type seen = {
   types_wild : string list;  (** subset of [types]' keys containing [*] *)
 }
 
+(* FIX (review round 1, HIGH): [lift] and [unwrap] used to be listed here.
+   They are TYPE paths, not value paths — [Arch_index_errch.strip_wrapper]
+   compares them against a [Tconstr]'s [Path.name] (the shipped Tezos
+   profile declares [lift = ["Lwt.t"; ...]] and
+   [unwrap = ["...Error_monad.trace"]]), and the walker reports type
+   occurrences through [note_type_path], which only ever flips flags in the
+   [types] table. Seeded into [values], they could therefore never be
+   found: EVERY config declaring a lift or an unwrap reported them as
+   "matched nothing", and [--errors-strict] exited 1 unconditionally —
+   including for [profiles/tezos-errors.toml], whose whole reason to exist
+   is [--errors-profile tezos]. *)
 let declared_value_paths (c : channel) =
   List.map fst c.origins
-  @ c.lift @ c.unwrap
   @ List.map fst c.handlers
   @ c.binds
   @ List.map (fun (p, _, _) -> p) c.transforms
   @ List.map (fun (p, _, _, _, _) -> p) c.converters
   @ c.sinks
+
+(* Every path this channel expects to meet as a TYPE. The carrier spellings
+   ([type]/[underlying]/[aliases], all folded into [type_paths] at parse
+   time) plus the two wrapper lists. Only [type_paths] participates in the
+   "carrier matched nothing at all" FATAL rule below — a [lift] wrapper the
+   corpus happens not to use is an ordinary per-path miss, not a dead
+   channel. *)
+let declared_type_paths (c : channel) = c.type_paths @ c.lift @ c.unwrap
 
 let create (t : t) : seen =
   let values = Hashtbl.create 64 and types = Hashtbl.create 64 in
@@ -411,7 +429,7 @@ let create (t : t) : seen =
         (declared_value_paths c) ;
       List.iter
         (fun p -> if not (Hashtbl.mem types p) then Hashtbl.replace types p (ref false))
-        c.type_paths)
+        (declared_type_paths c))
     t.channels ;
   let wild_keys tbl = Hashtbl.fold (fun k _ acc -> if has_wildcard k then k :: acc else acc) tbl [] in
   { values; types; values_wild = wild_keys values; types_wild = wild_keys types }
@@ -438,7 +456,95 @@ let unmatched (s : seen) : string list =
   Hashtbl.iter (fun p flag -> if not !flag then acc := p :: !acc) s.types ;
   List.sort compare !acc
 
+(* -------------------------------------------------------------------------- *)
+(* Reachability — a channel shadowed by an earlier one (review round 1, HIGH) *)
+(* -------------------------------------------------------------------------- *)
+
+(* Carrier-channel selection is FIRST-MATCH-WINS over the merged channel list
+   ([Arch_index_errch.carrier_channel_of_type] is a [List.find_opt]), so a
+   channel whose carrier types are all already claimed by an earlier channel
+   can never own a carrier. It is not inert-and-harmless: it is still
+   published in [comment_db_meta.error_contract], so every query on it
+   answers [NOT_A_CARRIER(c)] — a claim ABOUT THE CODE — where the truth is
+   "this channel was never applicable". That is exactly the "looked and found
+   nothing" / "never looked" confusion the whole feature exists to prevent,
+   so a shadowed declaration is refused at load time instead of shipped.
+
+   [claims ~earlier ~later p]: would [earlier] swallow every carrier that
+   [later] claims through its type path [p]? Deliberately conservative — it
+   says yes only when [earlier] both spells a pattern covering [p] AND
+   applies no narrower argument test than [later] does. Two channels over
+   the same carrier type distinguished by [error_type] (e.g. two [result]
+   channels with different error types) stay reachable and are not refused. *)
+let claims ~(earlier : channel) ~(later : channel) (p : string) =
+  let covers = List.exists (fun p' -> path_matches p' p) earlier.type_paths in
+  let no_narrower_test =
+    (* [Arch_index_errch.error_arg_ok] returns [true] unconditionally for
+       these two shapes, so [earlier] accepts any argument list. *)
+    earlier.error_arg = None || earlier.error_type = None || earlier.error_type = Some ""
+    (* ...or the two apply the identical test, so neither can distinguish. *)
+    || (earlier.error_arg = later.error_arg
+       && earlier.error_type = later.error_type
+       && earlier.unwrap = later.unwrap)
+  in
+  covers && no_narrower_test
+
+(** See .mli. *)
+let check_reachable (t : t) : (unit, string) result =
+  let rec go seen_before = function
+    | [] -> Ok ()
+    | (c : channel) :: rest ->
+        let shadowed_by p =
+          List.find_opt (fun earlier -> claims ~earlier ~later:c p) seen_before
+        in
+        let verdict =
+          if c.type_paths = [] then None
+          else
+            (* Every one of [c]'s spellings must be claimed for [c] to be
+               unreachable; one free spelling is enough to keep it alive. *)
+            List.fold_left
+              (fun acc p ->
+                match acc with
+                | None -> None (* an earlier path was already free *)
+                | Some found -> (
+                    match shadowed_by p with
+                    | None -> None
+                    | Some earlier -> Some ((p, earlier) :: found)))
+              (Some []) c.type_paths
+        in
+        (match verdict with
+        | Some ((p, (earlier : channel)) :: _) ->
+            Error
+              (Printf.sprintf
+                 "arch-errors: channel %s: carrier type '%s' is already claimed by channel \
+                  '%s', declared earlier — channel selection is first-match-wins, so %s could \
+                  never own a carrier and every query on it would answer NOT_A_CARRIER(%s) \
+                  about code it never examined. Reorder the channels so the more specific one \
+                  comes first, or merge the two declarations into one."
+                 c.name p earlier.name c.name c.name)
+        | _ -> go (seen_before @ [c]) rest)
+  in
+  go [] t.channels
+
+(* A channel that came out of {!builtin} UNTOUCHED: same name, and every
+   declared list still structurally identical to the built-in's ([merge]
+   replaces a channel wholesale, so a profile or user file that redeclares
+   [\[channel.option\]] produces a channel that is no longer this).
+
+   Used to decide whose declarations may fail a [--errors-strict] run. The
+   pre-existing [builtin_names] waiver on the FATAL carrier rule compares
+   names only, which is right there (a built-in carrier absent from a small
+   corpus is not a bug, whoever last edited the channel); for strict it is
+   not enough — a user who redeclares [option] IS responsible for the paths
+   they then wrote, and a name-only test would waive them. *)
+let is_untouched_builtin (c : channel) =
+  match List.find_opt (fun (b : channel) -> b.name = c.name) builtin.channels with
+  | Some b -> canon_channel b = canon_channel c
+  | None -> false
+
 let validate (t : t) (s : seen) ~strict ?(builtin_names = []) () : (unit, string) result =
+  (* (channel, message): the channel is carried so [--errors-strict] can tell
+     a declaration the operator wrote from one they merely inherited. *)
   let warnings = ref [] in
   let fatal = ref None in
   List.iter
@@ -456,38 +562,47 @@ let validate (t : t) (s : seen) ~strict ?(builtin_names = []) () : (unit, string
                (Printf.sprintf
                   "arch-errors: channel %s: carrier type matched nothing in the indexed corpus"
                   c.name)) ;
-      let note_miss p =
-        match Hashtbl.find_opt s.values p with
+      let note_miss tbl p =
+        match Hashtbl.find_opt tbl p with
         | Some flag when not !flag ->
-            warnings := Printf.sprintf "arch-errors: channel %s: '%s' matched nothing" c.name p :: !warnings
+            warnings :=
+              (c, Printf.sprintf "arch-errors: channel %s: '%s' matched nothing" c.name p)
+              :: !warnings
         | _ -> ()
       in
-      List.iter note_miss (declared_value_paths c) ;
-      List.iter
-        (fun p ->
-          match Hashtbl.find_opt s.types p with
-          | Some flag when not !flag ->
-              warnings :=
-                Printf.sprintf "arch-errors: channel %s: '%s' matched nothing" c.name p
-                :: !warnings
-          | _ -> ())
-        c.type_paths)
+      List.iter (note_miss s.values) (declared_value_paths c) ;
+      List.iter (note_miss s.types) (declared_type_paths c))
     t.channels ;
   match !fatal with
   | Some msg -> Error msg
   | None ->
       let warnings = List.rev !warnings in
-      List.iter (fun w -> Printf.eprintf "%s\n%!" w) warnings ;
-      if strict && warnings <> [] then
+      List.iter (fun (_, w) -> Printf.eprintf "%s\n%!" w) warnings ;
+      (* FIX (review round 1, HIGH, same root as the lift/unwrap one): only
+         declarations the OPERATOR is responsible for may fail a strict run.
+         Before this, an untouched built-in dragged its own Stdlib paths into
+         every strict verdict — and one of them, ['Stdlib.option'], is a
+         spelling the compiler NEVER prints (it prints the predefined type
+         as bare [option]), so [--errors-strict] was unsatisfiable by
+         construction for any corpus and any config, not merely awkward. *)
+      let operator_warnings =
+        List.filter (fun ((c : channel), _) -> not (is_untouched_builtin c)) warnings
+      in
+      if strict && operator_warnings <> [] then
         Error
           (Printf.sprintf
              "arch-errors: --errors-strict: %d declaration(s) matched nothing"
-             (List.length warnings))
+             (List.length operator_warnings))
       else Ok ()
 
 (* -------------------------------------------------------------------------- *)
 (* Inline tests                                                              *)
 (* -------------------------------------------------------------------------- *)
+
+let string_contains ~needle haystack =
+  let nl = String.length needle and hl = String.length haystack in
+  let rec go i = i + nl <= hl && (String.sub haystack i nl = needle || go (i + 1)) in
+  nl = 0 || go 0
 
 let%test "of_toml round trip: a minimal channel parses" =
   match
@@ -516,11 +631,6 @@ let%test "of_toml: origins/handlers/transforms/converters array-of-tables decode
       && c.transforms = [("Fx.Res.map_error", Replace, 1)]
       && c.converters = [("Fx.catch", "exception", "myres", 1, None)]
   | _ -> false
-
-let string_contains ~needle haystack =
-  let nl = String.length needle and hl = String.length haystack in
-  let rec go i = i + nl <= hl && (String.sub haystack i nl = needle || go (i + 1)) in
-  nl = 0 || go 0
 
 let%test "of_toml: unknown key in a channel table is a naming error" =
   match of_toml "[channel.myres]\ntype = \"Fx.Res.t\"\nbogus = 1\n" with
@@ -582,6 +692,94 @@ let%test "validate: a channel whose carrier type matches nothing is always fatal
   let cfg = { channels = [{ result_channel with name = "r" }]; summaries = [] } in
   let s = create cfg in
   match validate cfg s ~strict:false () with Error _ -> true | Ok () -> false
+
+(* Review round 1, HIGH (FR-027): a channel shadowed by an earlier one. *)
+let%test "check_reachable: the builtins alone are all reachable" =
+  check_reachable builtin = Ok ()
+
+let%test "check_reachable: a second channel on the same carrier type is refused" =
+  (* Exactly the shipped profile's old [tzoption] shape. *)
+  let tzoption = { option_channel with name = "tzoption" } in
+  let cfg = { channels = builtin.channels @ [tzoption]; summaries = [] } in
+  match check_reachable cfg with
+  | Error msg ->
+      (* The message must name BOTH channels: which one is dead, and what
+         killed it. *)
+      string_contains ~needle:"tzoption" msg && string_contains ~needle:"'option'" msg
+  | Ok () -> false
+
+let%test "check_reachable: only the SHADOWED channel is refused, not the earlier one" =
+  let tzoption = { option_channel with name = "tzoption" } in
+  (* Declared FIRST, so it is [option] that becomes unreachable. *)
+  let cfg = { channels = [tzoption; option_channel]; summaries = [] } in
+  match check_reachable cfg with
+  | Error msg -> string_contains ~needle:"channel option:" msg
+  | Ok () -> false
+
+let%test "check_reachable: a distinguishing error_type keeps a shared carrier reachable" =
+  (* Two [result] channels that differ in the error type they accept are
+     genuinely both selectable — refusing them would be a false positive. *)
+  let a = { result_channel with name = "a"; error_type = Some "Fx.err_a" } in
+  let b = { result_channel with name = "b"; error_type = Some "Fx.err_b" } in
+  check_reachable { channels = [a; b]; summaries = [] } = Ok ()
+
+let%test "check_reachable: one unclaimed spelling is enough to stay reachable" =
+  let later = { option_channel with name = "wide"; type_paths = ["option"; "My.opt"] } in
+  check_reachable { channels = [option_channel; later]; summaries = [] } = Ok ()
+
+let%test "check_reachable: a wildcard earlier channel shadows a matching literal" =
+  let wide = { result_channel with name = "wide"; type_paths = ["Tz_*.result"] } in
+  let narrow = { result_channel with name = "narrow"; type_paths = ["Tz_alpha.result"] } in
+  match check_reachable { channels = [wide; narrow]; summaries = [] } with
+  | Error _ -> true
+  | Ok () -> false
+
+let%test "check_reachable: a literal earlier channel does NOT shadow a wider wildcard" =
+  let narrow = { result_channel with name = "narrow"; type_paths = ["Tz_alpha.result"] } in
+  let wide = { result_channel with name = "wide"; type_paths = ["Tz_*.result"] } in
+  check_reachable { channels = [narrow; wide]; summaries = [] } = Ok ()
+
+(* Review round 1, HIGH: [lift]/[unwrap] are TYPE paths. Seeded into the
+   VALUE set they were unreachable — [note_value_path] is never called with
+   a type constructor's path — so they reported "matched nothing" forever. *)
+let%test "validate: a lift path is found by note_type_path, not note_value_path" =
+  let chan = { result_channel with name = "r"; lift = ["Lwt.t"]; unwrap = ["Tr.trace"] } in
+  let cfg = { channels = [chan]; summaries = [] } in
+  let s = create cfg in
+  note_value_path s "Lwt.t" ;
+  note_value_path s "Tr.trace" ;
+  (* Still unmatched: a value occurrence says nothing about a type path. *)
+  List.mem "Lwt.t" (unmatched s)
+  && List.mem "Tr.trace" (unmatched s)
+  &&
+  (note_type_path s "Lwt.t" ;
+   note_type_path s "Tr.trace" ;
+   not (List.mem "Lwt.t" (unmatched s) || List.mem "Tr.trace" (unmatched s)))
+
+let%test "validate: an unmatched lift path does not make the channel fatal" =
+  (* Only [type_paths] carries the "carrier matched nothing" FATAL rule. *)
+  let chan = { result_channel with name = "r"; lift = ["Lwt.t"] } in
+  let cfg = { channels = [chan]; summaries = [] } in
+  let s = create cfg in
+  note_type_path s "result" ;
+  match validate cfg s ~strict:false () with Ok () -> true | Error _ -> false
+
+let%test "validate: an UNTOUCHED built-in's miss does not fail --errors-strict" =
+  (* [Stdlib.option] is a spelling the compiler never prints, so a strict run
+     that counted built-in misses could never succeed anywhere. *)
+  let cfg = { channels = builtin.channels; summaries = [] } in
+  let s = create cfg in
+  match validate cfg s ~strict:true ~builtin_names:["exception"; "result"; "option"] () with
+  | Ok () -> true
+  | Error _ -> false
+
+let%test "validate: REDECLARING a built-in puts it back under --errors-strict" =
+  let redeclared = { option_channel with sinks = ["Fx.never_there"] } in
+  let cfg = { channels = [redeclared]; summaries = [] } in
+  let s = create cfg in
+  match validate cfg s ~strict:true ~builtin_names:["option"] () with
+  | Error _ -> true
+  | Ok () -> false
 
 let%test "validate: a matched carrier type is not fatal" =
   let cfg = { channels = [{ result_channel with name = "r" }]; summaries = [] } in

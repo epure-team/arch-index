@@ -80,6 +80,19 @@ val merge : t -> t -> t
     the same declarations, changes when any declared list changes. *)
 val digest : t -> string
 
+(** Refuse an effective config in which some channel is STRUCTURALLY
+    unreachable: carrier selection is first-match-wins over the merged
+    channel list, so a channel all of whose carrier types are already
+    claimed by an earlier channel can never own a carrier — yet it is still
+    published in [comment_db_meta.error_contract], making every query on it
+    answer [NOT_A_CARRIER] (a claim about the analysed code) where the truth
+    is "this channel was never applicable". [Error] names both channels and
+    the shared carrier type, and says to reorder or merge them. Independent
+    of any corpus: it reads the config alone, so it is checked before
+    indexing starts. Two channels sharing a carrier type but distinguished
+    by [error_type]/[error_arg] are reachable and are NOT refused. *)
+val check_reachable : t -> (unit, string) result
+
 (** {2 Validation — declared-set-with-found-flags}
 
     [seen] stores ONLY the paths declared by a config's channels, each with
@@ -89,9 +102,15 @@ val digest : t -> string
     path, and are a cheap no-op for anything not declared. *)
 type seen
 
-(** Pre-populate a [seen] set with every path [t]'s channels declare
-    (values: origins/lift/unwrap/handlers/binds/transforms/converters/sinks;
-    types: [type_paths]), each starting unfound. *)
+(** Pre-populate a [seen] set with every path [t]'s channels declare, each
+    starting unfound. The split matters, because only [note_value_path] can
+    ever flip a value flag and only [note_type_path] a type flag:
+    - values: origins / handlers / binds / transforms / converters / sinks;
+    - types: [type_paths] plus [lift] and [unwrap], which name type
+      constructors ([Lwt.t], [...Error_monad.trace]) and are matched against
+      a [Tconstr]'s path by {!Arch_index_errch}, not against a call head.
+      Filing them as values made them permanently unmatchable and
+      [--errors-strict] permanently fatal (review round 1). *)
 val create : t -> seen
 
 val note_value_path : seen -> string -> unit
@@ -110,6 +129,14 @@ val unmatched : seen -> string list
     simply absent from a small/non-matching corpus is not a declaration bug
     (Clarifications: "Built-in channels that match nothing"), so it is only
     ever a warning, per-channel, independent of whether OTHER channels in
-    the same effective config came from a file. [~strict:true] also turns
-    any per-path miss into a fatal error. *)
+    the same effective config came from a file.
+
+    [~strict:true] additionally turns a per-path miss into a fatal error —
+    but only for a channel the operator is responsible for: one whose name
+    is not a built-in's, or whose declarations differ from that built-in's
+    (redeclaring [\[channel.option\]] in a profile puts the whole channel
+    back under strict). An UNTOUCHED built-in's misses stay warnings: they
+    are not the operator's declarations, and one of them ([Stdlib.option])
+    is a spelling the compiler never prints, which made [--errors-strict]
+    unsatisfiable for every config and every corpus (review round 1). *)
 val validate : t -> seen -> strict:bool -> ?builtin_names:string list -> unit -> (unit, string) result

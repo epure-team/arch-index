@@ -129,31 +129,52 @@ sinks = [
   "Tezos_protocol_environment_*.Error_monad.Lwt_result_syntax.return_unit",
 ]
 
-# Second Tezos channel (roster/error-channels/tezos-profile-evidence.md, "A
-# second Tezos channel exists"): the protocol environment's OWN option
-# monad, Error_monad.Option_syntax / Error_monad.Lwt_option_syntax — a
-# distinct binds vocabulary from the built-in `option` channel's
-# Stdlib.Option.*, even though both carry the SAME `option` type.
+# The protocol environment's OWN option monad
+# (roster/error-channels/tezos-profile-evidence.md, "A second Tezos channel
+# exists"): Error_monad.Option_syntax / Error_monad.Lwt_option_syntax, a
+# binds vocabulary the built-in `option` channel does not know about.
 #
-# KNOWN LIMITATION (recorded per the ambiguity rule): carrier-channel
-# selection (arch_index_errch.ml's carrier_channel_of_type) picks the
-# FIRST channel in declaration order whose type_paths match — since the
-# built-in `option` channel is always declared first (built-in < profile
-# in the merge order) and also claims the bare `option` type, every
-# option-typed function in a Tezos corpus is attributed to `option`, not
-# `tzoption`; `tzoption`'s own binds are therefore not reachable through
-# ordinary carrier-driven node classification in this slice. Declared
-# anyway (the brief asks for it, and the carrier TYPE is real and present,
-# so validation does not fail); disambiguating same-type channels by binds
-# vocabulary as well as carrier type is out of this slice's scope — a
-# follow-up residual, not silently swallowed.
-[channel.tzoption]
+# WAS a separate `[channel.tzoption]` until review round 1 (HIGH, FR-027).
+# It carried the SAME carrier type as the built-in `option` channel, and
+# carrier selection is first-match-wins over the merged channel list
+# (arch_index_errch.ml's carrier_channel_of_type is a List.find_opt) with
+# built-ins declared first — so `tzoption` could never own a carrier. It was
+# nonetheless published in comment_db_meta.error_contract, so
+# `may-fail <any function> --channel tzoption` answered NOT_A_CARRIER
+# (tzoption) for EVERY function in a Tezos corpus: a positive claim about
+# the analysed code, where the truth was "this channel was never
+# applicable". Arch_errors_config.check_reachable now refuses that shape at
+# load time, so the profile could no longer ship it as-is.
+#
+# MERGED rather than DELETED. Deleting it would have made the config load
+# with the least churn, but it would have thrown away a vocabulary the
+# verified 276-unit inventory actually found, to keep a channel that could
+# never use it. Overriding `[channel.option]` instead gives the four
+# Option_syntax binds to the channel that DOES own every option-typed
+# carrier in the corpus — the analysis these four paths were declared for
+# now actually runs. Because `merge` replaces a same-named channel whole
+# rather than field by field, the built-in's own Stdlib.Option vocabulary
+# (arch_errors_config.ml's option_channel) is restated here verbatim; keep
+# the two in step when either changes.
+[channel.option]
 type = "option"
+underlying = ["Stdlib.option"]
 error_type = ""
 origins = [{ path = "None", arg = 0 }]
 binds = [
+  # Built-in option_channel, restated (see above).
+  "Stdlib.Option.bind",
+  "Stdlib.Option.Syntax.let*",
+  "Stdlib.Option.Syntax.and*",
+  # The protocol environment's own option monad.
   "Tezos_protocol_environment_*.Error_monad.Option_syntax.let*",
   "Tezos_protocol_environment_*.Error_monad.Option_syntax.let+",
   "Tezos_protocol_environment_*.Error_monad.Lwt_option_syntax.let*",
   "Tezos_protocol_environment_*.Error_monad.Lwt_option_syntax.let*?",
+]
+handlers = [
+  # Built-in option_channel, restated (see above).
+  { path = "Stdlib.Option.value", arg = 1 },
+  { path = "Stdlib.Option.get", arg = 1 },
+  { path = "Stdlib.Option.fold", arg = 1 },
 ]
