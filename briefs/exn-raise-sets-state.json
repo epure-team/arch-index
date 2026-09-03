@@ -1,7 +1,7 @@
 {
   "task": "exn-raise-sets",
   "mode": "full",
-  "current_phase": "qa",
+  "current_phase": "ship",
   "events": [
     {
       "phase": "question",
@@ -55,6 +55,13 @@
       "at": "2026-09-03T16:24:49Z",
       "by": "roster-qa",
       "reason": "all gates green; proto_alpha CHECK-3 measured, 6 spot checks consistent with source"
+    },
+    {
+      "phase": "ship",
+      "outcome": "COMPLETED",
+      "at": "2026-09-03T16:29:10Z",
+      "by": "roster-ship",
+      "reason": "PR #54 opened on human approval; merge left to the human"
     }
   ]
 }

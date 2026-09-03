@@ -1,7 +1,9 @@
 # Ship Gate — exn-raise-sets
 
 **Date:** 2026-09-03
-**Status: PENDING HUMAN PUSH APPROVAL** — review GO (round 1 / cycle 1,
+**Status: VALIDATED** — human approved push + PR (merge left to the human), PR opened:
+https://github.com/epure-team/arch-index/pull/54
+**Review:** GO (round 1 / cycle 1,
 `briefs/exn-raise-sets-review.json`), QA GO (round 1, `briefs/exn-raise-sets-qa.md`). The
 push and the PR are outward-facing and wait for the human; the merge is the human's.
 **Branch:** `feat/exn-raise-sets` → `main` (base `origin/main` `69e5c3d`, up to date — no rebase
