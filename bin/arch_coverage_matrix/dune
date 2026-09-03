@@ -1,0 +1,4 @@
+(executable
+ (name arch_coverage_matrix)
+ (public_name arch_coverage_matrix)
+ (libraries arch_index sqlite3 cmdliner))

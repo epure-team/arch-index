@@ -818,6 +818,7 @@ module Arch_index_git = Arch_index_git
 module Arch_index_cfg = Arch_index_cfg
 module Comment_parser = Comment_parser
 module Language_registry = Language_registry
+module Coverage_matrix = Coverage_matrix
 module Lsp_client = Lsp_client
 module Lsp_types = Lsp_types
 module Ocaml_enricher = Ocaml_enricher

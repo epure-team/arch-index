@@ -75,6 +75,9 @@ let arch_impact () = locate ~env_var:"ARCH_IMPACT" "bin/arch_impact/arch_impact.
 
 let arch_mutants () = locate ~env_var:"ARCH_MUTANTS" "bin/arch_mutants/arch_mutants.exe"
 
+let arch_coverage_matrix () =
+  locate ~env_var:"ARCH_COVERAGE_MATRIX" "bin/arch_coverage_matrix/arch_coverage_matrix.exe"
+
 let decision_lint () =
   locate ~env_var:"ARCH_DECISION_LINT" "poc/decision-lint/bin/decision_lint.exe"
 let schema () = locate ~env_var:"ARCH_SCHEMA" "architecture-schema.sql"
