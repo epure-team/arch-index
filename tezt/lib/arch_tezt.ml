@@ -343,12 +343,22 @@ let temp_db name =
   List.iter (fun ext -> ignore (Temp.file (name ^ ".db" ^ ext))) ["-wal"; "-shm"] ;
   db
 
-let index fixture =
+(* [extra_args]: additional producer flags (specs/error-channels.md
+   [--errors-config]/[--errors-profile]/[--errors-strict]) — [index_raw]
+   surfaces the exit code/output instead of failing the test, for a
+   scenario that EXPECTS a non-zero exit (e.g. [--errors-strict] promoting
+   a per-path miss to fatal, US-1 scenario 2). *)
+let index_raw ?(extra_args = []) fixture =
   let db = temp_db fixture.name in
   let code, output =
     run_command (callgraph_ocaml ())
-      ["--build-dir"; fixture.build_dir; "--db-path"; db; "--schema-path"; schema ()]
+      (["--build-dir"; fixture.build_dir; "--db-path"; db; "--schema-path"; schema ()]
+      @ extra_args)
   in
+  (code, output, db)
+
+let index ?extra_args fixture =
+  let code, output, db = index_raw ?extra_args fixture in
   if code <> 0 then Test.fail "indexing failed (exit %d):\n%s" code output ;
   db
 

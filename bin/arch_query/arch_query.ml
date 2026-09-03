@@ -33,9 +33,15 @@ Subcommands:
   reaches      <from> <to>     MUST-only: does a definite call path exist?
   unreachable  <from> <to>     SOUND dual (requires ⊤-marking): REACHABLE | UNREACHABLE | UNKNOWN
   escapes      <from>          the MAY_TOP (⊤) edges reachable from FROM
-  may-fail     <fn> --channel <name> [--assume-externals-pure]
+  may-fail     <fn> --channel <name|all> [--assume-externals-pure] [--builtin-summaries]
                                per error-channel generalisation of raises (specs/error-channels.md):
-                               BOUNDED | UNBOUNDED (⊤) | NOT_A_CARRIER(channel)
+                               BOUNDED | UNBOUNDED (⊤) | NOT_A_CARRIER(channel); --channel all
+                               prints one block per channel error_contract lists
+  fails-with   <E> [--channel <name>] [--assume-externals-pure] [--builtin-summaries]
+                               bounded nodes whose set contains E (channel default: exception);
+                               ⊤ nodes listed separately as "may include"
+  error-stats  --channel <name|all> [--assume-externals-pure] [--builtin-summaries]
+                               per-channel generalisation of exn-stats
   raises       <fn> [--assume-externals-pure]
                                exceptions that may ESCAPE fn, transitively, minus what
                                handlers around each call site catch; BOUNDED | UNBOUNDED (⊤)
@@ -135,6 +141,17 @@ let () =
       let str2 = Arch_db.Ty.(t2 string string) in
       ignore str2 ;
       let need_contract () = Arch_db.require_contract t cmd in
+      (* [error_contract = "v1:exception,result,option,…"] — the channel
+         list [--channel all] iterates (specs/error-channels.md "Query
+         vocabulary"). *)
+      let channels_of_contract t =
+        match Arch_db.meta t "error_contract" with
+        | None -> ["exception"]
+        | Some s -> (
+            match String.index_opt s ':' with
+            | None -> ["exception"]
+            | Some i -> String.split_on_char ',' (String.sub s (i + 1) (String.length s - i - 1)))
+      in
       (* Is this name a node of the graph at all?
 
          On the FLAT schema a node need not have a `functions` row — an unresolved callee exists
@@ -636,9 +653,12 @@ let () =
               ()
         | "may-fail" ->
             (* Per-channel generalisation of [raises] (specs/error-channels.md
-               "Query vocabulary", slice 2 — [result]/[option] only, no
-               [--channel all], no [fails-with]/[error-stats]: those are
-               later slices). *)
+               "Query vocabulary"). [--channel all] prints one block per
+               channel [error_contract] lists — the [exception] block is
+               produced by the exact same code path [raises] uses (same
+               [Arch_exn.load ~channel:"exception"], same table header
+               [exception; via; how], same hypothesis preamble), so it is
+               byte-identical (US-3.2). *)
             let channel =
               let rec find = function
                 | "--channel" :: c :: _ -> Some c
@@ -651,43 +671,169 @@ let () =
               let rec drop = function
                 | "--channel" :: _ :: tl -> drop tl
                 | "--assume-externals-pure" :: tl -> drop tl
+                | "--builtin-summaries" :: tl -> drop tl
                 | x :: tl -> x :: drop tl
                 | [] -> []
               in
               drop rest
             in
             let hyp = List.mem "--assume-externals-pure" rest in
+            let use_builtin_summaries = List.mem "--builtin-summaries" rest in
             let a = match positional with x :: _ -> x | [] -> "" in
+            let run_one channel =
+              let g =
+                try Arch_exn.load ~channel ~use_builtin_summaries t
+                with Arch_db.Refused m -> die 3 ("arch-query: " ^ m)
+              in
+              let sol = Arch_exn.solve ~assume_externals_pure:hyp g in
+              let cell s = Arch_db.Text s in
+              if channel = "exception" && hyp then
+                preamble ~h:[ "hypothesis" ] ~cells:[ "externals_pure" ]
+                  ~text:"hypothesis: externals_pure — callees outside the index assumed not to raise" ;
+              List.iter
+                (fun key ->
+                  let label = match Arch_exn.name_of g key with Some n -> n | None -> key in
+                  if not (Arch_exn.is_carrier g key) then
+                    Arch_fmt.print fmt [ "verdict" ]
+                      [ [ cell (Printf.sprintf "%s: NOT_A_CARRIER(%s)" label channel) ] ]
+                  else begin
+                    let set =
+                      match Arch_exn.SM.find_opt key sol with
+                      | Some s -> s
+                      | None -> Arch_exn.Known Arch_exn.SS.empty
+                    in
+                    Arch_fmt.print fmt [ channel; "via"; "how" ]
+                      (Arch_exn.rows_for g ~assume_externals_pure:hyp sol key) ;
+                    let v = Arch_exn.verdict ~assume_externals_pure:hyp set in
+                    Arch_fmt.print fmt [ "verdict" ]
+                      ([ [ cell (Printf.sprintf "%s: %s" label v) ] ]
+                      @ List.map (fun r -> [ cell ("  reason: " ^ r) ]) (Arch_exn.reasons_of set))
+                  end)
+                (Arch_exn.keys_of_name g a)
+            in
             (match channel with
             | None -> die 2 "arch-query: may-fail requires --channel <name>"
+            | Some "all" ->
+                need_known "function" a ;
+                List.iter run_one (channels_of_contract t)
             | Some channel ->
                 need_known "function" a ;
-                let g =
-                  try Arch_exn.load ~channel t
-                  with Arch_db.Refused m -> die 3 ("arch-query: " ^ m)
-                in
-                let sol = Arch_exn.solve ~assume_externals_pure:hyp g in
-                let cell s = Arch_db.Text s in
-                List.iter
-                  (fun key ->
-                    let label = match Arch_exn.name_of g key with Some n -> n | None -> key in
-                    if not (Arch_exn.is_carrier g key) then
-                      Arch_fmt.print fmt [ "verdict" ]
-                        [ [ cell (Printf.sprintf "%s: NOT_A_CARRIER(%s)" label channel) ] ]
-                    else begin
-                      let set =
-                        match Arch_exn.SM.find_opt key sol with
-                        | Some s -> s
-                        | None -> Arch_exn.Known Arch_exn.SS.empty
-                      in
-                      Arch_fmt.print fmt [ channel; "via"; "how" ]
-                        (Arch_exn.rows_for g ~assume_externals_pure:hyp sol key) ;
-                      let v = Arch_exn.verdict ~assume_externals_pure:hyp set in
-                      Arch_fmt.print fmt [ "verdict" ]
-                        ([ [ cell (Printf.sprintf "%s: %s" label v) ] ]
-                        @ List.map (fun r -> [ cell ("  reason: " ^ r) ]) (Arch_exn.reasons_of set))
-                    end)
-                  (Arch_exn.keys_of_name g a))
+                run_one channel)
+        | "fails-with" ->
+            (* specs/error-channels.md "Query vocabulary": bounded nodes
+               whose set contains the canonical [E] on [--channel] (default
+               [exception], same generalisation direction as
+               [may-fail]/[raisers-of]); ⊤ nodes are listed separately
+               ("may include"), exactly [raisers-of]'s shape, per channel. *)
+            let channel =
+              let rec find = function
+                | "--channel" :: c :: _ -> Some c
+                | _ :: tl -> find tl
+                | [] -> None
+              in
+              find rest
+            in
+            let channel = match channel with Some c -> c | None -> "exception" in
+            let positional =
+              let rec drop = function
+                | "--channel" :: _ :: tl -> drop tl
+                | "--assume-externals-pure" :: tl -> drop tl
+                | "--builtin-summaries" :: tl -> drop tl
+                | x :: tl -> x :: drop tl
+                | [] -> []
+              in
+              drop rest
+            in
+            let hyp = List.mem "--assume-externals-pure" rest in
+            let use_builtin_summaries = List.mem "--builtin-summaries" rest in
+            let a = match positional with x :: _ -> x | [] -> "" in
+            if a = "" then die 2 "arch-query: fails-with needs an error path (e.g. Not_found)" ;
+            let g =
+              try Arch_exn.load ~channel ~use_builtin_summaries t
+              with Arch_db.Refused m -> die 3 ("arch-query: " ^ m)
+            in
+            let sol = Arch_exn.solve ~assume_externals_pure:hyp g in
+            let target = Arch_exn.canon g a in
+            let cell s = Arch_db.Text s in
+            let bounded, top =
+              List.fold_left
+                (fun (bounded, top) key ->
+                  match Arch_exn.SM.find_opt key sol with
+                  | Some (Arch_exn.Known s) when Arch_exn.SS.mem target s -> (key :: bounded, top)
+                  | Some (Arch_exn.Top _ as s) when Arch_exn.SS.mem target (Arch_exn.known_part s)
+                    -> (bounded, key :: top)
+                  | _ -> (bounded, top))
+                ([], []) (Arch_exn.all_keys g)
+            in
+            let name k = match Arch_exn.name_of g k with Some n -> n | None -> k in
+            let file k = match Arch_exn.file_of g k with Some f -> f | None -> "" in
+            Arch_fmt.print fmt [ "function"; "file" ]
+              (List.rev_map (fun k -> [ cell (name k); cell (file k) ]) bounded) ;
+            Arch_fmt.print fmt [ "may_include"; "file" ]
+              (List.rev_map (fun k -> [ cell (name k); cell (file k) ]) top)
+        | "error-stats" ->
+            (* specs/error-channels.md "Query vocabulary": per-channel
+               generalisation of [exn-stats]; [--channel all] prints one
+               block per channel [error_contract] lists. *)
+            let channel =
+              let rec find = function
+                | "--channel" :: c :: _ -> Some c
+                | _ :: tl -> find tl
+                | [] -> None
+              in
+              find rest
+            in
+            let hyp = List.mem "--assume-externals-pure" rest in
+            let use_builtin_summaries = List.mem "--builtin-summaries" rest in
+            let cell s = Arch_db.Text s in
+            let run_one channel =
+              let g =
+                try Arch_exn.load ~channel ~use_builtin_summaries t
+                with Arch_db.Refused m -> die 3 ("arch-query: " ^ m)
+              in
+              let t0 = Unix.gettimeofday () in
+              let sol = Arch_exn.solve ~assume_externals_pure:hyp g in
+              let fixpoint_seconds = Unix.gettimeofday () -. t0 in
+              if hyp then
+                preamble ~h:[ "hypothesis" ] ~cells:[ "externals_pure" ]
+                  ~text:"hypothesis: externals_pure — callees outside the index assumed not to raise" ;
+              let n = ref 0 and nb = ref 0 and by_reason = Hashtbl.create 4 in
+              Arch_exn.SM.iter
+                (fun key s ->
+                  if Arch_exn.is_carrier g key then begin
+                    incr n ;
+                    match s with
+                    | Arch_exn.Known _ -> incr nb
+                    | Arch_exn.Top _ ->
+                        let r =
+                          match Arch_exn.dominant_reason s with
+                          | Some r -> Arch_exn.reason_kind_to_string r
+                          | None -> "none"
+                        in
+                        Hashtbl.replace by_reason r (1 + try Hashtbl.find by_reason r with Not_found -> 0)
+                  end)
+                sol ;
+              let pct x = if !n = 0 then "0.0%" else Printf.sprintf "%.1f%%" (100.0 *. float_of_int x /. float_of_int !n) in
+              let nt = !n - !nb in
+              let rows =
+                [ [ cell "channel"; cell channel ];
+                  [ cell "nodes"; cell (string_of_int !n) ];
+                  [ cell "bounded"; cell (Printf.sprintf "%d (%s)" !nb (pct !nb)) ];
+                  [ cell "unbounded"; cell (Printf.sprintf "%d (%s)" nt (pct nt)) ] ]
+                @ List.map
+                    (fun r -> [ cell ("unbounded." ^ r); cell (string_of_int (Hashtbl.find by_reason r)) ])
+                    (List.sort compare (Hashtbl.fold (fun k _ acc -> k :: acc) by_reason []))
+                @ [ [ cell "origins"; cell (string_of_int (Arch_exn.n_origins g)) ];
+                    [ cell "escaping_origins"; cell (string_of_int (Arch_exn.n_escaping g)) ];
+                    [ cell "scopes"; cell (string_of_int (Arch_exn.n_scopes g)) ];
+                    [ cell "fixpoint_seconds"; cell (Printf.sprintf "%.3f" fixpoint_seconds) ] ]
+              in
+              Arch_fmt.print fmt [ "metric"; "value" ] rows
+            in
+            (match channel with
+            | None -> die 2 "arch-query: error-stats requires --channel <name|all>"
+            | Some "all" -> List.iter run_one (channels_of_contract t)
+            | Some channel -> run_one channel)
         | "raises" | "raisers-of" | "exn-stats" ->
             (* Exception-identity may-raise sets (specs/exn-raise-sets.md).
                The hypothesis flag may sit anywhere after the subcommand; the

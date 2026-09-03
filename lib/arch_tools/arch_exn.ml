@@ -79,6 +79,10 @@ type t = {
           only meaningful — for a value channel; the [exception] channel has
           no such table (every node may raise) so {!is_carrier} always
           answers [true] for it. *)
+  summaries : SS.t SM.t;
+      (** [\[summaries\]] (FR-031): external callee display name -> the
+          declared origin set on THIS channel. Consulted only when an edge's
+          callee is external (absent from the index) — see [contribution]. *)
   n_origins : int;
   n_scopes : int;
   n_escaping : int;
@@ -122,6 +126,69 @@ let known_leaf name =
 
 let text = function Some s -> s | None -> ""
 
+(* -------------------------------------------------------------------- *)
+(* [summaries] (FR-031): decode [comment_db_meta.error_summaries] (see    *)
+(* arch_index.ml's encoder — TAB between callee and per-channel lists,   *)
+(* [|] between channel entries, [name:path1,path2]) and pick out THIS    *)
+(* channel's declared set per external callee.                          *)
+(* -------------------------------------------------------------------- *)
+
+let split_nonempty sep s =
+  String.split_on_char sep s |> List.filter (fun x -> x <> "")
+
+let decode_summaries ~channel (raw : string) : SS.t SM.t =
+  if raw = "" then SM.empty
+  else
+    String.split_on_char '\n' raw
+    |> List.filter (fun l -> l <> "")
+    |> List.fold_left
+         (fun acc line ->
+           match String.index_opt line '\t' with
+           | None -> acc
+           | Some i ->
+               let callee = String.sub line 0 i in
+               let rest = String.sub line (i + 1) (String.length line - i - 1) in
+               List.fold_left
+                 (fun acc entry ->
+                   match String.index_opt entry ':' with
+                   | None -> acc
+                   | Some j ->
+                       let c = String.sub entry 0 j in
+                       if c <> channel then acc
+                       else
+                         let paths =
+                           String.sub entry (j + 1) (String.length entry - j - 1)
+                           |> split_nonempty ','
+                         in
+                         SM.add callee (SS.of_list paths) acc)
+                 acc (split_nonempty '|' rest))
+         SM.empty
+
+(** Built-in [Stdlib] summary table (FR-031), [exception] channel only,
+    OFF by default — see [load]'s [~use_builtin_summaries]. *)
+let builtin_stdlib_summaries : SS.t SM.t =
+  let one p = SS.singleton p in
+  List.fold_left
+    (fun acc (name, exn) -> SM.add name (one exn) acc)
+    SM.empty
+    [
+      (* Canonical predefined-exception paths are BARE (docs/exception-raise-sets.md
+         "Canonical paths": the .cmt spells them [Stdlib.Not_found] etc.,
+         normalised) — matching the same convention here so a summary's
+         contribution equals what a real in-index raise of the same
+         exception would have produced. *)
+      ("Stdlib.List.hd", "Failure");
+      ("Stdlib.List.nth", "Failure");
+      ("Stdlib.List.tl", "Failure");
+      ("Stdlib.Hashtbl.find", "Not_found");
+      ("Stdlib.List.find", "Not_found");
+      ("Stdlib.List.assoc", "Not_found");
+      ("Stdlib.Option.get", "Invalid_argument");
+      ("Stdlib.int_of_string", "Failure");
+      ("Stdlib.String.sub", "Invalid_argument");
+      ("Stdlib.String.get", "Invalid_argument");
+    ]
+
 (* [channel]: the exception channel keeps "every edge in [calls]" (FR-029's
    byte-identical requirement — its rows and query output must not move) and
    its [exn_origins]/[exn_scopes]/[exn_scope_catches] rows are those tagged
@@ -138,7 +205,7 @@ let not_analysed_channel channel error_contract =
     channel
     (match error_contract with Some s -> s | None -> "<absent>")
 
-let load ?(channel = "exception") (t : Arch_db.t) =
+let load ?(channel = "exception") ?(use_builtin_summaries = false) (t : Arch_db.t) =
   if t.schema = Arch_db.Flat then Arch_db.refuse "%s" not_analysed ;
   if channel = "exception" then
     match Arch_db.meta t "exn_contract" with
@@ -271,6 +338,12 @@ let load ?(channel = "exception") (t : Arch_db.t) =
         SM.empty
         (qc i "SELECT function_id FROM channel_carriers WHERE channel=?")
   in
+  let summaries =
+    let declared = decode_summaries ~channel (text (Arch_db.meta t "error_summaries")) in
+    if use_builtin_summaries && channel = "exception" then
+      SM.union (fun _ a _ -> Some a) declared builtin_stdlib_summaries
+    else declared
+  in
   {
     channel;
     names;
@@ -281,6 +354,7 @@ let load ?(channel = "exception") (t : Arch_db.t) =
     origins;
     rebinds;
     carriers;
+    summaries;
     n_origins = !n_origins;
     n_scopes = SM.cardinal scopes;
     n_escaping = !n_escaping;
@@ -357,7 +431,11 @@ let contribution t ~assume_externals_pure sol (e : edge) =
       top May_top_edge e.site
     else if is_ext e.callee then
       let name = String.sub e.callee 4 (String.length e.callee - 4) in
-      if known_leaf name || assume_externals_pure then Known SS.empty else top External name
+      if known_leaf name then Known SS.empty
+      else
+        match SM.find_opt name t.summaries with
+        | Some s -> Known s (* FR-031: a declared external summary replaces ⊤ [external]. *)
+        | None -> if assume_externals_pure then Known SS.empty else top External name
     else match SM.find_opt e.callee sol with Some s -> s | None -> Known SS.empty
   in
   close t e.scope raw
