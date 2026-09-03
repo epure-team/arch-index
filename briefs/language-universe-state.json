@@ -1,7 +1,7 @@
 {
   "task": "language-universe",
   "mode": "fast",
-  "current_phase": "qa",
+  "current_phase": "ship",
   "events": [
     {
       "phase": "intake",
@@ -25,6 +25,12 @@
       "outcome": "GO",
       "reason": "Build clean, 91/91 tests pass. No spec exists (Fast mode) so Step 3 was substituted with independent fresh-fixture reverification of all three schema-writing paths: main schema (schema_version=1.3, exn_contract=v1 confirming the rebase preserved PR #54, language/universe correct), runner.ml flat schema (schema_version=1.1, built_by=arch_index_lsp, language correct), bin/arch_load (schema_version=1.1 written for the first time, built_by=arch-load, language correct) — confirming both review-round fixes (built_by discriminator, arch_load's missing schema_version) hold under a from-scratch QA pass, not just review's own claim. Cross-runtime QA skipped (breaker: codex degraded, unchanged since review).",
       "by": "roster-qa"
+    },
+    {
+      "phase": "ship",
+      "outcome": "COMPLETED",
+      "reason": "PR #55 merged (rebase-merge, 7458b1b). CI initially failed on the self-index golden file (built_by fix added 2 call sites in runner.ml; regenerated per ADR 001, 3818->3820 calls) and once more on a BEHIND-base rebase (own ledger commit only); both fixed and re-verified green before merging. Worktree/branch cleaned up post-merge.",
+      "by": "roster-ship"
     }
   ]
 }
