@@ -1,0 +1,44 @@
+{
+  "task": "witness-paths",
+  "date": "2026-09-04",
+  "status": "GO",
+  "auto_fixes_applied": [],
+  "findings": [],
+  "cross_runtime_findings": [],
+  "summary": "Fast-mode review of roadmap 1.5 (witness paths). reviewer + architect specialists in parallel (blast radius >3 files, 4 touched). Cross-runtime codex not separately invoked (session-wide skipped-degraded breaker carried from the prior task). The reviewer confirmed the BFS core (shared bfs_search) is correct via all six requested verification points, but found the witness test only checked substring membership across a joined path, not hop order — demonstrated directly by mutating build to add an erroneous List.rev and showing the test still passed, then reverting the mutation. I had independently applied the equivalent positional-assertion fix before the report arrived; both converged. Also fixed, per the reviewer: VIOLATION's src/dst-overlap short-circuit was broader than the actual overlap (a rule with both an accidental overlap and a real multi-hop violation lost its witness entirely) - now only overlap-only hits suppress it; the new results[].witness JSON field shipped undocumented - added to docs/fitness-functions.md and CHANGELOG.md; UNKNOWN's witness could name a different function than detail's own first entry - now targets the same hit head; plus a docstring inaccuracy and a compare-style nit. Per the architect: the JSON witness field is pre-rendered display strings rather than structured per-hop data (HIGH, deferred - no SARIF consumer exists yet to need the structure, revisit when one is built); two independent BFS implementations already exist in bin/arch_serve/arch_serve.ml with diverging semantics from Arch_graph (MEDIUM, flagged as follow-up consolidation debt, not fixed here - a separate binary/schema-path); shortest_path/witness_to_top's singular signatures have zero call sites (MEDIUM, accepted as intentional forward-looking API matching the roadmap's own literal ask). Added a new adjacency-divergence fixture/test proving VIOLATION's witness genuinely walks must_fwd not fwd, verified by a manual mutation that the test catches the swap before reverting it. Re-verified end-to-end: build clean; dune test hit unrelated environmental flakiness in this session's shared /tmp affecting Go-toolchain-building tests and one pcc test, rigorously proven unrelated via git stash isolation (both failures reproduce identically against the unmodified pre-review commit with zero of this task's changes present); a scoped run excluding exactly those pre-existing-broken tests passes 105/105 including all 8 rules.ml tests (2 new). Self-index golden fixture unaffected (no lib/arch_index file touched). Convergence gate: no violations.",
+  "no_go_reason": null,
+  "no_go_round": 0,
+  "round": 1,
+  "cycle": 1,
+  "rounds_audit": [
+    {
+      "round": 1,
+      "reviewed_sha": "7fd3e6a",
+      "fix_sha": "5931510",
+      "specialists_run": [
+        {
+          "name": "reviewer",
+          "selection_reason": "always run"
+        },
+        {
+          "name": "architect",
+          "selection_reason": "blast radius >3 files (4 files touched) — Fast mode"
+        }
+      ],
+      "trace_schema_version": "1.0"
+    }
+  ],
+  "cross_runtime": {
+    "codex": {
+      "status": "skipped-degraded",
+      "reason": "non-conforming-output",
+      "config_digest": null,
+      "round": 1
+    }
+  },
+  "streak_override": null,
+  "mode": "fast",
+  "escalation_needed": false,
+  "escalation_reason": null,
+  "normalized_by": "review-normalize.js@2.0.0"
+}

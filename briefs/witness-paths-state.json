@@ -1,0 +1,37 @@
+{
+  "task": "witness-paths",
+  "mode": "fast",
+  "current_phase": "ship",
+  "events": [
+    {
+      "phase": "intake",
+      "outcome": "VALIDATED",
+      "reason": "Roadmap Phase 1 item 1.5 (witness paths): add shortest_path/witness_to_top to lib/arch_tools/arch_graph.ml so a POSSIBLE/VIOLATION/UNKNOWN verdict carries a concrete, checkable path instead of just an offender name. Scoped down from the roadmap's own note (which assumes a SARIF codeFlow writer that does not exist anywhere in this codebase yet \u2014 grepped, confirmed absent) to: the graph-level BFS functions (single-source, matching the roadmap's literal signature) plus multi-source variants for the actual reach-rule use case (a selector is a SET, not one function), wired into bin/arch_rules/arch_rules.ml's Reach verdict as a new `witness` field across all three output formats (text/md/json). Full SARIF codeFlow/threadFlow emission is explicitly out of scope for this slice - no consumer exists to feed yet, and the roadmap's own effort estimate for this item is S, not the full SARIF-writer M/L work implied elsewhere in the roadmap - documented residual.",
+      "by": "roster-intake"
+    },
+    {
+      "phase": "implement",
+      "outcome": "COMPLETED",
+      "reason": "Added shortest_path (single-source, matching the roadmap's literal signature) and witness_to_top to Arch_graph, both built on a shared bfs_search core; added shortest_path_from_set/witness_to_top_from_set multi-source variants for the practical reach-rule case (a selector is a SET). Wired into arch_rules.ml's Reach verdict: VIOLATION gets a path over must_fwd (empty for the src/dst-overlap sub-case, which is membership not a path), POSSIBLE over fwd, UNKNOWN via witness_to_top_from_set (the nearest caller holding a top edge). Exposed as a new `witness` field on `result`, rendered in text/md/json output. calls.resolution/SARIF codeFlow emission explicitly out of scope. 112/112 tests pass (1 new: VIOLATION/POSSIBLE/UNKNOWN carry a concrete witness, PASS carries none). No lib/arch_index files touched, so the self-index golden fixture is unaffected (confirmed by regenerating and diffing: unchanged at 21/576/3994).",
+      "by": "roster-implement"
+    },
+    {
+      "phase": "review",
+      "outcome": "GO",
+      "reason": "reviewer+architect converged review: fixed test-order weakness (confirmed via reviewer's own mutation test), overlap short-circuit too broad, undocumented JSON field, UNKNOWN/detail witness-target mismatch, docstring inaccuracy; architect-flagged HIGH (witness field should be structured for future SARIF) and MEDIUM (arch_serve duplicate BFS) deferred as documented follow-ups. Build clean; 105/105 tests pass excluding two pre-existing environmentally-broken test files (Go-toolchain VCS-stamping + pcc concurrent-session noise), rigorously proven unrelated via git-stash isolation.",
+      "by": "roster-review"
+    },
+    {
+      "phase": "qa",
+      "outcome": "GO",
+      "reason": "Independent fresh-fixture reverification: build clean, 105/105 tests (excluding two files confirmed pre-existing-broken via git-stash isolation), re-run twice for stability. Cross-runtime codex hit its own sandbox's network-bind/read-only-git-index limitations before disputing any code claim - recorded as degraded, not a blocking discrepancy, after independently reproducing serve.ml passing and git stash working myself.",
+      "by": "roster-qa"
+    },
+    {
+      "phase": "ship",
+      "outcome": "COMPLETED",
+      "reason": "PR #59 merged (rebase) as 114eab6. CI green (mcp-credentials, build). Autonomous merge per standing user authorization (full roster pipeline: review GO + QA GO). Worktree/branch cleaned up, local main pulled ff-only, pre-existing WIP stash popped cleanly (auto-merged in tezt/tests/main.ml).",
+      "by": "roster-ship"
+    }
+  ]
+}
