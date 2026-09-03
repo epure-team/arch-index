@@ -44,9 +44,29 @@ DISAGREE was settled by a reachability probe, not by argument — see
    the fixture and AC-19 on proto_alpha. **Lands:** FR-027 (full), FR-033, US-4.
 5. **Query completeness + summaries.** `NOT_A_CARRIER`, per-channel `NOT_ANALYSED`,
    `--channel all`, `[summaries]`, strict mode. **Lands:** FR-023 (strict), 030–032, AC-15/18.
-6. **Docs, CHANGELOG, golden, three-corpus re-validation.** Extend
-   `docs/exception-raise-sets.md` (or new `docs/error-channels.md`), CHANGELOG, regenerate the
-   golden, append the error-channel numbers to `docs/exception-raise-sets-validation.md`.
+6. **Documentation, CHANGELOG, golden, three-corpus re-validation.** *(expanded 2026-09-03 on the
+   user's instruction: this PR defines a contract other producers must implement, so the docs are
+   a deliverable, not a footnote.)* Four audiences, four artefacts:
+   - **`docs/error-channels.md` — the user guide (to write in this slice).** What a channel is;
+     the built-ins and when you need none; writing `arch-errors.toml` field by field with a
+     worked example; `--errors-config` / `--errors-profile` / `--errors-strict` and the discovery
+     order; using the shipped Tezos profile; every command (`may-fail`, `fails-with`,
+     `error-stats`, and `raises`/`raisers-of`/`exn-stats` as the exception aliases) with real
+     output; **how to read a verdict** — `BOUNDED` vs `UNBOUNDED (⊤)` vs
+     `BOUNDED_UNDER_HYP(externals_pure)` vs `NOT_A_CARRIER` vs `NOT_ANALYSED`, and why the last
+     two are different answers; what `--assume-externals-pure` does and does not license;
+     troubleshooting (a path that matched nothing, a channel that is not in `error_contract`,
+     everything coming back ⊤); and the residual list.
+   - **`docs/error-channels-porting.md` — the adapter guide (WRITTEN, see the file).** The
+     language-neutral six-role model, the five soundness obligations, per-language mapping tables
+     for Rust / Go / TypeScript / Python / C, the rows to emit, the missing NDJSON records, and a
+     conformance checklist.
+   - **`README.md` — a short entry** in the feature list pointing at both, in the style of the
+     existing `arch-rules` / fitness-functions bullet. A reader who never opens `docs/` must still
+     learn the feature exists and what question it answers.
+   - **CHANGELOG**, golden regeneration, and the error-channel numbers appended to
+     `docs/exception-raise-sets-validation.md` (with the caveat that arch-index's own counts move
+     when code is added, so the binding assertion is on the two external corpora).
 
 **Early real-corpus smoke (adopted from Voice 1's HIGH/HIGH risk):** at the *end of step 2*, run
 the `result` channel over `~/dev/octez-manager` (built, 480 `.cmt`, ordinary `result` idiom) and
