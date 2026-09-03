@@ -88,24 +88,41 @@ let discover_user_config ~project_root ~errors_config =
       in
       if Sys.file_exists candidate then Some candidate else None
 
-(** [ARCH_ERRORS_PROFILES_DIR], then [<project root>/profiles], then
-    [<exe dir>/../../../profiles] (dune's install layout) — first hit wins;
-    the resolved path is printed (spec: "its path is printed"). *)
+(** [ARCH_ERRORS_PROFILES_DIR], then [<project root>/profiles], then a
+    [profiles/] directory in any ancestor of the executable — first hit wins;
+    the resolved path is printed (spec: "its path is printed").
+
+    FIX: [project_root] is the root of the project being ANALYSED, not of
+    arch-index, so for the shipped Tezos profile the second candidate is
+    [<tezos>/profiles] — which does not exist. That left the exe-relative
+    fallback as the only one that can ever find a shipped profile, and it was
+    off by one: [dirname^3] of [_build/default/bin/<tool>/<tool>.exe] is
+    [_build/], not the repository root. `--errors-profile tezos` therefore
+    failed on every external corpus — precisely the case a shipped profile
+    exists for. Walking ancestors instead of hardcoding a depth also covers an
+    installed layout, where the distance from the binary to its data
+    directory differs from dune's. *)
 let discover_profile ~project_root ~name =
   let file = name ^ "-errors.toml" in
+  (* Ancestors of the executable's directory, nearest first, bounded so a
+     binary run from / cannot walk the whole filesystem. *)
+  let exe_ancestors =
+    let rec up acc dir n =
+      if n <= 0 then List.rev acc
+      else
+        let parent = Filename.dirname dir in
+        if parent = dir then List.rev acc else up (parent :: acc) parent (n - 1)
+    in
+    let exe_dir = Filename.dirname Sys.executable_name in
+    exe_dir :: up [] exe_dir 6
+  in
   let candidates =
     (match Sys.getenv_opt "ARCH_ERRORS_PROFILES_DIR" with
     | Some d -> [Filename.concat d file]
     | None -> [])
     @ (if project_root = "" then []
        else [Filename.concat (Filename.concat project_root "profiles") file])
-    @ [
-        Filename.concat
-          (Filename.concat
-             (Filename.dirname (Filename.dirname (Filename.dirname Sys.executable_name)))
-             "profiles")
-          file;
-      ]
+    @ List.map (fun d -> Filename.concat (Filename.concat d "profiles") file) exe_ancestors
   in
   List.find_opt Sys.file_exists candidates
 
@@ -145,7 +162,8 @@ let load_errors_config ~project_root ~errors_config ~errors_profile =
       | None ->
           Arch_io.eprintf
             "arch-errors: --errors-profile %s: no profiles/%s-errors.toml found (checked \
-             ARCH_ERRORS_PROFILES_DIR, <project root>/profiles, <exe dir>/../../../profiles)\n"
+             ARCH_ERRORS_PROFILES_DIR, <analysed project root>/profiles, and profiles/ in \
+             each ancestor of the executable)\n"
             name
             name ;
           exit 1
