@@ -171,6 +171,32 @@ type pending_dep = {
   line_number : int;
 }
 
+(** Roadmap 1.4 (⊤-anchor taxonomy): why a [Head_unknown] target is
+    unknowable — see the .ml for which reasons this walker can and cannot
+    yet distinguish. *)
+type top_reason =
+  | Callback_param
+      (** parameter / local closure / genuinely computed function value with
+          no binding site — see .ml for the full caveat *)
+  | Module_param  (** functor argument or first-class module *)
+  | Dropped_node  (** the callee's own row/unit was intentionally rejected *)
+
+(** [top_reason_to_string r] — the exact string this reason is stored as in
+    [calls.top_reason].
+
+    {pre}
+    (none)
+
+    {post}
+    Returns ["callback_param"], ["module_param"], or ["dropped_node"].
+
+    {violators}
+    (none)
+
+    {violates}
+    (none) *)
+val top_reason_to_string : top_reason -> string
+
 (** What is statically known about a call's TARGET, independent of whether the
     call is conditional (see the .ml for the full taxonomy). *)
 type call_head =
@@ -179,8 +205,8 @@ type call_head =
       (** resolved qualified [(module, name)] — MUST candidate / external leaf *)
   | Head_enumerated of string
       (** named local fn passed as a callback → bounded candidate set *)
-  | Head_unknown of string
-      (** unknowable target (param / computed / dynamic root / residual) *)
+  | Head_unknown of string * top_reason
+      (** unknowable target (param / computed / dynamic root / residual), plus WHY *)
 
 (** Collected call information before resolution. [cond] is computed by CFG
     post-dominance: [false] iff the call's basic block runs on EVERY execution

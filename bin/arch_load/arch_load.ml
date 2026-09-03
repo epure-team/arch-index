@@ -33,15 +33,38 @@ NDJSON records (one JSON object per line; order-independent):
             language is OPTIONAL (roadmap 1.1) — a producer that knows its own language should
             set it; absent means NULL, never guessed by this loader.
   call:     {"type":"call","caller_name":"f","caller_file":"x.go",
-             "callee_name":"g","callee_file":"x.go"|null,"call_site":"x.go:12","kind":"MUST"}
+             "callee_name":"g","callee_file":"x.go"|null,"call_site":"x.go:12","kind":"MUST",
+             "top_reason":"reflection","top_anchor":"x.go:12:5"}
+            top_reason/top_anchor are OPTIONAL (roadmap 1.4) and meaningful only on a MAY_TOP
+            edge — absent means NULL, never guessed. top_reason must be one of the agnostic
+            vocabulary (see below) if given at all.
   decision: {"type":"decision","file_path":"x.go","line":42,"col":7,"form":"if",
              "arity":3,"verdict":"DEAD_SUBTERM","decided_by":"enumeration",
              "evidence":"...","snippet":"..."}
   dead_site:{"type":"dead_site","function_name":"f","call_site":"x.go:12","callee_name":"g"}
   `type` may be omitted: a record with "callee_name" is a call, else a function.
-  kind ∈ {MUST, MAY_ENUMERATED, MAY_TOP}. A MAY_TOP edge's callee_name is conventionally "*TOP*".|}
+  kind ∈ {MUST, MAY_ENUMERATED, MAY_TOP}. A MAY_TOP edge's callee_name is conventionally "*TOP*".
+  top_reason ∈ {callback_param, module_param, dropped_node, reflection, ffi, dynamic_load,
+  dispatch_unbounded, trait_object, fn_pointer, extern} (see docs/edge-kind-contract.md).|}
 
 let kinds = [ "MUST"; "MAY_ENUMERATED"; "MAY_TOP" ]
+
+(* Roadmap 1.4 (⊤-anchor taxonomy). Mirrors architecture-schema.sql's
+   [calls.top_reason] CHECK constraint exactly — kept as two copies for the
+   same reason [kind]'s own vocabulary already is (this loader depends only
+   on sqlite3+yojson, not the arch_index library that owns the schema
+   text). Optional: unlike [kind], a MAY_TOP edge with no top_reason is not
+   itself a contract violation (a producer that does not yet compute reasons
+   can still emit sound MAY_TOP edges) — only an out-of-vocabulary VALUE, if
+   one is given, is rejected. No producer in this codebase (callgraph-go,
+   callgraph-rust) emits this field yet; accepting it here lays the tracks
+   for when one does, per the same "documented, not silently dropped"
+   discipline as the [language] field in roadmap 1.1. *)
+let top_reasons =
+  [
+    "callback_param"; "module_param"; "dropped_node"; "reflection"; "ffi";
+    "dynamic_load"; "dispatch_unbounded"; "trait_object"; "fn_pointer"; "extern";
+  ]
 
 (** The contract, field by field. Anything outside these sets aborts the load unless it is an
     [x_]-prefixed producer-private extension. *)
@@ -49,7 +72,10 @@ let fields = function
   | "function" ->
       [ "type"; "name"; "file_path"; "exported"; "line_start"; "line_end"; "language" ]
   | "call" ->
-      [ "type"; "caller_name"; "caller_file"; "callee_name"; "callee_file"; "call_site"; "kind" ]
+      [
+        "type"; "caller_name"; "caller_file"; "callee_name"; "callee_file"; "call_site"; "kind";
+        "top_reason"; "top_anchor";
+      ]
   | "decision" ->
       [ "type"; "file_path"; "line"; "col"; "form"; "arity"; "verdict"; "decided_by"; "evidence";
         "snippet" ]
@@ -78,7 +104,7 @@ let die ?line fmt =
    (this binary depends only on sqlite3+yojson by design), so it gets its own
    local version identity, starting at "1.0" (the schema before this fix) and
    bumped to "1.1" for the [language] column added here. *)
-let schema_version = "1.1"
+let schema_version = "1.2"
 
 let schema =
   {|
@@ -89,7 +115,7 @@ CREATE TABLE comment_db_meta(key TEXT PRIMARY KEY, value TEXT);
 CREATE TABLE functions(name TEXT, file_path TEXT, exported INTEGER DEFAULT 0,
                        line_start INTEGER, line_end INTEGER, language TEXT);
 CREATE TABLE calls(caller_name TEXT, caller_file TEXT, callee_name TEXT, callee_file TEXT,
-                   call_site TEXT, kind TEXT);
+                   call_site TEXT, kind TEXT, top_reason TEXT, top_anchor TEXT);
 CREATE INDEX idx_calls_caller ON calls(caller_name);
 CREATE INDEX idx_calls_callee ON calls(callee_name);
 DROP TABLE IF EXISTS decisions;
@@ -293,11 +319,30 @@ let () =
                      (match other with Some k -> "\"" ^ k ^ "\"" | None -> "None")
                      (String.concat "; " kinds)
              in
+             let top_reason =
+               match str "top_reason" assoc with
+               | None -> None
+               | Some r when not (List.mem r top_reasons) ->
+                   die ~line:!lineno "call edge has invalid top_reason %S; must be one of [%s]"
+                     r (String.concat "; " top_reasons)
+               (* FIX (review, MEDIUM): mirrors architecture-schema.sql's own
+                  CHECK(top_reason IS NULL OR kind = 'MAY_TOP') — a reason is
+                  meaningless on a resolved/bounded-candidate edge, and this
+                  loader is the enforcement point for exactly this kind of
+                  malformed producer output. *)
+               | Some r when kind <> "MAY_TOP" ->
+                   die ~line:!lineno
+                     "call edge has top_reason %S but kind %S — top_reason is only meaningful on \
+                      a MAY_TOP edge"
+                     r kind
+               | Some r -> Some r
+             in
              let caller = str "caller_name" assoc and callee = str "callee_name" assoc in
              (match (caller, callee) with
              | Some c, Some e when c <> "" && e <> "" ->
                  calls :=
-                   (c, str "caller_file" assoc, e, str "callee_file" assoc, str "call_site" assoc, kind)
+                   ( c, str "caller_file" assoc, e, str "callee_file" assoc, str "call_site" assoc,
+                     kind, top_reason, str "top_anchor" assoc )
                    :: !calls ;
                  List.iter
                    (fun n ->
@@ -453,17 +498,19 @@ let () =
 
   let sc =
     Sqlite3.prepare db
-      "INSERT INTO calls(caller_name,caller_file,callee_name,callee_file,call_site,kind) \
-       VALUES(?,?,?,?,?,?)"
+      "INSERT INTO calls(caller_name,caller_file,callee_name,callee_file,call_site,kind,\
+       top_reason,top_anchor) VALUES(?,?,?,?,?,?,?,?)"
   in
   List.iter
-    (fun (cn, cf, en, ef, site, kind) ->
+    (fun (cn, cf, en, ef, site, kind, top_reason, top_anchor) ->
       bind_text_ck sc 1 cn ;
       bind_opt sc 2 cf ;
       bind_text_ck sc 3 en ;
       bind_opt sc 4 ef ;
       bind_opt sc 5 site ;
       bind_text_ck sc 6 kind ;
+      bind_opt sc 7 top_reason ;
+      bind_opt sc 8 top_anchor ;
       run sc)
     (List.rev !calls) ;
   ignore (Sqlite3.finalize sc) ;
@@ -510,7 +557,7 @@ let () =
   exec "COMMIT" ;
   ignore (Sqlite3.db_close db) ;
 
-  let count k = List.length (List.filter (fun (_, _, _, _, _, x) -> x = k) !calls) in
+  let count k = List.length (List.filter (fun (_, _, _, _, _, x, _, _) -> x = k) !calls) in
   Printf.eprintf
     "arch-load: wrote %s — %d functions, %d calls (MUST=%d MAY_ENUMERATED=%d MAY_TOP=%d); \
      callgraph_contract=v1\n"

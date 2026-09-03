@@ -114,6 +114,51 @@ heads, parameter calls, dynamic roots, FFI anchors). Remaining precision follow-
 closure-flow to enumerate first-class-value calls (research R3); see
 [docs/research/control-flow-coverage-analysis.md](research/control-flow-coverage-analysis.md).
 
+## ⊤-anchor taxonomy (roadmap 1.4)
+
+Every `MAY_TOP` edge already means "unknowable target" — this taxonomy makes WHY into data, via
+two new nullable columns on `calls`: `top_reason` (the agnostic vocabulary below) and `top_anchor`
+(a location string for the expression that lost the target — not always the call site; a
+callback's own parameter binding is the anchor a producer would ideally point to). Every producer
+shipped today uses `call_site` verbatim as `top_anchor` (OCaml's own `call_site` is `file:line`,
+with no column), not yet the finer location the roadmap's own note describes. Both columns are
+`NULL` for every edge that is not `MAY_TOP` — meaningless for a resolved or bounded-candidate edge.
+
+The agnostic vocabulary is the union of every producer's own local causes, enforced by a `CHECK`
+constraint on `calls.top_reason` (main schema) and by the same closed-vocabulary discipline
+`kind` already has (`bin/arch_load/arch_load.ml`) — an out-of-vocabulary value aborts the load,
+never silently stored or dropped:
+
+| Reason | Producer | Meaning |
+|---|---|---|
+| `callback_param` | OCaml | A function-typed parameter or local closure invoked/passed onward — the target could be anything the caller was given. Also covers, for now: a local `let`-bound lambda whose pattern was a tuple/alias/conditional binding rather than a plain identifier (`pattern_bound` in the roadmap's own vocabulary) — the CMT walker cannot yet distinguish these two structurally; see `lib/arch_index/arch_index_cmt.ml`'s own comment on `top_reason` for what tracking a future item would need to add to split them — AND a genuinely computed function value with no binding site at all (an anonymous application head, or the residual callee of an over-application). All three are "a callable value whose origin this walker did not track," read broadly under the roadmap's own "closure" wording. |
+| `module_param` | OCaml | A qualified path whose root is a non-persistent ident — a functor argument or first-class module value. |
+| `dropped_node` | OCaml | The callee's own row, or its whole compilation unit, was intentionally rejected this run (a genuine SQL-constraint rejection, not "not found") — its body exists but was never read, so the honest answer is ⊤, never a resolved leaf. |
+| `reflection` | Go | `reflect`-based dispatch. |
+| `ffi` | Go | A `cgo` foreign-function boundary. |
+| `dynamic_load` | Go | `plugin.Open` dynamic loading. |
+| `dispatch_unbounded` | Go | Interface dispatch with zero CHA candidates. |
+| `trait_object` | Rust | `dyn Trait` dispatch. |
+| `fn_pointer` | Rust | A function pointer value. |
+| `extern` | Rust | `extern "C"` / FFI. |
+
+**Residual, not silently dropped:** the OCaml walker distinguishes `callback_param` and
+`module_param` correctly (verified: `tezt/tests/top_anchor_taxonomy.ml`) and `dropped_node`
+correctly (verified: `tezt/tests/dropped_node_dependents.ml`), all with `top_anchor` set to the
+call site as an initial approximation (not yet the parameter's own binding location for
+`callback_param` — a real refinement, not yet built). Go and Rust do not emit `top_reason`/
+`top_anchor` as NDJSON data yet, even though both producers already compute the underlying
+distinctions internally (Go's well-known-TOP function table; Rust's `Callee.DynDispatch` variant,
+which already surfaces one dimension — `dyn Trait` — via its own `x_dyn_trait`/`x_dyn_method`
+producer-extension fields) — `bin/arch_load` accepts and validates the fields regardless, so
+wiring either producer to emit them is a mechanical follow-up to that producer's own codebase,
+not a schema/loader change. `calls.resolution` (`in_index`/`external_unit`/`dropped`, distinguishing
+a MUST-with-NULL-callee edge that is a genuine external leaf from one whose owning unit was a real
+dependency this run never actually indexed) is deferred entirely — the roadmap's own premise
+(`cmt_imports`) refers to `Cmt_format.cmt_infos.cmt_imports`, a real compiler-libs field this
+codebase does not yet consume, and its exact intended semantics need a design decision this task
+did not have enough confidence to make alone.
+
 ## Reachability semantics
 
 **`reaches A B`** — MUST-only under-approximation.

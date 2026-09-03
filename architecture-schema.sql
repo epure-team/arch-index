@@ -189,6 +189,28 @@ CREATE TABLE IF NOT EXISTS calls (
     kind TEXT,                              -- edge-kind contract: MUST | MAY_ENUMERATED | MAY_TOP (NULL on legacy = MUST)
     -- Roadmap 1.2 (ADR 002): which producer_runs row emitted this edge.
     producer_run_id INTEGER REFERENCES producer_runs(id) ON DELETE SET NULL,
+    -- Roadmap 1.4: the ⊤-anchor taxonomy. Both NULL unless kind='MAY_TOP' —
+    -- meaningless for a resolved or bounded-candidate edge. top_reason is
+    -- the AGNOSTIC vocabulary every producer maps its own local causes onto
+    -- (docs/edge-kind-contract.md); an out-of-vocabulary value is rejected by
+    -- the loader like an invalid kind is today. top_anchor is a location
+    -- string for the expression that lost the target — not always
+    -- call_site (a callback's anchor is its own parameter binding, not the
+    -- call that invokes it), though every producer shipped today uses
+    -- call_site (file:line — no column; the OCaml producer's own call sites
+    -- carry none today) as an initial approximation; see
+    -- docs/edge-kind-contract.md.
+    top_reason TEXT
+        CHECK(top_reason IS NULL OR top_reason IN (
+            'callback_param', 'module_param', 'dropped_node',
+            'reflection', 'ffi', 'dynamic_load', 'dispatch_unbounded',
+            'trait_object', 'fn_pointer', 'extern'
+        ))
+        -- FIX (review, MEDIUM): the vocabulary CHECK alone let a non-MAY_TOP
+        -- row carry a top_reason, which is meaningless (a resolved or
+        -- bounded-candidate edge is not unknowable, so no reason applies).
+        CHECK(top_reason IS NULL OR kind = 'MAY_TOP'),
+    top_anchor TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -196,6 +218,7 @@ CREATE INDEX IF NOT EXISTS idx_calls_caller ON calls(caller_id);
 CREATE INDEX IF NOT EXISTS idx_calls_callee ON calls(callee_id);
 CREATE INDEX IF NOT EXISTS idx_calls_callee_name ON calls(callee_name);
 CREATE INDEX IF NOT EXISTS idx_calls_producer_run ON calls(producer_run_id);
+CREATE INDEX IF NOT EXISTS idx_calls_top_reason ON calls(top_reason);
 
 -- Backend/contract metadata (key/value). A ⊤-marking backend sets
 -- callgraph_contract='v1' here once every calls.kind is populated (see EDGE-KIND
