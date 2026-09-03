@@ -66,7 +66,7 @@ let fixture_files =
        error_arg = 2\n\
        origins = [{path = \"Error2\", arg = 1}]\n" );
     ( "ec_a.ml",
-      {|type err = A | B of int
+      {|type err = A | B of int | C
 
 (* A custom result-shaped carrier, distinct from Stdlib.result. *)
 type 'a myres = Ok of 'a | Error of err
@@ -82,6 +82,20 @@ let g2 () = match f () with Error e -> Error e | ok -> ok
 
 (* US-2.4 : catch-all closing arm, plus a fresh origin of g3 itself *)
 let g3 () = match f () with Error _ -> Error (B 1) | ok -> ok
+
+(* US-2.14 (review round 1, CRITICAL): an or-pattern of two DIFFERENT
+   literals is NOT a catch-all. [multi] can return three identities; the arm
+   names only two, so [C] must survive. This regressed to [BOUNDED: {}] —
+   every error silently dropped — when the classifier collapsed any
+   non-single-literal argument pattern onto the catch-all case. *)
+let multi n : int myres =
+  if n = 0 then Error A else if n = 1 then Error (B n) else Error C
+
+let or_arm n = match multi n with Error (A | B _) -> Ok 0 | r -> r
+
+(* Control: a genuine wildcard under the constructor still closes everything,
+   so the fix above must not have disabled catch-all detection wholesale. *)
+let wild_arm n = match multi n with Error _ -> Ok 0 | r -> r
 
 (* US-3.1 : not a myres carrier at all *)
 let plain () = 42
@@ -276,6 +290,16 @@ let register_query () =
         "BOUNDED: {None}" ;
       Batch.contains b ~msg:"US-2.10 o2 propagates through Option.bind" ~haystack:(may_fail "option" "o2")
         "BOUNDED: {None}" ;
+      (* US-2.14 (review round 1, CRITICAL): the or-pattern arm names A and B
+         but not C, so it may close neither — closing more than an arm really
+         catches deletes a reachable error from the answer. *)
+      Batch.contains b ~msg:"US-2.14 multi can fail with all three identities"
+        ~haystack:(may_fail "myres" "multi") "BOUNDED: {Ec_a.A, Ec_a.B, Ec_a.C}" ;
+      Batch.contains b ~msg:"US-2.14 an or-pattern of two literals closes nothing, C survives"
+        ~haystack:(may_fail "myres" "or_arm") "Ec_a.C" ;
+      (* Control: a real wildcard still closes the channel. *)
+      Batch.contains b ~msg:"US-2.14 control: a wildcard arm still closes everything"
+        ~haystack:(may_fail "myres" "wild_arm") "BOUNDED: {}" ;
       (* US-3.1 : plain is not a myres carrier at all *)
       Batch.contains b ~msg:"US-3.1 plain is NOT_A_CARRIER(myres)"
         ~haystack:(may_fail "myres" "plain") "NOT_A_CARRIER(myres)" ;
