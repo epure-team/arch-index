@@ -167,27 +167,57 @@ impl Emitter {
         }
     }
 
+    /// A `dyn Trait` dispatch call site. Emitted as a MAY_TOP edge (this
+    /// single-crate walk never resolves it), but carries `dyn_trait`/
+    /// `dyn_method` fields so the whole-program merge pass can find and
+    /// narrow it — a plain `kind:"MAY_TOP"` edge alone is indistinguishable
+    /// from an fn-ptr/FFI/foreign MAY_TOP, which the merge pass must NOT try
+    /// to narrow.
+    fn call_dyn(&mut self, caller: &str, caller_file: Option<&str>, site: &str, trait_path: &str, method_name: &str) {
+        let key = format!("{caller}\u{2192}dyn:{trait_path}::{method_name}@{site}");
+        if !self.seen.insert(key) {
+            return;
+        }
+        let _ = writeln!(
+            self.out,
+            "{{\"type\":\"call\",{},{},\"callee_name\":\"{}\",\"callee_file\":null,{},\"kind\":\"MAY_TOP\",{},{}}}",
+            json_str_field("caller_name", caller),
+            json_opt_str_field("caller_file", caller_file),
+            TOP,
+            json_str_field("call_site", site),
+            json_str_field("x_dyn_trait", trait_path),
+            json_str_field("x_dyn_method", method_name)
+        );
+        self.n_may_top += 1;
+    }
+
     /// Per-crate trait-impl fact record, consumed by the (separate) whole-program
-    /// merge pass. `publish_false` reflects the DEFINING crate's own Cargo.toml
-    /// `publish` key — see specs/rust-soundcg-whole-program.md's publish-boundary
-    /// safety gate. Emitted regardless of whether anything downstream reads it
-    /// yet (spec's explicit US-1/US-2 coupling).
+    /// merge pass. `impl_crate` is the crate PROVIDING this impl (used by the
+    /// merge pass's missing-facts fallback, to know which crates' facts are
+    /// present in a batch). `publish_false` reflects the TRAIT's OWN DEFINING
+    /// crate's Cargo.toml `publish` key (NOT `impl_crate`'s — the safety gate
+    /// is about whether the trait itself could be extended by an external,
+    /// unseen crate) — see specs/rust-soundcg-whole-program.md's
+    /// publish-boundary safety gate. Emitted regardless of whether anything
+    /// downstream reads it yet (spec's explicit US-1/US-2 coupling).
     fn trait_impl_fact(
         &mut self,
         trait_path: &str,
         self_type_path: &str,
         method_name: &str,
-        defining_crate: &str,
+        impl_crate: &str,
         publish_false: bool,
+        is_blanket: bool,
     ) {
         let _ = writeln!(
             self.out,
-            "{{\"type\":\"trait_impl_fact\",{},{},{},{},\"publish_false\":{}}}",
+            "{{\"type\":\"trait_impl_fact\",{},{},{},{},\"publish_false\":{},\"is_blanket\":{}}}",
             json_str_field("trait_path", trait_path),
             json_str_field("self_type_path", self_type_path),
             json_str_field("method_name", method_name),
-            json_str_field("defining_crate", defining_crate),
-            publish_false
+            json_str_field("impl_crate", impl_crate),
+            publish_false,
+            is_blanket
         );
         self.n_facts += 1;
     }
@@ -228,6 +258,26 @@ fn instance_name<'tcx>(tcx: TyCtxt<'tcx>, instance: Instance<'tcx>) -> String {
 /// Qualified name for a bare DefId (used for the function-universe node pass).
 fn def_name<'tcx>(tcx: TyCtxt<'tcx>, def_id: DefId) -> String {
     tcx.def_path_str(def_id)
+}
+
+/// A CRATE-INDEPENDENT qualified path for a def: always
+/// `"<defining-crate>::<path-within-that-crate>"`, regardless of which
+/// crate's compilation is currently rendering it.
+///
+/// `def_path_str` is unsuitable for anything the whole-program merge pass
+/// needs to JOIN across separately-compiled crates: it renders a path
+/// relative to the CURRENT crate's own view, so the same trait comes out as
+/// bare `"Doer"` when a call site in its OWN defining crate renders it, but
+/// as `"crate_a::Doer"` when a DIFFERENT crate's `impl crate_a::Doer for B`
+/// renders the same trait — two different strings identifying the same
+/// definition. Every field the merge pass matches ACROSS crates (the trait
+/// identity in both `trait_impl_fact` and `dyn_trait`) must use this instead.
+fn stable_def_path<'tcx>(tcx: TyCtxt<'tcx>, def_id: DefId) -> String {
+    format!(
+        "{}{}",
+        tcx.crate_name(def_id.krate),
+        tcx.def_path(def_id).to_string_no_crate_verbose()
+    )
 }
 
 fn real_path_of(name: &rustc_span::FileName) -> Option<String> {
@@ -359,6 +409,12 @@ fn has_walkable_mir<'tcx>(tcx: TyCtxt<'tcx>, instance: Instance<'tcx>) -> bool {
 enum Callee {
     Must { name: String, file: Option<String> },
     Top { name: String },
+    /// `dyn Trait` virtual dispatch — MAY_TOP within this single-crate walk,
+    /// but carries the (trait_path, method_name) the whole-program merge pass
+    /// needs to later narrow it to MAY_ENUMERATED against the union of
+    /// `trait_impl_fact` records across the workspace. See
+    /// specs/rust-soundcg-whole-program.md.
+    DynDispatch { trait_path: String, method_name: String },
 }
 
 /// Classify a `Call` terminator's callee operand into MUST or MAY_TOP.
@@ -436,7 +492,15 @@ fn classify_resolved<'tcx>(tcx: TyCtxt<'tcx>, callee_inst: Instance<'tcx>) -> Ca
             }
         }
         InstanceKind::Intrinsic(_) => Callee::Top { name: TOP.to_string() },
-        InstanceKind::Virtual(..) => Callee::Top { name: TOP.to_string() },
+        InstanceKind::Virtual(method_def_id, _) => match tcx.trait_of_assoc(method_def_id) {
+            Some(trait_def_id) => Callee::DynDispatch {
+                trait_path: stable_def_path(tcx, trait_def_id),
+                method_name: tcx.item_name(method_def_id).to_string(),
+            },
+            // Not actually a trait method (shouldn't happen for Virtual, but
+            // never assume — fall back to the always-safe anchor).
+            None => Callee::Top { name: TOP.to_string() },
+        },
         // Concrete, deterministic compiler-synthesized bodies: once walked (the
         // has_walkable_mir fix), these have a single fixed target per
         // monomorphization and an injective name (the instance_name fix) — MUST
@@ -493,52 +557,67 @@ fn walk_instance<'tcx>(tcx: TyCtxt<'tcx>, instance: Instance<'tcx>, emit: &mut E
                 Callee::Top { name } => {
                     emit.call(&caller_name, caller_file.as_deref(), &name, None, &site, "MAY_TOP");
                 }
+                Callee::DynDispatch { trait_path, method_name } => {
+                    emit.call_dyn(&caller_name, caller_file.as_deref(), &site, &trait_path, &method_name);
+                }
             }
         }
     }
     true
 }
 
-/// Whether this crate's OWN `Cargo.toml` sets `publish = false` — the
-/// publish-boundary safety gate's per-crate input (see
+/// Whether the crate whose source file is at `source_file` sets
+/// `publish = false` — the publish-boundary safety gate's input (see
 /// specs/rust-soundcg-whole-program.md, "Publish-boundary safety gate").
 ///
-/// This is a deliberately conservative, cheap proxy (documented residual, not
-/// a strong guarantee): a bare `publish = false` in `[package]`, or
-/// `publish.workspace = true` resolving to `publish = false` in the workspace
-/// root's `[workspace.package]`, both count. Anything else (key absent, or
-/// `publish = true`/a registry list) is treated as "potentially publishable" —
-/// the gate errs toward MAY_TOP, never toward a false MAY_ENUMERATED.
-fn crate_sets_publish_false() -> bool {
-    let manifest_dir = match std::env::var("CARGO_MANIFEST_DIR") {
-        Ok(d) => d,
-        Err(_) => return false,
+/// FIX: this is keyed on the TRAIT-DEFINING crate's own source location, not
+/// on `CARGO_MANIFEST_DIR` (this process's OWN compiling crate). The gate's
+/// whole point is "could an external, unseen crate implement THIS trait" —
+/// that depends on whether the trait's own defining crate is publishable, not
+/// on whether the crate currently providing one particular impl happens to
+/// be. Walks up from `source_file`'s directory to find the nearest ancestor
+/// `Cargo.toml`, which is that crate's own manifest (or, if `publish =
+/// X.workspace = true`, its workspace root's `[workspace.package]`).
+///
+/// A deliberately conservative, cheap proxy (documented residual, not a
+/// strong guarantee): key absent, path undeterminable, or `publish = true`
+/// all count as "potentially publishable" — the gate errs toward MAY_TOP,
+/// never toward a false MAY_ENUMERATED.
+fn source_crate_sets_publish_false(source_file: &str) -> bool {
+    let start_dir = match std::path::Path::new(source_file).parent() {
+        Some(d) => d,
+        None => return false,
     };
-    let manifest_path = std::path::Path::new(&manifest_dir).join("Cargo.toml");
-    let contents = match std::fs::read_to_string(&manifest_path) {
-        Ok(c) => c,
-        Err(_) => return false,
-    };
-    match toml_publish_false(&contents, "package") {
-        Some(false_flag) => return false_flag,
-        None => {}
-    }
-    // `publish.workspace = true` — resolve against the workspace root, found by
-    // walking up for the nearest ancestor Cargo.toml containing `[workspace]`.
-    if toml_key_is_workspace_true(&contents, "publish") {
-        let mut dir = std::path::Path::new(&manifest_dir).parent();
-        while let Some(d) = dir {
-            let candidate = d.join("Cargo.toml");
-            if let Ok(c) = std::fs::read_to_string(&candidate) {
-                if c.contains("[workspace]") {
-                    if let Some(false_flag) = toml_publish_false(&c, "workspace.package") {
-                        return false_flag;
-                    }
-                    break;
+    let mut dir = Some(start_dir);
+    while let Some(d) = dir {
+        let candidate = d.join("Cargo.toml");
+        if let Ok(contents) = std::fs::read_to_string(&candidate) {
+            if contents.contains("[package]") {
+                match toml_publish_false(&contents, "package") {
+                    Some(false_flag) => return false_flag,
+                    None => {}
                 }
+                if toml_key_is_workspace_true(&contents, "publish") {
+                    // Resolve against the workspace root, found by continuing
+                    // to walk up for an ancestor Cargo.toml with [workspace].
+                    let mut wsdir = d.parent();
+                    while let Some(w) = wsdir {
+                        let wscandidate = w.join("Cargo.toml");
+                        if let Ok(wc) = std::fs::read_to_string(&wscandidate) {
+                            if wc.contains("[workspace]") {
+                                if let Some(false_flag) = toml_publish_false(&wc, "workspace.package") {
+                                    return false_flag;
+                                }
+                                break;
+                            }
+                        }
+                        wsdir = w.parent();
+                    }
+                }
+                return false;
             }
-            dir = d.parent();
         }
+        dir = d.parent();
     }
     false
 }
@@ -586,14 +665,36 @@ fn toml_key_is_workspace_true(contents: &str, key: &str) -> bool {
 /// explicit US-1/US-2 coupling: US-1 emits the facts, US-2's merge pass is
 /// what acts on them).
 fn emit_trait_impl_facts<'tcx>(tcx: TyCtxt<'tcx>, emit: &mut Emitter) {
-    let publish_false = crate_sets_publish_false();
-    let defining_crate = tcx.crate_name(rustc_hir::def_id::LOCAL_CRATE).to_string();
+    let impl_crate = tcx.crate_name(rustc_hir::def_id::LOCAL_CRATE).to_string();
+    let mut trait_publish_false_cache: std::collections::HashMap<DefId, bool> = std::collections::HashMap::new();
     for (trait_def_id, impl_local_ids) in tcx.all_local_trait_impls(()) {
-        let trait_path = tcx.def_path_str(*trait_def_id);
+        let trait_path = stable_def_path(tcx, *trait_def_id);
+        // Keyed on the TRAIT's OWN source location (see
+        // source_crate_sets_publish_false's doc), not this compiling crate —
+        // an impl in crate B of a trait defined in crate A must check A's
+        // publish flag, not B's.
+        let publish_false = *trait_publish_false_cache.entry(*trait_def_id).or_insert_with(|| {
+            let span = tcx.def_span(*trait_def_id);
+            match span_file(tcx, span) {
+                Some(f) => source_crate_sets_publish_false(&f),
+                None => false,
+            }
+        });
         for impl_local_id in impl_local_ids {
             let impl_def_id = impl_local_id.to_def_id();
             let trait_ref = tcx.impl_trait_ref(impl_def_id).skip_binder();
-            let self_type_path = trait_ref.self_ty().to_string();
+            let self_ty = trait_ref.self_ty();
+            let self_type_path = self_ty.to_string();
+            // A blanket impl's Self type is (or is built from) a bare generic
+            // type parameter of the impl block (`impl<T> Trait for T`, or
+            // `impl<T> Trait for Wrapper<T>` — still unbounded over T). Any
+            // impl whose Self type contains a Param is NOT a single concrete
+            // type, so the candidate set for this trait can never be proven
+            // closed — matching A2's own existing single-crate safety rule,
+            // extended here across the whole workspace.
+            let is_blanket = matches!(self_ty.kind(), ty::Param(_)) || self_ty.walk().any(|arg| {
+                matches!(arg.kind(), ty::GenericArgKind::Type(t) if matches!(t.kind(), ty::Param(_)))
+            });
             for assoc_def_id in tcx.associated_item_def_ids(impl_def_id) {
                 let assoc = tcx.associated_item(*assoc_def_id);
                 if assoc.is_fn() {
@@ -601,8 +702,9 @@ fn emit_trait_impl_facts<'tcx>(tcx: TyCtxt<'tcx>, emit: &mut Emitter) {
                         &trait_path,
                         &self_type_path,
                         assoc.name().as_str(),
-                        &defining_crate,
+                        &impl_crate,
                         publish_false,
+                        is_blanket,
                     );
                 }
             }
