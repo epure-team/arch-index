@@ -1,0 +1,10 @@
+# Pinned nightly for the rustc_private MIR driver.
+#
+# arch-callgraph-rust links rustc_driver / rustc_interface / rustc_middle (the
+# unstable `rustc_private` surface that clippy and miri use). That surface is
+# pinned to one nightly; the MIR / monomorphization-collector / Instance::resolve
+# APIs drift between releases, so the producer MUST be built and run with exactly
+# this toolchain. Bumping it is a deliberate, CI-gated operation (see selftest.sh).
+[toolchain]
+channel = "nightly-2026-06-20"
+components = ["rustc-dev", "llvm-tools", "rust-src"]

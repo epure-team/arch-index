@@ -1,0 +1,135 @@
+#!/usr/bin/env bash
+# arch-callgraph-rust — Rust Tier-1 sound(y) call-graph producer.
+#
+# A GENERAL-PURPOSE producer for ANY cargo workspace — the Rust analogue of
+# arch-callgraph-go (go/ssa+CHA) and the OCaml CMT walk. It drives rustc to
+# post-analysis via a rustc_private MIR driver, walks every TerminatorKind::Call
+# of every monomorphic instance, and emits a ⊤-marked NDJSON call graph in which
+# every unresolvable call site (dyn / generic / fn-ptr / FFI / intrinsic) becomes
+# a MAY_TOP edge to "*TOP*" — never silently dropped. This makes
+# `arch-query unreachable A B` SOUND (the pruning direction the rust-analyzer LSP
+# path cannot give).
+#
+# Usage:
+#   arch-callgraph-rust <cargo-workspace-dir>            # whole workspace (cross-crate)
+#   arch-callgraph-rust --file <file.rs> [rustc-flags]   # single file (no cargo)
+#   arch-callgraph-rust <dir> | arch-load out.db         # pipe straight to the loader
+#
+# Build the driver first: cd callgraph-rust && cargo build --release
+#
+# The driver links the unstable `rustc_private` surface and is PINNED to the
+# nightly in callgraph-rust/rust-toolchain.toml. It must be built and run with
+# that exact toolchain (rustup reads rust-toolchain.toml automatically).
+set -uo pipefail
+HERE="$(cd "$(dirname "$0")" && pwd)"
+CRATE_DIR="$HERE/callgraph-rust"
+
+DRIVER=""
+for cand in \
+  "$CRATE_DIR/target/release/arch-callgraph-rust" \
+  "$CRATE_DIR/target/debug/arch-callgraph-rust" \
+  "${CARGO_TARGET_DIR:-}/release/arch-callgraph-rust" \
+  "${CARGO_TARGET_DIR:-}/debug/arch-callgraph-rust"; do
+  if [ -n "$cand" ] && [ -x "$cand" ]; then DRIVER="$cand"; break; fi
+done
+if [ -z "$DRIVER" ]; then
+  echo "arch-callgraph-rust: driver not built — run: cd callgraph-rust && cargo build --release" >&2
+  exit 2
+fi
+
+SYSROOT="$(rustup --toolchain nightly-2026-06-20 run rustc --print sysroot 2>/dev/null \
+          || rustc --print sysroot)"
+export LD_LIBRARY_PATH="$SYSROOT/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+export DYLD_LIBRARY_PATH="$SYSROOT/lib${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}"
+export RUSTC_BOOTSTRAP=1
+
+if [ "${1:-}" = "--file" ]; then
+  shift
+  exec "$DRIVER" "$@"
+fi
+
+WS="${1:-.}"
+if [ ! -d "$WS" ]; then
+  echo "arch-callgraph-rust: '$WS' is not a directory (expected a cargo workspace root or --file)" >&2
+  exit 2
+fi
+
+WRAPPER_VAR="${ARCH_CG_RUST_WRAPPER_VAR:-RUSTC_WORKSPACE_WRAPPER}"
+
+# FIX (rust-cg-harness-offline-retry-serves-cache, HIGH, plan step 5): the prior
+# script's "offline, then fall back to online" retry shared ONE CARGO_TARGET_DIR
+# between both attempts and threw away the offline attempt's stderr, so any
+# workspace whose offline attempt failed PARTWAY THROUGH (the common case — it
+# typically fails on the first crate needing a registry fetch, after already
+# building everything before it) let the retry serve already-fingerprinted
+# .rlibs for every crate the offline attempt completed, silently emitting no
+# NDJSON for them, with the empty-graph guard below never firing because the
+# partial stream still had edges from the crates that WERE freshly compiled.
+#
+# Each attempt now gets its own scratch target dir, and neither attempt's
+# stderr is discarded, so an ICE or fetch failure is visible and the two
+# attempts cannot cross-contaminate cached fingerprints.
+TARGET_OFFLINE="$(mktemp -d "${TMPDIR:-/tmp}/arch-cg-rust-target-offline.XXXXXX")"
+TARGET_ONLINE="$(mktemp -d "${TMPDIR:-/tmp}/arch-cg-rust-target-online.XXXXXX")"
+STDERR_OFFLINE="$(mktemp "${TMPDIR:-/tmp}/arch-cg-rust-stderr-offline.XXXXXX")"
+NDJSON_OFFLINE="$(mktemp "${TMPDIR:-/tmp}/arch-cg-rust-ndjson-offline.XXXXXX")"
+NDJSON_ONLINE="$(mktemp "${TMPDIR:-/tmp}/arch-cg-rust-ndjson-online.XXXXXX")"
+cleanup() {
+  rm -rf "$TARGET_OFFLINE" "$TARGET_ONLINE"
+  rm -f "$STDERR_OFFLINE" "$NDJSON_OFFLINE" "$NDJSON_ONLINE"
+}
+trap cleanup EXIT
+
+rc=1
+NDJSON=""
+if (
+  cd "$WS" && env "$WRAPPER_VAR=$DRIVER" CARGO_TARGET_DIR="$TARGET_OFFLINE" RUSTC_BOOTSTRAP=1 \
+    cargo +nightly-2026-06-20 build --offline
+) >"$NDJSON_OFFLINE" 2>"$STDERR_OFFLINE"; then
+  NDJSON="$NDJSON_OFFLINE"
+  rc=0
+else
+  cat "$STDERR_OFFLINE" >&2
+  echo "arch-callgraph-rust: offline build failed, retrying online (fresh target dir, no cached fingerprints reused)" >&2
+  if (
+    cd "$WS" && env "$WRAPPER_VAR=$DRIVER" CARGO_TARGET_DIR="$TARGET_ONLINE" RUSTC_BOOTSTRAP=1 \
+      cargo +nightly-2026-06-20 build
+  ) >"$NDJSON_ONLINE"; then
+    NDJSON="$NDJSON_ONLINE"
+    rc=0
+  else
+    rc=$?
+  fi
+fi
+
+if [ "$rc" -ne 0 ]; then
+  echo "arch-callgraph-rust: cargo build failed (exit $rc) for workspace '$WS' — see stderr above." >&2
+  echo "arch-callgraph-rust: refusing to emit a partial/empty graph (false-confidence guard)." >&2
+  exit "$rc"
+fi
+
+# Post-hoc completeness check (plan step 5's harness fix, part 2): the NDJSON
+# must contain at least one function record naming each workspace member crate
+# — a cheap guard against a crate silently dropping out of the build (e.g. a
+# stale/partial fingerprint reuse) without the overall exit code reflecting it.
+if command -v jq >/dev/null 2>&1 && command -v cargo >/dev/null 2>&1; then
+  MEMBERS="$(cd "$WS" && cargo metadata --no-deps --format-version 1 2>/dev/null \
+    | jq -r '.packages[].name' 2>/dev/null)"
+  if [ -n "$MEMBERS" ]; then
+    while IFS= read -r member; do
+      [ -z "$member" ] && continue
+      # A function record's file_path is relative to the crate that DEFINES it
+      # (e.g. "crate_b/src/lib.rs"), not name-prefixed with the crate — a
+      # local caller's own name never carries its own crate:: prefix, only a
+      # CROSS-crate reference to it does. Match on the file path instead.
+      if ! grep -q "\"file_path\":\"${member}/" "$NDJSON" 2>/dev/null \
+         && ! grep -q "\"${member}::" "$NDJSON" 2>/dev/null; then
+        echo "arch-callgraph-rust: warning — no function record found for workspace member '$member'; it may have been served from a stale cache fingerprint rather than freshly compiled through the driver." >&2
+      fi
+    done <<EOF
+$MEMBERS
+EOF
+  fi
+fi
+
+cat "$NDJSON"
