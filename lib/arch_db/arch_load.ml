@@ -54,7 +54,16 @@ let parse_line line_num line =
   let has_callee  = List.mem_assoc "callee_name" obj in
   let typ         = get_str "type" in
   let is_call     = typ = Some "call" || (has_callee && typ <> Some "function") in
-  if is_call then begin
+  (* A producer may emit record kinds this loader doesn't consume — e.g. the
+     Rust producer's "trait_impl_fact" records, meant for a separate
+     whole-program merge pass that runs BEFORE arch_load in the real pipeline
+     (see specs/rust-soundcg-whole-program.md). Tolerate any [type] that is
+     neither "call" nor "function" (and has no callee_name, so isn't an
+     untagged call record either) by skipping it — never crash the whole load
+     over a record this loader was never meant to interpret. *)
+  if typ <> None && typ <> Some "call" && typ <> Some "function" && not has_callee then
+    `Skip
+  else if is_call then begin
     let kind =
       match get_str "kind" with
       | Some k when List.mem k valid_kinds -> k
@@ -176,6 +185,7 @@ let load ~output ~allow_empty ic =
           Hashtbl.replace names_in_calls c.c_caller c.c_caller_file;
           if c.c_callee <> "*TOP*" then
             Hashtbl.replace names_in_calls c.c_callee c.c_callee_file
+        | `Skip -> ()
     done
   with End_of_file -> ());
   (* Derive minimal function rows for names seen only in call edges *)
