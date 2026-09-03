@@ -34,8 +34,19 @@ val not_analysed : string
     origins/scopes are the rows tagged with that channel name
     (specs/error-channels.md). Raises [Arch_db.Refused] with
     {!not_analysed} when the DB is on the Flat schema or carries no
-    [exn_contract] meta flag. *)
-val load : ?channel:string -> Arch_db.t -> t
+    [exn_contract] meta flag.
+
+    [~use_builtin_summaries]: fold in a small built-in [Stdlib] summary
+    table on the [exception] channel (specs/error-channels.md FR-031) —
+    [List.hd]/[List.nth]/[List.tl] -> [Failure], [Hashtbl.find]/
+    [List.find]/[List.assoc] -> [Not_found], [Option.get] ->
+    [Invalid_argument], [int_of_string] -> [Failure], [String.sub]/
+    [String.get] -> [Invalid_argument]. OFF by default — deliberately
+    opt-in, so it never silently moves the two external-corpora exception
+    numbers the anti-regression gate checks (a config-declared
+    [\[summaries\]] entry is unconditional either way: it only ever fires on
+    an EXTERNAL callee, i.e. one absent from the index). *)
+val load : ?channel:string -> ?use_builtin_summaries:bool -> Arch_db.t -> t
 
 (** Every function-row key ([#id]) with a given display name. *)
 val keys_of_name : t -> string -> string list

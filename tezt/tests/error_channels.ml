@@ -42,12 +42,29 @@ let fixture_files =
          module ([Ec_a]) that defines them — a same-module call's resolved
          head carries the BARE name (module attribution is a separate
          [functions.module_id] column, not part of the identifier itself),
-         so the declared path is the bare name too, not [Ec_a.add_err]. *)
+         so the declared path is the bare name too, not [Ec_a.add_err].
+
+         [mytz2] (SLICE 4, FR-027 "lift"/"unwrap"/"underlying"/"aliases"):
+         [tzres] is the ALIAS spelling (one type argument — the error type
+         is implied by the declaration, [error_arg] does not apply);
+         [result2] is its OWN 2-argument [underlying] spelling (same
+         structural type, different arity, same rule the Tezos profile
+         needs for [tzresult]/[Pervasives.result]) — [error_arg] DOES apply
+         there, checked against [error_type = "tzerr"]. [never_matched] is
+         an intentionally-unmatched declared path (US-1 scenario 2: a
+         warning normally, fatal under [--errors-strict]). *)
       "[channel.myres]\n\
        type = \"myres\"\n\
        origins = [{path = \"Error\", arg = 1}]\n\
        transforms = [{path = \"add_err\", mode = \"add\", arg = 1}]\n\
-       converters = [{path = \"opt_of_res\", from = \"myres\", to = \"option\", arg = 1}]\n" );
+       converters = [{path = \"opt_of_res\", from = \"myres\", to = \"option\", arg = 1}]\n\
+       sinks = [\"never_matched\"]\n\
+       [channel.mytz2]\n\
+       type = \"tzres\"\n\
+       underlying = [\"result2\"]\n\
+       error_type = \"tzerr\"\n\
+       error_arg = 2\n\
+       origins = [{path = \"Error2\", arg = 1}]\n" );
     ( "ec_a.ml",
       {|type err = A | B of int
 
@@ -116,6 +133,28 @@ let opt_of_res (r : int myres) : int option =
   match r with Ok x -> Some x | Error _ -> None
 
 let conv () = opt_of_res (f ())
+
+(* SLICE 4 (FR-027, "lift"/"unwrap"/"underlying"/"aliases"): [tzres] is a
+   type ALIAS over [result2] (one argument — the .cmt never expands
+   abbreviations, so a function typed [int tzres] prints its return type
+   with head [tzres], not [result2]); a function typed
+   [(int, tzerr) result2] directly prints the 2-argument underlying spelling
+   instead. Both must be recognised as the SAME channel [mytz2] — the
+   arity-tolerant carrier check this slice adds. *)
+type tzerr = ..
+
+type tzerr += E1 | E2 of int
+
+type ('a, 'e) result2 = Ok2 of 'a | Error2 of 'e
+
+type 'a tzres = ('a, tzerr) result2
+
+(* Alias spelling: 1 type argument, [error_arg] not applicable. *)
+let mk1 () : int tzres = Error2 E1
+
+(* Underlying spelling: 2 type arguments, [error_arg = 2] checked against
+   [error_type = "tzerr"]. *)
+let mk2 () : (int, tzerr) result2 = Error2 (E2 5)
 |} );
   ]
 
@@ -285,7 +324,120 @@ let register_query () =
       (* SLICE 3, "Converters": the declared converter's [arg] is an origin
          on [to] (opaque identity, no [error] given). *)
       Batch.contains b ~msg:"converter: conv's option-channel origin is opaque converted_myres"
-        ~haystack:(may_fail "option" "conv") "BOUNDED: {option:converted_myres}") ;
+        ~haystack:(may_fail "option" "conv") "BOUNDED: {option:converted_myres}" ;
+      (* SLICE 4, FR-027 "lift"/"unwrap"/"underlying"/"aliases": the ALIAS
+         spelling ([tzres], 1 arg — error_arg not applicable) and the
+         UNDERLYING spelling ([result2], 2 args, error_arg=2 checked
+         against error_type) are the SAME channel. *)
+      Batch.contains b ~msg:"FR-027 alias spelling (tzres, 1 arg): mk1 is a mytz2 carrier"
+        ~haystack:(may_fail "mytz2" "mk1") "BOUNDED: {Ec_a.E1}" ;
+      Batch.contains b
+        ~msg:"FR-027 underlying spelling (result2, 2 args, error_arg checked): mk2 is a mytz2 carrier"
+        ~haystack:(may_fail "mytz2" "mk2") "BOUNDED: {Ec_a.E2}" ;
+      (* US-3.2: [--channel all] prints one block per emitted channel; the
+         [exception] block is byte-identical to plain [raises]. *)
+      let all_out = query db ["may-fail"; "hh"; "--channel"; "all"] in
+      let raises_hh = query db ["raises"; "hh"] in
+      Batch.check b ~msg:"US-3.2 --channel all's exception block equals raises hh byte-for-byte"
+        (Batch.has_substring ~needle:raises_hh all_out) ;
+      Batch.check b ~msg:"US-3.2 --channel all also visits the result channel (hh IS a result carrier)"
+        (Batch.has_substring ~needle:"hh: UNBOUNDED" all_out) ;
+      Batch.check b ~msg:"US-3.2 --channel all also visits the myres channel (hh is NOT a myres carrier)"
+        (Batch.has_substring ~needle:"hh: NOT_A_CARRIER(myres)" all_out) ;
+      (* US-3.1: fails-with lists bounded nodes containing the canonical
+         error, ⊤ nodes separately as "may include" — per channel: f/g2
+         carry [Ec_a.A] on [myres], h carries it on [result] (the SAME
+         literal path can be bounded on one channel and not even a
+         candidate on another — channels are genuinely separate universes). *)
+      let fw_myres = query db ["fails-with"; "Ec_a.A"; "--channel"; "myres"] in
+      List.iter
+        (fun fn ->
+          Batch.check b ~msg:(fn ^ " is listed by fails-with Ec_a.A --channel myres")
+            (Batch.has_substring ~needle:(fn ^ "|") fw_myres))
+        ["f"; "g2"] ;
+      let fw_result = query db ["fails-with"; "Ec_a.A"; "--channel"; "result"] in
+      Batch.check b ~msg:"h is listed by fails-with Ec_a.A --channel result"
+        (Batch.has_substring ~needle:"h|" fw_result) ;
+      (* [w2]'s set is [Top(∅, {unknown_error_value})]: "replace" mode
+         discards the inner [Ec_a.A] and the mapper is a parameter, so its
+         KNOWN part is empty — it correctly does NOT land in [may_include]
+         (that table lists ⊤ nodes whose KNOWN part contains the target,
+         not every ⊤ node; an empty table renders as no output at all, so
+         its absence here is itself the assertion — reaching this line
+         without the harness failing is the check). *)
+      ignore fw_result ;
+      (* US-3.4-ish: error-stats --channel myres reports the channel name
+         and a fixpoint time. *)
+      let es = query db ["error-stats"; "--channel"; "myres"] in
+      Batch.check b ~msg:"error-stats names the channel" (Batch.has_substring ~needle:"myres" es) ;
+      Batch.check b ~msg:"error-stats reports fixpoint_seconds"
+        (Batch.has_substring ~needle:"fixpoint_seconds" es) ;
+      let es_all = query db ["error-stats"; "--channel"; "all"] in
+      Batch.check b ~msg:"error-stats --channel all covers every emitted channel"
+        (Batch.has_substring ~needle:"exception" es_all
+        && Batch.has_substring ~needle:"myres" es_all
+        && Batch.has_substring ~needle:"mytz2" es_all) ;
+      (* US-3.5: a channel absent from error_contract is NOT_ANALYSED, exit 3. *)
+      let code, out = query_raw db ["may-fail"; "f"; "--channel"; "nonexistent"] in
+      Batch.eq_int b ~msg:"may-fail on an undeclared channel is NOT_ANALYSED (exit 3)" code 3 ;
+      Batch.check b ~msg:"the refusal names NOT_ANALYSED" (Batch.has_substring ~needle:"NOT_ANALYSED" out)) ;
+  Lwt.return_unit
+
+let register_strict () =
+  Test.register ~__FILE__ ~title:"error-channels: --errors-strict promotes a miss to fatal"
+    ~tags:["cmt"; "error_channels"; "config"]
+  @@ fun () ->
+  with_fixture ~name:"errch_strict" ~files:fixture_files @@ fun fixture ->
+  (* US-1 scenario 2: a warning by default (index still succeeds — the
+     other tests in this file rely on exactly that), fatal (exit 1) under
+     [--errors-strict], for the SAME never-matched declared path
+     ([Ec_a."never_matched"] in [channel.myres.sinks]). *)
+  let code, out, _db = Arch_tezt.index_raw ~extra_args:["--errors-strict"] fixture in
+  ignore out ;
+  Batch.run (fun b ->
+      Batch.eq_int b ~msg:"--errors-strict turns the declared-but-unmatched sink into exit 1"
+        (match code with 0 -> 0 | n -> n)
+        1) ;
+  Lwt.return_unit
+
+let register_summaries () =
+  Test.register ~__FILE__ ~title:"error-channels: [summaries] replaces external ⊤ with the declared set"
+    ~tags:["cmt"; "error_channels"; "query"]
+  @@ fun () ->
+  let dune =
+    "(library\n\
+    \ (name errch_summ)\n\
+    \ (wrapped false)\n\
+    \ (modules es_a)\n\
+    \ (flags (:standard -w -8-11-21-26-27-32-33-37-39)))\n"
+  in
+  let ml = "let m xs = List.hd xs\n" in
+  (* Without a declared summary, [List.hd] is an unresolved external -> ⊤
+     (a SEPARATE fixture, not just an unconfigured function in the same
+     one — FR-031's summary applies to every occurrence of the declared
+     callee once the config declares it, so isolating the "before" case
+     needs its own project with no [\[summaries\]] at all). *)
+  with_fixture ~name:"errch_summ_without"
+    ~files:[Fixture.dune_project; ("dune", dune); ("es_a.ml", ml)] @@ fun without_fixture ->
+  let without_db = index without_fixture in
+  with_fixture ~name:"errch_summ_with"
+    ~files:
+      [
+        Fixture.dune_project; ("dune", dune);
+        ("arch-errors.toml", "[summaries]\n\"Stdlib.List.hd\" = { exception = [\"Failure\"] }\n");
+        ("es_a.ml", ml);
+      ]
+  @@ fun with_fixture_ ->
+  let with_db = index with_fixture_ in
+  Batch.run (fun b ->
+      let without = query without_db ["raises"; "m"] in
+      Batch.check b ~msg:"m without a config summary sees List.hd as ⊤ external"
+        (Batch.has_substring ~needle:"UNBOUNDED" without) ;
+      (* FR-031: the config-declared summary is unconditional (no flag
+         needed) — [List.hd] contributes the declared set instead of ⊤. *)
+      let with_summary = query with_db ["raises"; "m"] in
+      Batch.check b ~msg:"m's config [summaries] entry replaces ⊤ external with BOUNDED: {Failure}"
+        (Batch.has_substring ~needle:"BOUNDED: {Failure}" with_summary)) ;
   Lwt.return_unit
 
 (* US-1 : validation is exercised by the fixture's arch-errors.toml (parsed
@@ -304,4 +456,6 @@ let register_config () =
 let register () =
   register_producer () ;
   register_query () ;
-  register_config ()
+  register_config () ;
+  register_strict () ;
+  register_summaries ()

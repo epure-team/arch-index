@@ -529,6 +529,23 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
      | Ok () -> ()) ;
   let error_config_unmatched = String.concat "," (Arch_errors_config.unmatched errors_seen) in
   let error_config_digest = Arch_errors_config.digest errors_effective in
+  (* [error_summaries] (specs/error-channels.md FR-031, slice 5): the
+     [[summaries]] table, serialised so [Arch_tools.Arch_exn] — which does
+     NOT depend on [otoml]/[Arch_errors_config] — can decode it at query
+     time without re-reading the config file. One line per callee: TAB
+     separates the callee path from its per-channel lists; each channel
+     entry is [name:path1,path2] joined by [|]. OCaml paths never contain
+     tab/newline/comma/pipe/colon-as-separator (dots and backticks only), so
+     no escaping is needed. *)
+  let error_summaries =
+    String.concat "\n"
+      (List.map
+         (fun (callee, chans) ->
+           callee ^ "\t"
+           ^ String.concat "|"
+               (List.map (fun (c, paths) -> c ^ ":" ^ String.concat "," paths) chans))
+         errors_effective.Arch_errors_config.summaries)
+  in
   (* [error_contract]: [exception] (frozen, always emitted, FR-029's
      byte-identical requirement) plus every value channel that matched at
      least one carrier type in the corpus — the Clarifications table's
@@ -567,6 +584,7 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
       ("error_config_digest", error_config_digest);
       ("error_config_source", error_config_source);
       ("error_config_unmatched", error_config_unmatched);
+      ("error_summaries", error_summaries);
     ] ;
 
   (* Resolve and insert calls *)
