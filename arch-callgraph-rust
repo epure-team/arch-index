@@ -15,7 +15,17 @@
 #   arch-callgraph-rust --file <file.rs> [rustc-flags]   # single file (no cargo)
 #   arch-callgraph-rust <dir> | arch-load out.db         # pipe straight to the loader
 #
+# The workspace path runs the per-crate producer over every member, THEN the
+# whole-program merge pass (bin/arch_callgraph_rust_merge) before emitting —
+# arch-load's strict record-type contract rejects the producer's own raw
+# trait_impl_fact/x_dyn_* records, so this script's output is always
+# merge-pass output, never raw per-crate NDJSON. Set
+# ARCH_CG_RUST_NO_MERGE=1 to get the raw, unmerged per-crate stream instead
+# (e.g. for debugging the producer in isolation) — that raw stream is NOT
+# arch-load-safe on any workspace with a trait impl.
+#
 # Build the driver first: cd callgraph-rust && cargo build --release
+# Build the merge pass: dune build bin/arch_callgraph_rust_merge
 #
 # The driver links the unstable `rustc_private` surface and is PINNED to the
 # nightly in callgraph-rust/rust-toolchain.toml. It must be built and run with
@@ -132,4 +142,25 @@ EOF
   fi
 fi
 
-cat "$NDJSON"
+if [ "${ARCH_CG_RUST_NO_MERGE:-}" = "1" ]; then
+  cat "$NDJSON"
+  exit 0
+fi
+
+# FIX (rust-cg-harness-broken-direct-pipe, CRITICAL): this script's own
+# documented usage ("arch-callgraph-rust <dir> | arch-load out.db") aborted on
+# any workspace defining a trait impl, because arch-load's strict contract
+# rejects the producer's raw trait_impl_fact/x_dyn_* records — nothing ran the
+# merge pass by default. It now always does, unless ARCH_CG_RUST_NO_MERGE=1.
+MERGE="$HERE/_build/default/bin/arch_callgraph_rust_merge/arch_callgraph_rust_merge.exe"
+[ -x "$MERGE" ] || MERGE=""
+if [ -z "$MERGE" ]; then
+  echo "arch-callgraph-rust: merge pass not built — run: dune build bin/arch_callgraph_rust_merge (or set ARCH_CG_RUST_NO_MERGE=1 for the raw, non-arch-load-safe per-crate stream)" >&2
+  exit 2
+fi
+MEMBERS_CSV="$(printf '%s' "${MEMBERS:-}" | tr '\n' ',' | sed 's/,$//')"
+if [ -n "$MEMBERS_CSV" ]; then
+  "$MERGE" --expected-crates "$MEMBERS_CSV" < "$NDJSON"
+else
+  "$MERGE" < "$NDJSON"
+fi

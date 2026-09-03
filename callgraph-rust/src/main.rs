@@ -263,15 +263,32 @@ fn instance_name<'tcx>(tcx: TyCtxt<'tcx>, instance: Instance<'tcx>) -> String {
         InstanceKind::AsyncDropGlueCtorShim(_, ty) => format!("<{ty}>::async_drop_in_place#shim"),
         InstanceKind::AsyncDropGlue(_, ty) => format!("<{ty}>::async_drop_in_place#poll"),
         InstanceKind::ClosureOnceShim { closure, .. } => {
-            format!("{}#call_once_shim", tcx.def_path_str(closure))
+            format!("{}#call_once_shim", stable_def_path(tcx, closure))
         }
-        _ => tcx.def_path_str(instance.def_id()),
+        // FIX (rust-cg-cross-crate-name-fragmentation, CRITICAL): this arm used
+        // to render via `tcx.def_path_str`, which is relative to whichever
+        // crate's OWN compilation is doing the rendering — bare when local to
+        // that process, crate-qualified when a DIFFERENT crate's process
+        // refers to the same DefId. Every ordinary MUST edge and function node
+        // this walker emits used that name, so a cross-crate call and the
+        // callee's own function record joined under two DIFFERENT strings for
+        // the same DefId — arch-load then holds them as two disconnected rows,
+        // silently truncating reachability through every cross-crate call
+        // (found empirically: a merged 2-crate NDJSON stream with
+        // "callee_name":"crate_a::use_dyn" and a SEPARATE function row named
+        // bare "use_dyn", never joining). `stable_def_path` was already built
+        // for the trait_impl_fact/dyn-dispatch join keys; using it here closes
+        // the same gap for ordinary function/MUST-edge identity.
+        _ => stable_def_path(tcx, instance.def_id()),
     }
 }
 
 /// Qualified name for a bare DefId (used for the function-universe node pass).
+/// Crate-independent (see `stable_def_path`'s own doc) — must match whatever
+/// name a MUST edge into this same DefId uses, regardless of which crate's
+/// process renders either side.
 fn def_name<'tcx>(tcx: TyCtxt<'tcx>, def_id: DefId) -> String {
-    tcx.def_path_str(def_id)
+    stable_def_path(tcx, def_id)
 }
 
 /// A CRATE-INDEPENDENT qualified path for a def: always
@@ -465,8 +482,14 @@ fn classify_callee<'tcx>(
 
     match func_ty.kind() {
         ty::FnDef(def_id, args) => {
+            // FIX (rust-cg-ffi-symbol-name-dropped, HIGH): a named `extern "C"`
+            // callee's own symbol name was being discarded in favor of the bare
+            // TOP sentinel, violating spec AC-4/CHECK-3 ("distinguishing 'target
+            // named but body unanalyzable' from 'target truly unknown'"). The
+            // edge still anchors to MAY_TOP (this driver cannot walk into a
+            // foreign body), but now carries the real symbol.
             if tcx.is_foreign_item(*def_id) {
-                return Callee::Top { name: TOP.to_string() };
+                return Callee::Top { name: stable_def_path(tcx, *def_id) };
             }
             if tcx.intrinsic(*def_id).is_some() {
                 return Callee::Top { name: TOP.to_string() };
@@ -488,7 +511,8 @@ fn classify_resolved<'tcx>(tcx: TyCtxt<'tcx>, callee_inst: Instance<'tcx>) -> Ca
     match callee_inst.def {
         InstanceKind::Item(def_id) => {
             if tcx.is_foreign_item(def_id) {
-                Callee::Top { name: TOP.to_string() }
+                // See classify_callee's matching fix: keep the real symbol name.
+                Callee::Top { name: stable_def_path(tcx, def_id) }
             } else if !def_id.is_local() && !is_workspace_analysed_source(tcx, def_id) {
                 // Cross-crate into std/core, a registry (crates.io) dependency,
                 // or anything else this process cannot verify was walked by our
