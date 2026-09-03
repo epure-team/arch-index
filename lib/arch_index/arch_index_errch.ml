@@ -190,7 +190,20 @@ let rec classify_value_pat ~canon_type ~canon_exn ~bare_ctor ~arg_pos
           match List.nth_opt sub (n - 1) with
           | Some subpat ->
               let caught =
+                (* FIX (review round 2, CRITICAL): the same rule the exception
+                   channel needs — `Error (B 0)` names identity [B] but only
+                   matches when the argument is 0, so closing [B] would drop
+                   `Error (B 1)`. [Arch_index_exn.pat_is_irrefutable] is the
+                   single definition of "accepts every value of this shape";
+                   both channels must agree or they will drift apart. *)
                 match literal_ctor_path_of_pat ~canon_type ~canon_exn subpat with
+                | Some _
+                  when not
+                         (match subpat.pat_desc with
+                         | Tpat_construct (_, _, args, _) ->
+                             List.for_all Arch_index_exn.pat_is_irrefutable args
+                         | _ -> true) ->
+                    Unrecognised
                 | Some pth -> Caught pth
                 | None -> (
                     (* Only a wildcard or a bare variable under the constructor

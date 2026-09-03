@@ -97,6 +97,23 @@ let or_arm n = match multi n with Error (A | B _) -> Ok 0 | r -> r
    so the fix above must not have disabled catch-all detection wholesale. *)
 let wild_arm n = match multi n with Error _ -> Ok 0 | r -> r
 
+(* US-2.15 (review round 2, CRITICAL): a constructor pattern whose ARGUMENT
+   constrains the value catches a strict subset of its identity. Closing the
+   identity would delete the values the arm does not match. Both channels share
+   one rule ([Arch_index_exn.pat_is_irrefutable]), so both are pinned here —
+   the exception case lives in this file rather than exn_raise_sets.ml so that
+   suite stays byte-identical as AC-17's evidence, and because the rule under
+   test is this feature's. *)
+let multi_b n : int myres = if n = 0 then Error (B 0) else Error (B 1)
+
+let narrow_arm n = match multi_b n with Error (B 0) -> Ok 0 | r -> r
+
+exception Boom of int
+
+let boom_raiser n = if n = 0 then raise (Boom 0) else raise (Boom 1)
+
+let narrow_handler n = try boom_raiser n with Boom 0 -> ()
+
 (* US-3.1 : not a myres carrier at all *)
 let plain () = 42
 
@@ -300,6 +317,14 @@ let register_query () =
       (* Control: a real wildcard still closes the channel. *)
       Batch.contains b ~msg:"US-2.14 control: a wildcard arm still closes everything"
         ~haystack:(may_fail "myres" "wild_arm") "BOUNDED: {}" ;
+      (* US-2.15 : `Error (B 0)` matches only when the argument is 0, so it
+         may not close Ec_a.B — `Error (B 1)` is still reachable. *)
+      Batch.contains b ~msg:"US-2.15 a constrained argument pattern does not close its identity"
+        ~haystack:(may_fail "myres" "narrow_arm") "Ec_a.B" ;
+      (* Same rule on the frozen exception channel: `with Boom 0 -> ()` must
+         not swallow `Boom 1`. This one is pre-existing shipped behaviour. *)
+      Batch.contains b ~msg:"US-2.15 `with Boom 0` does not close every Boom"
+        ~haystack:(may_fail "exception" "narrow_handler") "Boom" ;
       (* US-3.1 : plain is not a myres carrier at all *)
       Batch.contains b ~msg:"US-3.1 plain is NOT_A_CARRIER(myres)"
         ~haystack:(may_fail "myres" "plain") "NOT_A_CARRIER(myres)" ;
