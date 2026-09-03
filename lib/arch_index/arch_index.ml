@@ -117,6 +117,17 @@ let read_file path =
       let n = in_channel_length ic in
       really_input_string ic n)
 
+(* [--errors-config <path>] is a USER-typed path, unlike [--errors-profile]
+   (resolved via [discover_profile], which already checks [Sys.file_exists]
+   before ever calling [read_file]) — a typo here must be the same clean
+   "arch-errors: ... exit 1" FR-021 promises for every other config
+   failure, not an uncaught [Sys_error] backtrace at exit code 125. *)
+let read_file_or_die path =
+  try read_file path
+  with Sys_error msg ->
+    Arch_io.eprintf "arch-errors: --errors-config %s: %s\n" path msg ;
+    exit 1
+
 (** Load and merge the effective error-channels config: built-in < profile <
     user file, per Clarifications. Any parse failure (bad TOML, unknown key,
     unresolved [--errors-profile]) is fatal — printed and [exit 1] — since a
@@ -150,7 +161,7 @@ let load_errors_config ~project_root ~errors_config ~errors_profile =
   (match discover_user_config ~project_root ~errors_config with
   | None -> ()
   | Some path -> (
-      match Arch_errors_config.of_toml (read_file path) with
+      match Arch_errors_config.of_toml (read_file_or_die path) with
       | Error msg ->
           Arch_io.eprintf "arch-errors: %s: %s\n" path msg ;
           exit 1
