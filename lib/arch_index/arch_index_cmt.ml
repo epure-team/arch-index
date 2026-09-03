@@ -961,7 +961,9 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels
     | _ -> None
   in
   let is_declared_bind (c : Arch_errors_config.channel) head =
-    match head_qualified_name head with Some qn -> List.mem qn c.binds | None -> false
+    match head_qualified_name head with
+    | Some qn -> List.exists (fun p -> Arch_errors_config.path_matches p qn) c.binds
+    | None -> false
   in
   (* Bare constructor name off a declared origin path ("Stdlib.Error" ->
      "Error"; "None" -> "None"). *)
@@ -1174,7 +1176,9 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels
     | _ -> None
   in
   let path_declared paths head =
-    match head_qualified_name head with Some qn -> List.mem qn paths | None -> false
+    match head_qualified_name head with
+    | Some qn -> List.exists (fun p -> Arch_errors_config.path_matches p qn) paths
+    | None -> false
   in
   let find_transform head =
     match head_qualified_name head with
@@ -1183,7 +1187,8 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels
         List.find_map
           (fun (ch : Arch_errors_config.channel) ->
             List.find_map
-              (fun (p, mode, argpos) -> if p = qn then Some (ch, mode, argpos) else None)
+              (fun (p, mode, argpos) ->
+                if Arch_errors_config.path_matches p qn then Some (ch, mode, argpos) else None)
               ch.Arch_errors_config.transforms)
           value_channels
   in
@@ -1195,7 +1200,8 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels
           (fun (ch : Arch_errors_config.channel) ->
             List.find_map
               (fun (p, from_, to_, argpos, err) ->
-                if p = qn then Some (from_, to_, argpos, err) else None)
+                if Arch_errors_config.path_matches p qn then Some (from_, to_, argpos, err)
+                else None)
               ch.Arch_errors_config.converters)
           value_channels
   in
@@ -1206,8 +1212,26 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels
         List.find_map
           (fun (ch : Arch_errors_config.channel) ->
             List.find_map
-              (fun (p, argpos) -> if p = qn then Some (ch, argpos) else None)
+              (fun (p, argpos) ->
+                if Arch_errors_config.path_matches p qn then Some (ch, argpos) else None)
               ch.Arch_errors_config.handlers)
+          value_channels
+  in
+  (* SLICE 4 (specs/error-channels.md "Origins"): a declared origin that is
+     an ordinary FUNCTION, not a constructor (the Tezos idiom [error E]/
+     [tzfail E]/[error_when cond E] — [Texp_construct] only covers the
+     [Stdlib.Error]/[None]-style channels). The literal argument at [argpos]
+     names the error the same way a transform's [Add] argument does. *)
+  let find_origin head =
+    match head_qualified_name head with
+    | None -> None
+    | Some qn ->
+        List.find_map
+          (fun (ch : Arch_errors_config.channel) ->
+            List.find_map
+              (fun (p, argpos) ->
+                if Arch_errors_config.path_matches p qn then Some (ch, argpos) else None)
+              ch.Arch_errors_config.origins)
           value_channels
   in
   (* Peel a lambda literal's curried parameters down to its final body
@@ -1218,6 +1242,24 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels
     | Texp_function (_, Tfunction_body b) -> literal_return_of_lambda b
     | Texp_function (_, Tfunction_cases _) -> None
     | _ -> Some e
+  in
+  (* SLICE 4 (found by the proto_alpha oracle smoke, O-5 — [catch_f]): a
+     [handlers]/[converters] "guarded argument" is usually a CALL or an
+     alias to one ([resolve_head_call] handles both), but the Tezos [catch]/
+     [catch_f]/[catch_s] idiom guards a THUNK LITERAL — [fun () -> risky ()]
+     — which is not itself a call, so [resolve_head_call] on the lambda
+     expression answers [None] and the scope never covers anything. Peel
+     the thunk to its body first (arguments are walked, hence
+     [apply_head_ord] populated, before this code runs — see
+     [record_head]'s ordering note above) and resolve THAT. *)
+  let resolve_guarded_call (e : Typedtree.expression) =
+    match resolve_head_call e with
+    | Some _ as r -> r
+    | None -> (
+        match e.exp_desc with
+        | Texp_function _ -> (
+            match literal_return_of_lambda e with Some body -> resolve_head_call body | None -> None)
+        | _ -> None)
   in
   (* Diverging (noreturn) application head: a SATURATED call whose head Path
      resolves to a Stdlib primitive that never returns. Path-based detection is
@@ -1805,6 +1847,22 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels
                   let handler_hit =
                     match head_opt with Some h -> find_handler h | None -> None
                   in
+                  let origin_hit = match head_opt with Some h -> find_origin h | None -> None in
+                  (* SLICE 4 ("Sinks", declared [sinks]): a call whose OWN
+                     head is a declared sink (e.g. the Tezos profile's
+                     [Result_syntax.return] — a plain value wrapped into a
+                     carrier, not itself a source of error) never
+                     propagates, exactly like [ignore (E)]/[let _ = E in]
+                     but for the call's OWN head rather than an argument's. *)
+                  let sink_hit =
+                    match head_opt with
+                    | Some h ->
+                        List.exists
+                          (fun (ch : Arch_errors_config.channel) ->
+                            path_declared ch.Arch_errors_config.sinks h)
+                          value_channels
+                    | None -> false
+                  in
                   let bind_shape_hit =
                     match Arch_index_errch.bind_shape_channel ~channels:value_channels
                             fn_expr.exp_type
@@ -1823,7 +1881,7 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels
                       match head_qualified_name h with
                       | Some qn
                         when transform_hit <> None || converter_hit <> None
-                             || handler_hit <> None ->
+                             || handler_hit <> None || origin_hit <> None || sink_hit ->
                           note_seen_value_path qn
                       | _ -> ())
                   | None -> ()) ;
@@ -1833,7 +1891,7 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels
                   | Some (ch, argpos) -> (
                       match List.nth_opt args (argpos - 1) with
                       | Some (_, Some argexpr) -> (
-                          match resolve_head_call argexpr with
+                          match resolve_guarded_call argexpr with
                           | Some ord ->
                               let local_id =
                                 Arch_index_errch.add_scope (!cur).lerrch
@@ -1851,7 +1909,7 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels
                   | Some (from_, to_, argpos, err) ->
                       (match List.nth_opt args (argpos - 1) with
                       | Some (_, Some argexpr) -> (
-                          match resolve_head_call argexpr with
+                          match resolve_guarded_call argexpr with
                           | Some ord ->
                               let local_id =
                                 Arch_index_errch.add_scope (!cur).lerrch ~channel:from_
@@ -1860,10 +1918,37 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels
                               Hashtbl.replace errch_call_scope ord (from_, local_id)
                           | None -> ())
                       | _ -> ()) ;
+                      (* SLICE 4 ("Converters", Tezos [catch_f] — the ONLY
+                         real converter instance in proto_alpha, oracle O-5):
+                         when [err] is not statically declared, try the
+                         NEXT argument (a [catch_f]-shaped converter's own
+                         handler function, [exn -> error]) as a literal
+                         mapper, same rule as a "replace" transform's mapper
+                         — its literal return names the error, per call
+                         site. A one-argument converter like Tezos [catch]
+                         (or the fixture's [opt_of_res]) has no such next
+                         argument and falls back to the opaque identity, as
+                         before (US-2.11's [t5]). *)
+                      let literal_of_next () =
+                        match List.nth_opt args argpos with
+                        | Some (_, Some next_expr) -> (
+                            match next_expr.exp_desc with
+                            | Texp_function _ -> (
+                                match literal_return_of_lambda next_expr with
+                                | Some final ->
+                                    Arch_index_errch.literal_ctor_path_of_expr
+                                      ~canon_type:canon_exn ~canon_exn final
+                                | None -> None)
+                            | _ -> None)
+                        | _ -> None
+                      in
                       let path =
                         match err with
                         | Some e -> Some e
-                        | None -> Some (Printf.sprintf "%s:converted_%s" to_ from_)
+                        | None -> (
+                            match literal_of_next () with
+                            | Some p -> Some p
+                            | None -> Some (Printf.sprintf "%s:converted_%s" to_ from_))
                       in
                       Arch_index_errch.add_origin (!cur).lerrch ~channel:to_ ~path ~form:"raise"
                         ~loc:expr.exp_loc ()
@@ -1922,8 +2007,25 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels
                       Arch_index_errch.add_origin (!cur).lerrch ~channel:bc.Arch_errors_config.name
                         ~path:(Some site) ~form:"inferred_bind" ~loc:expr.exp_loc ()
                   | None -> ()) ;
-                  if transform_hit <> None || converter_hit <> None || bind_shape_hit <> None then
-                    callee_ty_for_channel := None ;
+                  (* SLICE 4: a declared FUNCTION origin (Tezos [error]/
+                     [tzfail]/[error_when]/…): the literal at [argpos] names
+                     the error, same rule as a transform's [Add] argument. *)
+                  (match origin_hit with
+                  | Some (ch, argpos) -> (
+                      match List.nth_opt args (argpos - 1) with
+                      | Some (_, Some argexpr) ->
+                          let path =
+                            Arch_index_errch.literal_ctor_path_of_expr ~canon_type:canon_exn
+                              ~canon_exn argexpr
+                          in
+                          Arch_index_errch.add_origin (!cur).lerrch
+                            ~channel:ch.Arch_errors_config.name ~path ~loc:expr.exp_loc ()
+                      | _ -> ())
+                  | None -> ()) ;
+                  if
+                    transform_hit <> None || converter_hit <> None || bind_shape_hit <> None
+                    || origin_hit <> None || sink_hit
+                  then callee_ty_for_channel := None ;
                   record_head () ;
                   (* Exception origin (identity-aware; primitive-keyed for
                      [raise], Stdlib-path-keyed for failwith/invalid_arg). *)

@@ -1,0 +1,159 @@
+# Tezos protocol-environment error-channels profile (specs/error-channels.md
+# slice 4, FR-033). Built from the VERIFIED path inventory
+# (roster/error-channels/tezos-v17-paths-seen.txt: all 276 .cmt units of
+# proto_alpha/lib_protocol, needle "Error_monad" — see
+# roster/error-channels/tezos-profile-evidence.md for the corrections this
+# made to the spec's original sketch), NOT from guesswork.
+#
+# UNIT-component wildcard: "Tezos_protocol_environment_*" so this one file
+# covers alpha and every numbered protocol without editing it per release
+# (specs/error-channels.md slice 4, "Profile-path wildcards").
+#
+# DEVIATION (recorded per the ambiguity rule): the implementer brief also
+# suggested "a separate channel entry for the shell's Tezos_error_monad.*".
+# The verified inventory contains ZERO occurrences of that path anywhere in
+# lib_protocol (every path is under Tezos_protocol_environment_alpha — the
+# protocol only ever sees the environment's OWN Error_monad, sandboxed by
+# the functor boundary; the shell's error monad is a lib_shell/node-side
+# concern, out of this corpus). Declaring it here as a FILE-sourced channel
+# would make its whole carrier type match nothing in proto_alpha and abort
+# the run with exit 1 (FR-023's "declaration matching nothing" rule, which
+# is NOT waived for file-sourced channels the way it is for built-ins) —
+# directly breaking AC-19's "exit 0, zero rejected rows" requirement. Not
+# declared here; left as a roadmap item for whoever profiles lib_shell.
+
+[channel.tzresult]
+type = "Tezos_protocol_environment_*.Error_monad.tzresult"
+underlying = ["Tezos_protocol_environment_*.Error_monad.Pervasives.result", "Tezos_protocol_environment_*.Pervasives.result"]
+unwrap = ["Tezos_protocol_environment_*.Error_monad.trace"]
+error_type = "Tezos_protocol_environment_*.Error_monad.error"
+error_arg = 2
+# The environment's own [Lwt] re-export, NOT the bare [Lwt.t] — found by
+# the main.ml smoke run (oracle O-6/O-7): [begin_application]/
+# [apply_operation]/[finalize_application] all print their outer wrapper as
+# [Tezos_protocol_environment_alpha.Lwt.t], never plain [Lwt.t] (the
+# sandboxed protocol environment re-exports its own copy of every module it
+# hands the protocol, [Lwt] included).
+lift = ["Lwt.t", "Tezos_protocol_environment_*.Lwt.t"]
+
+# Origins: "error"/"tzfail" (both syntaxes) construct a tzresult directly
+# from a literal error at argument 1; the conditional forms carry the
+# literal at argument 2 (roster/error-channels/tezos-profile-evidence.md,
+# "Origins not in the sketch").
+origins = [
+  { path = "Tezos_protocol_environment_*.Error_monad.error", arg = 1 },
+  { path = "Tezos_protocol_environment_*.Error_monad.tzfail", arg = 1 },
+  { path = "Tezos_protocol_environment_*.Error_monad.Result_syntax.tzfail", arg = 1 },
+  { path = "Tezos_protocol_environment_*.Error_monad.Lwt_result_syntax.tzfail", arg = 1 },
+  { path = "Tezos_protocol_environment_*.Error_monad.Result_syntax.fail", arg = 1 },
+  { path = "Tezos_protocol_environment_*.Error_monad.Lwt_result_syntax.fail", arg = 1 },
+  { path = "Tezos_protocol_environment_*.Error_monad.error_when", arg = 2 },
+  { path = "Tezos_protocol_environment_*.Error_monad.error_unless", arg = 2 },
+  { path = "Tezos_protocol_environment_*.Error_monad.fail_when", arg = 2 },
+  { path = "Tezos_protocol_environment_*.Error_monad.fail_unless", arg = 2 },
+]
+
+# Binds: Result_syntax/Lwt_result_syntax let-operators over a tzresult.
+# NOT declared, per the verified inventory (tezos-profile-evidence.md):
+# Result_syntax.and*/Lwt_result_syntax.and* (absent — 0 occurrences).
+# Lwt_result_syntax.let*! binds a plain Lwt.t (EC-6: not a tzresult carrier
+# by the carrier rule itself), so listing it here is harmless but also not
+# load-bearing; kept for completeness since the raw inventory names it.
+binds = [
+  "Tezos_protocol_environment_*.Error_monad.Result_syntax.let*",
+  "Tezos_protocol_environment_*.Error_monad.Result_syntax.let+",
+  "Tezos_protocol_environment_*.Error_monad.Lwt_result_syntax.let*",
+  "Tezos_protocol_environment_*.Error_monad.Lwt_result_syntax.let+",
+  "Tezos_protocol_environment_*.Error_monad.Lwt_result_syntax.let*?",
+  "Tezos_protocol_environment_*.Error_monad.Lwt_result_syntax.let*!",
+]
+
+# Transforms — all "add" (specs/error-channels.md "Transforms"): the inner
+# set survives, the literal at arg=1 is unioned in. record_trace_eval is
+# "present, not in the sketch" per the verified inventory.
+transforms = [
+  { path = "Tezos_protocol_environment_*.Error_monad.record_trace", mode = "add", arg = 1 },
+  { path = "Tezos_protocol_environment_*.Error_monad.trace", mode = "add", arg = 1 },
+  { path = "Tezos_protocol_environment_*.Error_monad.trace_eval", mode = "add", arg = 1 },
+  { path = "Tezos_protocol_environment_*.Error_monad.record_trace_eval", mode = "add", arg = 1 },
+]
+
+# Converters: catch_f is the ONLY catch_f/catch/catch_s site in all of
+# lib_protocol (roster/error-channels/tezos-profile-evidence.md, oracle
+# O-5: Script_repr.force_bytes, script_repr.ml:264). catch/catch_s are NOT
+# declared — verified absent (0 occurrences); declaring them would only
+# produce a harmless per-path warning, but the inventory says not to.
+# arg = 2, NOT 1 (found by the early smoke on THIS corpus, oracle O-5):
+# catch_f has a leading OPTIONAL ?catch_only parameter
+# (lib_protocol_environment/sigs/v17/error_monad.mli), so its formal
+# argument order is [?catch_only; (unit -> 'a) thunk; (exn -> error)
+# handler] — the guarded thunk is argument 2, not 1, whether or not a call
+# site actually supplies ~catch_only (the typechecker normalises labelled
+# applications to the arrow's own order, so [Texp_apply]'s args list always
+# has this shape, an unsupplied optional showing as [(Optional _, None)]).
+# The walker looks at the NEXT argument (arg 3, the exn -> error handler)
+# for a literal return when `error` is unset — see arch_index_cmt.ml's
+# converter handling, "literal_of_next".
+converters = [
+  { path = "Tezos_protocol_environment_*.Error_monad.catch_f", from = "exception", to = "tzresult", arg = 2 },
+]
+
+# Sinks (found by the early smoke on THIS corpus, not in the original
+# sketch): [return]/[ok]/[return_unit]/… wrap a plain VALUE into a tzresult
+# — their own return type is a tzresult, same as any real carrier callee,
+# so without declaring them as sinks every occurrence of e.g.
+# [Result_syntax.return v] is an ordinary propagating edge to an
+# UNRESOLVED EXTERNAL function (they live outside lib_protocol's own
+# indexed corpus) and turns almost every tzresult function ⊤ [external] —
+# not a soundness bug (⊤ is always safe) but uselessly pessimistic, and it
+# is exactly what oracle rows O-1/O-2/O-4 caught: [of_seconds] and
+# [spend_from_balance] both answered UNBOUNDED (⊤) reason "external
+# ...Result_syntax.return" before this was added. A sink's head call does
+# not propagate; its argument [v] is an ordinary value, never itself a
+# carrier call in any of these idioms, so nothing is lost.
+sinks = [
+  "Tezos_protocol_environment_*.Error_monad.ok",
+  "Tezos_protocol_environment_*.Error_monad.return",
+  "Tezos_protocol_environment_*.Error_monad.return_none",
+  "Tezos_protocol_environment_*.Error_monad.return_unit",
+  "Tezos_protocol_environment_*.Error_monad.Result_syntax.return",
+  "Tezos_protocol_environment_*.Error_monad.Result_syntax.return_none",
+  "Tezos_protocol_environment_*.Error_monad.Result_syntax.return_some",
+  "Tezos_protocol_environment_*.Error_monad.Result_syntax.return_true",
+  "Tezos_protocol_environment_*.Error_monad.Result_syntax.return_unit",
+  "Tezos_protocol_environment_*.Error_monad.Lwt_result_syntax.return",
+  "Tezos_protocol_environment_*.Error_monad.Lwt_result_syntax.return_false",
+  "Tezos_protocol_environment_*.Error_monad.Lwt_result_syntax.return_none",
+  "Tezos_protocol_environment_*.Error_monad.Lwt_result_syntax.return_some",
+  "Tezos_protocol_environment_*.Error_monad.Lwt_result_syntax.return_true",
+  "Tezos_protocol_environment_*.Error_monad.Lwt_result_syntax.return_unit",
+]
+
+# Second Tezos channel (roster/error-channels/tezos-profile-evidence.md, "A
+# second Tezos channel exists"): the protocol environment's OWN option
+# monad, Error_monad.Option_syntax / Error_monad.Lwt_option_syntax — a
+# distinct binds vocabulary from the built-in `option` channel's
+# Stdlib.Option.*, even though both carry the SAME `option` type.
+#
+# KNOWN LIMITATION (recorded per the ambiguity rule): carrier-channel
+# selection (arch_index_errch.ml's carrier_channel_of_type) picks the
+# FIRST channel in declaration order whose type_paths match — since the
+# built-in `option` channel is always declared first (built-in < profile
+# in the merge order) and also claims the bare `option` type, every
+# option-typed function in a Tezos corpus is attributed to `option`, not
+# `tzoption`; `tzoption`'s own binds are therefore not reachable through
+# ordinary carrier-driven node classification in this slice. Declared
+# anyway (the brief asks for it, and the carrier TYPE is real and present,
+# so validation does not fail); disambiguating same-type channels by binds
+# vocabulary as well as carrier type is out of this slice's scope — a
+# follow-up residual, not silently swallowed.
+[channel.tzoption]
+type = "option"
+error_type = ""
+origins = [{ path = "None", arg = 0 }]
+binds = [
+  "Tezos_protocol_environment_*.Error_monad.Option_syntax.let*",
+  "Tezos_protocol_environment_*.Error_monad.Option_syntax.let+",
+  "Tezos_protocol_environment_*.Error_monad.Lwt_option_syntax.let*",
+  "Tezos_protocol_environment_*.Error_monad.Lwt_option_syntax.let*?",
+]
