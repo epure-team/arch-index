@@ -132,3 +132,13 @@ val record_partial : acc -> loc:Location.t -> unit
 (** Scopes in enter order and origins in source order, with [o_escapes]
     computed from each origin's scope chain. *)
 val finalize : acc -> scope list * origin list
+
+(** Does this pattern accept EVERY value of its type?
+
+    A constructor pattern whose arguments constrain the value (a constant, a
+    nested constructor) catches a strict subset of its identity, so an arm
+    built from it must not be recorded as closing that identity — doing so
+    deletes a reachable failure from the answer. Shared with the value
+    channels so the two cannot drift apart. *)
+val pat_is_irrefutable : Typedtree.value Typedtree.general_pattern -> bool
+

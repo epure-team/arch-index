@@ -213,12 +213,42 @@ let arm_is_closing (a : arm) =
       it.expr it a.a_rhs ;
       not !reraises
 
+(* Does this pattern match EVERY value of its type, or only some?
+
+   FIX (review round 2, CRITICAL): [classify_pat] read a constructor pattern's
+   identity and discarded its argument patterns, so `try … with Failure "x" ->`
+   recorded `Failure` as caught and the solver subtracted every `Failure` the
+   body could raise — `Failure "y"` included. A constructor whose arguments
+   constrain the value catches a strict SUBSET of that identity, and closing an
+   identity we only partly catch deletes a reachable exception from the answer.
+
+   Only irrefutable arguments (wildcards, variables, and tuples/records/lazy
+   built from them) leave the identity fully caught. Anything that can fail to
+   match — a constant, a nested constructor, an array's length, a polymorphic
+   variant — makes the arm close nothing. An or-pattern is irrefutable only if
+   both sides are. *)
+let rec pat_is_irrefutable (p : Typedtree.value Typedtree.general_pattern) =
+  match p.pat_desc with
+  | Tpat_any | Tpat_var _ -> true
+  | Tpat_alias (inner, _, _, _) -> pat_is_irrefutable inner
+  | Tpat_tuple ps -> List.for_all pat_is_irrefutable ps
+  | Tpat_record (fields, _) -> List.for_all (fun (_, _, fp) -> pat_is_irrefutable fp) fields
+  | Tpat_lazy inner -> pat_is_irrefutable inner
+  | Tpat_or (a, b, _) -> pat_is_irrefutable a && pat_is_irrefutable b
+  | _ -> false
+
 type pat_class = {caught : string list; catch_all : bool; bound : string list}
 
 let rec classify_pat ~canon (p : Typedtree.value Typedtree.general_pattern) =
   match p.pat_desc with
-  | Tpat_construct (_, {cstr_tag = Cstr_extension (path, _); _}, _, _) ->
-      {caught = [canon path]; catch_all = false; bound = []}
+  | Tpat_construct (_, {cstr_tag = Cstr_extension (path, _); _}, args, _) ->
+      (* Catches this identity only if it accepts every value carrying it —
+         see [pat_is_irrefutable]. Otherwise the arm closes nothing: it does
+         match some values, but naming the identity here would subtract the
+         ones it does not match. *)
+      if List.for_all pat_is_irrefutable args then
+        {caught = [canon path]; catch_all = false; bound = []}
+      else {caught = []; catch_all = false; bound = []}
   | Tpat_or (a, b, _) ->
       let ca = classify_pat ~canon a and cb = classify_pat ~canon b in
       {
