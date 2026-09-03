@@ -1,0 +1,19 @@
+{
+  "task": "provenance-columns",
+  "date": "2026-09-03",
+  "status": "GO",
+  "round": 1,
+  "cycle": 1,
+  "qa_no_go_round": 0,
+  "causes": [],
+  "rounds_audit": [
+    {
+      "round": 1,
+      "date": "2026-09-03",
+      "verdict": "GO",
+      "causes": [],
+      "qualifying": false
+    }
+  ],
+  "cross_runtime": {}
+}

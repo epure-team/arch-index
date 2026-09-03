@@ -1,7 +1,7 @@
 {
   "task": "provenance-columns",
   "mode": "fast",
-  "current_phase": "review",
+  "current_phase": "qa",
   "events": [
     {
       "phase": "intake",
@@ -20,6 +20,12 @@
       "outcome": "GO",
       "reason": "reviewer + architect (cross-runtime codex skipped, degraded all session). 3 HIGH: producer_runs missing from the drop-and-recreate list (orphaned rows on re-index) - fixed; production write path untested - fixed with a real double-invocation test, which surfaced a SECOND independent pre-existing bug (PRAGMA foreign_keys=ON breaking re-index of any existing DB, unrelated to producer_runs) - fixed; architecture-schema.sql's own comment claimed SHA-256 while the implementation is MD5 - fixed (both specialists independently found this). 6 MEDIUM (invocation_digest hashing Sys.argv in library entry points, silent-NULL on a rejected producer_runs insert, three bin/arch_load flag-parsing bugs, a CHECK-constraint test with no positive control, two hand-duplicated set_meta blocks in runner.ml) and 1 LOW all fixed. architect confirmed the three-mechanism design is principled, not inconsistent. 96/96 tests pass post-fix, self-index golden regenerated.",
       "by": "roster-review"
+    },
+    {
+      "phase": "qa",
+      "outcome": "GO",
+      "reason": "Build clean, 96/96 tests. No spec exists (Fast mode) so Step 3 was substituted with independent fresh-fixture reverification of all three provenance mechanisms, outside the review round's own test files: main schema (double-invocation against a fresh fixture confirms exactly one producer_runs row and correct FK on functions/calls), flat LSP schema (fresh Go fixture confirms all four comment_db_meta keys), bin/arch_load (four scenarios: declared flags, default, invalid soundness-class rejected exit 2, empty --producer= rejected exit 2). Every review-round fix independently confirmed to hold under fresh exercise. Cross-runtime QA skipped (breaker: codex degraded, unchanged since review).",
+      "by": "roster-qa"
     }
   ]
 }
