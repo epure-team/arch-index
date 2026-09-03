@@ -57,10 +57,53 @@ Key/value store for index metadata.
 | `callgraph_contract` | `v1` when the index is ⊤-marked |
 | `decision_contract` | `v1` when a producer actually ran the decision analysis |
 | `built_by` | the producing tool, e.g. `arch-load` |
+| `producer` | (flat schemas only — roadmap 1.2, ADR 002) declared producer identity, e.g. `arch_index_lsp` |
+| `producer_version` | (flat schemas only) declared producer version, absent if not declared |
+| `soundness_class` | (flat schemas only) `sound_with_top` \| `heuristic` \| `asserted` — ADR 002's rigour classes |
+| `invocation_digest` | (flat schemas only) an MD5 identity fingerprint over the invocation |
 
 `decision_contract` is stamped only when decisions were supplied, so a consumer can tell
 "computed nothing" from "computed nothing to report". The `decisions` table exists either way —
 presence proves nothing, which is why every consumer checks whether it is **non-empty**.
+
+### Provenance (roadmap 1.2, ADR 002)
+
+The **main schema** records provenance as data, not per-row text: a `producer_runs` table (one
+row per invocation — `producer`, `producer_version`, `invocation_digest`, `soundness_class`) and a
+nullable `producer_run_id` FK on `functions`/`calls`. This is a join, not five denormalised
+columns repeated per row — at Octez scale (1.4M+ calls) the latter is a ~200 MB mistake for data
+that never varies within one run. `Arch_index.run` (the CMT path) inserts exactly one
+`producer_runs` row per invocation, claiming `soundness_class = 'sound_with_top'` — the one
+producer in this codebase that marks unresolvable targets ⊤ rather than dropping them.
+
+The two **flat schemas** (`runner.ml`'s LSP-based path, and `bin/arch_load`'s NDJSON loader) use
+`comment_db_meta` keys instead of a `producer_runs` table — see the table above. `runner.ml`
+always writes `producer = 'arch_index_lsp'` and `soundness_class = 'heuristic'` (it never marks
+⊤ — see `lsp_edge_kind`'s own comment in `runner.ml`), since this backend is always the same
+producer at the same rigour: nothing per-row to distinguish, unlike `language`, which genuinely
+varies after `run_multi`'s merge. `bin/arch_load` is producer-agnostic by design (Go, Rust, or any
+NDJSON producer can feed it), so it cannot hardcode an identity — `producer`/`producer_version`
+are written only when declared via `--producer=NAME`/`--producer-version=V`, and absent means "not
+declared", never a guess; `soundness_class` always writes, defaulting to the conservative
+`'heuristic'` per ADR 002's governing rule (only an explicit `--soundness-class=` flag can claim
+`sound_with_top`). An out-of-vocabulary `--soundness-class` value aborts the load, matching this
+loader's own strictness discipline for an invalid `kind`.
+
+`invocation_digest` is Stdlib `Digest` (MD5) over `(producer, producer_version, argv)` in every
+writer — an identity fingerprint so two reports of the same invocation can be compared without
+re-running, not a security boundary, so a heavier hash was not worth a new dependency. It does not
+hash project content (a full tree walk); that is a documented simplification, a follow-up if a
+future consumer needs content-sensitivity, not a silently dropped requirement. `argv` here is the
+literal `Sys.argv` only for `bin/arch_load` (a real CLI process); `Arch_index.run` and
+`Runner.run`/`run_multi` are library entry points, so a caller's own process argv would not vary
+between two calls with different parameters — they hash their own parameters
+(`build_dir`/`db_path`/`schema_path`, and `project_dir`/`language(s)`, respectively) instead
+(review-round fix — the first draft used `Sys.argv` unconditionally).
+
+**Residual:** `producer_version` is written only by `bin/arch_load` (from its `--producer-version=`
+flag, when a caller declares it). `Arch_index.run` and `runner.ml` both pass `producer_version =
+None` unconditionally — neither has a build-time version string to report (this project has no
+`VERSION` file). Not silently dropped: a future item that adds one should populate this argument.
 
 ## Additional tables
 
@@ -137,6 +180,7 @@ and forcing a shared constant across two intentionally-independent binaries woul
 | `1.1` | `function_effects`, `value_kinds` — mutation/effect tracking (Phase 1 capability A) | `effects-schema-migration.sql` |
 | `1.2` | `reachability_class`, `actor_role`, `temporal_class`, `gating`, `value_touched`, `precondition` columns on `function_effects`; `attack_edges` table and `from_path`/`to_path` columns — attack-surface capability layer (Phase 2) | `capabilities-schema-migration.sql` |
 | `1.3` | `modules.language`, `functions.language`/`functions.universe` — roadmap Phase 1 item 1.1, `SPEC-sound-callgraph.md` FR-001 ("node identity carries a language tag + internal/external universe flag") | `architecture-schema.sql` (additive columns) |
+| `1.4` | `producer_runs` table; `functions.producer_run_id`/`calls.producer_run_id` — roadmap Phase 1 item 1.2, ADR 002 | `architecture-schema.sql` (additive table + columns) |
 
 Versions `1.1` and `1.2` are retroactive: both migrations were applied to `main` before this
 versioning mechanism existed, so `schema_version` never actually recorded them at the time — this

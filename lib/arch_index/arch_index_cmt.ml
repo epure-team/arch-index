@@ -1582,7 +1582,8 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ~src_path ~calle
     @param count_code_lines Function to count code lines in a source file *)
 let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
     ~exposed_tbl ~doc_tbl ~module_quint_tbl ~stmt_mod ~stmt_fn ~stmt_ty
-    ~stmt_fld ~stmt_ctor ~stmt_scope ~stmt_catch ~stmt_origin ~stmt_rebind path =
+    ~stmt_fld ~stmt_ctor ~stmt_scope ~stmt_catch ~stmt_origin ~stmt_rebind
+    ?(producer_run_id = None) path =
   match Cmt_format.read path with
   | _, None -> ([], [], [])
   | _, Some info -> (
@@ -1859,6 +1860,7 @@ let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
                                       ~mutation_sites:(Some muts)
                                       ~deref_sites:(Some derefs)
                                       ~language:(Some "ocaml")
+                                      ~producer_run_id
                                       ?comment_quality_score:
                                         (Option.map
                                            (fun p ->
@@ -2068,6 +2070,7 @@ let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
                                               ~exposed:false
                                               ~intent:None
                                               ~language:(Some "ocaml")
+                                              ~producer_run_id
                                               ()
                                           with
                                           | Some lam_id ->

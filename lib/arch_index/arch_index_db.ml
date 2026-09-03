@@ -49,7 +49,7 @@ let schema_path =
    constant — a consumer reading schema_version="1.2" off a flat-schema
    database would wrongly conclude those tables exist. See
    [current_flat_schema_version] below, which runner.ml now uses instead. *)
-let current_schema_version = "1.3"
+let current_schema_version = "1.4"
 
 (* The flat schema (runner.ml's own inline 3-table [schema_sql]) — distinct
    version identity from [current_schema_version] above: the two schemas are
@@ -261,6 +261,47 @@ let bind_text_opt stmt idx = function
 (* Insert helpers                                                             *)
 (* -------------------------------------------------------------------------- *)
 
+(* Roadmap 1.2 (ADR 002): exactly one [producer_runs] row per invocation, so it
+   is inserted directly rather than through the prepared-statement machinery
+   the rest of this module uses for per-row inserts repeated thousands of
+   times. [soundness_class] defaults to the conservative 'heuristic' — ADR
+   002's governing rule ("a heuristic fact may raise a finding, but may never
+   discharge a top anchor or license a PASS") makes silence about rigour the
+   safe default, not 'sound_with_top', which a caller must claim explicitly. *)
+let insert_producer_run db ~producer ?(producer_version = None)
+    ?(invocation_digest = None) ?(soundness_class = "heuristic") () =
+  let stmt =
+    Sqlite3.prepare
+      db
+      "INSERT INTO producer_runs (producer, producer_version, \
+       invocation_digest, soundness_class) VALUES (?, ?, ?, ?)"
+  in
+  bind_text stmt 1 producer ;
+  bind_text_opt stmt 2 producer_version ;
+  bind_text_opt stmt 3 invocation_digest ;
+  bind_text stmt 4 soundness_class ;
+  let result = exec_stmt_rowid db ~what:"producer_runs" stmt in
+  ignore (Sqlite3.finalize stmt : Sqlite3.Rc.t) ;
+  result
+
+(* An identity fingerprint for one invocation, so two reports of the SAME run
+   can be compared without re-running (roadmap 1.2's stated purpose for
+   [invocation_digest]). Deliberately Stdlib [Digest] (MD5), not a SHA-256
+   library (the roadmap's literal suggestion): this is an identity
+   comparison, not a security boundary, and using what is already in the
+   standard library avoids adding a new external dependency for a
+   non-adversarial use case. Also deliberately narrower than the roadmap's
+   eventual goal — it hashes (producer, producer_version, argv), not a full
+   project-content hash (a tree walk), which is out of scope for this item
+   and left as a documented follow-up rather than silently dropped. *)
+let invocation_digest ~producer ~producer_version ~argv =
+  let payload =
+    String.concat
+      "\x00"
+      (producer :: Option.value producer_version ~default:"" :: Array.to_list argv)
+  in
+  Digest.to_hex (Digest.string payload)
+
 let insert_module db stmt_mod ~path ~lines ~has_mli ?(quint_module_raw = None)
     ?(language = None) () =
   let now =
@@ -296,7 +337,7 @@ let insert_function db stmt_fn ~module_id ~name ~signature ~line_start ~line_end
     ?(has_post = false) ?(has_violators = false) ?(has_violates = false)
     ?(violators_raw = None) ?(violates_raw = None) ?(tests_raw = None)
     ?(quint_raw = None) ?(mutation_sites = None) ?(deref_sites = None)
-    ?(language = None) () =
+    ?(language = None) ?(producer_run_id = None) () =
   bind_int stmt_fn 1 module_id ;
   bind_text stmt_fn 2 name ;
   bind_text_opt stmt_fn 3 signature ;
@@ -316,6 +357,7 @@ let insert_function db stmt_fn ~module_id ~name ~signature ~line_start ~line_end
   bind_int_opt stmt_fn 17 mutation_sites ;
   bind_int_opt stmt_fn 18 deref_sites ;
   bind_text_opt stmt_fn 19 language ;
+  bind_int_opt stmt_fn 20 producer_run_id ;
   exec_stmt_rowid db ~what:"functions" stmt_fn
 
 let insert_type db stmt_ty ~module_id ~name ~kind ~line_start ~line_end ~exposed
@@ -349,19 +391,31 @@ let insert_constructor db stmt_ctor ~type_id ~constructor_name ~position
    reference THIS call — [None] on rejection, so nothing links to another
    call's id. [insert_call] is the same insert with the id dropped: one bind
    sequence, not two that can drift. *)
-let insert_call_rowid db stmt_call ~caller_id ~callee_id ~callee_name ~call_site ~kind =
+let insert_call_rowid db stmt_call ~caller_id ~callee_id ~callee_name ~call_site
+    ~kind ?(producer_run_id = None) () =
   bind_int stmt_call 1 caller_id ;
   bind_text stmt_call 3 callee_name ;
   bind_text_opt stmt_call 4 call_site ;
   bind_text stmt_call 5 kind ;
+  bind_int_opt stmt_call 6 producer_run_id ;
   (match callee_id with
   | Some id -> bind_int stmt_call 2 id
   | None -> ignore (Sqlite3.bind stmt_call 2 Sqlite3.Data.NULL)) ;
   exec_stmt_rowid db ~what:"calls" stmt_call
 
-let insert_call db stmt_call ~caller_id ~callee_id ~callee_name ~call_site ~kind =
+let insert_call db stmt_call ~caller_id ~callee_id ~callee_name ~call_site ~kind
+    ?(producer_run_id = None) () =
   ignore
-    (insert_call_rowid db stmt_call ~caller_id ~callee_id ~callee_name ~call_site ~kind
+    (insert_call_rowid
+       db
+       stmt_call
+       ~caller_id
+       ~callee_id
+       ~callee_name
+       ~call_site
+       ~kind
+       ~producer_run_id
+       ()
       : int option)
 
 let insert_call_exn_scope db stmt ~call_id ~scope_id =

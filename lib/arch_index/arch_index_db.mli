@@ -265,6 +265,50 @@ val bind_bool : Sqlite3.stmt -> int -> bool -> unit
     (none) *)
 val bind_text_opt : Sqlite3.stmt -> int -> string option -> unit
 
+(** Insert one [producer_runs] row (roadmap 1.2, ADR 002), return its ID, or
+    [None] if the row was rejected. Exactly one call per producer invocation
+    — not a per-source-row insert like the rest of this module.
+
+    {pre}
+    (none)
+
+    {post}
+    [Some id] with the rowid of the newly inserted producer_runs record, or
+    [None] when the row was rejected.
+
+    {violators}
+    (none)
+
+    {violates}
+    (none) *)
+val insert_producer_run :
+  Sqlite3.db ->
+  producer:string ->
+  ?producer_version:string option ->
+  ?invocation_digest:string option ->
+  ?soundness_class:string ->
+  unit ->
+  int option
+
+(** [invocation_digest ~producer ~producer_version ~argv] — an MD5 identity
+    fingerprint over the invocation (Stdlib [Digest], not a SHA-256 library:
+    this compares invocations, it is not a security boundary). Does not hash
+    project content — see the [.ml] comment for why.
+
+    {pre}
+    (none)
+
+    {post}
+    Returns a hex digest string deterministic in its inputs.
+
+    {violators}
+    (none)
+
+    {violates}
+    (none) *)
+val invocation_digest :
+  producer:string -> producer_version:string option -> argv:string array -> string
+
 (** Insert a module record, return its ID, or [None] if the row was rejected.
 
     {pre}
@@ -328,6 +372,7 @@ val insert_function :
   ?mutation_sites:int option ->
   ?deref_sites:int option ->
   ?language:string option ->
+  ?producer_run_id:int option ->
   unit ->
   int option
 
@@ -424,6 +469,8 @@ val insert_call :
   callee_name:string ->
   call_site:string option ->
   kind:string ->
+  ?producer_run_id:int option ->
+  unit ->
   unit
 
 (** Insert a module dependency.
@@ -497,6 +544,8 @@ val insert_call_rowid :
   callee_name:string ->
   call_site:string option ->
   kind:string ->
+  ?producer_run_id:int option ->
+  unit ->
   int option
 
 (** Link a call to the innermost handler scope enclosing its site.

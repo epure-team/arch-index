@@ -214,6 +214,24 @@ let set_meta db key value =
   ignore (Sqlite3.step stmt) ;
   ignore (Sqlite3.finalize stmt)
 
+(* Roadmap 1.2 (ADR 002). Db-level meta, not a per-row producer_runs FK like
+   the main schema: this whole backend is always the SAME producer at the
+   SAME rigour ('heuristic' — see [lsp_edge_kind] above for why it never
+   earns 'sound_with_top'), so there is nothing per-row to distinguish,
+   unlike [language], which genuinely varies after [run_multi]'s merge.
+   Shared by [run] and [run_multi] so the two write sites cannot drift the
+   way [built_by] once did (see the FIX comment above [run]'s own call). *)
+let set_provenance_meta db ~digest_argv =
+  set_meta db "producer" "arch_index_lsp" ;
+  set_meta db "soundness_class" "heuristic" ;
+  set_meta
+    db
+    "invocation_digest"
+    (Arch_index_db.invocation_digest
+       ~producer:"arch_index_lsp"
+       ~producer_version:None
+       ~argv:digest_argv)
+
 (* -------------------------------------------------------------------------- *)
 (* Timeout helper                                                              *)
 (* -------------------------------------------------------------------------- *)
@@ -353,7 +371,12 @@ let run ~sw ~env ~project_dir ~language ~output ?(no_enrich = false)
         can now check this instead of trusting a bare "1.1" to mean the
         same thing everywhere. *)
      set_meta db "built_by" "arch_index_lsp" ;
-     set_meta db "language" language
+     set_meta db "language" language ;
+     (* [run]'s own parameters as the digest input, not [Sys.argv]: this is a
+        library entry point, not a CLI process — the host process's argv
+        would be identical across two [run] calls with different
+        [~project_dir]. *)
+     set_provenance_meta db ~digest_argv:[| project_dir; language |]
    with exn ->
      ignore (Sqlite3.db_close db) ;
      (try Sys.remove tmp_output with _ -> ()) ;
@@ -491,6 +514,10 @@ let run_multi ~sw ~env ~project_dir ~languages ~output ?(no_enrich = false)
             db
             "language"
             (String.concat "," (List.map (fun (l, _, _) -> l) tmp_dbs)) ;
+          set_provenance_meta
+            db
+            ~digest_argv:
+              (Array.of_list (project_dir :: List.map fst languages)) ;
           true
         with exn ->
           if verbose then
