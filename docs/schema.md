@@ -101,12 +101,20 @@ not survive unmodified). A consumer that only understands version `N.x` can safe
 database (every `N.*` schema is a superset of `N.0`); it must refuse a database whose major version
 it does not recognize, since some table or column it depends on may be gone.
 
-This versions the **main** schema (`architecture-schema.sql`, above) only. The flat schema (see
-"The flat schema" above) is a fixed, deliberately minimal 3-table shape that has never changed —
-it shares the same `comment_db_meta.schema_version` key, but a version bump here does not imply
-anything about the flat schema, and vice versa. A consumer must check which schema it opened (`Arch_db.schema`
-probes for `calls.caller_name`, per [`lib/arch_tools/arch_db.ml`](../lib/arch_tools/arch_db.ml)) before
-treating a version number as informative for that shape.
+This versions the **main** schema (`architecture-schema.sql`, above) only — written by
+`Arch_index.run` (the CMT-based path). The flat schema (see "The flat schema" above, the LSP-based
+path's own inline 3-table shape — the actual entry point `arch_index_cli` uses) is structurally
+different and has never changed; it gets its **own** version identity,
+`Arch_index_db.current_flat_schema_version` (currently `"1.0"`, re-exported nowhere yet since no
+consumer has asked for it), written by `runner.ml`'s two `comment_db_meta.schema_version` call
+sites — never `current_schema_version`. **Both write into the same `comment_db_meta.schema_version`
+key**, so a consumer must check WHICH schema it opened (`Arch_db.schema` probes for
+`calls.caller_name`, per [`lib/arch_tools/arch_db.ml`](../lib/arch_tools/arch_db.ml)) before
+treating the number it reads as meaning anything about that shape — the two version spaces are
+otherwise incomparable (a flat-schema `"1.0"` and a main-schema `"1.0"` describe unrelated table
+sets). A first draft of this fix stamped every database with `current_schema_version` regardless of
+which schema it actually was — caught and fixed by a fresh review round, since it would have let a
+flat-schema consumer read `"1.2"` and wrongly conclude `function_effects`/`attack_edges` exist.
 
 | Version | Added | Migration |
 |---|---|---|

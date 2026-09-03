@@ -41,12 +41,28 @@ val db_path : string
     (none) *)
 val schema_path : string
 
-(** Current schema version, ["<major>.<minor>"] — bumped by hand at every
-    schema change (minor for additive, major for breaking). History:
-    [docs/schema-versions.md]. This is the single source of truth
-    [comment_db_meta.schema_version] is written from; there is no other
-    literal version string anywhere in the codebase. *)
+(** Current MAIN schema version, ["<major>.<minor>"] — describes
+    [architecture-schema.sql]/[schema_path]/[schema_sql] below (the CMT-based
+    path, [Arch_index.run]), bumped by hand at every schema change (minor for
+    additive, major for breaking). History: [docs/schema.md]. NOT the version
+    of the flat schema — see {!current_flat_schema_version}, a structurally
+    different 3-table shape that must never be stamped with this value. *)
 val current_schema_version : string
+
+(** Version of the flat schema (the LSP-based path's own inline 3-table
+    [comment_db_meta]/[functions]/[calls] shape, distinct from the main
+    schema above) — has never changed, stays ["1.0"] until it does. Written
+    by [runner.ml]'s two [comment_db_meta.schema_version] call sites, never
+    by {!current_schema_version}. *)
+val current_flat_schema_version : string
+
+(** [schema_version_at_least ~major ~minor] — whether the current schema
+    version is at least [major.minor], using proper numeric comparison
+    (unlike a naive [current_schema_version = "1.2"] string check, this
+    correctly orders e.g. [1.10] above [1.2]). Returns [false], not an
+    exception, if [current_schema_version] is ever malformed — a consumer
+    asking "is this compatible" should get a conservative no, not a crash. *)
+val schema_version_at_least : major:int -> minor:int -> bool
 
 (** [architecture-schema.sql]'s contents, embedded at compile time. Lets a
     consumer of the [arch-index] library diff against the exact schema text a

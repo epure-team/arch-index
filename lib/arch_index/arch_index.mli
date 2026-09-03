@@ -76,7 +76,8 @@ val run :
     [project_dir] must be an absolute path to the project root.
 
     {post}
-    On success, [output] is a valid SQLite file with [comment_db_meta.schema_version=1].
+    On success, [output] is a valid SQLite file with [comment_db_meta.schema_version] set to
+    {!schema_version}.
     On LSP failure or timeout, returns [Ok ()] with an empty symbol set.
     Output path is written atomically — no partial file exists on failure.
 
@@ -223,8 +224,14 @@ val run_lsp_multi :
 (** Current schema version, ["<major>.<minor>"] — what
     [comment_db_meta.schema_version] is stamped with by every run above.
     History and the table/column set each version added:
-    [docs/schema-versions.md]. (#51 part 1.) *)
+    [docs/schema.md]. (#51 part 1.) *)
 val schema_version : string
+
+(** [schema_version_at_least ~major ~minor] — whether the running library's
+    schema version is at least [major.minor], via proper numeric comparison
+    (not a brittle [schema_version = "1.2"] string check). Returns [false]
+    rather than raising if [schema_version] is ever malformed. *)
+val schema_version_at_least : major:int -> minor:int -> bool
 
 (** [architecture-schema.sql]'s contents, embedded at compile time — lets a
     consumer of this library diff against the exact schema text a given build

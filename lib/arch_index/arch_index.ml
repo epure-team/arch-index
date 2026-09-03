@@ -175,6 +175,21 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
           really_input_string ic n)
   in
   exec_exn db sql ;
+  (* FIX (review): this is the ONLY path that writes architecture-schema.sql
+     (the schema current_schema_version's history actually describes — the
+     migrations that bumped it to 1.1/1.2 apply to THIS schema, not
+     runner.ml's separate flat 3-table one). It never stamped schema_version
+     at all before this fix — meaning the versioning mechanism #51 asked for
+     was, until now, never actually exercised for the schema it was built to
+     describe. Unconditional (unlike callgraph_contract below, which is
+     gated on a non-empty universe): the database's STRUCTURE is
+     architecture-schema.sql regardless of how much got indexed into it. *)
+  exec_exn
+    db
+    (Printf.sprintf
+       "INSERT OR REPLACE INTO comment_db_meta (key, value) VALUES \
+        ('schema_version', '%s')"
+       Arch_index_db.current_schema_version) ;
 
   (* Prepare statements *)
   let stmt_mod =
@@ -719,4 +734,5 @@ let run_lsp_multi = Runner.run_multi
 (* -------------------------------------------------------------------------- *)
 
 let schema_version = Arch_index_db.current_schema_version
+let schema_version_at_least = Arch_index_db.schema_version_at_least
 let schema_sql = Arch_index_db.schema_sql
