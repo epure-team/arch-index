@@ -186,6 +186,7 @@ module Db : sig
     ?quint_raw:string option ->
     ?mutation_sites:int option ->
     ?deref_sites:int option ->
+    ?language:string option ->
     unit ->
     int option
   (** Insert a function row, returning its id — [None] when the row was

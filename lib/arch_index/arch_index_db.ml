@@ -49,14 +49,14 @@ let schema_path =
    constant — a consumer reading schema_version="1.2" off a flat-schema
    database would wrongly conclude those tables exist. See
    [current_flat_schema_version] below, which runner.ml now uses instead. *)
-let current_schema_version = "1.2"
+let current_schema_version = "1.3"
 
-(* The flat schema (runner.ml's own inline 3-table [schema_sql]) has never
-   changed since it was introduced — it stays "1.0" until it does. Distinct
+(* The flat schema (runner.ml's own inline 3-table [schema_sql]) — distinct
    version identity from [current_schema_version] above: the two schemas are
    structurally incomparable, and conflating them under one version number is
-   exactly the bug a fresh review round caught in this same PR. *)
-let current_flat_schema_version = "1.0"
+   a bug a review round once caught (see docs/schema.md's history). Bumped to
+   "1.1" for roadmap item 1.1: an optional [language] column on [functions]. *)
+let current_flat_schema_version = "1.1"
 
 (* FIX (review): [current_schema_version] is a raw string, so a naive consumer
    is tempted to write [Arch_index.schema_version = "1.2"] — brittle against
@@ -262,7 +262,7 @@ let bind_text_opt stmt idx = function
 (* -------------------------------------------------------------------------- *)
 
 let insert_module db stmt_mod ~path ~lines ~has_mli ?(quint_module_raw = None)
-    () =
+    ?(language = None) () =
   let now =
     Printf.sprintf
       "%04d-%02d-%02dT%02d:%02d:%02d"
@@ -284,6 +284,7 @@ let insert_module db stmt_mod ~path ~lines ~has_mli ?(quint_module_raw = None)
   bind_text stmt_mod 3 now ;
   bind_bool stmt_mod 4 has_mli ;
   bind_text_opt stmt_mod 5 quint_module_raw ;
+  bind_text_opt stmt_mod 6 language ;
   exec_stmt_rowid db ~what:"modules" stmt_mod
 
 let bind_int_opt stmt idx = function
@@ -294,7 +295,8 @@ let insert_function db stmt_fn ~module_id ~name ~signature ~line_start ~line_end
     ~exposed ~intent ?(comment_quality_score = None) ?(has_pre = false)
     ?(has_post = false) ?(has_violators = false) ?(has_violates = false)
     ?(violators_raw = None) ?(violates_raw = None) ?(tests_raw = None)
-    ?(quint_raw = None) ?(mutation_sites = None) ?(deref_sites = None) () =
+    ?(quint_raw = None) ?(mutation_sites = None) ?(deref_sites = None)
+    ?(language = None) () =
   bind_int stmt_fn 1 module_id ;
   bind_text stmt_fn 2 name ;
   bind_text_opt stmt_fn 3 signature ;
@@ -313,6 +315,7 @@ let insert_function db stmt_fn ~module_id ~name ~signature ~line_start ~line_end
   bind_text_opt stmt_fn 16 quint_raw ;
   bind_int_opt stmt_fn 17 mutation_sites ;
   bind_int_opt stmt_fn 18 deref_sites ;
+  bind_text_opt stmt_fn 19 language ;
   exec_stmt_rowid db ~what:"functions" stmt_fn
 
 let insert_type db stmt_ty ~module_id ~name ~kind ~line_start ~line_end ~exposed

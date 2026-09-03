@@ -196,7 +196,7 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
     Sqlite3.prepare
       db
       "INSERT INTO modules (path, lines, last_analyzed, has_mli, \
-       quint_module_raw) VALUES (?, ?, ?, ?, ?)"
+       quint_module_raw, language) VALUES (?, ?, ?, ?, ?, ?)"
   in
   let stmt_fn =
     Sqlite3.prepare
@@ -204,8 +204,8 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
       "INSERT OR REPLACE INTO functions (module_id, name, signature, \
        line_start, line_end, exposed, intent, comment_quality_score, has_pre, \
        has_post, has_violators, has_violates, violators_raw, violates_raw, \
-       tests_raw, quint_raw, mutation_sites, deref_sites) VALUES (?, ?, ?, ?, \
-       ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+       tests_raw, quint_raw, mutation_sites, deref_sites, language) VALUES (?, \
+       ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
   in
   let stmt_ty =
     Sqlite3.prepare

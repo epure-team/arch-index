@@ -22,9 +22,11 @@ Usage:  arch-load [--allow-empty] <out.db> [input.ndjson]      (input defaults t
 
 NDJSON records (one JSON object per line; order-independent):
   function: {"type":"function","name":"f","file_path":"x.go","exported":true|false,
-             "line_start":10,"line_end":42}
+             "line_start":10,"line_end":42,"language":"go"}
             line_start/line_end are OPTIONAL but required for any per-diff or per-line join
             (arch-impact, arch-mutants, arch-coverage); without them a diff maps to a whole FILE.
+            language is OPTIONAL (roadmap 1.1) — a producer that knows its own language should
+            set it; absent means NULL, never guessed by this loader.
   call:     {"type":"call","caller_name":"f","caller_file":"x.go",
              "callee_name":"g","callee_file":"x.go"|null,"call_site":"x.go:12","kind":"MUST"}
   decision: {"type":"decision","file_path":"x.go","line":42,"col":7,"form":"if",
@@ -39,7 +41,8 @@ let kinds = [ "MUST"; "MAY_ENUMERATED"; "MAY_TOP" ]
 (** The contract, field by field. Anything outside these sets aborts the load unless it is an
     [x_]-prefixed producer-private extension. *)
 let fields = function
-  | "function" -> [ "type"; "name"; "file_path"; "exported"; "line_start"; "line_end" ]
+  | "function" ->
+      [ "type"; "name"; "file_path"; "exported"; "line_start"; "line_end"; "language" ]
   | "call" ->
       [ "type"; "caller_name"; "caller_file"; "callee_name"; "callee_file"; "call_site"; "kind" ]
   | "decision" ->
@@ -59,6 +62,19 @@ let die ?line fmt =
       exit 2)
     fmt
 
+(* FIX (roadmap 1.1, found while adding the [language] column): this loader
+   never stamped [comment_db_meta.schema_version] at all — a third, previously
+   undiscovered instance of the exact silent-schema-drift bug class #51 was
+   about (the other two were fixed in the schema-versioning task: the main
+   schema, architecture-schema.sql, and runner.ml's own flat schema). This
+   loader's schema is structurally identical to runner.ml's flat schema but
+   written by an independent code path with its own evolution — deliberately
+   NOT sharing a dependency on the arch_index library for one string constant
+   (this binary depends only on sqlite3+yojson by design), so it gets its own
+   local version identity, starting at "1.0" (the schema before this fix) and
+   bumped to "1.1" for the [language] column added here. *)
+let schema_version = "1.1"
+
 let schema =
   {|
 DROP TABLE IF EXISTS comment_db_meta;
@@ -66,7 +82,7 @@ DROP TABLE IF EXISTS functions;
 DROP TABLE IF EXISTS calls;
 CREATE TABLE comment_db_meta(key TEXT PRIMARY KEY, value TEXT);
 CREATE TABLE functions(name TEXT, file_path TEXT, exported INTEGER DEFAULT 0,
-                       line_start INTEGER, line_end INTEGER);
+                       line_start INTEGER, line_end INTEGER, language TEXT);
 CREATE TABLE calls(caller_name TEXT, caller_file TEXT, callee_name TEXT, callee_file TEXT,
                    call_site TEXT, kind TEXT);
 CREATE INDEX idx_calls_caller ON calls(caller_name);
@@ -115,7 +131,13 @@ let starts_with ~prefix s =
 
 (* ------------------------------------------------------------------ *)
 
-type fn = { file : string option; exported : bool; ls : int option; le : int option }
+type fn = {
+  file : string option;
+  exported : bool;
+  ls : int option;
+  le : int option;
+  language : string option;
+}
 
 let () =
   let args = List.tl (Array.to_list Sys.argv) in
@@ -256,7 +278,13 @@ let () =
                in
                if not (Hashtbl.mem funcs name) then decl_order := name :: !decl_order ;
                Hashtbl.replace funcs name
-                 { file = str "file_path" assoc; exported = truthy "exported" assoc; ls; le } ;
+                 {
+                   file = str "file_path" assoc;
+                   exported = truthy "exported" assoc;
+                   ls;
+                   le;
+                   language = str "language" assoc;
+                 } ;
                if not (Hashtbl.mem seen name) then (
                  Hashtbl.replace seen name () ;
                  seen_order := name :: !seen_order)))
@@ -270,7 +298,9 @@ let () =
     List.filter (fun n -> n <> "*TOP*" && not (Hashtbl.mem funcs n)) (List.rev !seen_order)
   in
   List.iter
-    (fun n -> Hashtbl.replace funcs n { file = None; exported = false; ls = None; le = None })
+    (fun n ->
+      Hashtbl.replace funcs n
+        { file = None; exported = false; ls = None; le = None; language = None })
     derived ;
   let insert_order = List.rev !decl_order @ derived in
 
@@ -325,10 +355,12 @@ let () =
   in
   put_meta "callgraph_contract" "v1" ;
   put_meta "built_by" "arch-load" ;
+  put_meta "schema_version" schema_version ;
 
   let sf =
     Sqlite3.prepare db
-      "INSERT INTO functions(name,file_path,exported,line_start,line_end) VALUES(?,?,?,?,?)"
+      "INSERT INTO functions(name,file_path,exported,line_start,line_end,language) \
+       VALUES(?,?,?,?,?,?)"
   in
   List.iter
     (fun n ->
@@ -338,6 +370,7 @@ let () =
       bind_ck sf 3 (Sqlite3.Data.INT (if f.exported then 1L else 0L)) ;
       bind_int_opt sf 4 f.ls ;
       bind_int_opt sf 5 f.le ;
+      bind_opt sf 6 f.language ;
       run sf)
     insert_order ;
   ignore (Sqlite3.finalize sf) ;
