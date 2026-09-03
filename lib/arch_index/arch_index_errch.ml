@@ -37,6 +37,35 @@ let carrier_channel_of_type ~channels ty =
         channels
   | _ -> None
 
+(** [bind_shape_channel ~channels ty]: [ty] has "bind shape" over some
+    declared channel [c] — [c -> ('a -> c) -> c] — iff, without stripping any
+    arrows first (unlike {!carrier_channel_of_type}), [ty] is
+    [Tarrow(_, c1, Tarrow(_, arg2, _, _), _)] where [c1] and [arg2]'s own
+    result (after stripping ITS arrows) and [ty]'s final result all name the
+    SAME channel [c] (specs/error-channels.md "Binds": ["inferred_bind"]).
+    Used to flag an UNDECLARED bind-shaped operator, never to silently treat
+    it as a bind. *)
+let bind_shape_channel ~channels ty =
+  match Types.get_desc ty with
+  | Tarrow (_, arg1, rest, _) -> (
+      match Types.get_desc rest with
+      | Tarrow (_, arg2, res, _) -> (
+          match Types.get_desc arg2 with
+          | Tarrow _ -> (
+              match
+                ( carrier_channel_of_type ~channels arg1,
+                  carrier_channel_of_type ~channels arg2,
+                  carrier_channel_of_type ~channels res )
+              with
+              | Some a, Some b, Some c
+                when a.Arch_errors_config.name = b.Arch_errors_config.name
+                     && b.Arch_errors_config.name = c.Arch_errors_config.name ->
+                  Some a
+              | _ -> None)
+          | _ -> None)
+      | _ -> None)
+  | _ -> None
+
 let constructor_canonical_path ~canon_type (ty : Types.type_expr) cstr_name =
   match Types.get_desc ty with
   | Tconstr (p, _, _) -> (
@@ -153,7 +182,18 @@ let idents_occur ~idents (e : Typedtree.expression) =
 (* Recording                                                                 *)
 (* ------------------------------------------------------------------------ *)
 
-type origin = {o_channel : string; o_path : string option; o_line : int; o_col : int}
+type origin = {
+  o_channel : string;
+  o_path : string option;
+  o_form : string;
+      (* "raise" (a literal path), "unknown" (non-literal argument — ⊤
+         [unknown_error_value]), or "inferred_bind" ([o_path] then carries
+         the call-site witness "file:line", not a canonical error path —
+         specs/error-channels.md "Binds": an undeclared bind-shaped operator
+         over a declared carrier). *)
+  o_line : int;
+  o_col : int;
+}
 
 type scope = {
   s_id : int;
@@ -188,8 +228,10 @@ let add_scope acc ~channel ~catch_all ~caught ~loc =
     :: acc.scopes ;
   id
 
-let add_origin acc ~channel ~path ~loc =
+let add_origin acc ~channel ~path ?(form = "") ~loc () =
   let line, col = pos loc in
-  acc.origins <- {o_channel = channel; o_path = path; o_line = line; o_col = col} :: acc.origins
+  let form = if form <> "" then form else if path = None then "unknown" else "raise" in
+  acc.origins <-
+    {o_channel = channel; o_path = path; o_form = form; o_line = line; o_col = col} :: acc.origins
 
 let finalize acc = (List.rev acc.scopes, List.rev acc.origins)

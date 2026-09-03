@@ -23,6 +23,15 @@
 val carrier_channel_of_type :
   channels:Arch_errors_config.channel list -> Types.type_expr -> Arch_errors_config.channel option
 
+(** [bind_shape_channel ~channels ty]: [ty] (an UNSTRIPPED function type, the
+    operator's own type before application) has the shape
+    [c -> ('a -> c) -> c] for some declared channel [c] — [None] otherwise.
+    Used to flag an application whose head is NOT a declared [binds] path but
+    whose type says it binds a carrier anyway (specs/error-channels.md
+    "Binds": [inferred_bind]). *)
+val bind_shape_channel :
+  channels:Arch_errors_config.channel list -> Types.type_expr -> Arch_errors_config.channel option
+
 (** Canonical path of an ordinary (non-extensible) constructor: the module
     portion of its constructed type's canonical path (via [canon_type],
     expected to be [Arch_index_exn.canonical_path] partially applied) plus
@@ -74,7 +83,13 @@ val idents_occur : idents:string list -> Typedtree.expression -> bool
 
 (** {2 Recording} *)
 
-type origin = {o_channel : string; o_path : string option; o_line : int; o_col : int}
+type origin = {
+  o_channel : string;
+  o_path : string option;
+  o_form : string;
+  o_line : int;
+  o_col : int;
+}
 
 (** A value-channel handler: covers exactly one call's head (linked
     separately, by the caller, via [call_exn_scopes]). [s_caught] mirrors
@@ -98,6 +113,9 @@ val create : unit -> acc
 val add_scope :
   acc -> channel:string -> catch_all:bool -> caught:string list -> loc:Location.t -> int
 
-val add_origin : acc -> channel:string -> path:string option -> loc:Location.t -> unit
+(** [~form]: defaults to ["unknown"] when [path = None], ["raise"]
+    otherwise — pass it explicitly for ["inferred_bind"] (see {!origin}). *)
+val add_origin :
+  acc -> channel:string -> path:string option -> ?form:string -> loc:Location.t -> unit -> unit
 
 val finalize : acc -> scope list * origin list

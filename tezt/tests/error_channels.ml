@@ -38,7 +38,16 @@ let fixture_files =
        ([err]) rather than parameterising it, so the carrier check's
        "error_arg not applicable" branch is what's exercised. *)
     ( "arch-errors.toml",
-      "[channel.myres]\ntype = \"myres\"\norigins = [{path = \"Error\", arg = 1}]\n" );
+      (* [add_err]/[opt_of_res] are called UNQUALIFIED from within the same
+         module ([Ec_a]) that defines them — a same-module call's resolved
+         head carries the BARE name (module attribution is a separate
+         [functions.module_id] column, not part of the identifier itself),
+         so the declared path is the bare name too, not [Ec_a.add_err]. *)
+      "[channel.myres]\n\
+       type = \"myres\"\n\
+       origins = [{path = \"Error\", arg = 1}]\n\
+       transforms = [{path = \"add_err\", mode = \"add\", arg = 1}]\n\
+       converters = [{path = \"opt_of_res\", from = \"myres\", to = \"option\", arg = 1}]\n" );
     ( "ec_a.ml",
       {|type err = A | B of int
 
@@ -64,6 +73,49 @@ let plain () = 42
 let o () = if Sys.opaque_identity true then None else Some 1
 
 let o2 () = Option.bind (o ()) (fun x -> Some x)
+
+(* A genuine Stdlib.result carrier (built-in [result] channel), for
+   binds/transforms/inferred_bind (specs/error-channels.md "Binds" /
+   "Transforms"). *)
+let fr () : (int, err) result = Error A
+
+(* US-2.5 : Stdlib.Result.bind (declared bind) — the bound expression's head
+   call AND the continuation both propagate. *)
+let h () = Stdlib.Result.bind (fr ()) (fun x -> Ok x)
+
+let h2 () = Stdlib.Result.bind (fr ()) (fun _ -> Error (B 2))
+
+(* US-2.7 : "replace" mode via the built-in Stdlib.Result.map_error — the
+   inner set is discarded, only the mapper's literal return survives. *)
+let w () = Stdlib.Result.map_error (fun _ -> B 3) (fr ())
+
+let w2 mapper = Stdlib.Result.map_error mapper (fr ())
+
+(* US-2.8 : alias chain — [r2] resolves to [f ()]'s head call through a
+   chain of single-variable lets. *)
+let al () =
+  let r = f () in
+  let r2 = r in
+  match r2 with Error A -> Ok 1 | ok -> ok
+
+(* US-2.13 : an UNDECLARED operator with bind shape over the [result]
+   carrier — must never be silently treated as a bind. *)
+let ( >>=? ) r k = Stdlib.Result.bind r k
+
+let hh () = fr () >>=? fun x -> Ok x
+
+(* "add"-mode transform: config declares [Ec_a.add_err] — the literal at
+   [arg=1] unions in; the OTHER argument's own call still propagates
+   normally. *)
+let add_err (_e : err) (r : int myres) : int myres = r
+
+let t_add () = add_err (B 9) (f ())
+
+(* Converter: config declares [Ec_a.opt_of_res] (myres -> option). *)
+let opt_of_res (r : int myres) : int option =
+  match r with Ok x -> Some x | Error _ -> None
+
+let conv () = opt_of_res (f ())
 |} );
   ]
 
@@ -200,7 +252,40 @@ let register_query () =
       (* --channel is required *)
       let code, out = query_raw db ["may-fail"; "f"] in
       Batch.eq_int b ~msg:"may-fail without --channel is a usage error" code 2 ;
-      Batch.check b ~msg:"the error names --channel" (Batch.has_substring ~needle:"--channel" out)) ;
+      Batch.check b ~msg:"the error names --channel" (Batch.has_substring ~needle:"--channel" out) ;
+      (* US-2.5 (SLICE 3, "Binds"): [Stdlib.Result.bind]'s bound expression
+         AND its continuation both propagate. *)
+      Batch.contains b ~msg:"US-2.5 h: the bound expression's head call propagates"
+        ~haystack:(may_fail "result" "h") "BOUNDED: {Ec_a.A}" ;
+      Batch.contains b
+        ~msg:"US-2.5 h2: the continuation's own origin (Ec_a.B) also propagates"
+        ~haystack:(may_fail "result" "h2") "BOUNDED: {Ec_a.A, Ec_a.B}" ;
+      (* US-2.7 (SLICE 3, "Transforms"): [Stdlib.Result.map_error] in
+         "replace" mode — the inner set does NOT survive; a lambda-literal
+         mapper's own literal return does. *)
+      Batch.contains b ~msg:"US-2.7 w: replace discards the inner Ec_a.A, keeps only Ec_a.B"
+        ~haystack:(may_fail "result" "w") "BOUNDED: {Ec_a.B}" ;
+      Batch.contains b ~msg:"US-2.7 w2: a parameter mapper is ⊤"
+        ~haystack:(may_fail "result" "w2") "UNBOUNDED (⊤)" ;
+      (* US-2.8 (SLICE 3, "Handler scopes" / alias chains): [r2] resolves to
+         [f ()]'s head call through a chain of single-variable lets. *)
+      Batch.contains b ~msg:"US-2.8 al: the alias chain closes Ec_a.A"
+        ~haystack:(may_fail "myres" "al") "BOUNDED: {}" ;
+      (* US-2.13 (SLICE 3, [inferred_bind]): an undeclared bind-shaped
+         operator is NEVER silently treated as a bind — ⊤ with a witness. *)
+      let hh_out = may_fail "result" "hh" in
+      Batch.contains b ~msg:"US-2.13 hh: undeclared bind-shaped operator is ⊤" ~haystack:hh_out
+        "UNBOUNDED (⊤)" ;
+      Batch.check b ~msg:"US-2.13 hh: the reason names inferred_bind"
+        (Batch.has_substring ~needle:"inferred_bind" hh_out) ;
+      (* SLICE 3, "Transforms" ["add" mode]: the literal at [arg] unions in;
+         the OTHER (inner) argument's own call still propagates normally. *)
+      Batch.contains b ~msg:"add-mode transform: t_add unions Ec_a.B with the inner Ec_a.A"
+        ~haystack:(may_fail "myres" "t_add") "BOUNDED: {Ec_a.A, Ec_a.B}" ;
+      (* SLICE 3, "Converters": the declared converter's [arg] is an origin
+         on [to] (opaque identity, no [error] given). *)
+      Batch.contains b ~msg:"converter: conv's option-channel origin is opaque converted_myres"
+        ~haystack:(may_fail "option" "conv") "BOUNDED: {option:converted_myres}") ;
   Lwt.return_unit
 
 (* US-1 : validation is exercised by the fixture's arch-errors.toml (parsed
