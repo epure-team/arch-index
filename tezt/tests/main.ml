@@ -93,4 +93,5 @@ let () =
   Exn_raise_sets.register () ;
   Provenance.register () ;
   Coverage_matrix.register () ;
+  Top_anchor_taxonomy.register () ;
   Tezt.Test.run ()

@@ -453,6 +453,44 @@ type pending_dep = {
     call is conditional. Conditionality ([pending_call.cond]) is computed by
     CFG post-dominance; the final edge kind is decided at resolution time from
     the (head × cond × partial) facts. *)
+(* Roadmap 1.4 (⊤-anchor taxonomy): WHY a head is unknowable, decided at the
+   point [Head_unknown] is produced — the only two reasons this walker can
+   actually tell apart today. [Callback_param] also covers two cases the
+   roadmap's own vocabulary distinguishes conceptually but this walker cannot
+   yet distinguish structurally: a genuine function PARAMETER, and a local
+   [let]-bound lambda whose pattern was a tuple/alias/conditional binding
+   rather than a plain [Tpat_var] ("pattern_bound" in the roadmap's
+   vocabulary) — [local_lam_stamps] only ever records the [Tpat_var] success
+   case, so at a later use site "not stamped" cannot tell a real parameter
+   from a pattern-bound lambda without new binding-site tracking. Folding
+   both into [Callback_param] is a documented, honest simplification, not a
+   silent conflation — see docs/edge-kind-contract.md's ⊤-anchor section. *)
+type top_reason =
+  | Callback_param
+      (** Parameter / local closure whose target this walker cannot compute
+          — includes the not-yet-distinguished "pattern_bound" sub-case, AND
+          (FIX, review MEDIUM: undocumented until now) a genuinely computed
+          function value with no binding site at all — an anonymous
+          application head this walker cannot name, or the residual callee
+          of an over-application ([f a b c] where [f] has arity 2: the extra
+          args apply to [f]'s unknown RETURN value). Both are, like a real
+          parameter, "a callable value whose origin this walker did not
+          track" — the roadmap's own "closure" wording is read broadly
+          enough to cover a fully anonymous computed value, not narrowly as
+          "only a named parameter." *)
+  | Module_param
+      (** Qualified path whose root is a non-persistent ident: a functor
+          argument or first-class module value. *)
+  | Dropped_node
+      (** The callee's own row (or its whole compilation unit) was
+          intentionally rejected this run — its body exists but was never
+          read, so the honest answer is ⊤, not "no such function." *)
+
+let top_reason_to_string = function
+  | Callback_param -> "callback_param"
+  | Module_param -> "module_param"
+  | Dropped_node -> "dropped_node"
+
 type call_head =
   | Head_local of string
       (** Unqualified name resolving (stamp-based) to a same-module top-level
@@ -463,10 +501,10 @@ type call_head =
   | Head_enumerated of string
       (** A named local function passed as a function-typed ARGUMENT: the
           callee (e.g. [List.map]) may invoke it → bounded candidate set. *)
-  | Head_unknown of string
+  | Head_unknown of string * top_reason
       (** Unknowable target: applied parameter/local closure, computed head,
           dynamic-root qualified path (functor/first-class-module), or an
-          over-application residual — display name or ["*TOP*"]. *)
+          over-application residual — display name or ["*TOP*"], plus WHY. *)
 
 (** Collected call information before resolution. *)
 type pending_call = {
@@ -496,7 +534,7 @@ type pending_call = {
     (LSP fallback path). *)
 let pending_display (p : pending_call) =
   match p.head with
-  | Head_local n | Head_enumerated n | Head_unknown n -> (n, None)
+  | Head_local n | Head_enumerated n | Head_unknown (n, _) -> (n, None)
   | Head_qualified (m, n) -> (n, m)
 
 (** A synthetic function node for a nested [fun …]/[function] literal:
@@ -953,11 +991,19 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ~src_path ~calle
                    occurrence case emits the enumerated edge — nothing here. *)
                 ()
             | Texp_ident (Path.Pident id, _, _) ->
-                add_call (Head_unknown (Ident.name id)) loc
+                add_call (Head_unknown (Ident.name id, Callback_param)) loc
             | Texp_ident ((Path.Pdot _ as p), _, _) ->
-                let _, n = path_to_module_name p in
-                add_call (Head_unknown n) loc
-            | _ -> add_call (Head_unknown "*TOP*") loc
+                (* FIX (review, LOW): the other two Module_param sites
+                   (add_path_call, record_head) display the qualified name
+                   ["module.name"]; this one displayed the bare name only,
+                   so the same functor member showed up under two different
+                   spellings depending on which syntactic position invoked
+                   it. *)
+                let m, n = path_to_module_name p in
+                let disp = match m with Some m -> m ^ "." ^ n | None -> n in
+                let reason = if qualified_is_dynamic p then Module_param else Callback_param in
+                add_call (Head_unknown (disp, reason)) loc
+            | _ -> add_call (Head_unknown ("*TOP*", Callback_param)) loc
             (* computed function value *))
         | _ -> ())
       args
@@ -968,7 +1014,7 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ~src_path ~calle
     match path with
     | Path.Pident id when ident_is_local_fn id ->
         add_call (Head_local (local_fn_name id)) loc
-    | Path.Pident id -> add_call (Head_unknown (Ident.name id)) loc
+    | Path.Pident id -> add_call (Head_unknown (Ident.name id, Callback_param)) loc
     | _ ->
         let callee_module, callee_name = path_to_module_name path in
         if qualified_is_dynamic path then
@@ -977,7 +1023,7 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ~src_path ~calle
             | Some m -> m ^ "." ^ callee_name
             | None -> callee_name
           in
-          add_call (Head_unknown disp) loc
+          add_call (Head_unknown (disp, Module_param)) loc
         else add_call (Head_qualified (callee_module, callee_name)) loc
   in
   (* Diverging (noreturn) application head: a SATURATED call whose head Path
@@ -1367,7 +1413,7 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ~src_path ~calle
                         (* Parameter / local / shadowing binding → unknowable. *)
                         add_call
                           ~partial
-                          (Head_unknown (Ident.name id))
+                          (Head_unknown (Ident.name id, Callback_param))
                           expr.exp_loc)
                 | Texp_ident (path, _, _) ->
                     let callee_module, callee_name = path_to_module_name path in
@@ -1377,7 +1423,7 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ~src_path ~calle
                         | Some m -> m ^ "." ^ callee_name
                         | None -> callee_name
                       in
-                      add_call ~partial (Head_unknown disp) expr.exp_loc
+                      add_call ~partial (Head_unknown (disp, Module_param)) expr.exp_loc
                     else
                       add_call
                         ~partial
@@ -1390,17 +1436,18 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ~src_path ~calle
                     match Hashtbl.find_opt lam_names fn_expr.exp_loc with
                     | Some node_name ->
                         add_call ~partial (Head_local node_name) expr.exp_loc
-                    | None -> add_call ~partial (Head_unknown "*TOP*") expr.exp_loc)
+                    | None ->
+                        add_call ~partial (Head_unknown ("*TOP*", Callback_param)) expr.exp_loc)
                 | _ ->
                     (* Computed function head → unresolvable. *)
-                    add_call ~partial (Head_unknown "*TOP*") expr.exp_loc) ;
+                    add_call ~partial (Head_unknown ("*TOP*", Callback_param)) expr.exp_loc) ;
                 (* Over-application [f a b c] where [f] has arity 2: the head
                    call is saturated (handled above), but the extra args are
                    applied to the (unknown) returned function value — a residual
                    call to an unknowable target. Record it as ⊤ so [unreachable]
                    stays sound. *)
                 if head_arity > 0 && nargs > head_arity then
-                  add_call (Head_unknown "*TOP*") expr.exp_loc ;
+                  add_call (Head_unknown ("*TOP*", Callback_param)) expr.exp_loc ;
                 add_arg_escapes args expr.exp_loc
               in
               (match short_circuit_arity fn_expr with

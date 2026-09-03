@@ -49,7 +49,7 @@ let schema_path =
    constant — a consumer reading schema_version="1.2" off a flat-schema
    database would wrongly conclude those tables exist. See
    [current_flat_schema_version] below, which runner.ml now uses instead. *)
-let current_schema_version = "1.5"
+let current_schema_version = "1.7"
 
 (* The flat schema (runner.ml's own inline 3-table [schema_sql]) — distinct
    version identity from [current_schema_version] above: the two schemas are
@@ -392,19 +392,21 @@ let insert_constructor db stmt_ctor ~type_id ~constructor_name ~position
    call's id. [insert_call] is the same insert with the id dropped: one bind
    sequence, not two that can drift. *)
 let insert_call_rowid db stmt_call ~caller_id ~callee_id ~callee_name ~call_site
-    ~kind ?(producer_run_id = None) () =
+    ~kind ?(top_reason = None) ?(top_anchor = None) ?(producer_run_id = None) () =
   bind_int stmt_call 1 caller_id ;
   bind_text stmt_call 3 callee_name ;
   bind_text_opt stmt_call 4 call_site ;
   bind_text stmt_call 5 kind ;
   bind_int_opt stmt_call 6 producer_run_id ;
+  bind_text_opt stmt_call 7 top_reason ;
+  bind_text_opt stmt_call 8 top_anchor ;
   (match callee_id with
   | Some id -> bind_int stmt_call 2 id
   | None -> ignore (Sqlite3.bind stmt_call 2 Sqlite3.Data.NULL)) ;
   exec_stmt_rowid db ~what:"calls" stmt_call
 
 let insert_call db stmt_call ~caller_id ~callee_id ~callee_name ~call_site ~kind
-    ?(producer_run_id = None) () =
+    ?(top_reason = None) ?(top_anchor = None) ?(producer_run_id = None) () =
   ignore
     (insert_call_rowid
        db
@@ -414,6 +416,8 @@ let insert_call db stmt_call ~caller_id ~callee_id ~callee_name ~call_site ~kind
        ~callee_name
        ~call_site
        ~kind
+       ~top_reason
+       ~top_anchor
        ~producer_run_id
        ()
       : int option)

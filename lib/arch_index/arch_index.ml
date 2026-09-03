@@ -287,7 +287,7 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
     Sqlite3.prepare
       db
       "INSERT INTO calls (caller_id, callee_id, callee_name, call_site, kind, \
-       producer_run_id) VALUES (?, ?, ?, ?, ?, ?)"
+       producer_run_id, top_reason, top_anchor) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
   in
   let stmt_dep =
     Sqlite3.prepare
@@ -505,29 +505,43 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
             try_from parts
           in
           let demoted = call.cond || call.partial in
-          let callee_id, callee_display_name, kind =
+          (* Roadmap 1.4 (⊤-anchor taxonomy): [top_reason] is [None] whenever
+             [kind] is not "MAY_TOP" (the column is meaningless for a
+             resolved or bounded-candidate edge), [Some <reason>] otherwise.
+             [Dropped_node] always wins over the head's own carried reason —
+             it is the MORE SPECIFIC explanation ("this callee's row/unit was
+             rejected this run") wherever it applies, not a fallback. *)
+          let callee_id, callee_display_name, kind, top_reason =
             match call.head with
-            | Arch_index_cmt.Head_unknown n -> (None, n, "MAY_TOP")
+            | Arch_index_cmt.Head_unknown (n, reason) ->
+                (None, n, "MAY_TOP", Some (Arch_index_cmt.top_reason_to_string reason))
             | Arch_index_cmt.Head_enumerated n -> (
                 (* A named local function passed as a callback — resolve it to a
                    node so the closure can follow it, but as MAY_ENUMERATED (the
                    callee may or may not invoke it), never MUST — conditional or
                    not, the candidate set is the same. *)
                 match resolve_local n with
-                | Some id -> incr n_resolved ; (Some id, n, "MAY_ENUMERATED")
+                | Some id -> incr n_resolved ; (Some id, n, "MAY_ENUMERATED", None)
                 | None ->
                     (* A dropped candidate is not an enumerated one: its body is
                        unknown, so the honest kind is ⊤. *)
-                    if dropped_local n then (None, n, "MAY_TOP")
-                    else (None, n, "MAY_ENUMERATED"))
+                    if dropped_local n then (None, n, "MAY_TOP", Some "dropped_node")
+                    else (None, n, "MAY_ENUMERATED", None))
             | Arch_index_cmt.Head_local n -> (
                 match resolve_local n with
                 | Some id ->
                     incr n_resolved ;
-                    (Some id, n, (if demoted then "MAY_ENUMERATED" else "MUST"))
+                    (Some id, n, (if demoted then "MAY_ENUMERATED" else "MUST"), None)
                 | None ->
-                    (* Not in the function table (shadow/anomaly): unknowable. *)
-                    (None, n, "MAY_TOP"))
+                    (* FIX (review, HIGH): this branch (a same-module name
+                       that failed to resolve) is exactly where a genuinely
+                       DROPPED function lands, same as every other unresolved
+                       branch in this match — it must check [dropped_local]
+                       too, not default straight to [callback_param]. [kind]
+                       is "MAY_TOP" either way, so this changes only
+                       [top_reason], with zero soundness risk. *)
+                    if dropped_local n then (None, n, "MAY_TOP", Some "dropped_node")
+                    else (None, n, "MAY_TOP", Some "callback_param"))
             | Arch_index_cmt.Head_qualified (mod_opt, n) -> (
                 let display_name =
                   match mod_opt with Some m -> m ^ "." ^ n | None -> n
@@ -536,16 +550,17 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
                 match mod_opt with
                 | None -> (
                     match resolve_local n with
-                    | Some id -> incr n_resolved ; (Some id, n, kind)
+                    | Some id -> incr n_resolved ; (Some id, n, kind, None)
                     | None ->
-                        if dropped_local n then (None, n, "MAY_TOP")
+                        if dropped_local n then (None, n, "MAY_TOP", Some "dropped_node")
                         else
                           ( None,
                             n,
-                            (if demoted then "MAY_ENUMERATED" else "MAY_TOP") ))
+                            (if demoted then "MAY_ENUMERATED" else "MAY_TOP"),
+                            (if demoted then None else Some "callback_param") ))
                 | Some mod_name -> (
                     match resolve_qualified mod_name n with
-                    | Some id -> incr n_resolved ; (Some id, display_name, kind)
+                    | Some id -> incr n_resolved ; (Some id, display_name, kind, None)
                     | None ->
                         (* Unresolved. A genuine external is a leaf either way —
                            MUST leaf when unconditional, enumerated leaf when
@@ -554,8 +569,8 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
                            MUST there would let a reachability query terminate
                            on a body nobody analysed. *)
                         if dropped_qualified mod_name n then
-                          (None, display_name, "MAY_TOP")
-                        else (None, display_name, kind)))
+                          (None, display_name, "MAY_TOP", Some "dropped_node")
+                        else (None, display_name, kind, None)))
           in
           (match
              insert_call_rowid
@@ -566,6 +581,13 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
                ~callee_name:callee_display_name
                ~call_site:(Some call.call_site)
                ~kind
+               ~top_reason
+               (* FIX (review, LOW): key on [kind] directly, not [top_reason]
+                  — states the actual invariant (top_anchor is meaningful
+                  exactly when kind is MAY_TOP) rather than relying on
+                  top_reason always agreeing with it, which a future branch
+                  could get wrong independently. *)
+               ~top_anchor:(if kind = "MAY_TOP" then Some call.call_site else None)
                ~producer_run_id
                ()
            with

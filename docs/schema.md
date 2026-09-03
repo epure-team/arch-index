@@ -242,6 +242,7 @@ and forcing a shared constant across two intentionally-independent binaries woul
 | `1.3` | `modules.language`, `functions.language`/`functions.universe` — roadmap Phase 1 item 1.1, `SPEC-sound-callgraph.md` FR-001 ("node identity carries a language tag + internal/external universe flag") | `architecture-schema.sql` (additive columns) |
 | `1.4` | `producer_runs` table; `functions.producer_run_id`/`calls.producer_run_id` — roadmap Phase 1 item 1.2, ADR 002 | `architecture-schema.sql` (additive table + columns) |
 | `1.5` | `analysis_coverage` table — roadmap Phase 1 item 1.3, the honest-absence guarantee | `architecture-schema.sql` (additive table); also embedded standalone in `arch-coverage-matrix` |
+| `1.7` | `calls.top_reason`/`calls.top_anchor` — roadmap Phase 1 item 1.4, the ⊤-anchor taxonomy (see `docs/edge-kind-contract.md`) | `architecture-schema.sql` (additive columns); `bin/arch_load` gets its own `top_reason` in its NDJSON contract, version 1.1→1.2 |
 
 Versions `1.1` and `1.2` are retroactive: both migrations were applied to `main` before this
 versioning mechanism existed, so `schema_version` never actually recorded them at the time — this
@@ -265,3 +266,4 @@ build promises is also available at compile time as `Arch_index.schema_sql : str
 |---|---|
 | `1.0` | The schema as it existed before this loader ever tracked a version — `comment_db_meta.schema_version` was never written at all until `1.1` (a third, previously undiscovered instance of #51's bug class, found and fixed alongside this table). |
 | `1.1` | `functions.language` (optional NDJSON field on the `"function"` record type) — roadmap Phase 1 item 1.1. |
+| `1.2` | `calls.top_reason`/`calls.top_anchor` (optional NDJSON fields on the `"call"` record type, meaningful only on a `MAY_TOP` edge) — roadmap Phase 1 item 1.4. |

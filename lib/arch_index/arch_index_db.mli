@@ -469,6 +469,8 @@ val insert_call :
   callee_name:string ->
   call_site:string option ->
   kind:string ->
+  ?top_reason:string option ->
+  ?top_anchor:string option ->
   ?producer_run_id:int option ->
   unit ->
   unit
@@ -544,6 +546,8 @@ val insert_call_rowid :
   callee_name:string ->
   call_site:string option ->
   kind:string ->
+  ?top_reason:string option ->
+  ?top_anchor:string option ->
   ?producer_run_id:int option ->
   unit ->
   int option

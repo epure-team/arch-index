@@ -95,6 +95,13 @@ let register_enforcement () =
         ~stdin:
           {|{"type":"call","caller_name":"f","callee_name":"g","call_site":"x:1","kind":"garbage"}|}
         "load_badkind" ;
+      (* Roadmap 1.4: top_reason follows the same closed-vocabulary
+         discipline as kind — an out-of-vocabulary value aborts the load,
+         never silently ignored or stored as-is. *)
+      refuses ~msg:"an invalid top_reason value must abort the load"
+        ~stdin:
+          {|{"type":"call","caller_name":"f","callee_name":"g","call_site":"x:1","kind":"MAY_TOP","top_reason":"garbage"}|}
+        "load_badtopreason" ;
       (* A producer that fails silently emits functions and no edges; loading
          that yields a trust-stamped index where everything reads UNREACHABLE. *)
       refuses ~msg:"a stream with zero call edges must abort the load"
@@ -155,5 +162,27 @@ let register_enforcement () =
               ~msg:"decision_contract must NOT be stamped when no decision records are supplied"
               (Db.string_opt conn
                  "SELECT value FROM comment_db_meta WHERE key='decision_contract'")
-              None)) ;
+              None) ;
+
+      (* Roadmap 1.4: a valid top_reason/top_anchor pair is accepted and
+         stored verbatim — no producer in this codebase emits these fields
+         yet (a documented residual), but the loader must not reject them. *)
+      let trdb = temp_db "load_top_reason" in
+      if Sys.file_exists trdb then Sys.remove trdb ;
+      let code, output =
+        load
+          ~stdin:
+            {|{"type":"call","caller_name":"f","callee_name":"g","call_site":"x:1","kind":"MAY_TOP","top_reason":"reflection","top_anchor":"x:1:5"}|}
+          trdb
+      in
+      Batch.exit_code b ~msg:"a valid top_reason/top_anchor pair must be accepted" ~expected:0
+        (code, output) ;
+      if Sys.file_exists trdb then
+        Db.with_db trdb (fun conn ->
+            Batch.eq_string_opt b ~msg:"top_reason must be stored verbatim"
+              (Db.string_opt conn "SELECT top_reason FROM calls WHERE callee_name='g'")
+              (Some "reflection") ;
+            Batch.eq_string_opt b ~msg:"top_anchor must be stored verbatim"
+              (Db.string_opt conn "SELECT top_anchor FROM calls WHERE callee_name='g'")
+              (Some "x:1:5"))) ;
   Lwt.return_unit

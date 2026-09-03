@@ -181,6 +181,17 @@ let register_dropped_function () =
                "SELECT COUNT(*) FROM calls WHERE callee_name LIKE \
                 '%ghost_target' AND callee_id IS NOT NULL")
             0 ;
+          (* Roadmap 1.4 (⊤-anchor taxonomy): a dropped callee's ⊤ must carry
+             the MOST SPECIFIC reason available — "its row was rejected this
+             run", not the generic "parameter/local closure" a caller's own
+             head shape might otherwise suggest. *)
+          Batch.eq_string
+            b
+            ~msg:"a dropped callee's top_reason must be dropped_node, not a generic fallback"
+            (text
+               conn
+               "SELECT top_reason FROM calls WHERE callee_name LIKE '%ghost_target'")
+            "dropped_node" ;
           (* The control, in the same database and the same run: a callee that
              was stored still resolves, and still resolves as MUST. A guard
              that answered MAY_TOP for everything unresolved — or for
@@ -315,6 +326,26 @@ let register_dropped_module () =
                conn
                "SELECT COUNT(*) FROM calls WHERE kind='MUST' AND callee_name \
                 LIKE 'Corpus.B.%'")
+            0 ;
+          (* Roadmap 1.4: a whole DROPPED UNIT (dropped_qualified, not the
+             single-row dropped_local path register_dropped_function above
+             exercises) must ALSO carry top_reason='dropped_node' — the two
+             call sites in arch_index.ml are separate code paths, so this is
+             not redundant with the earlier assertion.
+
+             FIX (review, MEDIUM-HIGH): "!=" against a NULL top_reason
+             evaluates to NULL in SQLite, not true, so a row silently missing
+             its reason — the exact regression this assertion exists to
+             catch — was NOT counted and passed. "IS NOT" compares against
+             NULL truthfully. *)
+          Batch.eq_int
+            b
+            ~msg:"every MAY_TOP edge into the dropped unit must carry top_reason=dropped_node"
+            (count
+               conn
+               "SELECT COUNT(*) FROM calls WHERE kind='MAY_TOP' AND \
+                (callee_name LIKE '%ghost_target' OR callee_name LIKE '%.kept') \
+                AND top_reason IS NOT 'dropped_node'")
             0)) ;
   Lwt.return_unit
 
