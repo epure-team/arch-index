@@ -1,10 +1,13 @@
 open Cmdliner
 
-let run build_dir db_path schema_path =
+let run build_dir db_path schema_path errors_config errors_profile errors_strict =
   let result =
     Arch_index.run
       ?db_path
       ?schema_path
+      ?errors_config
+      ?errors_profile
+      ~errors_strict
       ~build_dir
       ()
   in
@@ -44,9 +47,36 @@ let schema_path_arg =
   let doc = "Path to the SQL schema file." in
   Arg.(value & opt (some string) None & info ["schema-path"; "s"] ~docv:"FILE" ~doc)
 
+let errors_config_arg =
+  let doc =
+    "Path to an arch-errors.toml error-channels config. Overrides discovery \
+     of arch-errors.toml at the project root."
+  in
+  Arg.(value & opt (some string) None & info ["errors-config"] ~docv:"FILE" ~doc)
+
+let errors_profile_arg =
+  let doc =
+    "Name of a shipped error-channels profile (resolves \
+     profiles/<name>-errors.toml)."
+  in
+  Arg.(value & opt (some string) None & info ["errors-profile"] ~docv:"NAME" ~doc)
+
+let errors_strict_arg =
+  let doc = "Make every error-channels declaration miss fatal, not just a warning." in
+  Arg.(value & flag & info ["errors-strict"] ~doc)
+
 let cmd =
   let doc = "Index OCaml call graph from CMT files." in
   let info = Cmd.info "arch_callgraph_ocaml" ~doc in
-  Cmd.v info Term.(const run $ build_dir_arg $ db_path_arg $ schema_path_arg)
+  Cmd.v
+    info
+    Term.(
+      const run
+      $ build_dir_arg
+      $ db_path_arg
+      $ schema_path_arg
+      $ errors_config_arg
+      $ errors_profile_arg
+      $ errors_strict_arg)
 
 let () = exit (Cmd.eval cmd)

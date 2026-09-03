@@ -46,6 +46,14 @@ type result = {
       or [docs/architecture.db])
     @param schema_path Path to the SQL schema file (default: from
       ARCH_SCHEMA_PATH env or [architecture-schema.sql])
+    @param errors_config Path to an [arch-errors.toml] error-channels config,
+      overriding discovery of [arch-errors.toml] at the project root
+      (specs/error-channels.md FR-021).
+    @param errors_profile Name of a shipped error-channels profile,
+      resolving [profiles/<name>-errors.toml].
+    @param errors_strict When [true], any declared error-channels path that
+      matched nothing in the corpus is fatal, not just a printed warning
+      (default: [false]).
     @param build_dir Directory to scan (e.g., [_build/default])
     @return Statistics about what was indexed
 
@@ -54,6 +62,11 @@ type result = {
 
     {post}
     Returns a [result] record with counts of indexed modules, functions, types, calls, deps, and type usages.
+    [comment_db_meta] carries [error_contract], [error_config_digest],
+    [error_config_source] and [error_config_unmatched]
+    (specs/error-channels.md FR-024). A channel whose carrier type matched
+    nothing in the corpus, or any declaration miss under [errors_strict],
+    exits the process with status 1 and a named error rather than returning.
 
     {violators}
     (none)
@@ -61,7 +74,14 @@ type result = {
     {violates}
     (none) *)
 val run :
-  ?db_path:string -> ?schema_path:string -> build_dir:string -> unit -> result
+  ?db_path:string ->
+  ?schema_path:string ->
+  ?errors_config:string ->
+  ?errors_profile:string ->
+  ?errors_strict:bool ->
+  build_dir:string ->
+  unit ->
+  result
 
 (** [run_lsp ~sw ~env ~project_dir ~language ~output ()] runs the LSP-based
     arch_index pipeline, writing a [comment_db] SQLite file to [output].

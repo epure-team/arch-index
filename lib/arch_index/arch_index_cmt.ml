@@ -65,6 +65,27 @@ let dropped_unit_paths () =
   Hashtbl.fold (fun k () acc -> k :: acc) dropped_units [] |> List.sort String.compare
 
 (* -------------------------------------------------------------------------- *)
+(* Error-channels config validation collector (specs/error-channels.md,       *)
+(* slice 0). [Arch_index.run] sets this to a [Arch_errors_config.seen] built  *)
+(* from the effective config before walking any .cmt, and clears it after —   *)
+(* same process-global-reset-per-run pattern as [dropped_nodes] above. [None] *)
+(* (no run in flight, or a caller that never sets it) makes every note a      *)
+(* cheap no-op, so callers other than [Arch_index.run] pay nothing. *)
+let seen_collector : Arch_errors_config.seen option ref = ref None
+
+let set_seen_collector (s : Arch_errors_config.seen option) = seen_collector := s
+
+let note_seen_value_path (p : string) =
+  match !seen_collector with
+  | Some s -> Arch_errors_config.note_value_path s p
+  | None -> ()
+
+let note_seen_type_path (p : string) =
+  match !seen_collector with
+  | Some s -> Arch_errors_config.note_type_path s p
+  | None -> ()
+
+(* -------------------------------------------------------------------------- *)
 (* Nested-module indexing policy (issue #16)                                  *)
 (* -------------------------------------------------------------------------- *)
 
@@ -682,7 +703,9 @@ let extract_types_from_signature ty =
   let rec extract_constr ty role pos =
     match Types.get_desc ty with
     | Tconstr (path, args, _) ->
-        add_type (type_path_of_path path) role pos ;
+        let p = type_path_of_path path in
+        add_type p role pos ;
+        note_seen_type_path p ;
         (* Also extract type arguments (e.g., 'a list -> extract list) *)
         List.iter (fun arg -> extract_constr arg role pos) args
     | Tarrow (_, arg_ty, ret_ty, _) ->
@@ -1011,6 +1034,7 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ~src_path ~calle
   (* Emit a call to a function named by a resolved [Path.t] — e.g. a let*/and*
      bind operator, which is applied but is not a [Texp_apply] node. *)
   let add_path_call (path : Path.t) loc =
+    note_seen_value_path (Path.name path) ;
     match path with
     | Path.Pident id when ident_is_local_fn id ->
         add_call (Head_local (local_fn_name id)) loc
@@ -1416,6 +1440,7 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ~src_path ~calle
                           (Head_unknown (Ident.name id, Callback_param))
                           expr.exp_loc)
                 | Texp_ident (path, _, _) ->
+                    note_seen_value_path (Path.name path) ;
                     let callee_module, callee_name = path_to_module_name path in
                     if qualified_is_dynamic path then
                       let disp =
