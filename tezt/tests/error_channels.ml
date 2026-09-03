@@ -477,8 +477,56 @@ let register_config () =
      abort the run. *)
   Lwt.return_unit
 
+(* Review round 1, HIGH — "re-indexing an existing database is unsound".
+   [Arch_index_support.schema_tables_to_drop] listed none of the
+   exception/error-channel tables, so a SECOND run over the same file
+   doubled [exn_scopes]/[exn_origins] and rejected every [call_exn_scopes]
+   row on its [call_id] primary key — keeping the FIRST run's links, which
+   then close call sites they never covered. Every existing test indexes
+   once into a fresh temp database, so nothing could see it.
+
+   The assertion is deliberately shaped as "run 2 == run 1, exit 0" over the
+   whole error-channel table set rather than against hardcoded counts: it
+   stays true as the fixture grows, and it fails loudly for any table added
+   to the schema later and forgotten in the drop list. *)
+let reindexed_tables =
+  [
+    "exn_scopes"; "exn_origins"; "exn_scope_catches"; "call_exn_scopes"; "exn_edges";
+    "channel_carriers"; "exn_rebinds"; "functions"; "calls"; "modules"; "producer_runs";
+  ]
+
+let register_reindex () =
+  Test.register ~__FILE__
+    ~title:"error-channels: re-indexing an existing database is idempotent"
+    ~tags:["cmt"; "error_channels"; "reindex"]
+  @@ fun () ->
+  with_fixture ~name:"errch_reindex" ~files:fixture_files @@ fun fixture ->
+  let db = Arch_tezt.temp_db "errch_reindex" in
+  let counts () =
+    Db.with_db db (fun conn ->
+        List.map
+          (fun t -> (t, Db.int conn (Printf.sprintf "SELECT count(*) FROM %s" t)))
+          reindexed_tables)
+  in
+  let code1, out1 = Arch_tezt.index_raw_into ~db fixture in
+  if code1 <> 0 then Test.fail "first index failed (exit %d):\n%s" code1 out1 ;
+  let first = counts () in
+  let code2, out2 = Arch_tezt.index_raw_into ~db fixture in
+  Batch.run (fun b ->
+      Batch.eq_int b ~msg:"re-indexing the same database exits 0" code2 0 ;
+      if code2 <> 0 then Batch.note b "second index output:\n%s" out2 ;
+      let second = counts () in
+      List.iter
+        (fun (t, n1) ->
+          Batch.eq_int b
+            ~msg:(Printf.sprintf "%s has the same row count after a second index" t)
+            (List.assoc t second) n1)
+        first) ;
+  Lwt.return_unit
+
 let register () =
   register_producer () ;
+  register_reindex () ;
   register_query () ;
   register_config () ;
   register_strict () ;
