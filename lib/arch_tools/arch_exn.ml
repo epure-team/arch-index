@@ -206,7 +206,17 @@ let not_analysed_channel channel error_contract =
     (match error_contract with Some s -> s | None -> "<absent>")
 
 let load ?(channel = "exception") ?(use_builtin_summaries = false) (t : Arch_db.t) =
-  if t.schema = Arch_db.Flat then Arch_db.refuse "%s" not_analysed ;
+  (* FIX (review round 1, MEDIUM): {!not_analysed} is worded for the
+     exception channel — it names [raises]/[raisers-of]/[exn-stats]. Reaching
+     it on a value channel told a user who asked about [result] to rebuild in
+     order to get commands that have nothing to do with their question.
+     {!not_analysed_channel} says the same thing about the channel actually
+     asked for, so use it whenever one was named. *)
+  let refuse_not_analysed () =
+    if channel = "exception" then Arch_db.refuse "%s" not_analysed
+    else Arch_db.refuse "%s" (not_analysed_channel channel (Arch_db.meta t "error_contract"))
+  in
+  if t.schema = Arch_db.Flat then refuse_not_analysed () ;
   if channel = "exception" then
     match Arch_db.meta t "exn_contract" with
     | Some _ when Arch_db.has_table t "exn_origins" -> ()
@@ -216,7 +226,7 @@ let load ?(channel = "exception") ?(use_builtin_summaries = false) (t : Arch_db.
        ("v1:exception,result,option,…") — FR-032: a channel absent there
        MUST refuse NOT_ANALYSED, distinctly from the [exception] channel's
        own (unchanged) check above. *)
-    if not (Arch_db.has_table t "exn_origins") then Arch_db.refuse "%s" not_analysed ;
+    if not (Arch_db.has_table t "exn_origins") then refuse_not_analysed () ;
     let ec = Arch_db.meta t "error_contract" in
     let emitted =
       match ec with
