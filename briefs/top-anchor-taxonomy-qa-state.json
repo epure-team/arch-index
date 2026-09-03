@@ -1,0 +1,25 @@
+{
+  "task": "top-anchor-taxonomy",
+  "date": "2026-09-03",
+  "status": "GO",
+  "round": 1,
+  "cycle": 1,
+  "qa_no_go_round": 0,
+  "causes": [],
+  "rounds_audit": [
+    {
+      "round": 1,
+      "date": "2026-09-03",
+      "verdict": "GO",
+      "causes": [],
+      "qualifying": false
+    }
+  ],
+  "cross_runtime": {
+    "codex": {
+      "status": "available",
+      "config_digest": "codex:2702d145257b4beb",
+      "round": 1
+    }
+  }
+}

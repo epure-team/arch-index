@@ -1,0 +1,37 @@
+{
+  "task": "top-anchor-taxonomy",
+  "mode": "fast",
+  "current_phase": "ship",
+  "events": [
+    {
+      "phase": "intake",
+      "outcome": "VALIDATED",
+      "reason": "Roadmap Phase 1 item 1.4 (the top-anchor taxonomy): calls.top_reason/calls.top_anchor, making WHY a call is MAY_TOP into data. Pre-implementation research found the roadmap's own cited line numbers stale (drift from ~1000+ lines added by this session's prior tasks) and its cmt_imports/resolution premise referring to a real but unconsumed compiler-libs field (Cmt_format.cmt_infos.cmt_imports), not an existing in-repo table. Scoped per user confirmation ('we work at the code source/binary level, not API calls, not yet anyway') to implement top_reason/top_anchor fully for OCaml (the only sound_with_top producer), extend the NDJSON contract (bin/arch_load) to accept the full closed vocabulary so Go/Rust can populate it later, and explicitly defer calls.resolution and the pattern_bound/deferred sub-splitting as documented residuals requiring further design clarification this task could not confidently resolve alone.",
+      "by": "roster-intake"
+    },
+    {
+      "phase": "implement",
+      "outcome": "COMPLETED",
+      "reason": "calls.top_reason (+CHECK constraint, 10-value vocabulary) + calls.top_anchor added to the main schema (1.5->1.6). Arch_index_cmt.Head_unknown gains a top_reason payload, threaded through ~10 production sites; only callback_param and module_param are structurally distinguishable today (pattern_bound folds into callback_param, documented residual); dropped_node computed in arch_index.ml, overriding the head's own reason. bin/arch_load accepts the full vocabulary (own schema_version 1.1->1.2) so Go/Rust can populate it later, though neither producer emits it yet (documented residual, same pattern as roadmap 1.1/1.2's Go/Rust gaps). calls.resolution explicitly deferred - its cmt_imports-based semantics need a design decision not confidently resolvable alone. 109/109 tests pass, self-index golden regenerated, must_null_ceiling re-checked (no recalibration needed).",
+      "by": "roster-implement"
+    },
+    {
+      "phase": "review",
+      "outcome": "GO",
+      "reason": "reviewer+architect converged on the Head_local/dropped_local HIGH finding plus 6 MEDIUM/LOW findings, all fixed; cross-session schema-version renumbering (1.6->1.7) coordinated with peer session arch-index-96; 111/111 tests pass, self-index golden regenerated (3994 calls), must_null_ceiling within headroom.",
+      "by": "roster-review"
+    },
+    {
+      "phase": "qa",
+      "outcome": "GO",
+      "reason": "Independent fresh-fixture reverification: 111/111 tests, self-index golden re-regenerated and matched, cross-runtime codex ran an independent QA pass (fresh self-index DB, live CHECK-constraint probe, direct code inspection of the Head_local/dropped_local fix) and reported zero discrepancies.",
+      "by": "roster-qa"
+    },
+    {
+      "phase": "ship",
+      "outcome": "COMPLETED",
+      "reason": "PR #58 merged (rebase) as ef57163. CI green (mcp-credentials, build). Autonomous merge per standing user authorization (full roster pipeline: review GO + QA GO). Worktree/branch cleaned up, local main pulled ff-only, pre-existing WIP stash popped cleanly (auto-merged in tezt/tests/main.ml).",
+      "by": "roster-ship"
+    }
+  ]
+}

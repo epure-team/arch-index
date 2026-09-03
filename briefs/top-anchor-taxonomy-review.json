@@ -1,0 +1,44 @@
+{
+  "task": "top-anchor-taxonomy",
+  "date": "2026-09-03",
+  "status": "GO",
+  "auto_fixes_applied": [],
+  "findings": [],
+  "cross_runtime_findings": [],
+  "summary": "Fast-mode review of roadmap 1.4 (calls.top_reason/calls.top_anchor, the ⊤-anchor taxonomy). reviewer + architect specialists in parallel (blast radius >3 files, 14 touched). Cross-runtime codex skipped (degraded all session). Both specialists independently converged on the same HIGH finding: Head_local's unresolved branch in arch_index.ml defaulted straight to Some \"callback_param\" without checking dropped_local n first, unlike every sibling branch in the same match — zero soundness risk since kind was already MAY_TOP either way, but a dropped_node edge would have been silently mislabeled. Fixed by adding the same guard used elsewhere. Also found: a NULL-blind test assertion (top_reason != 'dropped_node' evaluates to SQL NULL, not TRUE, so a silently-missing reason would pass undetected — the exact regression class this taxonomy exists to catch); four production sites folding a genuinely-computed function-value head into callback_param with no disclosure (fixed via documentation, both reviewers accepted this over adding new vocabulary); a documented top_anchor format (file:line:col) that did not match its actual format (file:line); the NULL-unless-MAY_TOP pairing invariant being documented but unenforced beyond vocabulary (fixed with a new CHECK constraint plus a loader-side pairing check and two new global-invariant tests); and three LOW findings (top_anchor keyed off top_reason=None rather than kind directly, an inconsistent Module_param display name at one production site, and test assertions not pinning kind='MAY_TOP' alongside top_reason). All fixed. Separately, mid-review a cross-session coordination message from peer session arch-index-96 (parallel work on feat/error-channels) surfaced a real schema-version collision (both sessions had independently claimed current_schema_version = \"1.6\"); renumbered this task's bump to 1.7 across arch_index_db.ml, docs/schema.md, and this brief, verified via grep no stray 1.6 references remained. Re-verified end-to-end: build clean, 111/111 tests, self-index golden regenerated (21 modules / 576 functions / 3994 calls, reflecting the display-name fix's small resolution delta), must_null_ceiling re-checked against the new count within existing headroom. Convergence gate: no violations.",
+  "no_go_reason": null,
+  "no_go_round": 0,
+  "round": 1,
+  "cycle": 1,
+  "rounds_audit": [
+    {
+      "round": 1,
+      "reviewed_sha": "2a82b9f",
+      "fix_sha": "617a00e",
+      "specialists_run": [
+        {
+          "name": "reviewer",
+          "selection_reason": "always run"
+        },
+        {
+          "name": "architect",
+          "selection_reason": "blast radius >3 files (14 files touched) — Fast mode"
+        }
+      ],
+      "trace_schema_version": "1.0"
+    }
+  ],
+  "cross_runtime": {
+    "codex": {
+      "status": "skipped-degraded",
+      "reason": "non-conforming-output",
+      "config_digest": null,
+      "round": 1
+    }
+  },
+  "streak_override": null,
+  "mode": "fast",
+  "escalation_needed": false,
+  "escalation_reason": null,
+  "normalized_by": "review-normalize.js@2.0.0"
+}
