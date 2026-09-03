@@ -292,6 +292,16 @@ let enter_scope acc ~canon ~form ~(loc : Location.t) ~arms =
 
 let leave_scope acc = match acc.stack with _ :: tl -> acc.stack <- tl | [] -> ()
 
+(** A DEFERRED body — a [lazy] thunk, an object's methods, a functor body —
+    runs at force / dispatch / application time, outside any handler that
+    lexically encloses its definition. Its origins and calls must therefore
+    see NO enclosing scope (review finding, 2026-09-03: [try lazy (raise A)
+    with A -> …] had stored the origin as closed). Restored on every exit. *)
+let with_cleared_scopes acc f =
+  let saved = acc.stack in
+  acc.stack <- [] ;
+  Fun.protect ~finally:(fun () -> acc.stack <- saved) f
+
 let add acc form path scope (loc : Location.t) =
   let line, col = pos loc in
   acc.raw_origins <- (form, path, scope, line, col) :: acc.raw_origins

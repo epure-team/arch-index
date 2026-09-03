@@ -91,6 +91,37 @@ external my_raise : exn -> 'a = "%raise"
 
 let shadowed () = my_raise Not_found
 
+(* US-1.11 : a deferred body is outside the lexically enclosing handler *)
+let mk () = try lazy (raise E) with E -> lazy ()
+
+let use () = Lazy.force (mk ())
+
+(* US-1.12 : unknown exception value *)
+let unknown_raiser x = if x then raise E else raise (Obj.magic 0)
+
+(* US-1.12 : or-pattern and alias arms catch both paths *)
+let or_arm () = try a () with E | M.E2 _ -> 0
+
+let alias_arm () = try b () with (M.E2 _ as e) -> ignore e ; 0
+
+(* US-1.12 : nested try — the chain closes both *)
+let nested () = try (try a () with E -> 0) with M.E2 _ -> 1
+
+(* US-1.12 : a handler on a rebound alias closes the target *)
+let alias_handler () = try f () with Alias -> 0
+
+(* US-1.12 : raise_with_backtrace with a literal is an origin *)
+let with_bt () = Printexc.raise_with_backtrace E (Printexc.get_raw_backtrace ())
+
+(* US-1.12 : raising primitives *)
+let div x y = x / y
+
+let idx (arr : int array) i = arr.(i)
+
+let cmp_int (x : int) y = x = y
+
+let cmp_poly (x : 'a) (y : 'a) = x = y
+
 (* ... and a non-Stdlib failwith is NOT an origin *)
 let failwith (_ : string) = 0
 
@@ -245,7 +276,42 @@ let register () =
             (Db.int conn
                (Printf.sprintf "SELECT count(*) FROM exn_origins WHERE function_id=%d"
                   (fn_id conn "notorigin")))
-            0)) ;
+            0 ;
+          (* US-1.11 : deferred body *)
+          Batch.eq_string b ~msg:"US-1.11 a raise inside lazy under a try still escapes"
+            (String.concat "," (origins conn "mk")) "raise:Exn_a.E:1" ;
+          Batch.eq_int b ~msg:"US-1.11 the deferred origin has no scope"
+            (Db.int conn
+               (Printf.sprintf
+                  "SELECT count(*) FROM exn_origins WHERE function_id=%d AND scope_id IS NULL"
+                  (fn_id conn "mk")))
+            1 ;
+          (* US-1.12 : forms *)
+          Batch.contains b ~msg:"US-1.12 unknown value origin" ~haystack:(String.concat "," (origins conn "unknown_raiser")) "unknown:NULL:1" ;
+          Batch.contains b ~msg:"US-1.12 literal origin kept next to the unknown one" ~haystack:(String.concat "," (origins conn "unknown_raiser")) "raise:Exn_a.E:1" ;
+          Batch.eq_string b ~msg:"US-1.12 division origin" (String.concat "," (origins conn "div")) "division:Division_by_zero:1" ;
+          Batch.eq_string b ~msg:"US-1.12 index origin" (String.concat "," (origins conn "idx")) "index:Invalid_argument:1" ;
+          Batch.eq_string b ~msg:"US-1.12 comparison at int records nothing" (String.concat "," (origins conn "cmp_int")) "" ;
+          Batch.eq_string b ~msg:"US-1.12 comparison at a type variable is an origin" (String.concat "," (origins conn "cmp_poly")) "compare:Invalid_argument:1" ;
+          Batch.eq_string b ~msg:"US-1.12 raise_with_backtrace literal origin" (String.concat "," (origins conn "with_bt")) "raise:Exn_a.E:1" ;
+          (* US-1.12 : arms *)
+          let caught name =
+            String.concat ","
+              (Db.strings conn
+                 (Printf.sprintf
+                    "SELECT c.exn_path FROM exn_scope_catches c JOIN exn_scopes s ON s.id=c.scope_id \
+                     WHERE s.function_id=%d ORDER BY c.exn_path"
+                    (fn_id conn name)))
+          in
+          Batch.eq_string b ~msg:"US-1.12 or-pattern catches both" (caught "or_arm") "Exn_a.E,Exn_a.M.E2" ;
+          Batch.eq_string b ~msg:"US-1.12 alias arm catches the inner pattern" (caught "alias_arm") "Exn_a.M.E2" ;
+          Batch.eq_int b ~msg:"US-1.12 nested try: inner scope has a parent"
+            (Db.int conn
+               (Printf.sprintf
+                  "SELECT count(*) FROM exn_scopes WHERE function_id=%d AND parent_id IS NOT NULL"
+                  (fn_id conn "nested")))
+            1 ;
+          Batch.eq_string b ~msg:"US-1.12 alias handler records the alias path as written" (caught "alias_handler") "Exn_a.Alias")) ;
   Lwt.return_unit
 
 let register_query () =
@@ -310,14 +376,34 @@ let register_query () =
       (* rebinding canonicalised *)
       Batch.contains b ~msg:"rebound alias reads as its target" ~haystack:(raises "al")
         "BOUNDED: {Not_found}" ;
+      (* US-1.11 : deferred body under the hypothesis *)
+      Batch.contains b ~msg:"US-1.11 the lazy raise escapes through Lazy.force under the hypothesis"
+        ~haystack:(raises ~flag:true "use") "BOUNDED_UNDER_HYP(externals_pure): {Exn_a.E}" ;
+      (* US-1.12 : query side *)
+      let ur = raises "unknown_raiser" in
+      Batch.contains b ~msg:"US-1.12 unknown value is ⊤ with its known part listed" ~haystack:ur
+        "UNBOUNDED (⊤): {Exn_a.E}" ;
+      Batch.contains b ~msg:"US-1.12 reason unknown_exn_value" ~haystack:ur "unknown_exn_value" ;
+      Batch.contains b ~msg:"US-1.12 or-pattern closes both" ~haystack:(raises "or_arm") "BOUNDED: {}" ;
+      Batch.contains b ~msg:"US-1.12 alias arm closes E2, leaves E" ~haystack:(raises "alias_arm")
+        "BOUNDED: {Exn_a.E}" ;
+      Batch.contains b ~msg:"US-1.12 nested chain closes both" ~haystack:(raises "nested") "BOUNDED: {}" ;
+      Batch.contains b ~msg:"US-1.12 alias handler closes the rebound target"
+        ~haystack:(raises "alias_handler") "BOUNDED: {}" ;
+      Batch.contains b ~msg:"US-1.12 division" ~haystack:(raises "div") "BOUNDED: {Division_by_zero}" ;
+      Batch.contains b ~msg:"US-1.12 index" ~haystack:(raises "idx") "BOUNDED: {Invalid_argument}" ;
+      Batch.contains b ~msg:"US-1.12 int comparison raises nothing" ~haystack:(raises "cmp_int") "BOUNDED: {}" ;
+      Batch.contains b ~msg:"US-1.12 polymorphic comparison" ~haystack:(raises "cmp_poly")
+        "BOUNDED: {Invalid_argument}" ;
       (* US-2.9 / US-2.10 *)
       let code, _ = query_raw db ["raises"; "nosuch"] in
       Batch.eq_int b ~msg:"US-2.9 unknown function refused with exit 3" code 3 ;
-      (* US-3.1 *)
+      (* US-3.1 — row-shaped needles (list format prints name|file|how) *)
       let ro = query db ["raisers-of"; "Not_found"] in
-      Batch.contains b ~msg:"US-3.1 f is a direct raiser" ~haystack:ro "f" ;
-      Batch.contains b ~msg:"US-3.1 k is a transitive raiser" ~haystack:ro "k" ;
-      Batch.contains b ~msg:"US-3.1 ⊤ nodes listed separately" ~haystack:ro "cb" ;
+      Batch.contains b ~msg:"US-3.1 f is a direct raiser" ~haystack:ro "f|exn_a.ml|direct" ;
+      Batch.contains b ~msg:"US-3.1 k is a transitive raiser" ~haystack:ro "k|exn_a.ml|transitive" ;
+      Batch.contains b ~msg:"US-3.1 ⊤ nodes listed separately" ~haystack:ro "cb|exn_a.ml|may_top_edge" ;
+      Batch.not_contains b ~msg:"US-3.1 g (closed) is not a raiser" ~haystack:ro "\ng|exn_a.ml" ;
       (* US-3.2 *)
       let st = query db ["exn-stats"] in
       List.iter
@@ -340,6 +426,21 @@ let register_query () =
   let code, out = query_raw bare ["raises"; "f"] in
   if code <> 3 || not (Batch.has_substring ~needle:"NOT_ANALYSED" out) then
     Test.fail "US-3.4 expected exit 3 with NOT_ANALYSED on a pre-feature DB, got %d:\n%s" code out ;
+  (* US-2.10 : an index that is not ⊤-marked is refused by the callgraph contract first *)
+  let unmarked =
+    Fixture.main ~name:"exn_unmarked"
+      ~seed:
+        "INSERT INTO modules(path,lines) VALUES ('x.ml',1); INSERT INTO functions(module_id,name) \
+         VALUES (1,'f'); INSERT OR REPLACE INTO comment_db_meta(key,value) VALUES ('exn_contract','v1');"
+      ()
+  in
+  List.iter
+    (fun args ->
+      let code, out = query_raw unmarked args in
+      if code <> 3 || not (Batch.has_substring ~needle:"NOT ⊤-marked" out) then
+        Test.fail "US-2.10 expected exit 3 REFUSED (NOT ⊤-marked) for %s, got %d:\n%s"
+          (String.concat " " args) code out)
+    [["raises"; "f"]; ["raisers-of"; "Not_found"]; ["exn-stats"]] ;
   Lwt.return_unit
 
 let register () =

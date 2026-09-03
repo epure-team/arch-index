@@ -5,7 +5,7 @@
 module SS : Set.S with type elt = string
 module SM : Map.S with type key = string
 
-type reason_kind = May_top_edge | External | Unknown_exn_value | Dropped_node
+type reason_kind = May_top_edge | External | Unknown_exn_value
 
 val reason_kind_to_string : reason_kind -> string
 
@@ -13,9 +13,13 @@ type reason = {kind : reason_kind; witness : string}
 
 module RS : Set.S with type elt = reason
 
-(** [Known s] — bounded, sound over-approximation; [Top rs] — unbounded, one
-    reason per witness. *)
-type set = Known of SS.t | Top of RS.t
+(** [Known s] — bounded, sound over-approximation; [Top (known, rs)] —
+    unbounded, one reason per witness, with the resolved part still carried
+    so a ⊤ verdict never hides what IS known to escape. *)
+type set = Known of SS.t | Top of SS.t * RS.t
+
+(** The resolved part of a set ([Known s] → [s]; [Top (k, _)] → [k]). *)
+val known_part : set -> SS.t
 
 type t
 

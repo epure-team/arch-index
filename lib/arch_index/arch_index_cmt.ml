@@ -987,8 +987,14 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ~src_path ~calle
      head here. All listed heads have arity 1. *)
   let noreturn_head (fn : Typedtree.expression) nargs =
     nargs >= 1
-    &&
-    match fn.exp_desc with
+    && (* Any [%raise] primitive never returns, whatever path re-exports it
+          (the protocol environment's [raise]) — the same recogniser the
+          exception-identity pass uses, so the two cannot disagree on what a
+          raise is. The Stdlib-path cases below add failwith/invalid_arg/exit,
+          which are ordinary functions, not primitives. *)
+       Arch_index_exn.is_raise_head fn
+       ||
+       match fn.exp_desc with
     | Texp_ident (path, _, _) -> (
         (* The root must be the PERSISTENT Stdlib compilation unit — a local
            module named Stdlib (non-persistent root) must not terminate. *)
@@ -1049,7 +1055,11 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ~src_path ~calle
           let walk_isolated_default () =
             let saved = (blk ()) in
             set_blk (deferred_blk ()) ;
-            default_iterator.expr self expr ;
+            (* A deferred body runs outside any lexically enclosing handler:
+               its exception scope stack is cleared in lockstep with the CFG
+               block isolation. *)
+            Arch_index_exn.with_cleared_scopes (!cur).lexn (fun () ->
+                default_iterator.expr self expr) ;
             set_blk saved
           in
           (* A match/try case walked inside an already-conditional block:
@@ -1443,7 +1453,8 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ~src_path ~calle
                  in an isolated (never always-exec) block. *)
               let saved = (blk ()) in
               set_blk (deferred_blk ()) ;
-              default_iterator.module_expr self me ;
+              Arch_index_exn.with_cleared_scopes (!cur).lexn (fun () ->
+                  default_iterator.module_expr self me) ;
               set_blk saved
           | _ -> default_iterator.module_expr self me);
     }
@@ -1682,6 +1693,19 @@ let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
                                     (qualify ~prefix (Ident.name id))
                               | None -> ())
                             mbs
+                      | Tstr_include incl ->
+                          (* [include M] re-exports M's exceptions and modules
+                             under fresh idents of THIS unit: a raise of one
+                             must print as this unit's path, like a cross-unit
+                             handler will. *)
+                          List.iter
+                            (fun (si : Types.signature_item) ->
+                              match si with
+                              | Sig_typext (id, _, _, _) | Sig_module (id, _, _, _, _) ->
+                                  Hashtbl.replace unit_declared (Ident.unique_name id)
+                                    (qualify ~prefix (Ident.name id))
+                              | _ -> ())
+                            incl.incl_type
                       | _ -> ()) ;
                   let canon_exn =
                     Arch_index_exn.canonical_path

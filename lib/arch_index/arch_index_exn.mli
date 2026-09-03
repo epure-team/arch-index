@@ -96,6 +96,10 @@ val enter_scope :
 
 val leave_scope : acc -> unit
 
+(** Run [f] with no enclosing scope — for deferred bodies ([lazy], objects,
+    functor bodies) that execute outside any lexically enclosing handler. *)
+val with_cleared_scopes : acc -> (unit -> 'a) -> 'a
+
 val record_raise_head :
   acc ->
   canon:(Path.t -> string) ->

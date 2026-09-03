@@ -70,14 +70,14 @@ unless it is in the fixed `Stdlib` table (heads whose effect is already an origi
 that cannot raise) or the `externals_pure` hypothesis is stated. Worklist fixpoint; monotone over
 a finite universe, so it terminates (`exn-stats` prints `fixpoint_seconds`).
 
-Verdicts: `BOUNDED: {…}` (no ⊤ in the cone — a sound over-approximation), `UNBOUNDED (⊤)` with
-one `reason: <kind> <witness>` line each, `BOUNDED_UNDER_HYP(externals_pure): {…}`. The
-hypothesis never hides `may_top_edge`, `unknown_exn_value` or `dropped_node`. Rows list each
+Verdicts: `BOUNDED: {…}` (no ⊤ in the cone — a sound over-approximation), `UNBOUNDED (⊤): {…}`
+(the resolved part is still listed) with one `reason: <kind> <witness>` line each, `BOUNDED_UNDER_HYP(externals_pure): {…}`. The
+hypothesis never hides `may_top_edge` or `unknown_exn_value`. Rows list each
 escaping exception with `via` (one callee) and `how ∈ {direct, transitive}`; under ⊤ the known
 part is still listed.
 
 `raisers-of Exn` lists bounded nodes containing `Exn` and, separately, ⊤ nodes with their dominant
-reason (`may_top_edge > external > unknown_exn_value > dropped_node`). `exn-stats` gives the
+reason (`may_top_edge > external > unknown_exn_value`; a dropped callee is already a `MAY_TOP` edge in `calls` and reads as `may_top_edge`). `exn-stats` gives the
 bounded/unbounded shares.
 
 ## Residuals (accepted, documented)
@@ -101,6 +101,14 @@ bounded/unbounded shares.
   invisible under the hypothesis.
 - **Comparison on closures.** Recorded only when the argument type may hold a closure; a
   polymorphic function compared at an abstract type is conservatively an origin.
+- **Deferred bodies.** A raise inside `lazy (…)`, an object method or a functor body runs outside
+  any handler that lexically encloses its definition; the producer clears the scope stack around
+  such bodies, so the origin is recorded as escaping and its calls carry no scope.
+- **Exceptions declared inside a functor body.** The raise side prints the definition path
+  (`U.F.E`), a handler on an instance prints the application path (`U.I1.E`): they never unify.
+  Over-approximating (the handler closes nothing), and `raisers-of U.I1.E` finds no raiser.
+- **`include M` re-exports** are registered as this unit's idents, so a raise of an included
+  exception prints the including unit's path — the same string a cross-unit handler prints.
 
 ## Measurement on this repository (self-index, 2026-09-03)
 

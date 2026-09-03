@@ -5,7 +5,8 @@
     Per node: [Known s] — a finite set of canonical exception paths, a sound
     over-approximation of what may escape — or [Top rs], unbounded, with one
     reason per witness (a [MAY_TOP] edge, an external callee not in the index,
-    a [raise] of a non-literal value, a dropped node). [Top] absorbs; the
+    a [raise] of a non-literal value; a dropped callee is already a [MAY_TOP]
+    edge in [calls]). [Top] absorbs; the
     universe of paths is finite (those in the DB), the join is monotone, so the
     worklist terminates.
 
@@ -27,20 +28,18 @@
 module SM = Map.Make (String)
 module SS = Set.Make (String)
 
-type reason_kind = May_top_edge | External | Unknown_exn_value | Dropped_node
+type reason_kind = May_top_edge | External | Unknown_exn_value
 
 let reason_kind_to_string = function
   | May_top_edge -> "may_top_edge"
   | External -> "external"
   | Unknown_exn_value -> "unknown_exn_value"
-  | Dropped_node -> "dropped_node"
 
 (* Dominant-reason order for exn-stats (spec C-8). *)
 let reason_rank = function
   | May_top_edge -> 0
   | External -> 1
   | Unknown_exn_value -> 2
-  | Dropped_node -> 3
 
 type reason = {kind : reason_kind; witness : string}
 
@@ -53,7 +52,9 @@ module RS = Set.Make (struct
     | c -> c
 end)
 
-type set = Known of SS.t | Top of RS.t
+(* [Top (known, reasons)]: unbounded, but the part we DO know may escape is
+   kept and reported — a ⊤ verdict never hides a resolved exception. *)
+type set = Known of SS.t | Top of SS.t * RS.t
 
 type scope = {parent : int option; catch_all : bool; caught : SS.t}
 
@@ -148,14 +149,27 @@ let load (t : Arch_db.t) =
   in
   (* edges were consed in reverse; restore call order for deterministic provenance *)
   let edges = SM.map List.rev edges in
+  let rebinds =
+    List.fold_left
+      (fun acc (a, b) -> SM.add (text a) (text b) acc)
+      SM.empty
+      (q Arch_db.Ty.(t2 s s) "SELECT alias_path, target_path FROM exn_rebinds")
+  in
+  (* [exception Alias = Target]: both sides of every set operation are
+     canonical, so the caught side is canonicalised at load (FR-014). *)
+  let canon_r p =
+    let rec go p n = match SM.find_opt p rebinds with Some q when n < 16 -> go q (n + 1) | _ -> p in
+    go p 0
+  in
   let catches =
     List.fold_left
       (fun acc (sid, p) ->
         match sid with
         | None -> acc
         | Some sid ->
+            let p = canon_r (text p) in
             SM.update (string_of_int sid)
-              (function None -> Some (SS.singleton (text p)) | Some x -> Some (SS.add (text p) x))
+              (function None -> Some (SS.singleton p) | Some x -> Some (SS.add p x))
               acc)
       SM.empty
       (q Arch_db.Ty.(t2 i s) "SELECT scope_id, exn_path FROM exn_scope_catches")
@@ -193,12 +207,6 @@ let load (t : Arch_db.t) =
       (q Arch_db.Ty.(t2 (t2 i s) (t2 s i))
          "SELECT function_id, form, exn_path, escapes FROM exn_origins ORDER BY id")
   in
-  let rebinds =
-    List.fold_left
-      (fun acc (a, b) -> SM.add (text a) (text b) acc)
-      SM.empty
-      (q Arch_db.Ty.(t2 s s) "SELECT alias_path, target_path FROM exn_rebinds")
-  in
   {
     names;
     files;
@@ -224,14 +232,16 @@ let canon t p =
 let join a b =
   match (a, b) with
   | Known x, Known y -> Known (SS.union x y)
-  | Top x, Top y -> Top (RS.union x y)
-  | Top x, Known _ | Known _, Top x -> Top x
+  | Top (kx, rx), Top (ky, ry) -> Top (SS.union kx ky, RS.union rx ry)
+  | Top (k, r), Known s | Known s, Top (k, r) -> Top (SS.union k s, r)
 
 let equal a b =
   match (a, b) with
   | Known x, Known y -> SS.equal x y
-  | Top x, Top y -> RS.equal x y
+  | Top (kx, rx), Top (ky, ry) -> SS.equal kx ky && RS.equal rx ry
   | _ -> false
+
+let known_part = function Known s -> s | Top (k, _) -> k
 
 (** [close t scope set]: apply the scope chain enclosing a call site. *)
 let close t scope set =
@@ -245,11 +255,12 @@ let close t scope set =
   match chain SS.empty scope with
   | None -> Known SS.empty
   | Some caught -> (
+      let sub s = SS.filter (fun p -> not (SS.mem (canon t p) caught)) s in
       match set with
-      | Known s -> Known (SS.filter (fun p -> not (SS.mem (canon t p) caught)) s)
-      | Top _ -> set)
+      | Known s -> Known (sub s)
+      | Top (k, r) -> Top (sub k, r) (* ⊤ − finite = ⊤; its known part still shrinks *))
 
-let top kind witness = Top (RS.singleton {kind; witness})
+let top kind witness = Top (SS.empty, RS.singleton {kind; witness})
 
 (** Direct contribution of a node: its escaping literal origins, ⊤ for an
     escaping unknown value. Re-raise origins contribute nothing — the
@@ -320,45 +331,29 @@ let solve ?(assume_externals_pure = false) t =
 
 let keys_of_name t name = match SM.find_opt name t.by_name with Some l -> List.rev l | None -> []
 
-let set_to_string = function
-  | Known s -> "{" ^ String.concat ", " (SS.elements s) ^ "}"
-  | Top _ -> "{⊤}"
+let set_to_string set = "{" ^ String.concat ", " (SS.elements (known_part set)) ^ "}"
 
 let verdict ~assume_externals_pure = function
-  | Known s ->
-      if assume_externals_pure then
-        "BOUNDED_UNDER_HYP(externals_pure): " ^ set_to_string (Known s)
-      else "BOUNDED: " ^ set_to_string (Known s)
-  | Top _ -> "UNBOUNDED (⊤)"
+  | Known _ as s ->
+      if assume_externals_pure then "BOUNDED_UNDER_HYP(externals_pure): " ^ set_to_string s
+      else "BOUNDED: " ^ set_to_string s
+  | Top _ as s -> "UNBOUNDED (⊤): " ^ set_to_string s
 
 (** For a node, each escaping exception with how it got there. *)
 let rows_for t ~assume_externals_pure sol key =
-  let direct_set = match direct t key with Known s -> s | Top _ -> SS.empty in
+  let direct_set = known_part (direct t key) in
   let es = match SM.find_opt key t.edges with Some l -> l | None -> [] in
   let via p =
     List.find_map
       (fun (e : edge) ->
-        match contribution t ~assume_externals_pure sol e with
-        | Known s when SS.mem p s -> Some (match SM.find_opt e.callee t.names with Some n -> n | None -> e.callee)
-        | _ -> None)
+        if SS.mem p (known_part (contribution t ~assume_externals_pure sol e)) then
+          Some (match SM.find_opt e.callee t.names with Some n -> n | None -> e.callee)
+        else None)
       es
   in
   let set = match SM.find_opt key sol with Some s -> s | None -> Known SS.empty in
   (* Under ⊤ the known part is still listed: what we DO know may escape. *)
-  let paths =
-    match set with
-    | Known s -> SS.elements s
-    | Top _ ->
-        let known =
-          List.fold_left
-            (fun acc e ->
-              match contribution t ~assume_externals_pure sol e with
-              | Known s -> SS.union acc s
-              | Top _ -> acc)
-            direct_set es
-        in
-        SS.elements known
-  in
+  let paths = SS.elements (known_part set) in
   List.map
     (fun p ->
       if SS.mem p direct_set then [Arch_db.Text p; Arch_db.Text "-"; Arch_db.Text "direct"]
@@ -367,11 +362,11 @@ let rows_for t ~assume_externals_pure sol key =
     paths
 
 let reasons_of = function
-  | Top rs -> List.map (fun (r : reason) -> reason_kind_to_string r.kind ^ " " ^ r.witness) (RS.elements rs)
+  | Top (_, rs) -> List.map (fun (r : reason) -> reason_kind_to_string r.kind ^ " " ^ r.witness) (RS.elements rs)
   | Known _ -> []
 
 let dominant_reason = function
-  | Top rs when not (RS.is_empty rs) -> Some (RS.min_elt rs : reason).kind
+  | Top (_, rs) when not (RS.is_empty rs) -> Some (RS.min_elt rs : reason).kind
   | _ -> None
 
 let name_of t k = SM.find_opt k t.names

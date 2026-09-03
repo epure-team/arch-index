@@ -342,19 +342,10 @@ let insert_constructor db stmt_ctor ~type_id ~constructor_name ~position
   bind_text_opt stmt_ctor 4 arg_types ;
   exec_stmt db ~what:"type_constructors" stmt_ctor
 
-let insert_call db stmt_call ~caller_id ~callee_id ~callee_name ~call_site ~kind =
-  bind_int stmt_call 1 caller_id ;
-  bind_text stmt_call 3 callee_name ;
-  bind_text_opt stmt_call 4 call_site ;
-  bind_text stmt_call 5 kind ;
-  (match callee_id with
-  | Some id -> bind_int stmt_call 2 id
-  | None -> ignore (Sqlite3.bind stmt_call 2 Sqlite3.Data.NULL)) ;
-  exec_stmt db ~what:"calls" stmt_call
-
-(* Same binds as [insert_call], but the rowid is handed back so a dependent
-   row ([call_exn_scopes]) can reference THIS call — [None] on rejection, so
-   nothing links to another call's id. *)
+(* The rowid is handed back so a dependent row ([call_exn_scopes]) can
+   reference THIS call — [None] on rejection, so nothing links to another
+   call's id. [insert_call] is the same insert with the id dropped: one bind
+   sequence, not two that can drift. *)
 let insert_call_rowid db stmt_call ~caller_id ~callee_id ~callee_name ~call_site ~kind =
   bind_int stmt_call 1 caller_id ;
   bind_text stmt_call 3 callee_name ;
@@ -364,6 +355,11 @@ let insert_call_rowid db stmt_call ~caller_id ~callee_id ~callee_name ~call_site
   | Some id -> bind_int stmt_call 2 id
   | None -> ignore (Sqlite3.bind stmt_call 2 Sqlite3.Data.NULL)) ;
   exec_stmt_rowid db ~what:"calls" stmt_call
+
+let insert_call db stmt_call ~caller_id ~callee_id ~callee_name ~call_site ~kind =
+  ignore
+    (insert_call_rowid db stmt_call ~caller_id ~callee_id ~callee_name ~call_site ~kind
+      : int option)
 
 let insert_call_exn_scope db stmt ~call_id ~scope_id =
   bind_int stmt 1 call_id ;
