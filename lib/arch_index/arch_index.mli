@@ -126,6 +126,10 @@ module Comment_parser = Comment_parser
     See {!Language_registry} for the full API. *)
 module Language_registry = Language_registry
 
+(** Roadmap 1.3 coverage matrix — the honest-absence guarantee.
+    See {!Coverage_matrix} for the full API. *)
+module Coverage_matrix = Coverage_matrix
+
 (** Function body comparison across modules.
     See {!Arch_index_compare} for the full API. *)
 module Arch_index_compare = Arch_index_compare

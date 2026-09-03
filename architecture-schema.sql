@@ -4,6 +4,26 @@
 
 PRAGMA foreign_keys = ON;
 
+-- Roadmap 1.3: the honest-absence guarantee. One row per (language, analysis)
+-- pair a coverage run could have attempted for a TARGET project, so a query
+-- over a language/analysis no adapter covers returns a row saying so, never
+-- silence (arch-coverage-matrix is the writer; see
+-- lib/arch_index/coverage_matrix.ml). `language` is NULL for a cross-language
+-- analysis (`decisions`, test-line `coverage`) that is not scoped to one
+-- language. Snapshot semantics: arch-coverage-matrix deletes and re-inserts
+-- every row on each run — this describes the CURRENT run, not history.
+CREATE TABLE IF NOT EXISTS analysis_coverage (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    language TEXT,
+    analysis TEXT NOT NULL,
+    status TEXT NOT NULL CHECK(status IN ('covered', 'not_analysed', 'failed', 'partial')),
+    detail TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_analysis_coverage_status ON analysis_coverage(status);
+CREATE INDEX IF NOT EXISTS idx_analysis_coverage_language ON analysis_coverage(language);
+
 -- Roadmap 1.2 (ADR 002): one row per producer invocation that wrote into this
 -- database. `functions.producer_run_id` / `calls.producer_run_id` point back
 -- here so a row's provenance is a join, not five denormalised text columns

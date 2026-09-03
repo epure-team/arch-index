@@ -105,6 +105,66 @@ flag, when a caller declares it). `Arch_index.run` and `runner.ml` both pass `pr
 None` unconditionally — neither has a build-time version string to report (this project has no
 `VERSION` file). Not silently dropped: a future item that adds one should populate this argument.
 
+### Analysis coverage (roadmap 1.3)
+
+`analysis_coverage` is the honest-absence guarantee: one row per (language, analysis) pair a run
+against a TARGET project could have attempted, written by `arch-coverage-matrix`
+(`bin/arch_coverage_matrix`, logic in `lib/arch_index/coverage_matrix.ml`). A language/analysis
+with no invocable producer is recorded as `not_analysed` with a build/install instruction in
+`detail`, never left as silent zero rows — the honest version of #23 (a missing LSP binary
+producing an empty database with exit 0). `status ∈ {covered, not_analysed, failed, partial}`.
+`language` is `NULL` for a cross-language analysis (`coverage`, `decisions`) not scoped to one
+language. Snapshot semantics: each run deletes and re-inserts every row — this table describes the
+run that just computed it, not accumulating history.
+
+The roadmap's own vocabulary of six analysis kinds
+(`callgraph`/`effects`/`cfg`/`decisions`/`coverage`/`types`) is **not** uniformly invocable, and
+`arch-coverage-matrix` does not pretend otherwise:
+
+- `callgraph` and `effects` are real, independently invocable producers, detected on genuinely
+  different terms per language: OCaml (both) — a bundled dune executable, "available" once built;
+  Go `callgraph` — the DRIVER the repo-root wrapper script (`arch-callgraph-go`) itself gates
+  internally (`repo_root/bin/arch-callgraph-go`), not the wrapper's own existence; Rust
+  `callgraph` — the SAME, but the wrapper (`arch-callgraph-rust`) has TWO gates, not one: the
+  driver itself (one of 4 candidate build paths) AND the whole-program merge pass
+  (`bin/arch_callgraph_rust_merge`) it unconditionally requires — both need to be built for
+  `covered`, only the first for a distinct `not_analysed` reason. Neither wrapper's own existence
+  is checked (both are checked into git and always present, so checking either would report
+  `covered` on every checkout regardless of whether the driver/merge-pass behind it is built) —
+  every other language registered in `Language_registry` — `Language_registry.lookup`, with
+  `lsp_install_instruction` filling `detail` on failure. Every detected language gets an
+  `effects` row, `not_analysed` with an honest reason unless it is OCaml or Go — Go's own
+  `effects` producer exists only as test-harness infrastructure today (built into a temp dir by
+  `tezt/lib/arch_tezt.ml`'s own helper), not a shipped binary, so it too reports `not_analysed`
+  rather than being silently promoted to `covered`.
+- `cfg` and `types` are **not** independently invoked — they are facts the `callgraph` producer
+  for a language already emits as part of its own output (post-dominance/CFG; the `types` table).
+  Their coverage rows mirror that language's own `callgraph` row's status rather than being
+  probed a second time.
+- `coverage` (test-line coverage, an unrelated meaning from the `coverage` SQL table documented
+  above) requires an externally-supplied LCOV tracefile this tool cannot discover on its own —
+  `not_analysed` unless `--lcov <path>` names an existing file.
+- `decisions` (`poc/decision-lint`) is a proof-of-concept outside the main dune build graph
+  entirely — always `not_analysed`.
+
+`arch-coverage-matrix --project <dir> --db-path <out.db> [--allow-partial] [--lcov <path>]` exits 1
+if any **language-scoped** row (`callgraph`/`effects`/`cfg`/`types`, `language IS NOT NULL`) is
+`not_analysed`/`failed`/`partial` and `--allow-partial` was not given, per the roadmap's own
+ratchet ("a non-zero exit unless `--allow-partial` is given"). The two cross-language rows
+(`coverage`, `decisions`) never gate the exit code: neither can become `covered` by anything this
+tool run alone could fix (an LCOV tracefile is supplied externally or it is not; `decisions` is a
+standing fact about this codebase's own build graph), so counting them would make every
+invocation without `--allow-partial` exit 1 unconditionally — a gate that always fires carries no
+signal. `partial` (an OCaml `_build/default` present but containing no `.cmt`/`.cmti` files —
+about to silently index nothing) counts as a gap, same as `not_analysed`/`failed`.
+
+The repo-root marker search (`find_repo_root`) looks for a directory containing BOTH
+`architecture-schema.sql` and a `_build` subdirectory, not the marker file alone: dune mirrors
+every file it depends on into `_build/default/` as part of its own build sandbox, so
+`_build/default/architecture-schema.sql` is a real, separate file — a marker-alone search
+starting from inside `_build/default/bin/...` (where this and every other executable this project
+builds lives) finds that mirrored copy first, one directory short of the genuine root.
+
 ## Additional tables
 
 `types`, `type_fields`, `type_constructors` — indexed type definitions.
@@ -181,6 +241,7 @@ and forcing a shared constant across two intentionally-independent binaries woul
 | `1.2` | `reachability_class`, `actor_role`, `temporal_class`, `gating`, `value_touched`, `precondition` columns on `function_effects`; `attack_edges` table and `from_path`/`to_path` columns — attack-surface capability layer (Phase 2) | `capabilities-schema-migration.sql` |
 | `1.3` | `modules.language`, `functions.language`/`functions.universe` — roadmap Phase 1 item 1.1, `SPEC-sound-callgraph.md` FR-001 ("node identity carries a language tag + internal/external universe flag") | `architecture-schema.sql` (additive columns) |
 | `1.4` | `producer_runs` table; `functions.producer_run_id`/`calls.producer_run_id` — roadmap Phase 1 item 1.2, ADR 002 | `architecture-schema.sql` (additive table + columns) |
+| `1.5` | `analysis_coverage` table — roadmap Phase 1 item 1.3, the honest-absence guarantee | `architecture-schema.sql` (additive table); also embedded standalone in `arch-coverage-matrix` |
 
 Versions `1.1` and `1.2` are retroactive: both migrations were applied to `main` before this
 versioning mechanism existed, so `schema_version` never actually recorded them at the time — this

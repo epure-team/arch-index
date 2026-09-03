@@ -49,7 +49,7 @@ let schema_path =
    constant — a consumer reading schema_version="1.2" off a flat-schema
    database would wrongly conclude those tables exist. See
    [current_flat_schema_version] below, which runner.ml now uses instead. *)
-let current_schema_version = "1.4"
+let current_schema_version = "1.5"
 
 (* The flat schema (runner.ml's own inline 3-table [schema_sql]) — distinct
    version identity from [current_schema_version] above: the two schemas are

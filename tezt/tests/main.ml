@@ -92,4 +92,5 @@ let () =
   Query_limits.register () ;
   Exn_raise_sets.register () ;
   Provenance.register () ;
+  Coverage_matrix.register () ;
   Tezt.Test.run ()

@@ -93,8 +93,15 @@ let must_null_query =
    the new [lib/arch_index/arch_index_exn.ml]'s calls into compiler-libs
    ([Ident.*], [Path.*], [Types.get_desc], [Predef.*]) and [Tast_iterator] —
    genuine external leaves of the same class as the existing rows, measured
-   on the branch's clean tree (self-index: 20 modules / 527 functions). *)
-let clean_measured = 289
+   on the branch's clean tree (self-index: 20 modules / 527 functions).
+
+   Recalibrated again 2026-09-03 (feat/coverage-matrix): 289 → 321. The +32
+   rows are calls from the new [lib/arch_index/coverage_matrix.ml] (roadmap
+   1.3) into [Sys.*]/[Filename.*]/[Unix.*]/[Sqlite3.*] plus the intervening
+   provenance-columns and language-universe tasks' own additions since the
+   prior recalibration — genuine external leaves of the same class, not a
+   new unsound edge kind. *)
+let clean_measured = 321
 
 let headroom = 25
 
