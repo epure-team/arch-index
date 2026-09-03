@@ -3,6 +3,17 @@
 ## [Unreleased]
 
 ### Added
+- Exception-identity may-raise sets for OCaml (roadmap 3.4): the CMT producer records raise
+  origins with the resolved constructor path, handler scopes with their caught sets, and the
+  handler scope enclosing **each call site** (`exn_origins` / `exn_scopes` /
+  `exn_scope_catches` / `call_exn_scopes` / `exn_rebinds`, additive). `arch-query raises <fn>`
+  computes the transitive set minus what the handlers around each call catch, with ⊤ reasons
+  (`may_top_edge`, `external`, `unknown_exn_value`) and verdicts `BOUNDED` / `UNBOUNDED (⊤)` /
+  `BOUNDED_UNDER_HYP(externals_pure)`; `raisers-of <Exn>`, `exn-stats`,
+  `--assume-externals-pure`. A DB without `comment_db_meta.exn_contract` refuses `NOT_ANALYSED`.
+  Raise heads are recognised by the `%raise` primitive (protocol-environment safe); raising
+  primitives (comparison on closure-capable types, integer division, bounds checks) are typed
+  origins. See `docs/exception-raise-sets.md` and `specs/exn-raise-sets.md`.
 - `arch-impact`: per-diff change-impact briefing over the sound call graph — touched functions,
   affected exported API, blast radius, ⊤ frontier, reaching tests, effects crossed, and findings
   on touched lines. Text / Markdown / JSON output. `--fail-on-new-findings` implements the R5
