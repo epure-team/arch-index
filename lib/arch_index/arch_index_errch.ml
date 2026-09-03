@@ -136,11 +136,20 @@ let rec pat_bound_idents (p : Typedtree.value Typedtree.general_pattern) =
     [caught = Some bare_ctor] whenever matched, never a catch-all "any". A
     bare variable / wildcard is a catch-all for the WHOLE channel (any
     error), independent of [bare_ctor]. *)
+(* What one match arm demonstrably catches on a value channel. Three cases,
+   not two: the old [string option] conflated "catches everything" with
+   "catches something this type cannot name", and the second silently closed
+   the channel. See the FIX note inside [classify_value_pat]. *)
+type caught_class =
+  | Catch_all  (** a wildcard or bare variable: closes the whole channel *)
+  | Caught of string  (** exactly this one canonical error identity *)
+  | Unrecognised  (** a real but unnameable subset: MUST NOT close anything *)
+
 let rec classify_value_pat ~canon_type ~canon_exn ~bare_ctor ~arg_pos
     (p : Typedtree.value Typedtree.general_pattern) =
   match p.pat_desc with
-  | Tpat_any -> Some (None, [])
-  | Tpat_var (id, _, _) -> Some (None, [Ident.unique_name id])
+  | Tpat_any -> Some (Catch_all, [])
+  | Tpat_var (id, _, _) -> Some (Catch_all, [Ident.unique_name id])
   | Tpat_alias (inner, id, _, _) -> (
       match classify_value_pat ~canon_type ~canon_exn ~bare_ctor ~arg_pos inner with
       | Some (caught, bound) -> Some (caught, Ident.unique_name id :: bound)
@@ -151,10 +160,19 @@ let rec classify_value_pat ~canon_type ~canon_exn ~bare_ctor ~arg_pos
           classify_value_pat ~canon_type ~canon_exn ~bare_ctor ~arg_pos b )
       with
       | Some (ca, ba), Some (cb, bb) ->
+          (* FIX (review, CRITICAL): two literals that DIFFER used to collapse
+             to the catch-all case, so `Error (A | B) -> ...` closed the whole
+             channel and every other error the call could return vanished from
+             the answer. A disjunction is only a catch-all when one side really
+             is one; two different literals are a set this single-path type
+             cannot express, so the arm closes nothing instead. Losing that
+             precision costs an extra element in the report; getting it wrong
+             loses a real error silently. *)
           let caught =
             match (ca, cb) with
-            | None, _ | _, None -> None
-            | Some x, Some y -> if x = y then Some x else None
+            | Catch_all, _ | _, Catch_all -> Catch_all
+            | Unrecognised, _ | _, Unrecognised -> Unrecognised
+            | Caught x, Caught y -> if x = y then Caught x else Unrecognised
           in
           Some (caught, ba @ bb)
       | (Some _ as r), None | None, (Some _ as r) -> r
@@ -167,17 +185,27 @@ let rec classify_value_pat ~canon_type ~canon_exn ~bare_ctor ~arg_pos
             | Some pth -> pth
             | None -> Longident.last lid.Asttypes.txt
           in
-          Some (Some path, [])
+          Some (Caught path, [])
       | n, _ when n > 0 -> (
           match List.nth_opt sub (n - 1) with
           | Some subpat ->
-              let path =
+              let caught =
                 match literal_ctor_path_of_pat ~canon_type ~canon_exn subpat with
-                | Some pth -> Some pth
-                | None -> None (* non-literal argument pattern: catch-all for this ctor *)
+                | Some pth -> Caught pth
+                | None -> (
+                    (* Only a wildcard or a bare variable under the constructor
+                       really catches everything it can carry. Any other shape
+                       (record, constant, lazy, an or-pattern already reduced
+                       above) matches a SUBSET we cannot name, so it must not
+                       be allowed to close the channel. *)
+                    match subpat.pat_desc with
+                    | Tpat_any | Tpat_var _ -> Catch_all
+                    | _ -> Unrecognised)
               in
-              Some (path, pat_bound_idents subpat)
-          | None -> Some (None, []))
+              Some (caught, pat_bound_idents subpat)
+          (* Constructor applied with fewer arguments than [arg_pos] names:
+             we cannot see the error position at all. *)
+          | None -> Some (Unrecognised, []))
       | _ -> None)
   | _ -> None
 

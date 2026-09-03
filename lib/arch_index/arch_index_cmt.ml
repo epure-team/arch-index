@@ -1545,8 +1545,13 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels
                             in
                             if closing then (
                               match caught_opt with
-                              | None -> catch_all := true
-                              | Some p -> caught := p :: !caught))
+                              | Arch_index_errch.Catch_all -> catch_all := true
+                              | Arch_index_errch.Caught p -> caught := p :: !caught
+                              (* Closes nothing: the arm matches a real subset
+                                 we cannot name, so subtracting anything here
+                                 would drop an error the call can still
+                                 return. *)
+                              | Arch_index_errch.Unrecognised -> ()))
                           matched ;
                         match resolve_head_call scrut with
                         | Some ord ->
