@@ -152,7 +152,7 @@ let bfs_search ~adj ~seeds ~stop =
       end)
     seeds ;
   let found = ref None in
-  while !found = None && not (Queue.is_empty q) do
+  while Option.is_none !found && not (Queue.is_empty q) do
     let x = Queue.pop q in
     if stop x then found := Some x
     else
@@ -176,9 +176,11 @@ let bfs_search ~adj ~seeds ~stop =
 
 (** [shortest_path g ~from ~to_] is the BFS-shortest sequence of keys from [from] to [to_]
     inclusive, over the resolved edges ([fwd] — MUST ∪ MAY_ENUMERATED, the same set a
-    reachability {!closure} follows). [None] when [to_] is unreachable from [from], including
-    when either key is absent from the graph. A ⊤ frontier is never part of a path: [fwd] already
-    excludes it (see {!load}) — that is what {!witness_to_top} is for. *)
+    reachability {!closure} follows). [None] when [to_] is unreachable from [from]. A key absent
+    from the graph is reachable only from (and to) itself: [shortest_path g ~from:k ~to_:k] is
+    [Some [k]] for ANY [k], present or not — [bfs_search] never consults {!t.nodes}, only the
+    edge maps. A ⊤ frontier is never part of a path: [fwd] already excludes it (see {!load}) —
+    that is what {!witness_to_top} is for. *)
 let shortest_path g ~from ~to_ =
   bfs_search ~adj:g.fwd ~seeds:(SS.singleton from) ~stop:(fun x -> x = to_)
 
@@ -196,12 +198,6 @@ let shortest_path_from_set ~adj ~from ~to_ =
     such node is reachable. *)
 let witness_to_top g ~from =
   bfs_search ~adj:g.fwd ~seeds:(SS.singleton from) ~stop:(fun x -> SM.mem x g.tops)
-
-(** [witness_to_top_from_set g ~from] is {!witness_to_top}, generalised to a set of seeds — the
-    multi-source variant a `reach` rule's UNKNOWN verdict needs, for the same reason
-    {!shortest_path_from_set} exists. *)
-let witness_to_top_from_set g ~from =
-  bfs_search ~adj:g.fwd ~seeds:from ~stop:(fun x -> SM.mem x g.tops)
 
 let label g key =
   match SM.find_opt key g.nodes with

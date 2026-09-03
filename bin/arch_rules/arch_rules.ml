@@ -230,18 +230,20 @@ let eval (t : Arch_db.t) (g : Arch_graph.t) ~sound r =
         | _ -> None
       in
       (* The offender list already says a path exists somewhere; this is the path itself, so a
-         reviewer can check the verdict without re-deriving it by hand. VIOLATION's self-overlap
-         sub-case (src ∩ dst nonempty) is membership, not a call path — no witness there. *)
+         reviewer can check the verdict without re-deriving it by hand. A VIOLATION `hit` can mix
+         self-overlap members (src ∩ dst — membership, not a call path) with genuine must-reachable
+         targets in the SAME result, when a rule has both an accidental overlap and a real multi-hop
+         violation: only the overlap members themselves get no witness; the first hit that is NOT
+         also an overlap member still gets a real BFS path. *)
       let witness =
         match v with
-        | "VIOLATION" when not (SS.is_empty (SS.inter src dst)) -> []
         | "VIOLATION" -> (
-            match hit with
-            | target :: _ -> (
+            match List.find_opt (fun k -> not (SS.mem k src && SS.mem k dst)) hit with
+            | None -> []
+            | Some target -> (
                 match Arch_graph.shortest_path_from_set ~adj:g.must_fwd ~from:src ~to_:target with
                 | Some path -> List.map lbl path
-                | None -> [])
-            | [] -> [])
+                | None -> []))
         | "POSSIBLE" -> (
             match hit with
             | target :: _ -> (
@@ -250,9 +252,15 @@ let eval (t : Arch_db.t) (g : Arch_graph.t) ~sound r =
                 | None -> [])
             | [] -> [])
         | "UNKNOWN" -> (
-            match Arch_graph.witness_to_top_from_set g ~from:src with
-            | Some path -> List.map lbl path
-            | None -> [])
+            (* `hit` here is `escaping` (reach_verdict), the SAME set `detail` is built from — the
+               witness must end at `hit`'s own head, not at whichever ⊤-holder a plain nearest-search
+               happens to find first, or the two fields could name different functions. *)
+            match hit with
+            | target :: _ -> (
+                match Arch_graph.shortest_path_from_set ~adj:g.fwd ~from:src ~to_:target with
+                | Some path -> List.map lbl path
+                | None -> [])
+            | [] -> [])
         | _ -> []
       in
       { rule = r.name; kind = kind_of r.body; exact = false; verdict = v; detail = List.map lbl (take 20 hit);
