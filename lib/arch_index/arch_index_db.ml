@@ -33,11 +33,71 @@ let schema_path =
    (new nullable column/table/index; every migration so far has been this
    kind), the major component for a breaking one (a column/table removal or
    type change an existing consumer's query could not survive unmodified).
-   History and the table/column set each version added: docs/schema-versions.md.
-   Read by [comment_db_meta.schema_version] at write time (see runner.ml) —
-   there is exactly one source of truth for "what version did this build
-   actually emit", not one hardcoded literal per call site. *)
+   History and the table/column set each version added: docs/schema.md.
+   Describes THIS module's [schema_path]/[schema_sql] — the "main" schema
+   (architecture-schema.sql, 16 tables, grown by two migrations so far) that
+   [Arch_index.run] (the CMT-based path) writes. There is exactly one source
+   of truth for "what version does the main schema promise", not one
+   hardcoded literal per call site.
+
+   FIX (review, HIGH): a second, STRUCTURALLY DIFFERENT schema exists —
+   runner.ml's own inline 3-table flat schema (comment_db_meta, functions,
+   calls — the LSP-based path, the actual production entry point via
+   `arch_index_cli`). It shares comment_db_meta's key/value store but has
+   never had, and cannot have, any of the tables the migrations above added
+   (function_effects, attack_edges, ...). It MUST NOT be stamped with this
+   constant — a consumer reading schema_version="1.2" off a flat-schema
+   database would wrongly conclude those tables exist. See
+   [current_flat_schema_version] below, which runner.ml now uses instead. *)
 let current_schema_version = "1.2"
+
+(* The flat schema (runner.ml's own inline 3-table [schema_sql]) has never
+   changed since it was introduced — it stays "1.0" until it does. Distinct
+   version identity from [current_schema_version] above: the two schemas are
+   structurally incomparable, and conflating them under one version number is
+   exactly the bug a fresh review round caught in this same PR. *)
+let current_flat_schema_version = "1.0"
+
+(* FIX (review): [current_schema_version] is a raw string, so a naive consumer
+   is tempted to write [Arch_index.schema_version = "1.2"] — brittle against
+   any future reformatting and gives no way to ask "at least 1.1" without
+   re-parsing by hand. Give consumers a real comparison instead of pushing
+   them toward string equality. *)
+let parse_schema_version v =
+  match String.split_on_char '.' v with
+  | [ major; minor ] -> (
+      match (int_of_string_opt major, int_of_string_opt minor) with
+      | Some ma, Some mi -> Some (ma, mi)
+      | _ -> None)
+  | _ -> None
+
+let schema_version_at_least ~major ~minor =
+  match parse_schema_version current_schema_version with
+  | Some (cur_major, cur_minor) ->
+      cur_major > major || (cur_major = major && cur_minor >= minor)
+  | None -> false
+
+let%test "schema_version_at_least: current version satisfies itself" =
+  match parse_schema_version current_schema_version with
+  | Some (major, minor) -> schema_version_at_least ~major ~minor
+  | None -> false
+
+let%test "schema_version_at_least: a future minor version is not satisfied" =
+  match parse_schema_version current_schema_version with
+  | Some (major, minor) -> not (schema_version_at_least ~major ~minor:(minor + 1))
+  | None -> false
+
+(* FIX (review, HIGH): a fresh review round found a first draft of this fix
+   stamped EVERY database (both the main schema and the structurally
+   different flat schema) with [current_schema_version] — a flat-schema
+   consumer would then read "1.2" and wrongly conclude function_effects/
+   attack_edges exist. The two version identities must stay distinct and
+   well-formed regardless of what either constant is bumped to later. *)
+let%test "main and flat schema versions are distinct identities" =
+  current_schema_version <> current_flat_schema_version
+
+let%test "current_flat_schema_version is a well-formed major.minor string" =
+  parse_schema_version current_flat_schema_version <> None
 
 (* [schema_sql] embeds architecture-schema.sql's contents at compile time via
    ppx_blob (same mechanism ts_enricher.ml already uses for ts_shim.js) — a
