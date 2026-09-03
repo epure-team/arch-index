@@ -1,0 +1,16 @@
+{
+  "task": "error-channels",
+  "mode": "full",
+  "schema_version": "1.0",
+  "steps": [
+    {"id":"step-1","skill":"roster-implement","inputs":["briefs/error-channels-implementer.md","specs/error-channels.md","roster/error-channels/feasibility-probe.md"],"outputs":["briefs/error-channels-impl.md"],"hook":false},
+    {"id":"step-2","skill":"roster-review","inputs":["briefs/error-channels-reviewer.md","briefs/error-channels-impl.md"],"outputs":["briefs/error-channels-review.json"],"hook":false},
+    {"id":"step-3","skill":"roster-qa","inputs":["briefs/error-channels-qa-scope.md","docs/exception-raise-sets-validation.md"],"outputs":["briefs/error-channels-qa.md"],"hook":false},
+    {"id":"step-4","skill":"roster-ship","inputs":["briefs/error-channels-qa.md"],"outputs":["briefs/error-channels-ship-gate.md"],"hook":false}
+  ],
+  "quality_gates": {
+    "build": "eval \"$(opam env --switch=/home/mathias/dev/arch-index --set-switch)\" && dune build --root .",
+    "test": "eval \"$(opam env --switch=/home/mathias/dev/arch-index --set-switch)\" && dune test --root . --force",
+    "lint": ""
+  }
+}
