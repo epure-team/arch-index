@@ -11,6 +11,26 @@
   since a rule's source selector resolves to a set of seeds, not one), sharing one BFS core.
   `PASS` and every non-`reach` rule form carry no witness, since none of them assert a
   reachability claim a path could illustrate.
+- Configurable **error channels** (roadmap 3.4-bis), generalising the exception analysis to
+  error-carrying values. A channel is one way of failing; `exception`, `result` and `option` are
+  built in, and `arch-errors.toml` declares any others (carrier type and aliases, origins, binds,
+  `add`/`replace` transforms, converters that close one channel and open another, and sinks).
+  Merge order is built-in < profile < user file, the effective config is digested into
+  `comment_db_meta.error_config_digest`, and a shipped `profiles/tezos-errors.toml` covers the
+  Tezos protocol environment's `tzresult` — built from a verified inventory of all 276 units of
+  `lib_protocol`, not from the documented API surface, because the two disagree.
+  `arch-query may-fail <fn> --channel <name|all>`, `fails-with <E>`, `error-stats`, all with
+  `--assume-externals-pure` and `--builtin-summaries`. Verdicts distinguish `BOUNDED`,
+  `UNBOUNDED (⊤)` with witnesses, `BOUNDED_UNDER_HYP(externals_pure)`, `NOT_A_CARRIER` ("looked;
+  it cannot fail this way") and `NOT_ANALYSED` (exit 3, "nobody looked") — the last two are kept
+  apart because an empty set and an unperformed analysis must never be confusable. Polymorphic
+  variants are recognised as error identities, which matters: real corpora spell errors
+  `` Error `Msg `` far more often than with ordinary constructors. Schema **1.6**, additive
+  (`channel` columns, `exn_edges`, `channel_carriers`). Config errors — a bad path, an unknown
+  TOML key, or a declared carrier type that matches nothing in the corpus — exit 1 rather than
+  degrade silently; `--errors-strict` promotes unmatched-path warnings to fatal.
+  See `docs/error-channels.md`, the adapter contract in `docs/error-channels-porting.md`, and
+  `specs/error-channels.md`.
 - Exception-identity may-raise sets for OCaml (roadmap 3.4): the CMT producer records raise
   origins with the resolved constructor path, handler scopes with their caught sets, and the
   handler scope enclosing **each call site** (`exn_origins` / `exn_scopes` /
