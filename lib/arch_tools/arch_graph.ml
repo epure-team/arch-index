@@ -136,6 +136,73 @@ let closure seeds adj =
   in
   SS.diff (go seeds (SS.elements seeds)) seeds
 
+(* Shared BFS core for every witness-path query below. [seeds] may be a single key or several —
+   a `reach` rule's source selector is a SET, and the shortest path a reviewer wants is the
+   shortest from ANY seed, not an arbitrary one. [stop] decides early termination: given the node
+   just discovered, is it (or does it satisfy) the thing we are looking for? Returns the key that
+   satisfied [stop], or [None] if the frontier is exhausted first. *)
+let bfs_search ~adj ~seeds ~stop =
+  let parent = Hashtbl.create 64 in
+  let q = Queue.create () in
+  SS.iter
+    (fun s ->
+      if not (Hashtbl.mem parent s) then begin
+        Hashtbl.replace parent s s ;
+        Queue.push s q
+      end)
+    seeds ;
+  let found = ref None in
+  while !found = None && not (Queue.is_empty q) do
+    let x = Queue.pop q in
+    if stop x then found := Some x
+    else
+      let succ = match SM.find_opt x adj with Some s -> s | None -> SS.empty in
+      SS.iter
+        (fun n ->
+          if not (Hashtbl.mem parent n) then begin
+            Hashtbl.replace parent n x ;
+            Queue.push n q
+          end)
+        succ
+  done ;
+  match !found with
+  | None -> None
+  | Some target ->
+      let rec build acc cur =
+        let p = Hashtbl.find parent cur in
+        if p = cur then cur :: acc else build (cur :: acc) p
+      in
+      Some (build [] target)
+
+(** [shortest_path g ~from ~to_] is the BFS-shortest sequence of keys from [from] to [to_]
+    inclusive, over the resolved edges ([fwd] — MUST ∪ MAY_ENUMERATED, the same set a
+    reachability {!closure} follows). [None] when [to_] is unreachable from [from], including
+    when either key is absent from the graph. A ⊤ frontier is never part of a path: [fwd] already
+    excludes it (see {!load}) — that is what {!witness_to_top} is for. *)
+let shortest_path g ~from ~to_ =
+  bfs_search ~adj:g.fwd ~seeds:(SS.singleton from) ~stop:(fun x -> x = to_)
+
+(** [shortest_path_from_set ~adj ~from ~to_] is {!shortest_path}, generalised to a SET of
+    starting seeds — the shortest path from whichever seed reaches [to_] first. This is what a
+    `reach` rule needs: its source selector is a set, and the rule's own VIOLATION/POSSIBLE
+    verdict already says {i some} seed reaches the target, not which one. [adj] lets the caller
+    choose [g.must_fwd] (a VIOLATION's own proof edges) or [g.fwd] (a POSSIBLE's wider cone). *)
+let shortest_path_from_set ~adj ~from ~to_ =
+  bfs_search ~adj ~seeds:from ~stop:(fun x -> x = to_)
+
+(** [witness_to_top g ~from] is the shortest path (inclusive of [from]) to the nearest key that
+    itself carries a ⊤ edge ([SM.mem key g.tops]) — concrete evidence for why a reachability
+    query returned UNKNOWN rather than PASS: the source cone escapes exactly here. [None] when no
+    such node is reachable. *)
+let witness_to_top g ~from =
+  bfs_search ~adj:g.fwd ~seeds:(SS.singleton from) ~stop:(fun x -> SM.mem x g.tops)
+
+(** [witness_to_top_from_set g ~from] is {!witness_to_top}, generalised to a set of seeds — the
+    multi-source variant a `reach` rule's UNKNOWN verdict needs, for the same reason
+    {!shortest_path_from_set} exists. *)
+let witness_to_top_from_set g ~from =
+  bfs_search ~adj:g.fwd ~seeds:from ~stop:(fun x -> SM.mem x g.tops)
+
 let label g key =
   match SM.find_opt key g.nodes with
   | Some n -> ( match n.file with Some f -> Printf.sprintf "%s  (%s)" n.name f | None -> n.name)
