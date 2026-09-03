@@ -458,6 +458,17 @@ let insert_exn_rebind db stmt ~alias_path ~target_path =
   bind_text stmt 2 target_path ;
   exec_stmt db ~what:"exn_rebinds" stmt
 
+let insert_exn_edge db stmt ~call_id ~channel ~role =
+  bind_int stmt 1 call_id ;
+  bind_text stmt 2 channel ;
+  bind_text stmt 3 role ;
+  exec_stmt db ~what:"exn_edges" stmt
+
+let insert_channel_carrier db stmt ~function_id ~channel =
+  bind_int stmt 1 function_id ;
+  bind_text stmt 2 channel ;
+  exec_stmt db ~what:"channel_carriers" stmt
+
 let insert_module_dep db stmt_dep ~source_module ~target_module ~target_path
     ~dep_kind ~alias_name ~line_number =
   bind_int stmt_dep 1 source_module ;

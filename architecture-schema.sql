@@ -431,10 +431,24 @@ CREATE TABLE IF NOT EXISTS exn_edges (
     role TEXT NOT NULL CHECK(role IN ('propagates','bind_arg','sink','transform_add','transform_replace','convert')),
     PRIMARY KEY (call_id, channel, role)
 );
+-- channel_carriers: which (function, channel) pairs the producer determined
+-- to be a c-carrier by the specs/error-channels.md Clarifications rule (its
+-- return type, after stripping leading arrows, matches the channel's carrier
+-- type). A node absent here for channel c answers NOT_A_CARRIER(c) at query
+-- time even when it has zero origins/edges on c (an always-Ok carrier is
+-- still BOUNDED: {}, not NOT_A_CARRIER — the two are not the same fact).
+-- Written starting with the value-channel spine slice (slice 2); additive
+-- under schema 1.3, no separate migration file.
+CREATE TABLE IF NOT EXISTS channel_carriers (
+    function_id INTEGER NOT NULL REFERENCES functions(id) ON DELETE CASCADE,
+    channel TEXT NOT NULL,
+    PRIMARY KEY (function_id, channel)
+);
 CREATE INDEX IF NOT EXISTS idx_exn_scopes_fn ON exn_scopes(function_id);
 CREATE INDEX IF NOT EXISTS idx_exn_origins_fn ON exn_origins(function_id);
 CREATE INDEX IF NOT EXISTS idx_exn_scope_catches_scope ON exn_scope_catches(scope_id);
 CREATE INDEX IF NOT EXISTS idx_exn_edges_channel ON exn_edges(channel);
+CREATE INDEX IF NOT EXISTS idx_channel_carriers_channel ON channel_carriers(channel);
 
 -- Test coverage tracking
 CREATE TABLE IF NOT EXISTS coverage (

@@ -426,6 +426,25 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
   let stmt_call_scope =
     Sqlite3.prepare db "INSERT INTO call_exn_scopes (call_id, scope_id) VALUES (?, ?)"
   in
+  let stmt_carrier =
+    Sqlite3.prepare
+      db
+      "INSERT OR IGNORE INTO channel_carriers (function_id, channel) VALUES (?, ?)"
+  in
+  let stmt_edge =
+    Sqlite3.prepare
+      db
+      "INSERT OR IGNORE INTO exn_edges (call_id, channel, role) VALUES (?, ?, ?)"
+  in
+  (* Value channels the producer actually analyses (specs/error-channels.md
+     "Carrier check"): every declared channel with a non-empty carrier
+     [type_paths] — [exception] (a marker with none) is excluded, it stays
+     the untouched [lexn]/[calls]-based path above. *)
+  let value_channels =
+    List.filter
+      (fun (c : Arch_errors_config.channel) -> c.type_paths <> [])
+      errors_effective.Arch_errors_config.channels
+  in
 
   (* Process all .cmt files inside a transaction *)
   exec_exn db "BEGIN TRANSACTION" ;
@@ -458,6 +477,8 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
             ~stmt_catch
             ~stmt_origin
             ~stmt_rebind
+            ~value_channels
+            ~stmt_carrier
             ~producer_run_id
             path
         in
@@ -494,20 +515,44 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
      validation, builtins included, since [merge] can fold user overrides
      into them. *)
   Arch_index_cmt.set_seen_collector None ;
+  let builtin_names =
+    List.map (fun (c : Arch_errors_config.channel) -> c.name) Arch_errors_config.builtin.channels
+  in
   (if error_config_source <> "builtin" then
-     match Arch_errors_config.validate errors_effective errors_seen ~strict:errors_strict with
+     match
+       Arch_errors_config.validate errors_effective errors_seen ~strict:errors_strict
+         ~builtin_names ()
+     with
      | Error msg ->
          Arch_io.eprintf "%s\n" msg ;
          exit 1
      | Ok () -> ()) ;
   let error_config_unmatched = String.concat "," (Arch_errors_config.unmatched errors_seen) in
   let error_config_digest = Arch_errors_config.digest errors_effective in
-  (* Slices 0-1 only wire config discovery/validation and the schema's
-     [channel] columns end to end; the producer still only ever emits the
-     [exception] channel (specs/error-channels.md's byte-identical
-     requirement) — later slices widen this to whatever channels actually
-     got emitted. Bound, not sprintf'd, into the SQL text: [error_config_source]
-     and [error_config_unmatched] embed filesystem paths, which may contain a
+  (* [error_contract]: [exception] (frozen, always emitted, FR-029's
+     byte-identical requirement) plus every value channel that matched at
+     least one carrier type in the corpus — the Clarifications table's
+     "built-in channels that match nothing" rule: an unmatched BUILT-IN
+     channel is simply not emitted (never fatal); a channel from a FILE
+     that matches nothing is already fatal above, so by this point every
+     surviving file-sourced channel matched something too. A channel with
+     no [type_paths] at all (only [exception]) trivially "matches". *)
+  let channel_emitted (c : Arch_errors_config.channel) =
+    c.Arch_errors_config.type_paths = []
+    || List.exists (fun p -> not (List.mem p (Arch_errors_config.unmatched errors_seen))) c.type_paths
+  in
+  let error_contract =
+    "v1:"
+    ^ String.concat
+        ","
+        ("exception"
+        :: List.filter_map
+             (fun (c : Arch_errors_config.channel) ->
+               if channel_emitted c then Some c.Arch_errors_config.name else None)
+             value_channels)
+  in
+  (* Bound, not sprintf'd, into the SQL text: [error_config_source] and
+     [error_config_unmatched] embed filesystem paths, which may contain a
      single quote. *)
   let stmt_meta =
     Sqlite3.prepare db "INSERT OR REPLACE INTO comment_db_meta (key, value) VALUES (?, ?)"
@@ -518,7 +563,7 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
       Arch_index_db.bind_text stmt_meta 2 value ;
       Arch_index_db.exec_stmt db ~what:"comment_db_meta" stmt_meta)
     [
-      ("error_contract", "v1:exception");
+      ("error_contract", error_contract);
       ("error_config_digest", error_config_digest);
       ("error_config_source", error_config_source);
       ("error_config_unmatched", error_config_unmatched);
@@ -747,9 +792,20 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
               (* The handler scope enclosing THIS call site, linked to this
                  call's own rowid — the pair is written back to back so no
                  other insert can slip in between. *)
-              match call.exn_scope with
+              (match call.exn_scope with
               | Some scope_id ->
                   Arch_index_db.insert_call_exn_scope db stmt_call_scope ~call_id ~scope_id
+              | None -> ()) ;
+              (* Propagating value-channel edge (specs/error-channels.md
+                 "Propagating edges"): only once the callee's resolution is
+                 known, so a call to a DROPPED node — genuinely a c-carrier,
+                 its body just was not stored — still counts (the edge row
+                 exists independent of [callee_id]; the query's own ⊤
+                 handling for a MAY_TOP/unresolved callee already covers it,
+                 same as the exception channel). *)
+              match call.errch_propagates with
+              | Some channel ->
+                  Arch_index_db.insert_exn_edge db stmt_edge ~call_id ~channel ~role:"propagates"
               | None -> ())
           | None -> ()) ;
           (* R2: the call sits in a block unreachable from its function's CFG

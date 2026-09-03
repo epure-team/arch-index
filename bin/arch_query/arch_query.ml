@@ -33,6 +33,9 @@ Subcommands:
   reaches      <from> <to>     MUST-only: does a definite call path exist?
   unreachable  <from> <to>     SOUND dual (requires ⊤-marking): REACHABLE | UNREACHABLE | UNKNOWN
   escapes      <from>          the MAY_TOP (⊤) edges reachable from FROM
+  may-fail     <fn> --channel <name> [--assume-externals-pure]
+                               per error-channel generalisation of raises (specs/error-channels.md):
+                               BOUNDED | UNBOUNDED (⊤) | NOT_A_CARRIER(channel)
   raises       <fn> [--assume-externals-pure]
                                exceptions that may ESCAPE fn, transitively, minus what
                                handlers around each call site catch; BOUNDED | UNBOUNDED (⊤)
@@ -631,6 +634,60 @@ let () =
                   f.name, u.param_name"
                  where)
               ()
+        | "may-fail" ->
+            (* Per-channel generalisation of [raises] (specs/error-channels.md
+               "Query vocabulary", slice 2 — [result]/[option] only, no
+               [--channel all], no [fails-with]/[error-stats]: those are
+               later slices). *)
+            let channel =
+              let rec find = function
+                | "--channel" :: c :: _ -> Some c
+                | _ :: tl -> find tl
+                | [] -> None
+              in
+              find rest
+            in
+            let positional =
+              let rec drop = function
+                | "--channel" :: _ :: tl -> drop tl
+                | "--assume-externals-pure" :: tl -> drop tl
+                | x :: tl -> x :: drop tl
+                | [] -> []
+              in
+              drop rest
+            in
+            let hyp = List.mem "--assume-externals-pure" rest in
+            let a = match positional with x :: _ -> x | [] -> "" in
+            (match channel with
+            | None -> die 2 "arch-query: may-fail requires --channel <name>"
+            | Some channel ->
+                need_known "function" a ;
+                let g =
+                  try Arch_exn.load ~channel t
+                  with Arch_db.Refused m -> die 3 ("arch-query: " ^ m)
+                in
+                let sol = Arch_exn.solve ~assume_externals_pure:hyp g in
+                let cell s = Arch_db.Text s in
+                List.iter
+                  (fun key ->
+                    let label = match Arch_exn.name_of g key with Some n -> n | None -> key in
+                    if not (Arch_exn.is_carrier g key) then
+                      Arch_fmt.print fmt [ "verdict" ]
+                        [ [ cell (Printf.sprintf "%s: NOT_A_CARRIER(%s)" label channel) ] ]
+                    else begin
+                      let set =
+                        match Arch_exn.SM.find_opt key sol with
+                        | Some s -> s
+                        | None -> Arch_exn.Known Arch_exn.SS.empty
+                      in
+                      Arch_fmt.print fmt [ channel; "via"; "how" ]
+                        (Arch_exn.rows_for g ~assume_externals_pure:hyp sol key) ;
+                      let v = Arch_exn.verdict ~assume_externals_pure:hyp set in
+                      Arch_fmt.print fmt [ "verdict" ]
+                        ([ [ cell (Printf.sprintf "%s: %s" label v) ] ]
+                        @ List.map (fun r -> [ cell ("  reason: " ^ r) ]) (Arch_exn.reasons_of set))
+                    end)
+                  (Arch_exn.keys_of_name g a))
         | "raises" | "raisers-of" | "exn-stats" ->
             (* Exception-identity may-raise sets (specs/exn-raise-sets.md).
                The hypothesis flag may sit anywhere after the subcommand; the

@@ -547,7 +547,22 @@ type pending_call = {
   exn_scope : int option;
       (* innermost exception-handler scope enclosing the call site, in the
          caller node ([Arch_index_exn] local id during the walk, rewritten to
-         the [exn_scopes] row id by [process_cmt] before resolution). *)
+         the [exn_scopes] row id by [process_cmt] before resolution) OR a
+         value-channel scope covering THIS call's head (specs/error-channels.md
+         "Handler scopes") — the two never collide in practice (a
+         value-channel scope covers a call's head only when that call's
+         result is the immediate scrutinee of a later match, a lexically
+         separate site from any enclosing [try]), and the schema's
+         [call_exn_scopes] table has room for only one link per call, so an
+         exception-channel link wins if both were ever present (documented
+         residual, not exercised by any required scenario). *)
+  errch_propagates : string option;
+      (* [Some channel]: this call is a propagating edge candidate on
+         [channel] — caller and callee are both c-carriers at this site, and
+         the call is not to a declared [binds] path (specs/error-channels.md
+         "Propagating edges" / "Binds"). Rewritten to nothing further; the
+         caller (arch_index.ml) turns a [Some] here straight into an
+         [exn_edges] row once dropped calls are known. *)
 }
 
 (** Flat display of a pending call's callee: [(name, module)] — the qualified
@@ -585,6 +600,12 @@ type lctx = {
   lexn : Arch_index_exn.acc;
       (* exception origins / handler scopes of THIS node: a lambda literal gets
          a fresh, empty accumulator, so a parent's [try] never covers its body *)
+  lchannel : Arch_errors_config.channel option;
+      (* THIS node's own value channel (specs/error-channels.md "Carrier
+         check"), from its own (curried) type — [None] if it is not a
+         c-carrier of any declared value channel. *)
+  lerrch : Arch_index_errch.acc;
+      (* value-channel origins / handler scopes of THIS node. *)
 }
 
 (** Collected type usage information.
@@ -857,8 +878,8 @@ let build_local_fn_stamps (structure : Typedtree.structure) =
     resolvable (MUST-candidate) call only if its stamp is in this set —
     otherwise it is a parameter / local binding / closure and is MAY_TOP.
     Returns a list of pending calls. *)
-let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ~src_path ~caller_module
-    ~caller_name ~local_fn_stamps (expr : Typedtree.expression) =
+let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels = [])
+    ~src_path ~caller_module ~caller_name ~local_fn_stamps (expr : Typedtree.expression) =
   (* Per-node CFG: every function — the top-level binding AND each nested
      lambda node — gets its own lowering context with its own graph, current
      block, and try-dispatch stack. Calls record their (context, block); after
@@ -867,8 +888,9 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ~src_path ~calle
      thunks, object methods, functor bodies) walk in ISOLATED blocks of the
      current context — entry-unreachable, hence never always-exec — which
      forces [cond] while guaranteeing the calls are still recorded. *)
+  let carrier_of ty = Arch_index_errch.carrier_channel_of_type ~channels:value_channels ty in
   let next_ctx_id = ref 0 in
-  let new_ctx caller =
+  let new_ctx caller channel =
     let id = !next_ctx_id in
     incr next_ctx_id ;
     {
@@ -879,20 +901,90 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ~src_path ~calle
       ldeferred = [];
       lcaller = caller;
       lexn = Arch_index_exn.create ();
+      lchannel = channel;
+      lerrch = Arch_index_errch.create ();
     }
   in
-  let root_ctx = new_ctx caller_name in
+  let root_ctx = new_ctx caller_name (carrier_of expr.exp_type) in
   let all_ctxs = ref [root_ctx] in
   let cur = ref root_ctx in
-  (* raw record: (ctx id, block, caller, head, partial, site) — [cond] is
-     resolved after solving every context's graph. *)
+  (* raw record: (ord, ctx id, block, caller, head, partial, site, exn_scope,
+     errch_candidate) — [cond] is resolved after solving every context's
+     graph. [ord] is a globally unique, creation-order call id used ONLY to
+     retroactively mark a call sunk / handler-covered on a value channel
+     (specs/error-channels.md "Sinks" / "Handler scopes") once the AST site
+     that determines that (an [ignore], a wildcard [let], a [match]) is
+     reached — which happens strictly after the call itself was walked (the
+     scrutinee/argument is walked before the site that classifies it). *)
   let raw = ref [] in
-  let add_call ?(partial = false) head loc =
+  let next_call_ord = ref 0 in
+  (* [Texp_apply] location -> the ord of ITS OWN head call, set the instant
+     [record_head] emits it — used to resolve a [match]/sink's scrutinee
+     back to "the call whose result this is", when that scrutinee IS a call
+     (not merely bound to one through a chain of single-variable lets). *)
+  let apply_head_ord : (Location.t, int) Hashtbl.t = Hashtbl.create 32 in
+  (* Ident stamp -> the ord of the call its single-variable-let chain
+     resolves to (specs/error-channels.md "Handler scopes": "a variable
+     bound by a chain of single-variable lets to a call"). Absent = not such
+     a chain — the safe default (uncovered, propagates). *)
+  let let_head_call : (string, int) Hashtbl.t = Hashtbl.create 16 in
+  let sunk_ords : (int, unit) Hashtbl.t = Hashtbl.create 8 in
+  (* call ord -> (channel, local errch scope id) covering its head. *)
+  let errch_call_scope : (int, string * int) Hashtbl.t = Hashtbl.create 8 in
+  (* Every ident ever bound by a value-case pattern in THIS walk, by
+     [Ident.unique_name]. OCaml's static scoping means such a stamp can only
+     ever be referenced from inside that same arm's guard/RHS, so a single
+     accumulate-only set (no push/pop discipline) is exactly as precise as a
+     properly-scoped stack here — see arch_index_errch.mli's [idents_occur]
+     and the "re-return" origin-suppression rule below. *)
+  let arm_bound_idents : (string, unit) Hashtbl.t = Hashtbl.create 16 in
+  let resolve_head_call (e : Typedtree.expression) =
+    match e.exp_desc with
+    | Texp_apply _ -> Hashtbl.find_opt apply_head_ord e.exp_loc
+    | Texp_ident (Path.Pident id, _, _) -> Hashtbl.find_opt let_head_call (Ident.unique_name id)
+    | _ -> None
+  in
+  let mark_sunk (e : Typedtree.expression) =
+    match resolve_head_call e with Some ord -> Hashtbl.replace sunk_ords ord () | None -> ()
+  in
+  let head_qualified_name = function
+    | Head_qualified (Some m, n) -> Some (m ^ "." ^ n)
+    | Head_qualified (None, n) -> Some n
+    | _ -> None
+  in
+  let is_declared_bind (c : Arch_errors_config.channel) head =
+    match head_qualified_name head with Some qn -> List.mem qn c.binds | None -> false
+  in
+  (* Bare constructor name off a declared origin path ("Stdlib.Error" ->
+     "Error"; "None" -> "None"). *)
+  let bare_ctor_name p =
+    match String.rindex_opt p '.' with
+    | Some i -> String.sub p (i + 1) (String.length p - i - 1)
+    | None -> p
+  in
+  let add_call ?(partial = false) ?is_head_of ?callee_ty head loc =
     let line = loc.Location.loc_start.pos_lnum in
     let call_site = Printf.sprintf "%s:%d" src_path line in
     let c = !cur in
     let exn_scope = Arch_index_exn.current_scope c.lexn in
-    raw := (c.cid, c.lblk, c.lcaller, head, partial, call_site, exn_scope) :: !raw
+    let ord = !next_call_ord in
+    incr next_call_ord ;
+    (match is_head_of with
+    | Some hloc -> Hashtbl.replace apply_head_ord hloc ord
+    | None -> ()) ;
+    let errch_candidate =
+      match (c.lchannel, callee_ty) with
+      | Some caller_c, Some cty -> (
+          match carrier_of cty with
+          | Some callee_c
+            when callee_c.Arch_errors_config.name = caller_c.Arch_errors_config.name
+                 && not (is_declared_bind caller_c head) ->
+              Some caller_c.Arch_errors_config.name
+          | _ -> None)
+      | _ -> None
+    in
+    raw :=
+      (ord, c.cid, c.lblk, c.lcaller, head, partial, call_site, exn_scope, errch_candidate) :: !raw
   in
   (* Current-context CFG shorthands. *)
   let blk () = (!cur).lblk in
@@ -1008,13 +1100,13 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ~src_path ~calle
                    row is REPLACED by that enumerated edge (FR-012). *)
                 ()
             | Texp_ident (Path.Pident id, _, _) when ident_is_local_fn id ->
-                add_call (Head_enumerated (local_fn_name id)) loc
+                add_call ~callee_ty:ae.exp_type (Head_enumerated (local_fn_name id)) loc
             | Texp_ident (Path.Pident id, _, _) when lam_stamp id <> None ->
                 (* Let-bound lambda passed by name: the generic Texp_ident
                    occurrence case emits the enumerated edge — nothing here. *)
                 ()
             | Texp_ident (Path.Pident id, _, _) ->
-                add_call (Head_unknown (Ident.name id, Callback_param)) loc
+                add_call ~callee_ty:ae.exp_type (Head_unknown (Ident.name id, Callback_param)) loc
             | Texp_ident ((Path.Pdot _ as p), _, _) ->
                 (* FIX (review, LOW): the other two Module_param sites
                    (add_path_call, record_head) display the qualified name
@@ -1025,8 +1117,8 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ~src_path ~calle
                 let m, n = path_to_module_name p in
                 let disp = match m with Some m -> m ^ "." ^ n | None -> n in
                 let reason = if qualified_is_dynamic p then Module_param else Callback_param in
-                add_call (Head_unknown (disp, reason)) loc
-            | _ -> add_call (Head_unknown ("*TOP*", Callback_param)) loc
+                add_call ~callee_ty:ae.exp_type (Head_unknown (disp, reason)) loc
+            | _ -> add_call ~callee_ty:ae.exp_type (Head_unknown ("*TOP*", Callback_param)) loc
             (* computed function value *))
         | _ -> ())
       args
@@ -1160,9 +1252,9 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ~src_path ~calle
                 }
                 :: !lambdas ;
               if not (Hashtbl.mem binding_literals expr.exp_loc) then
-                add_call (Head_enumerated name) expr.exp_loc ;
+                add_call ~callee_ty:expr.exp_type (Head_enumerated name) expr.exp_loc ;
               let saved = !cur in
-              let c = new_ctx name in
+              let c = new_ctx name (carrier_of expr.exp_type) in
               all_ctxs := c :: !all_ctxs ;
               cur := c ;
               !walk_fn_body_ref expr ;
@@ -1184,7 +1276,7 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ~src_path ~calle
                       Hashtbl.replace binding_literals vb.vb_expr.exp_loc ()
                   | _ -> ()) ;
                   default_iterator.value_binding self vb ;
-                  match (vb.vb_pat.pat_desc, vb.vb_expr.exp_desc) with
+                  (match (vb.vb_pat.pat_desc, vb.vb_expr.exp_desc) with
                   | Tpat_var (id, _, _), Texp_function _ -> (
                       match Hashtbl.find_opt lam_names vb.vb_expr.exp_loc with
                       | Some node_name ->
@@ -1193,7 +1285,30 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ~src_path ~calle
                             (Ident.unique_name id)
                             (node_name, fn_arity vb.vb_expr)
                       | None -> ())
-                  | _ -> ())
+                  | _ -> ()) ;
+                  (* Value-channel single-variable-let alias chain
+                     (specs/error-channels.md "Handler scopes"): [id] resolves
+                     to a head call's ord either directly (its RHS IS that
+                     call) or by chaining through an earlier such stamp. *)
+                  (match vb.vb_pat.pat_desc with
+                  | Tpat_var (id, _, _) -> (
+                      match vb.vb_expr.exp_desc with
+                      | Texp_apply _ -> (
+                          match Hashtbl.find_opt apply_head_ord vb.vb_expr.exp_loc with
+                          | Some ord -> Hashtbl.replace let_head_call (Ident.unique_name id) ord
+                          | None -> ())
+                      | Texp_ident (Path.Pident aliased, _, _) -> (
+                          match Hashtbl.find_opt let_head_call (Ident.unique_name aliased) with
+                          | Some ord -> Hashtbl.replace let_head_call (Ident.unique_name id) ord
+                          | None -> ())
+                      | _ -> ())
+                  | _ -> ()) ;
+                  (* Sinks (specs/error-channels.md "Sinks"): [let _ = E in …]
+                     — the head call of [E] does not propagate. *)
+                  (match vb.vb_pat.pat_desc with
+                  | Tpat_any -> mark_sunk vb.vb_expr
+                  | Tpat_var (id, _, _) when Ident.name id = "_" -> mark_sunk vb.vb_expr
+                  | _ -> ()))
                 vbs ;
               self.expr self body
           | Texp_ident (Path.Pident id, _, _)
@@ -1208,7 +1323,7 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ~src_path ~calle
                  falsely reads as dead/unreachable. *)
               (match lam_stamp id with
               | Some (node_name, _) ->
-                  add_call (Head_enumerated node_name) expr.exp_loc
+                  add_call ~callee_ty:expr.exp_type (Head_enumerated node_name) expr.exp_loc
               | None -> ())
           | Texp_lazy _ | Texp_object _ ->
               (* Non-promoted deferred boundaries: a lazy thunk or an object's
@@ -1253,6 +1368,81 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ~src_path ~calle
                     : int) ;
               self.expr self scrut ;
               if scoped then Arch_index_exn.leave_scope (!cur).lexn ;
+              (* Value-channel handler scopes (specs/error-channels.md
+                 "Handler scopes"): [match E with Error p -> rhs | …] covers
+                 the HEAD CALL of [E] — resolvable only once [scrut] above has
+                 been walked (a direct call sets [apply_head_ord] during that
+                 walk; an alias chain was set earlier, at its own [let]). *)
+              (* Ordinary value arms of a [match] live in [comp_cases],
+                 wrapped [Tpat_value] (Typedtree.mli: only an [effect P k]
+                 arm lands in [val_cases]) — unwrap before classifying. An
+                 [exception]/or-pattern computation case never matches an
+                 origin constructor, so it is simply skipped (safe: a
+                 skipped arm cannot close anything, the over-approximating
+                 direction). *)
+              let value_arms =
+                List.filter_map
+                  (fun (c : Typedtree.computation Typedtree.case) ->
+                    match c.c_lhs.pat_desc with
+                    | Tpat_value vp ->
+                        Some
+                          ((vp :> Typedtree.value Typedtree.general_pattern), c.c_guard, c.c_rhs)
+                    | _ -> None)
+                  comp_cases
+              in
+              (* The scrutinee's OWN type picks at most one channel — scanning
+                 every declared channel's origin constructor NAME against
+                 every arm (without this) would let an unrelated same-named
+                 constructor of a totally different type (any user type
+                 happening to also declare an [Error] case) spuriously
+                 "match" a channel it has nothing to do with. *)
+              (match carrier_of scrut.exp_type with
+              | None -> ()
+              | Some c ->
+                  List.iter
+                    (fun (opath, pos) ->
+                      let bare = bare_ctor_name opath in
+                      let matched =
+                        List.filter_map
+                          (fun (pat, guard, rhs) ->
+                            match
+                              Arch_index_errch.classify_value_pat ~canon_type:canon_exn ~canon_exn
+                                ~bare_ctor:bare ~arg_pos:pos pat
+                            with
+                            | Some (caught, bound) -> Some ((guard, rhs), caught, bound)
+                            | None -> None)
+                          value_arms
+                      in
+                      if matched <> [] then begin
+                        List.iter
+                          (fun (_, _, bound) ->
+                            List.iter (fun id -> Hashtbl.replace arm_bound_idents id ()) bound)
+                          matched ;
+                        let catch_all = ref false and caught = ref [] in
+                        List.iter
+                          (fun ((guard, rhs), caught_opt, bound) ->
+                            let closing =
+                              guard = None && not (Arch_index_errch.idents_occur ~idents:bound rhs)
+                            in
+                            if closing then (
+                              match caught_opt with
+                              | None -> catch_all := true
+                              | Some p -> caught := p :: !caught))
+                          matched ;
+                        match resolve_head_call scrut with
+                        | Some ord ->
+                            let local_id =
+                              Arch_index_errch.add_scope
+                                (!cur).lerrch
+                                ~channel:c.Arch_errors_config.name
+                                ~catch_all:!catch_all
+                                ~caught:!caught
+                                ~loc:expr.exp_loc
+                            in
+                            Hashtbl.replace errch_call_scope ord (c.Arch_errors_config.name, local_id)
+                        | None -> ()
+                      end)
+                    c.Arch_errors_config.origins) ;
               if partiality = Partial then
                 Arch_index_exn.record_partial (!cur).lexn ~loc:expr.exp_loc ;
               let s_end = (blk ()) in
@@ -1425,14 +1615,16 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ~src_path ~calle
                 | Texp_ident (Path.Pident id, _, _) when ident_is_local_fn id ->
                     (* Same-module top-level function — MUST candidate; [cond]
                        and [partial] decide the final kind at resolution. *)
-                    add_call ~partial (Head_local (local_fn_name id)) expr.exp_loc
+                    add_call ~partial ~is_head_of:expr.exp_loc ~callee_ty:fn_expr.exp_type
+                      (Head_local (local_fn_name id)) expr.exp_loc
                 | Texp_ident (Path.Pident id, _, _) -> (
                     match lam_stamp id with
                     | Some (node_name, _) ->
                         (* Head application of a let-bound literal: resolves to
                            the lambda node — MUST when unconditional+saturated,
                            MAY_ENUMERATED otherwise (same rule as top-level). *)
-                        add_call ~partial (Head_local node_name) expr.exp_loc
+                        add_call ~partial ~is_head_of:expr.exp_loc ~callee_ty:fn_expr.exp_type
+                          (Head_local node_name) expr.exp_loc
                     | None ->
                         (* Parameter / local / shadowing binding → unknowable. *)
                         add_call
@@ -1448,10 +1640,12 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ~src_path ~calle
                         | Some m -> m ^ "." ^ callee_name
                         | None -> callee_name
                       in
-                      add_call ~partial (Head_unknown (disp, Module_param)) expr.exp_loc
+                      add_call ~callee_ty:fn_expr.exp_type ~is_head_of:expr.exp_loc ~partial (Head_unknown (disp, Module_param)) expr.exp_loc
                     else
                       add_call
                         ~partial
+                        ~is_head_of:expr.exp_loc
+                        ~callee_ty:fn_expr.exp_type
                         (Head_qualified (callee_module, callee_name))
                         expr.exp_loc
                 | Texp_function _ -> (
@@ -1462,10 +1656,10 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ~src_path ~calle
                     | Some node_name ->
                         add_call ~partial (Head_local node_name) expr.exp_loc
                     | None ->
-                        add_call ~partial (Head_unknown ("*TOP*", Callback_param)) expr.exp_loc)
+                        add_call ~callee_ty:fn_expr.exp_type ~is_head_of:expr.exp_loc ~partial (Head_unknown ("*TOP*", Callback_param)) expr.exp_loc)
                 | _ ->
                     (* Computed function head → unresolvable. *)
-                    add_call ~partial (Head_unknown ("*TOP*", Callback_param)) expr.exp_loc) ;
+                    add_call ~callee_ty:fn_expr.exp_type ~is_head_of:expr.exp_loc ~partial (Head_unknown ("*TOP*", Callback_param)) expr.exp_loc) ;
                 (* Over-application [f a b c] where [f] has arity 2: the head
                    call is saturated (handled above), but the extra args are
                    applied to the (unknown) returned function value — a residual
@@ -1498,6 +1692,16 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ~src_path ~calle
                   (* Descend into fn + args FIRST (argument evaluation precedes
                      the call; nested constructs split blocks), then record. *)
                   default_iterator.expr self expr ;
+                  (* Sink (specs/error-channels.md "Sinks"): [ignore (E)] — the
+                     head call of [E] does not propagate. *)
+                  (match fn_expr.exp_desc with
+                  | Texp_ident (path, _, _)
+                    when (not (qualified_is_dynamic path))
+                         && path_to_module_name path = (Some "Stdlib", "ignore") -> (
+                      match args with
+                      | [(_, Some arg)] -> mark_sunk arg
+                      | _ -> ())
+                  | _ -> ()) ;
                   record_head () ;
                   (* Exception origin (identity-aware; primitive-keyed for
                      [raise], Stdlib-path-keyed for failwith/invalid_arg). *)
@@ -1516,6 +1720,62 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ~src_path ~calle
                      head call was recorded in this block (the raise itself
                      runs), so post-divergence code lands entry-unreachable. *)
                   if noreturn_head fn_expr nargs then diverge ())
+          | Texp_sequence (e1, e2) ->
+              (* Both run unconditionally, same block; [e1] is a NON-FINAL
+                 position — a sink (specs/error-channels.md "Sinks"): the
+                 head call of [e1] does not propagate, nested calls still
+                 do. *)
+              self.expr self e1 ;
+              mark_sunk e1 ;
+              self.expr self e2
+          | Texp_construct (_, cstr_desc, args) ->
+              (* Value-channel origin (specs/error-channels.md "Origins"): an
+                 application of the channel's origin constructor. The
+                 constructed value's OWN type ([cstr_res]) decides the
+                 channel — the same carrier check used for functions, just
+                 without stripping arrows (a constructor's type never is
+                 one). *)
+              (match carrier_of cstr_desc.cstr_res with
+              | Some c -> (
+                  match
+                    List.find_opt
+                      (fun (opath, _) -> bare_ctor_name opath = cstr_desc.cstr_name)
+                      c.Arch_errors_config.origins
+                  with
+                  | None -> ()
+                  | Some (opath, 0) ->
+                      note_seen_value_path opath ;
+                      Arch_index_errch.add_origin
+                        (!cur).lerrch
+                        ~channel:c.Arch_errors_config.name
+                        ~path:(Some opath)
+                        ~loc:expr.exp_loc
+                  | Some (opath, pos) -> (
+                      note_seen_value_path opath ;
+                      match List.nth_opt args (pos - 1) with
+                      | None -> ()
+                      | Some argexpr -> (
+                          match argexpr.exp_desc with
+                          | Texp_ident (Path.Pident vid, _, _)
+                            when Hashtbl.mem arm_bound_idents (Ident.unique_name vid) ->
+                              (* "re-return" ([Error e -> Error e]): the
+                                 non-closing arm rule already keeps this
+                                 forwarded through the uncovered edge —
+                                 recording it again here would double-count
+                                 it as a fresh origin of THIS node. *)
+                              ()
+                          | _ ->
+                              let path =
+                                Arch_index_errch.literal_ctor_path_of_expr ~canon_type:canon_exn
+                                  ~canon_exn argexpr
+                              in
+                              Arch_index_errch.add_origin
+                                (!cur).lerrch
+                                ~channel:c.Arch_errors_config.name
+                                ~path
+                                ~loc:expr.exp_loc)))
+              | None -> ()) ;
+              default_iterator.expr self expr
           | _ -> default_iterator.expr self expr);
       module_expr =
         (fun self me ->
@@ -1616,7 +1876,7 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ~src_path ~calle
     !all_ctxs ;
   let calls =
     List.rev_map
-      (fun (cid, block, caller, head, partial, call_site, exn_scope) ->
+      (fun (ord, cid, block, caller, head, partial, call_site, exn_scope, errch_candidate) ->
         let cond =
           match Hashtbl.find_opt verdicts cid with
           | Some v -> not (Arch_index_cfg.always_exec v block)
@@ -1632,7 +1892,33 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ~src_path ~calle
           | Some v -> not (Arch_index_cfg.may_run v block)
           | None -> false (* unknown ctx: never claim dead *)
         in
-        {caller_module; caller_name = caller; head; partial; cond; dead; call_site; exn_scope})
+        (* A call whose head is SUNK (specs/error-channels.md "Sinks") never
+           propagates on any channel — override the type-based candidate. A
+           value-channel scope covering this call's head (if any) is folded
+           into the SAME [exn_scope] slot the exception channel uses; a
+           genuine exception scope (set above, from [lexn]) wins if both are
+           somehow present (documented residual, see the [pending_call] type
+           comment). *)
+        let errch_propagates = if Hashtbl.mem sunk_ords ord then None else errch_candidate in
+        let exn_scope =
+          match exn_scope with
+          | Some _ -> exn_scope
+          | None -> (
+              match Hashtbl.find_opt errch_call_scope ord with
+              | Some (_, local_id) -> Some (-(local_id + 1)) (* negative: errch id-space marker *)
+              | None -> None)
+        in
+        {
+          caller_module;
+          caller_name = caller;
+          head;
+          partial;
+          cond;
+          dead;
+          call_site;
+          exn_scope;
+          errch_propagates;
+        })
       !raw
   in
   (* Exception facts per node, keyed by the node name the calls are attributed
@@ -1640,7 +1926,10 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ~src_path ~calle
   let exn_by_node =
     List.rev_map (fun c -> (c.lcaller, Arch_index_exn.finalize c.lexn)) !all_ctxs
   in
-  (calls, List.rev !lambdas, exn_by_node)
+  let errch_by_node =
+    List.rev_map (fun c -> (c.lcaller, c.lchannel, Arch_index_errch.finalize c.lerrch)) !all_ctxs
+  in
+  (calls, List.rev !lambdas, exn_by_node, errch_by_node)
 
 (* -------------------------------------------------------------------------- *)
 (* Process a single .cmt file                                                 *)
@@ -1656,6 +1945,7 @@ let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
     ~exposed_tbl ~doc_tbl ~module_quint_tbl ~stmt_mod ~stmt_fn ~stmt_ty
     ~stmt_fld ~stmt_ctor ~stmt_scope ~stmt_catch ~stmt_origin ~stmt_rebind
     ?(producer_run_id = None) path =
+    ?(value_channels = []) ?stmt_carrier path =
   match Cmt_format.read path with
   | _, None -> ([], [], [])
   | _, Some info -> (
@@ -1761,6 +2051,20 @@ let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
                       match it.str_desc with
                       | Tstr_exception te -> declare te.tyexn_constructor
                       | Tstr_typext te -> List.iter declare te.tyext_constructors
+                      | Tstr_type (_, tds) ->
+                          (* Value-channel constructor canonicalisation
+                             (specs/error-channels.md "Origins" / "Handler
+                             scopes") needs a same-unit TYPE's path too — an
+                             ordinary constructor's canonical path is
+                             derived from its constructed value's type
+                             ([Arch_index_errch.constructor_canonical_path]),
+                             which goes through [canon_exn]/[unit_declared]
+                             exactly like an exception's path does. *)
+                          List.iter
+                            (fun (td : Typedtree.type_declaration) ->
+                              Hashtbl.replace unit_declared (Ident.unique_name td.typ_id)
+                                (qualify ~prefix (Ident.name td.typ_id)))
+                            tds
                       | Tstr_module {mb_id = Some id; _} ->
                           Hashtbl.replace unit_declared (Ident.unique_name id)
                             (qualify ~prefix (Ident.name id))
@@ -2108,9 +2412,10 @@ let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
                                         type_usages ;
                                       (* Collect calls (and promoted lambda nodes) from
                                          this function's body *)
-                                      let calls, lam_nodes, exn_by_node =
+                                      let calls, lam_nodes, exn_by_node, errch_by_node =
                                         collect_calls_from_expr
                                           ~canon_exn
+                                          ~value_channels
                                           ~src_path:rel_path
                                           ~caller_module:rel_path
                                           ~caller_name:name
@@ -2209,21 +2514,86 @@ let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
                                                     ~channel:"exception")
                                                 origins)
                                         exn_by_node ;
+                                      (* Value-channel facts (specs/error-channels.md
+                                         "Handler scopes" / "Origins"): same
+                                         pattern as the exception channel above,
+                                         a SEPARATE local-id space (never
+                                         nested, so [parent_id] is always
+                                         [None]), the reused ['match_exception']
+                                         [form] (irrelevant at query time — see
+                                         [Arch_tools.Arch_exn.load], which never
+                                         selects [exn_scopes.form]), and the
+                                         reused ['raise']/['unknown'] [form]s on
+                                         origins (same reason: only ["reraise"]
+                                         and a [None] path are special-cased by
+                                         the query). *)
+                                      let errch_scope_ids = Hashtbl.create 8 in
+                                      List.iter
+                                        (fun (node, channel_opt, (scopes, origins)) ->
+                                          match Hashtbl.find_opt node_ids node with
+                                          | None -> ()
+                                          | Some fid ->
+                                              (match (channel_opt, stmt_carrier) with
+                                              | Some c, Some stmt_carrier ->
+                                                  insert_channel_carrier
+                                                    db
+                                                    stmt_carrier
+                                                    ~function_id:fid
+                                                    ~channel:c.Arch_errors_config.name
+                                              | _ -> ()) ;
+                                              List.iter
+                                                (fun (s : Arch_index_errch.scope) ->
+                                                  match
+                                                    insert_exn_scope db stmt_scope ~function_id:fid
+                                                      ~parent_id:None ~form:"match_exception"
+                                                      ~line:s.s_line ~col:s.s_col
+                                                      ~catch_all:s.s_catch_all ~channel:s.s_channel
+                                                  with
+                                                  | Some sid ->
+                                                      Hashtbl.replace errch_scope_ids (node, s.s_id) sid ;
+                                                      List.iter
+                                                        (fun exn_path ->
+                                                          insert_exn_scope_catch db stmt_catch
+                                                            ~scope_id:sid ~exn_path)
+                                                        s.s_caught
+                                                  | None -> ())
+                                                scopes ;
+                                              List.iter
+                                                (fun (o : Arch_index_errch.origin) ->
+                                                  insert_exn_origin db stmt_origin ~function_id:fid
+                                                    ~scope_id:None
+                                                    ~form:(if o.o_path = None then "unknown" else "raise")
+                                                    ~exn_path:o.o_path ~escapes:true
+                                                    ~line:o.o_line ~col:o.o_col ~channel:o.o_channel)
+                                                origins)
+                                        errch_by_node ;
                                       (* Calls carry the walker's LOCAL scope id;
                                          rewrite to the row id (None if the
                                          scope row was rejected: an unlinked
-                                         call over-approximates — sound). *)
+                                         call over-approximates — sound). A
+                                         NEGATIVE local id (see
+                                         [collect_calls_from_expr]) names a
+                                         value-channel scope instead, decoded
+                                         via [errch_scope_ids]. *)
                                       let calls =
                                         List.map
                                           (fun (c : pending_call) ->
                                             match c.exn_scope with
                                             | None -> c
-                                            | Some local ->
+                                            | Some local when local >= 0 ->
                                                 {
                                                   c with
                                                   exn_scope =
                                                     Hashtbl.find_opt scope_ids
                                                       (c.caller_name, local);
+                                                }
+                                            | Some neg ->
+                                                let local_id = -neg - 1 in
+                                                {
+                                                  c with
+                                                  exn_scope =
+                                                    Hashtbl.find_opt errch_scope_ids
+                                                      (c.caller_name, local_id);
                                                 })
                                           calls
                                       in

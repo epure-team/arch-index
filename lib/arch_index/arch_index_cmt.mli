@@ -248,9 +248,14 @@ type pending_call = {
   call_site : string;
   exn_scope : int option;
       (** innermost exception-handler scope enclosing the call site in the
-          caller node — a walker-local id inside [collect_calls_from_expr],
-          the [exn_scopes] row id once [process_cmt] has stored the scope
-          (specs/exn-raise-sets.md). *)
+          caller node, OR a value-channel handler scope covering this call's
+          head (specs/error-channels.md "Handler scopes") — a walker-local
+          id inside [collect_calls_from_expr], the [exn_scopes] row id once
+          [process_cmt] has stored the scope (specs/exn-raise-sets.md). *)
+  errch_propagates : string option;
+      (** [Some channel]: this call is a propagating edge on [channel]
+          (specs/error-channels.md "Propagating edges") — an [exn_edges]
+          role='propagates' row once resolved to a real [calls] row id. *)
 }
 
 (** Flat [(name, module)] display of a pending call's callee, for kind-less
@@ -309,6 +314,7 @@ val build_local_fn_stamps :
     syntactic arity. *)
 val collect_calls_from_expr :
   ?canon_exn:(Path.t -> string) ->
+  ?value_channels:Arch_errors_config.channel list ->
   src_path:string ->
   caller_module:string ->
   caller_name:string ->
@@ -317,10 +323,16 @@ val collect_calls_from_expr :
   pending_call list
   * lambda_node list
   * (string * (Arch_index_exn.scope list * Arch_index_exn.origin list)) list
+  * (string * Arch_errors_config.channel option * (Arch_index_errch.scope list * Arch_index_errch.origin list))
+    list
 (** The third component holds each node's exception facts (handler scopes and
-    raise origins), keyed by the node name its calls are attributed to.
-    [canon_exn] canonicalises exception constructor paths (default:
-    [Path.name] — the LSP fallback path, which stores no exception rows). *)
+    raise origins), keyed by the node name its calls are attributed to. The
+    fourth holds each node's value-channel facts and its own carrier channel
+    (specs/error-channels.md), same keying. [canon_exn] canonicalises
+    exception constructor paths (default: [Path.name] — the LSP fallback
+    path, which stores no exception rows). [value_channels] are the declared
+    value channels (i.e. [Arch_errors_config.t.channels] minus [exception]);
+    default [[]] — no value-channel analysis. *)
 
 (** Collected type usage information. *)
 type pending_type_usage = {
@@ -365,6 +377,8 @@ val process_cmt :
   stmt_catch:Sqlite3.stmt ->
   stmt_origin:Sqlite3.stmt ->
   stmt_rebind:Sqlite3.stmt ->
+  ?value_channels:Arch_errors_config.channel list ->
+  ?stmt_carrier:Sqlite3.stmt ->
   ?producer_run_id:int option ->
   string ->
   pending_call list * pending_dep list * pending_type_usage list

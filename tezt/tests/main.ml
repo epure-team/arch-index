@@ -96,4 +96,5 @@ let () =
   Provenance.register () ;
   Coverage_matrix.register () ;
   Top_anchor_taxonomy.register () ;
+  Error_channels.register () ;
   Tezt.Test.run ()

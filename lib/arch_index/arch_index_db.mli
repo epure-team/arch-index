@@ -654,3 +654,39 @@ val insert_exn_origin :
     {violates}
     (none) *)
 val insert_exn_rebind : Sqlite3.db -> Sqlite3.stmt -> alias_path:string -> target_path:string -> unit
+
+(** One propagating (or other-role) value-channel edge (specs/error-channels.md
+    Clarifications: "Schema").
+
+    {pre}
+    [call_id] references an existing [calls] row; [role] is one of the
+    [exn_edges.role] CHECK values.
+
+    {post}
+    One [exn_edges] row, or a counted rejection (duplicate (call_id, channel,
+    role) is silently ignored — the same call can be revisited harmlessly).
+
+    {violators}
+    (none)
+
+    {violates}
+    (none) *)
+val insert_exn_edge : Sqlite3.db -> Sqlite3.stmt -> call_id:int -> channel:string -> role:string -> unit
+
+(** Mark [function_id] a c-carrier of [channel] (specs/error-channels.md
+    Clarifications: "Carrier check"): its presence, independent of any
+    origin/edge row, is what makes [may-fail] answer [BOUNDED: {}] rather
+    than [NOT_A_CARRIER(c)] for an always-successful carrier.
+
+    {pre}
+    [function_id] references an existing functions row.
+
+    {post}
+    One [channel_carriers] row, or a counted rejection.
+
+    {violators}
+    (none)
+
+    {violates}
+    (none) *)
+val insert_channel_carrier : Sqlite3.db -> Sqlite3.stmt -> function_id:int -> channel:string -> unit
