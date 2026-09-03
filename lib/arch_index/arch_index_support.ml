@@ -37,6 +37,33 @@ let schema_views_to_drop =
 
 let schema_tables_to_drop =
   [
+    (* Exception / error-channel tables (specs/error-channels.md). FIX
+       (review round 1, HIGH): none of these were listed, so re-indexing an
+       EXISTING database left every previous run's rows in place. The
+       damage was not merely "stale rows": [exn_scopes]/[exn_origins]
+       DOUBLED, and [call_exn_scopes] — whose primary key is [call_id] —
+       rejected every link of the second run on the unique constraint while
+       KEEPING the first run's rows, now pointing at scope ids that belong
+       to a different walk of the tree. Since call ids are reused across
+       runs, those survivors close call sites they never covered: an
+       UNSOUND subtraction (a raise silently dropped from an answer), in a
+       database the rejection accounting only ever reports as "incomplete".
+       Ordered dependents-first like the entries below.
+
+       On [PRAGMA foreign_keys = OFF] (set by the caller around this loop,
+       see the comment at arch_index.ml's [DROP] site): with enforcement
+       off SQLite does not refuse a [DROP TABLE] on a still-referenced
+       table, so this ordering is not what makes the drop succeed — it is
+       kept dependents-first so the list stays correct if enforcement is
+       ever left on, and so it reads the same way as the rest of the list.
+       Nothing here depends on FK enforcement being off. *)
+    "channel_carriers";
+    "exn_edges";
+    "call_exn_scopes";
+    "exn_scope_catches";
+    "exn_origins";
+    "exn_scopes";
+    "exn_rebinds";
     "module_deps";
     "type_usage";
     "type_constructors";

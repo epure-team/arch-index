@@ -348,13 +348,20 @@ let temp_db name =
    surfaces the exit code/output instead of failing the test, for a
    scenario that EXPECTS a non-zero exit (e.g. [--errors-strict] promoting
    a per-path miss to fatal, US-1 scenario 2). *)
-let index_raw ?(extra_args = []) fixture =
+(* Index into a CALLER-CHOSEN database path. Separate from [index_raw] (which
+   always allocates a fresh one) so a test can run the producer TWICE over the
+   same on-disk file — the drop-then-recreate cycle
+   ([Arch_index_support.schema_tables_to_drop]) is only exercised by a second
+   invocation, and a table missing from that list is invisible to every test
+   that indexes once into an empty database. *)
+let index_raw_into ~db ?(extra_args = []) fixture =
+  run_command (callgraph_ocaml ())
+    (["--build-dir"; fixture.build_dir; "--db-path"; db; "--schema-path"; schema ()]
+    @ extra_args)
+
+let index_raw ?extra_args fixture =
   let db = temp_db fixture.name in
-  let code, output =
-    run_command (callgraph_ocaml ())
-      (["--build-dir"; fixture.build_dir; "--db-path"; db; "--schema-path"; schema ()]
-      @ extra_args)
-  in
+  let code, output = index_raw_into ~db ?extra_args fixture in
   (code, output, db)
 
 let index ?extra_args fixture =
