@@ -341,6 +341,18 @@ let run ~sw ~env ~project_dir ~language ~output ?(no_enrich = false)
      write_calls db call_rows ;
      exec_exn db "COMMIT" ;
      set_meta db "schema_version" Arch_index_db.current_flat_schema_version ;
+     (* FIX (review, HIGH): this flat schema is structurally identical to
+        bin/arch_load's own flat schema — both are the `Flat` variant per
+        Arch_db.schema's `calls.caller_name` probe, and both now carry
+        independently-bumped "1.1" version strings that a consumer cannot
+        tell apart. `built_by` is the existing, already-documented
+        discriminator key (docs/schema.md's own comment_db_meta table;
+        arch_load already writes 'built_by'='arch-load') — this path never
+        wrote it before. A consumer that cares which flat-schema PRODUCER
+        wrote a DB, and hence which schema_version numbering space applies,
+        can now check this instead of trusting a bare "1.1" to mean the
+        same thing everywhere. *)
+     set_meta db "built_by" "arch_index_lsp" ;
      set_meta db "language" language
    with exn ->
      ignore (Sqlite3.db_close db) ;
@@ -474,6 +486,7 @@ let run_multi ~sw ~env ~project_dir ~languages ~output ?(no_enrich = false)
               exec_exn db "DETACH DATABASE src")
             tmp_dbs ;
           set_meta db "schema_version" Arch_index_db.current_flat_schema_version ;
+          set_meta db "built_by" "arch_index_lsp" ;
           set_meta
             db
             "language"

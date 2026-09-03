@@ -117,6 +117,20 @@ sets). A first draft of this fix stamped every database with `current_schema_ver
 which schema it actually was — caught and fixed by a fresh review round, since it would have let a
 flat-schema consumer read `"1.2"` and wrongly conclude `function_effects`/`attack_edges` exist.
 
+A THIRD writer of this same structural flat shape exists — `bin/arch_load/arch_load.ml`, a generic
+NDJSON loader for other producers (Go, Rust, ...), deliberately independent of the `arch_index`
+library (no shared dependency, so no shared version constant either — see its own version history
+below). Since `Arch_db.schema` only distinguishes `Flat` from `Main` (not WHICH flat-schema writer
+produced a given database), two flat-schema databases can carry the identical `schema_version`
+string while describing genuinely independent evolution — a real, caught-in-review instance of the
+same silent-drift risk class #51 was about, one level up from the original bug. The mitigation:
+both `runner.ml` and `bin/arch_load/arch_load.ml` write `comment_db_meta.built_by` (already an
+established, documented meta key — `arch_index_lsp` and `arch-load` respectively); a consumer that
+needs to know which flat-schema numbering space a `schema_version` value belongs to can check
+`built_by` first. This is a proxy, not a merge of the two version spaces into one — accepted as a
+residual rather than unifying them, since the two schemas are only COINCIDENTALLY identical today
+and forcing a shared constant across two intentionally-independent binaries would be the wrong fix.
+
 | Version | Added | Migration |
 |---|---|---|
 | `1.0` | The base 16-table schema (`functions`, `calls`, `modules`, `comment_db_meta`, and the rest listed above) | `architecture-schema.sql` (baseline) |
@@ -139,3 +153,10 @@ build promises is also available at compile time as `Arch_index.schema_sql : str
 |---|---|
 | `1.0` | The base 3-table shape (`comment_db_meta`, `functions`, `calls`) — baseline, has been stable since introduction. |
 | `1.1` | `functions.language` (optional) — roadmap Phase 1 item 1.1, threaded from `runner.ml`'s already-known `~language`/`~languages` parameter (never re-detected — the caller, `arch_index_cli`, already resolved it via `Language_registry.detect_language_roots`). |
+
+### `bin/arch_load/arch_load.ml`'s own version history (independent constant — see the note above)
+
+| Version | Added |
+|---|---|
+| `1.0` | The schema as it existed before this loader ever tracked a version — `comment_db_meta.schema_version` was never written at all until `1.1` (a third, previously undiscovered instance of #51's bug class, found and fixed alongside this table). |
+| `1.1` | `functions.language` (optional NDJSON field on the `"function"` record type) — roadmap Phase 1 item 1.1. |
