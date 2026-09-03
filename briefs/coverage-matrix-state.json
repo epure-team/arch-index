@@ -1,7 +1,7 @@
 {
   "task": "coverage-matrix",
   "mode": "fast",
-  "current_phase": "review",
+  "current_phase": "qa",
   "events": [
     {
       "phase": "intake",
@@ -20,6 +20,12 @@
       "outcome": "GO",
       "reason": "reviewer + architect (cross-runtime codex skipped, degraded all session). Both independently found the same CRITICAL: repo_root computed as a single dirname hop landed inside _build/default, silently defeating all Go/Rust callgraph detection in every real invocation - fixed, but required a second pass (dune mirrors architecture-schema.sql into _build/default too) and new stub-based positive tests to actually catch it surviving the first fix. Second CRITICAL: an uncaught crash on symlinks under _build/default - fixed. 3 HIGH (no positive test for driver-built path, effects rows silently omitted for 4/6 languages contradicting the mli contract, Rust's second wrapper gate - the merge pass - not checked) and 3 MEDIUM (DDL duplication with a false equality claim, no transaction/checked binds in write_coverage, has_gap counting permanently-not_analysed cross-language rows) plus 1 LOW all fixed. architect confirmed the per-kind detection split is principled, not an excuse to under-deliver. 105/105 tests pass post-fix including two new real driver-built positive tests, self-index golden regenerated.",
       "by": "roster-review"
+    },
+    {
+      "phase": "qa",
+      "outcome": "GO",
+      "reason": "Build clean, 105/105 tests. No spec exists (Fast mode) so Step 3 was substituted with independent fresh-fixture reverification outside the review round's own test files: Rust with no driver anywhere (not_analysed, correct instruction), Rust with only the driver stub planted (not_analysed naming the merge pass specifically - confirms the review round's two-gate HIGH fix holds), and a clean single-language OCaml project (exit 0 in both a would-be-gap and clean scenario - confirms the has_gap MEDIUM fix holds). All three independently reconfirm the review round's fixes. Cross-runtime QA skipped (breaker: codex degraded, unchanged since review).",
+      "by": "roster-qa"
     }
   ]
 }
