@@ -115,6 +115,66 @@ if [ -n "${raw:-}" ]; then
   grep -q "fallback" /tmp/selftest-cg-rust-missing.stderr || note "missing-facts: fallback message not printed to stderr"
 fi
 
+# ── Scenario 3b (CHECK-4, the spec's "hard requirement from intake"): a 3-crate
+# flat-union case — impl_crate implements trait_crate's trait, but caller_crate
+# NEVER depends on impl_crate at all. The merge pass must still find the impl,
+# because the whole point of the flat-union architecture (vs. dependency-graph-
+# aware merging, explicitly deferred) is that it does not care about the
+# caller's own dependency edges — only about which crates were in the batch. ──
+mkdir -p "$WS/flatunion/trait_crate/src" "$WS/flatunion/impl_crate/src" "$WS/flatunion/caller_crate/src"
+cat >"$WS/flatunion/Cargo.toml" <<'EOF'
+[workspace]
+members = ["trait_crate", "impl_crate", "caller_crate"]
+resolver = "2"
+EOF
+cat >"$WS/flatunion/trait_crate/Cargo.toml" <<'EOF'
+[package]
+name = "trait_crate"
+version = "0.1.0"
+edition = "2021"
+publish = false
+EOF
+cat >"$WS/flatunion/trait_crate/src/lib.rs" <<'EOF'
+pub trait Doer { fn do_it(&self); }
+pub fn use_dyn(d: &dyn Doer) { d.do_it(); }
+EOF
+cat >"$WS/flatunion/impl_crate/Cargo.toml" <<'EOF'
+[package]
+name = "impl_crate"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+trait_crate = { path = "../trait_crate" }
+EOF
+cat >"$WS/flatunion/impl_crate/src/lib.rs" <<'EOF'
+pub struct Widget;
+impl trait_crate::Doer for Widget { fn do_it(&self) {} }
+EOF
+cat >"$WS/flatunion/caller_crate/Cargo.toml" <<'EOF'
+[package]
+name = "caller_crate"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+trait_crate = { path = "../trait_crate" }
+EOF
+cat >"$WS/flatunion/caller_crate/src/lib.rs" <<'EOF'
+pub fn entry(d: &dyn trait_crate::Doer) { trait_crate::use_dyn(d); }
+EOF
+raw_fu="$("$DRIVER_HARNESS" "$WS/flatunion" 2>/tmp/selftest-cg-rust-flatunion.stderr)"
+if [ -z "$raw_fu" ]; then
+  note "flatunion: producer emitted nothing (see /tmp/selftest-cg-rust-flatunion.stderr)"
+else
+  merged="$(printf '%s\n' "$raw_fu" | "$MERGE" --expected-crates trait_crate,impl_crate,caller_crate 2>/dev/null)"
+  n_enum=$(printf '%s\n' "$merged" | grep -c '"kind":"MAY_ENUMERATED"')
+  printf '%s\n' "$merged" | grep -q '"callee_name":"impl_crate::{impl#0}::do_it"' \
+    || note "flatunion: expected the MAY_ENUMERATED edge to include impl_crate's candidate despite caller_crate never depending on impl_crate; merged output: $merged"
+  [ "$n_enum" -ge 1 ] || note "flatunion: expected >=1 MAY_ENUMERATED edge, got $n_enum"
+fi
+
 # ── Scenario 4 (CHECK-6): trait-defining crate omits publish=false → stays MAY_TOP ──
 mkdir -p "$WS/nopublish/crate_a/src" "$WS/nopublish/crate_b/src"
 cat >"$WS/nopublish/Cargo.toml" <<'EOF'
