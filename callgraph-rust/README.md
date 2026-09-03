@@ -69,12 +69,23 @@ multi-day scope and accepted as-is rather than deferred without a record.
    LSP-based extractor (`lib/arch_index/call_graph_extractor.ml`) names functions with the bare
    LSP `prepareCallHierarchy` symbol name (e.g. `do_it`); this MIR-based producer always emits
    crate-qualified `stable_def_path`-derived names (e.g. `crate_a::use_dyn`,
-   `<A as Doer>::do_it`, `crate_a::{impl#0}::do_it`). The two naming schemes are structurally
+   `crate_a::{impl#0}::do_it`). The two naming schemes are structurally
    distinct string spaces with no shared bare-name collisions to misattribute across — verified by
    inspection, not by a mechanical check (no deterministic check is meaningful here: there is no
    shared key space to assert equality or inequality over, only two producers that must never be
    run against the same repo's output stream and merged as if they used one naming convention,
    which the harness scripts don't do).
+6. **Build-script (`build.rs`) compilations are not filtered out.** `RUSTC_WORKSPACE_WRAPPER` wraps
+   every workspace-member crate's compilation, including each member's own `build.rs` (compiled by
+   Cargo under the crate name `build_script_build` — the SAME synthetic name for every member that
+   has one). Since `stable_def_path` prefixes with the compiling crate's own name, two different
+   workspace members' build scripts can still collide under that shared `build_script_build::...`
+   prefix (this is a narrower residual than the pre-fix cross-crate name collision this round
+   otherwise closed — that one affected ordinary application code; this one is scoped to whatever a
+   `build.rs` itself defines, which is rarely relevant to the analyzed program's own call graph).
+   Accepted given how narrow the practical impact is; filtering on
+   `std::env::var("CARGO_CRATE_NAME") == Ok("build_script_build")` is a cheap follow-up if it ever
+   matters in practice.
 
 ## CI wiring
 
