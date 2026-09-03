@@ -58,8 +58,8 @@ let functions_sql =
   "INSERT OR REPLACE INTO functions (module_id, name, signature, line_start, \
    line_end, exposed, intent, comment_quality_score, has_pre, has_post, \
    has_violators, has_violates, violators_raw, violates_raw, tests_raw, \
-   quint_raw, mutation_sites, deref_sites, language) VALUES (?, ?, ?, ?, ?, \
-   ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+   quint_raw, mutation_sites, deref_sites, language, producer_run_id) VALUES \
+   (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
 
 let type_usage_sql =
   "INSERT INTO type_usage (function_id, type_id, type_name, usage_role, \

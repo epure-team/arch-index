@@ -4,6 +4,40 @@
 
 PRAGMA foreign_keys = ON;
 
+-- Roadmap 1.2 (ADR 002): one row per producer invocation that wrote into this
+-- database. `functions.producer_run_id` / `calls.producer_run_id` point back
+-- here so a row's provenance is a join, not five denormalised text columns
+-- repeated per row — at Octez scale (1.4M+ calls) the latter is a ~200 MB
+-- mistake for data that never varies within one run.
+CREATE TABLE IF NOT EXISTS producer_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    -- This table is written ONLY by the main-schema (CMT) writer — e.g.
+    -- 'arch_index_cmt'. The two flat-schema writers (runner.ml's LSP path,
+    -- bin/arch_load's NDJSON loader) never insert here; their provenance
+    -- lives in comment_db_meta instead (see docs/schema.md's Provenance
+    -- section for why).
+    producer TEXT NOT NULL,
+    producer_version TEXT,                  -- tool version string; NULL if unknown
+    -- An MD5 identity fingerprint (Stdlib Digest, not SHA-256 — this compares
+    -- invocations, it is not a security boundary) over (producer,
+    -- producer_version, argv), so two reports of the same invocation can be
+    -- compared without re-running. Does not hash project content (a full
+    -- tree walk) — narrower than a full content-addressed digest, documented
+    -- as a deliberate simplification, not silently dropped: a future item
+    -- that needs content-sensitivity extends this digest rather than
+    -- replacing the column.
+    invocation_digest TEXT,
+    -- ADR 002 soundness classes. Mirrors function_effects.soundness's
+    -- vocabulary (sound/candidate/manual) under different names — the
+    -- mapping is sound_with_top<-sound, heuristic<-candidate,
+    -- asserted<-manual — recorded here as a comment, not applied to existing
+    -- function_effects rows, so a later consolidation of the two columns is
+    -- mechanical rather than a guess.
+    soundness_class TEXT NOT NULL DEFAULT 'heuristic'
+        CHECK(soundness_class IN ('sound_with_top', 'heuristic', 'asserted')),
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Modules (source files)
 CREATE TABLE IF NOT EXISTS modules (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -65,6 +99,9 @@ CREATE TABLE IF NOT EXISTS functions (
     -- table will ever violate on its own.
     language TEXT DEFAULT NULL,
     universe TEXT NOT NULL DEFAULT 'internal' CHECK(universe IN ('internal', 'external')),
+    -- Roadmap 1.2 (ADR 002): which producer_runs row emitted this row. NULL on
+    -- a pre-1.2 index, never guessed backward (same discipline as language).
+    producer_run_id INTEGER REFERENCES producer_runs(id) ON DELETE SET NULL,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(module_id, name)
 );
@@ -94,6 +131,7 @@ CREATE INDEX IF NOT EXISTS idx_functions_no_intent ON functions(intent) WHERE in
 CREATE INDEX IF NOT EXISTS idx_functions_large ON functions(line_count DESC);
 CREATE INDEX IF NOT EXISTS idx_functions_mutation ON functions(mutation_sites DESC)
   WHERE mutation_sites IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_functions_producer_run ON functions(producer_run_id);
 
 -- Mutability density (R8). Advisory only: a threshold on this is gameable by
 -- hiding writes behind a helper, so surface it for sorting and review, never as
@@ -129,12 +167,15 @@ CREATE TABLE IF NOT EXISTS calls (
     callee_name TEXT NOT NULL,              -- function name (for unresolved: Module.func)
     call_site TEXT,                         -- file:line location
     kind TEXT,                              -- edge-kind contract: MUST | MAY_ENUMERATED | MAY_TOP (NULL on legacy = MUST)
+    -- Roadmap 1.2 (ADR 002): which producer_runs row emitted this edge.
+    producer_run_id INTEGER REFERENCES producer_runs(id) ON DELETE SET NULL,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE INDEX IF NOT EXISTS idx_calls_caller ON calls(caller_id);
 CREATE INDEX IF NOT EXISTS idx_calls_callee ON calls(callee_id);
 CREATE INDEX IF NOT EXISTS idx_calls_callee_name ON calls(callee_name);
+CREATE INDEX IF NOT EXISTS idx_calls_producer_run ON calls(producer_run_id);
 
 -- Backend/contract metadata (key/value). A ⊤-marking backend sets
 -- callgraph_contract='v1' here once every calls.kind is populated (see EDGE-KIND

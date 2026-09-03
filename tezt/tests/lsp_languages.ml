@@ -155,7 +155,19 @@ let register_go () =
                              = '%s'"
                             caller callee))
                       1)
-                  [("Entry", "helper"); ("main", "Entry")]))) ;
+                  [("Entry", "helper"); ("main", "Entry")] ;
+                (* Roadmap 1.2 (ADR 002): this is [Runner.run] (single
+                   language), not [run_multi] — [multilang.ml] already pins
+                   these same three keys for the merge path; this is the
+                   other write site, sharing the same [set_provenance_meta]
+                   helper but otherwise untested until now. *)
+                Batch.eq_string_opt b ~msg:"Go: comment_db_meta.producer"
+                  (Db.string_opt conn "SELECT value FROM comment_db_meta WHERE key = 'producer'")
+                  (Some "arch_index_lsp") ;
+                Batch.eq_string_opt b ~msg:"Go: comment_db_meta.soundness_class"
+                  (Db.string_opt conn
+                     "SELECT value FROM comment_db_meta WHERE key = 'soundness_class'")
+                  (Some "heuristic")))) ;
   Lwt.return_unit
 
 let rust_files =

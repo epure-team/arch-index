@@ -18,7 +18,12 @@
 let usage =
   {|arch-load — build a ⊤-marked arch-index DB from an NDJSON call-edge stream.
 
-Usage:  arch-load [--allow-empty] <out.db> [input.ndjson]      (input defaults to stdin)
+Usage:  arch-load [--allow-empty] [--producer=NAME] [--producer-version=V]
+                   [--soundness-class=sound_with_top|heuristic|asserted]
+                   <out.db> [input.ndjson]      (input defaults to stdin)
+        --producer / --producer-version declare who emitted this NDJSON stream (roadmap 1.2);
+        absent means NULL, never guessed. --soundness-class defaults to 'heuristic' (ADR 002's
+        conservative default) — only an explicit flag can claim 'sound_with_top'.
 
 NDJSON records (one JSON object per line; order-independent):
   function: {"type":"function","name":"f","file_path":"x.go","exported":true|false,
@@ -139,10 +144,60 @@ type fn = {
   language : string option;
 }
 
+(* Roadmap 1.2 (ADR 002): this loader is producer-agnostic by design (it
+   depends on no producer-specific code), so provenance cannot be hardcoded
+   the way runner.ml's own single-backend flat schema does — it must be
+   DECLARED by whatever wrapped this invocation (the shell script that ran
+   `callgraph-go`, say), via a flag, or left absent. Absent is not "unknown
+   producer, assume sound" — [soundness_class] still defaults to the
+   conservative 'heuristic' per ADR 002's governing rule; only an explicit
+   flag can claim 'sound_with_top'. An invalid class ABORTS, matching this
+   loader's own strictness discipline for [kind]. *)
+(* [None] means "not present at all". A PRESENT-but-empty value (`--producer=`)
+   is a near-certain shell-scripting bug (an unset variable substituted into
+   the flag) — ABORTS rather than silently downgrading to "not declared",
+   matching this loader's die-on-ambiguity philosophy for [kind] below. *)
+let opt_flag_value args prefix =
+  match
+    List.find_map
+      (fun a ->
+        if starts_with ~prefix a then
+          Some (String.sub a (String.length prefix) (String.length a - String.length prefix))
+        else None)
+      args
+  with
+  | Some "" -> die "%s must not be empty" prefix
+  | v -> v
+
+let provenance_flag_prefixes =
+  [ "--producer="; "--producer-version="; "--soundness-class=" ]
+
 let () =
   let args = List.tl (Array.to_list Sys.argv) in
   let allow_empty = List.mem "--allow-empty" args in
-  let args = List.filter (fun a -> a <> "--allow-empty") args in
+  let producer = opt_flag_value args "--producer=" in
+  let producer_version = opt_flag_value args "--producer-version=" in
+  let soundness_class =
+    match opt_flag_value args "--soundness-class=" with
+    | None -> "heuristic"
+    | Some ("sound_with_top" | "heuristic" | "asserted") as v -> Option.get v
+    | Some other ->
+        die "invalid --soundness-class=%s (want sound_with_top|heuristic|asserted)" other
+  in
+  let args =
+    List.filter
+      (fun a ->
+        a <> "--allow-empty"
+        && not (List.exists (fun prefix -> starts_with ~prefix a) provenance_flag_prefixes))
+      args
+  in
+  (* Any surviving `--`-looking argument is an unrecognised flag (a typo in
+     one of the four above, most likely) — reject it rather than let it fall
+     through to [out]/[input] below and silently create a database named
+     after the misspelled flag. *)
+  List.iter
+    (fun a -> if starts_with ~prefix:"--" a then die "unrecognised flag: %s" a)
+    args ;
   let out, input =
     match args with
     | [] ->
@@ -356,6 +411,27 @@ let () =
   put_meta "callgraph_contract" "v1" ;
   put_meta "built_by" "arch-load" ;
   put_meta "schema_version" schema_version ;
+  (* Roadmap 1.2 (ADR 002). [producer]/[producer_version] are written only
+     when declared via a flag — an absent [producer] key means "not
+     declared", never a guess. [soundness_class] always writes (its own
+     default is the conservative 'heuristic'). [invocation_digest] is an MD5
+     identity fingerprint over (producer, producer_version, argv) — Stdlib
+     [Digest], computed locally rather than depending on the arch_index
+     library's own [Arch_index_db.invocation_digest] for one function: this
+     binary's independence from that library (sqlite3+yojson only) is
+     deliberate, per its own top-of-file documentation. *)
+  Option.iter (put_meta "producer") producer ;
+  Option.iter (put_meta "producer_version") producer_version ;
+  put_meta "soundness_class" soundness_class ;
+  put_meta
+    "invocation_digest"
+    (Digest.to_hex
+       (Digest.string
+          (String.concat
+             "\x00"
+             (Option.value producer ~default:""
+             :: Option.value producer_version ~default:""
+             :: Array.to_list Sys.argv)))) ;
 
   let sf =
     Sqlite3.prepare db

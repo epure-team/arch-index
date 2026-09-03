@@ -187,6 +187,7 @@ module Db : sig
     ?mutation_sites:int option ->
     ?deref_sites:int option ->
     ?language:string option ->
+    ?producer_run_id:int option ->
     unit ->
     int option
   (** Insert a function row, returning its id — [None] when the row was

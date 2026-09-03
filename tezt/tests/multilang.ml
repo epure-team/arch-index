@@ -240,7 +240,29 @@ let register () =
             (option string)
             ~error_msg:
               "the LSP path must not stamp callgraph_contract (got %L): it \
-               does not enumerate unresolved targets as MAY_TOP")) ;
+               does not enumerate unresolved targets as MAY_TOP") ;
+
+        (* Roadmap 1.2 (ADR 002): this backend's provenance is DB-level meta
+           (see runner.ml's own set_meta calls), not a per-row producer_runs
+           FK like the main schema — 'heuristic' because this backend never
+           marks ⊤ (the same fact the callgraph_contract check above pins). *)
+        Check.(
+          (Db.string_opt db "SELECT value FROM comment_db_meta WHERE key = 'producer'"
+           = Some "arch_index_lsp")
+            (option string)
+            ~error_msg:"comment_db_meta.producer should be %R, got %L") ;
+        Check.(
+          (Db.string_opt db
+             "SELECT value FROM comment_db_meta WHERE key = 'soundness_class'"
+           = Some "heuristic")
+            (option string)
+            ~error_msg:"comment_db_meta.soundness_class should be %R, got %L") ;
+        Check.(
+          (Db.string_opt db
+             "SELECT value FROM comment_db_meta WHERE key = 'invocation_digest'"
+           <> None)
+            (option string)
+            ~error_msg:"comment_db_meta.invocation_digest should be stamped, got %L")) ;
       Lwt.return_unit
     end
   end

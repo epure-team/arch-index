@@ -150,6 +150,22 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
     (List.length backup.function_intents)
     (List.length backup.type_intents) ;
 
+  (* FIX (found while testing roadmap 1.2's producer_runs table, but
+     pre-existing and independent of it — reproduces on plain `calls`/
+     `functions` alone): with `PRAGMA foreign_keys = ON` (set above), SQLite
+     refuses a `DROP TABLE` on a table some OTHER table's FK still declares a
+     reference to, even via `IF EXISTS` — and once the referencing table
+     itself has already been dropped earlier in this same loop, the error is
+     the cryptic "no such table: main.<already-dropped-table>" rather than
+     anything mentioning the table this statement is actually trying to
+     drop. This made every re-index of an EXISTING (non-empty) database fail
+     — the very case [backup_intents] above exists to support — and nothing
+     caught it because no test had exercised a real double invocation
+     against the same on-disk file before. Turn enforcement off for the
+     drop-then-recreate cycle; architecture-schema.sql's own `PRAGMA
+     foreign_keys = ON` turns it back on immediately after, so every insert
+     below still enforces the FK. *)
+  exec_exn db "PRAGMA foreign_keys = OFF" ;
   (* Drop views first (they reference the tables), then tables. *)
   List.iter
     (fun view -> exec_exn db (Printf.sprintf "DROP VIEW IF EXISTS %s" view))
@@ -191,6 +207,41 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
         ('schema_version', '%s')"
        Arch_index_db.current_schema_version) ;
 
+  (* Roadmap 1.2 (ADR 002): one producer_runs row for this whole invocation.
+     'sound_with_top' is a deliberate, explicit claim, not the module's
+     conservative default — the CMT walker is the one producer in this
+     codebase that marks unresolvable targets ⊤ rather than dropping them
+     (see [lsp_edge_kind] in runner.ml for the contrasting case that keeps
+     the conservative default). *)
+  let producer_run_id =
+    Arch_index_db.insert_producer_run
+      db
+      ~producer:"arch_index_cmt"
+      ~invocation_digest:
+        (Some
+           (Arch_index_db.invocation_digest
+              ~producer:"arch_index_cmt"
+              ~producer_version:None
+              (* [run]'s own parameters, not [Sys.argv]: this function is
+                 published library surface (FIX above, review-round finding)
+                 — a host process's argv does not vary between two [run]
+                 calls with different [~build_dir], so hashing it would make
+                 every invocation from the same process indistinguishable,
+                 defeating the digest's one stated purpose. *)
+              ~argv:[| build_dir; db_path; schema_path |]))
+      ~soundness_class:"sound_with_top"
+      ()
+  in
+  (* A rejected insert here is silent otherwise — every function/call row
+     this run writes would carry NULL provenance with no local signal why,
+     and [n_statement_failures] only surfaces post-hoc, per-table, with no
+     mention of [producer_runs] specifically. This is a single, once-per-run
+     insert, so failing loudly is cheap. *)
+  if producer_run_id = None then
+    Arch_io.eprintf
+      "arch_index: warning: producer_runs insert failed — every row this run \
+       writes will have NULL provenance\n" ;
+
   (* Prepare statements *)
   let stmt_mod =
     Sqlite3.prepare
@@ -204,8 +255,9 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
       "INSERT OR REPLACE INTO functions (module_id, name, signature, \
        line_start, line_end, exposed, intent, comment_quality_score, has_pre, \
        has_post, has_violators, has_violates, violators_raw, violates_raw, \
-       tests_raw, quint_raw, mutation_sites, deref_sites, language) VALUES (?, \
-       ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+       tests_raw, quint_raw, mutation_sites, deref_sites, language, \
+       producer_run_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, \
+       ?, ?, ?, ?, ?)"
   in
   let stmt_ty =
     Sqlite3.prepare
@@ -234,8 +286,8 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
   let stmt_call =
     Sqlite3.prepare
       db
-      "INSERT INTO calls (caller_id, callee_id, callee_name, call_site, kind) \
-       VALUES (?, ?, ?, ?, ?)"
+      "INSERT INTO calls (caller_id, callee_id, callee_name, call_site, kind, \
+       producer_run_id) VALUES (?, ?, ?, ?, ?, ?)"
   in
   let stmt_dep =
     Sqlite3.prepare
@@ -305,6 +357,7 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
             ~stmt_catch
             ~stmt_origin
             ~stmt_rebind
+            ~producer_run_id
             path
         in
         all_pending_calls := List.rev_append calls !all_pending_calls ;
@@ -513,6 +566,8 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
                ~callee_name:callee_display_name
                ~call_site:(Some call.call_site)
                ~kind
+               ~producer_run_id
+               ()
            with
           | Some call_id -> (
               (* The handler scope enclosing THIS call site, linked to this

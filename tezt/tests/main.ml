@@ -91,4 +91,5 @@ let () =
   Must_null_ceiling.register () ;
   Query_limits.register () ;
   Exn_raise_sets.register () ;
+  Provenance.register () ;
   Tezt.Test.run ()

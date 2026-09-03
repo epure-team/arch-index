@@ -45,6 +45,11 @@ let schema_tables_to_drop =
     "calls";
     "functions";
     "modules";
+    (* Must come after [calls]/[functions] (both FK-reference it) — otherwise
+       a re-index of the same database accumulates one orphaned row per
+       invocation, and [SELECT * FROM producer_runs] stops answering "what
+       produced THIS index" (roadmap 1.2). *)
+    "producer_runs";
   ]
 
 let backup_intents db =

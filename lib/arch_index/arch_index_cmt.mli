@@ -315,5 +315,6 @@ val process_cmt :
   stmt_catch:Sqlite3.stmt ->
   stmt_origin:Sqlite3.stmt ->
   stmt_rebind:Sqlite3.stmt ->
+  ?producer_run_id:int option ->
   string ->
   pending_call list * pending_dep list * pending_type_usage list
