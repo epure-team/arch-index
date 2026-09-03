@@ -1,0 +1,25 @@
+{
+  "task": "coverage-matrix",
+  "mode": "fast",
+  "current_phase": "review",
+  "events": [
+    {
+      "phase": "intake",
+      "outcome": "VALIDATED",
+      "reason": "Roadmap Phase 1 item 1.3 (analysis_coverage — the honest-absence guarantee). Two rounds of pre-implementation research (spawned agents) revealed the roadmap's own design note assumed one shared 'analysis registry' checkable via Language_registry.lookup, but Go/Rust callgraph have separate standalone producer binaries entirely outside that registry, and effects/cfg/decisions/coverage/types are heterogeneous (three genuinely different availability-detection mechanisms, one analysis kind — decisions — not even part of the main dune build). Presented this finding to the user via AskUserQuestion; user chose full scope: build a real cross-producer registry/orchestrator rather than a narrowly-bounded slice. Scoped and documented per-kind in briefs/coverage-matrix-impl.md.",
+      "by": "roster-intake"
+    },
+    {
+      "phase": "implement",
+      "outcome": "COMPLETED",
+      "reason": "New analysis_coverage table (main schema, 1.4->1.5) + bin/arch_coverage_matrix binary + lib/arch_index/coverage_matrix.ml. Per-kind detection: OCaml callgraph/effects via bundled-executable + .cmt presence; Go/Rust callgraph via each wrapper script's own internal driver-path probe (a real bug caught manually before automated tests existed: an early draft checked the always-present wrapper script itself, not the driver it gates); every other Language_registry language via Language_registry.lookup; cfg/types derived from the callgraph row, not independently invoked; coverage requires --lcov; decisions (poc/decision-lint) always not_analysed since it is outside the main dune build. --allow-partial CLI flag with exit 1/0 semantics. must_null_ceiling ratchet recalibrated 289->321, verified against real query output. 102/102 tests pass, self-index golden regenerated.",
+      "by": "roster-implement"
+    },
+    {
+      "phase": "review",
+      "outcome": "GO",
+      "reason": "reviewer + architect (cross-runtime codex skipped, degraded all session). Both independently found the same CRITICAL: repo_root computed as a single dirname hop landed inside _build/default, silently defeating all Go/Rust callgraph detection in every real invocation - fixed, but required a second pass (dune mirrors architecture-schema.sql into _build/default too) and new stub-based positive tests to actually catch it surviving the first fix. Second CRITICAL: an uncaught crash on symlinks under _build/default - fixed. 3 HIGH (no positive test for driver-built path, effects rows silently omitted for 4/6 languages contradicting the mli contract, Rust's second wrapper gate - the merge pass - not checked) and 3 MEDIUM (DDL duplication with a false equality claim, no transaction/checked binds in write_coverage, has_gap counting permanently-not_analysed cross-language rows) plus 1 LOW all fixed. architect confirmed the per-kind detection split is principled, not an excuse to under-deliver. 105/105 tests pass post-fix including two new real driver-built positive tests, self-index golden regenerated.",
+      "by": "roster-review"
+    }
+  ]
+}

@@ -1,0 +1,44 @@
+{
+  "task": "coverage-matrix",
+  "date": "2026-09-03",
+  "status": "GO",
+  "auto_fixes_applied": [],
+  "findings": [],
+  "cross_runtime_findings": [],
+  "summary": "Fast-mode review of roadmap 1.3 (analysis_coverage, the honest-absence guarantee). reviewer + architect specialists in parallel (blast radius >3 files, 14 touched). Cross-runtime codex skipped (degraded all session). Both specialists independently converged on the same CRITICAL finding: repo_root was computed as a single dirname hop from the executable's own path, landing inside _build/default/bin/arch_coverage_matrix rather than the true repo root, so Go/Rust callgraph detection silently reported not_analysed in every real invocation regardless of whether the drivers were built. The fix itself required TWO passes (dune mirrors architecture-schema.sql into _build/default too, so a marker-alone search hit that copy first) and surfaced a further divergence between the test file's own repo-root helper and the CLI's, only caught by adding real driver-built positive tests. reviewer also found a second CRITICAL (an uncaught Sys_error crash on a dangling symlink under _build/default), 3 HIGH (no positive test for the driver-built path; effects rows silently omitted for 4 of 6 languages, contradicting the module's own documented contract; the Rust wrapper's second gate, the whole-program merge pass, not checked), and 3 MEDIUM (DDL duplicated with an unverified equality claim; write_coverage had no transaction and ignored bind results; has_gap counted structurally-permanent cross-language rows making the exit code always non-zero) plus 1 LOW (is_executable matching directories) - all fixed. architect confirmed the per-kind detection split is a principled response to genuine heterogeneity in this codebase's producer landscape, not an excuse to under-deliver. Re-verified end-to-end: build clean, 105/105 tests (including two new stub-based positive tests for Go/Rust that actually caught the repo_root bug surviving its first fix attempt). Convergence gate: no violations.",
+  "no_go_reason": null,
+  "no_go_round": 0,
+  "round": 1,
+  "cycle": 1,
+  "rounds_audit": [
+    {
+      "round": 1,
+      "reviewed_sha": "9733c10",
+      "fix_sha": "9733c10",
+      "specialists_run": [
+        {
+          "name": "reviewer",
+          "selection_reason": "always run"
+        },
+        {
+          "name": "architect",
+          "selection_reason": "blast radius >3 files (14 files touched) — Fast mode"
+        }
+      ],
+      "trace_schema_version": "1.0"
+    }
+  ],
+  "cross_runtime": {
+    "codex": {
+      "status": "skipped-degraded",
+      "reason": "non-conforming-output",
+      "config_digest": null,
+      "round": 1
+    }
+  },
+  "streak_override": null,
+  "mode": "fast",
+  "escalation_needed": false,
+  "escalation_reason": null,
+  "normalized_by": "review-normalize.js@2.0.0"
+}

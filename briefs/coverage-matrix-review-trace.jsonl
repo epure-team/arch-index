@@ -1,0 +1,4 @@
+{"schema_version":"1.0","ts":"2026-09-03T20:31:08.326Z","task":"coverage-matrix","round":1,"cycle":1,"event":"normalizer","actor":"review-normalize.js","outcome":"ran"}
+{"schema_version":"1.0","ts":"2026-09-03T20:31:08.345Z","task":"coverage-matrix","round":1,"cycle":1,"event":"scope-gate","actor":"check-scope-diff.sh","outcome":"skipped","detail":"not-full-mode"}
+{"schema_version":"1.0","ts":"2026-09-03T20:31:08.363Z","task":"coverage-matrix","round":1,"cycle":1,"event":"specialist","actor":"reviewer","outcome":"ran"}
+{"schema_version":"1.0","ts":"2026-09-03T20:31:08.382Z","task":"coverage-matrix","round":1,"cycle":1,"event":"specialist","actor":"architect","outcome":"ran"}
