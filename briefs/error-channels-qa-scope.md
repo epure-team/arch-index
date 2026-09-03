@@ -34,11 +34,22 @@ Re-run the shipped exception channel and compare against
 `docs/exception-raise-sets-validation.md` **exactly**; any drift is a NO-GO unless the impl brief
 explains it.
 
-| corpus | build dir | expected nodes / bounded / under-hyp / scopes / links |
-|---|---|---|
-| arch-index (whole repo) | `_build/default` | 1 765 / 18.4 % / 44.4 % / 106 / 389 |
-| octez-manager | `~/dev/octez-manager/_build/default` | 12 317 / 24.6 % / 47.6 % / 491 / 2 245 |
-| proto_alpha | `/home/mathias/dev/tezos/tezos/_build/default/src/proto_alpha/lib_protocol` | 14 452 / 23.8 % / 46.4 % / 18 / 35 |
+**Read this before comparing.** arch-index is *itself* one of the corpora, and this feature adds
+modules to it, so its raw counts legitimately move (measured 2026-09-03 after slices 0–1:
+1 765 → 1 845 nodes, 106 → 108 scopes, 389 → 399 links, purely from `arch_errors_config.ml`).
+A gate that compares arch-index's absolute numbers therefore proves nothing and would be
+"fixed" by editing the expected value — the exact anti-pattern this repo has been bitten by.
+
+**The binding assertion is on the two EXTERNAL corpora, which the feature cannot change.** They
+must match *exactly*; any drift there is a real regression in the exception channel.
+
+| corpus | build dir | expected nodes / bounded / under-hyp / scopes / links | rule |
+|---|---|---|---|
+| octez-manager | `~/dev/octez-manager/_build/default` | 12 317 / 24.6 % / 47.6 % / 491 / 2 245 | **exact — any drift is a NO-GO** |
+| proto_alpha | `/home/mathias/dev/tezos/tezos/_build/default/src/proto_alpha/lib_protocol` | 14 452 / 23.8 % / 46.4 % / 18 / 35 | **exact — any drift is a NO-GO** |
+| arch-index (whole repo) | `_build/default` | baseline 1 765 / 18.4 % / 44.4 % / 106 / 389 | may grow; every delta must be attributable to modules this branch adds — state the attribution, do not just update the number |
+
+(Verified at slices 0–1: both external corpora reproduced the baseline to the digit.)
 
 ```bash
 for c in arch-index octez-manager proto-alpha; do : ; done   # see the table for --build-dir
