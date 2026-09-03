@@ -1,7 +1,7 @@
 {
   "task": "exn-raise-sets",
   "mode": "full",
-  "current_phase": "plan",
+  "current_phase": "implement",
   "events": [
     {
       "phase": "question",
@@ -35,6 +35,12 @@
       "at": "2026-09-03T15:43:00Z",
       "by": "roster-plan",
       "reason": "autonomous: quiz/final gate pre-approved; no DISAGREE/USER-CHALLENGE"
+    },
+    {
+      "phase": "implement",
+      "outcome": "COMPLETED",
+      "at": "2026-09-03T16:02:16Z",
+      "by": "roster-implement"
     }
   ]
 }
