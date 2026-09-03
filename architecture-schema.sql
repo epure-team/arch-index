@@ -13,11 +13,16 @@ CREATE TABLE IF NOT EXISTS modules (
     last_analyzed TEXT,                     -- ISO 8601 timestamp
     has_mli BOOLEAN DEFAULT 0,              -- whether .mli exists
     quint_module_raw TEXT DEFAULT NULL,     -- body of {quint-module} comment section (Quint preamble)
+    -- Roadmap 1.1: which producer/language emitted this module — from
+    -- Language_registry.detect_language_roots's (language, root) pairs, matched
+    -- by longest root prefix. NULL on a pre-1.1 index (never guessed backward).
+    language TEXT DEFAULT NULL,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE INDEX IF NOT EXISTS idx_modules_lines ON modules(lines DESC);
 CREATE INDEX IF NOT EXISTS idx_modules_no_intent ON modules(intent) WHERE intent IS NULL;
+CREATE INDEX IF NOT EXISTS idx_modules_language ON modules(language);
 
 -- Functions
 CREATE TABLE IF NOT EXISTS functions (
@@ -47,6 +52,19 @@ CREATE TABLE IF NOT EXISTS functions (
     -- on backends that do not compute them.
     mutation_sites INTEGER DEFAULT NULL,
     deref_sites INTEGER DEFAULT NULL,
+    -- Roadmap 1.1 (SPEC-sound-callgraph.md FR-001: "node identity carries a
+    -- language tag + internal/external universe flag"). [language] is
+    -- inherited from this function's own [modules.language] at insert time —
+    -- NULL on a pre-1.1 index, never guessed. [universe] is 'internal' for
+    -- every row a producer actually emitted (which is every row in THIS
+    -- table); 'external' is reserved for the synthesized `ext:` leaves
+    -- Arch_graph.load creates from a NULL callee_id, which are not functions
+    -- rows at all today (deferred to a later item) — so 'internal' is the
+    -- only value this table's own rows can carry right now, and the CHECK
+    -- constraint documents the eventual full domain rather than one this
+    -- table will ever violate on its own.
+    language TEXT DEFAULT NULL,
+    universe TEXT NOT NULL DEFAULT 'internal' CHECK(universe IN ('internal', 'external')),
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(module_id, name)
 );
@@ -70,6 +88,8 @@ WHERE f.violators_raw IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_functions_module ON functions(module_id);
 CREATE INDEX IF NOT EXISTS idx_functions_exposed ON functions(exposed);
+CREATE INDEX IF NOT EXISTS idx_functions_language ON functions(language);
+CREATE INDEX IF NOT EXISTS idx_functions_universe ON functions(universe);
 CREATE INDEX IF NOT EXISTS idx_functions_no_intent ON functions(intent) WHERE intent IS NULL;
 CREATE INDEX IF NOT EXISTS idx_functions_large ON functions(line_count DESC);
 CREATE INDEX IF NOT EXISTS idx_functions_mutation ON functions(mutation_sites DESC)

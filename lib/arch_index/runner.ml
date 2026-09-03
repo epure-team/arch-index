@@ -34,7 +34,13 @@ CREATE TABLE IF NOT EXISTS functions (
   violators_raw TEXT,
   violates_raw TEXT,
   tests_raw TEXT,
-  quint_raw TEXT
+  quint_raw TEXT,
+  -- Roadmap 1.1: optional, uniform for every row a single [run] invocation
+  -- writes (this backend indexes exactly one language per invocation — see
+  -- [~language]); [run_multi] carries it through the merge from each
+  -- language's own temp DB rather than re-deriving it. NULL on a pre-1.1
+  -- database, never guessed.
+  language TEXT
 );
 CREATE TABLE IF NOT EXISTS calls (
   id INTEGER PRIMARY KEY,
@@ -85,14 +91,15 @@ let bind_bool stmt pos b = bind_int stmt pos (if b then 1 else 0)
 (* Write functions and calls to SQLite                                         *)
 (* -------------------------------------------------------------------------- *)
 
-let write_functions db fn_rows =
+let write_functions db ~language fn_rows =
   let stmt =
     Sqlite3.prepare
       db
       "INSERT INTO functions (name, file_path, line_start, line_end, exported, \
        signature, summary, comment_quality_score, has_pre, has_post, \
        has_violators, has_violates, violators_raw, violates_raw, tests_raw, \
-       quint_raw) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+       quint_raw, language) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, \
+       ?, ?, ?)"
   in
   List.iter
     (fun (row : Lsp_extractor.fn_row) ->
@@ -171,6 +178,7 @@ let write_functions db fn_rows =
       bind_text stmt 14 violates_raw ;
       bind_text stmt 15 tests_raw ;
       bind_text stmt 16 quint_raw ;
+      bind_text stmt 17 (Some language) ;
       ignore (Sqlite3.step stmt))
     fn_rows ;
   ignore (Sqlite3.finalize stmt)
@@ -329,7 +337,7 @@ let run ~sw ~env ~project_dir ~language ~output ?(no_enrich = false)
   (try
      exec_exn db schema_sql ;
      exec_exn db "BEGIN TRANSACTION" ;
-     write_functions db fn_rows ;
+     write_functions db ~language fn_rows ;
      write_calls db call_rows ;
      exec_exn db "COMMIT" ;
      set_meta db "schema_version" Arch_index_db.current_flat_schema_version ;
@@ -446,9 +454,9 @@ let run_multi ~sw ~env ~project_dir ~languages ~output ?(no_enrich = false)
                 db
                 (Printf.sprintf
                    "INSERT INTO functions (name, file_path, line_start, \
-                    line_end, exported, signature, summary) SELECT name, %sfile_path, \
-                    line_start, line_end, exported, signature, summary FROM \
-                    src.functions"
+                    line_end, exported, signature, summary, language) SELECT name, \
+                    %sfile_path, line_start, line_end, exported, signature, summary, \
+                    language FROM src.functions"
                    q) ;
               exec_exn
                 db

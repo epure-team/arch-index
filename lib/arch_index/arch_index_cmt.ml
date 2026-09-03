@@ -1627,6 +1627,13 @@ let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
                   ~lines
                   ~has_mli
                   ?quint_module_raw:(Option.map Option.some quint_module_raw)
+                  (* Roadmap 1.1: this whole walker only ever processes .cmt/
+                     .cmti files, which are structurally always OCaml — there
+                     is nothing to detect here, unlike the LSP-based flat-
+                     schema path (runner.ml), which genuinely serves several
+                     languages and threads its own already-known ~language
+                     through instead of hardcoding one. *)
+                  ~language:(Some "ocaml")
                   ()
               with
               | None ->
@@ -1851,6 +1858,7 @@ let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
                                       ~intent
                                       ~mutation_sites:(Some muts)
                                       ~deref_sites:(Some derefs)
+                                      ~language:(Some "ocaml")
                                       ?comment_quality_score:
                                         (Option.map
                                            (fun p ->
@@ -2059,6 +2067,7 @@ let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
                                               ~line_end:l.lam_line_end
                                               ~exposed:false
                                               ~intent:None
+                                              ~language:(Some "ocaml")
                                               ()
                                           with
                                           | Some lam_id ->

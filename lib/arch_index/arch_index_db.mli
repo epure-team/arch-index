@@ -287,6 +287,7 @@ val insert_module :
   lines:int ->
   has_mli:bool ->
   ?quint_module_raw:string option ->
+  ?language:string option ->
   unit ->
   int option
 
@@ -326,6 +327,7 @@ val insert_function :
   ?quint_raw:string option ->
   ?mutation_sites:int option ->
   ?deref_sites:int option ->
+  ?language:string option ->
   unit ->
   int option
 

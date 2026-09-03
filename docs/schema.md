@@ -104,9 +104,10 @@ it does not recognize, since some table or column it depends on may be gone.
 This versions the **main** schema (`architecture-schema.sql`, above) only — written by
 `Arch_index.run` (the CMT-based path). The flat schema (see "The flat schema" above, the LSP-based
 path's own inline 3-table shape — the actual entry point `arch_index_cli` uses) is structurally
-different and has never changed; it gets its **own** version identity,
-`Arch_index_db.current_flat_schema_version` (currently `"1.0"`, re-exported nowhere yet since no
-consumer has asked for it), written by `runner.ml`'s two `comment_db_meta.schema_version` call
+different; it gets its **own** version identity,
+`Arch_index_db.current_flat_schema_version` (currently `"1.1"` — bumped from `"1.0"` for roadmap
+item 1.1's optional `functions.language` column, re-exported nowhere yet since no consumer has
+asked for it), written by `runner.ml`'s two `comment_db_meta.schema_version` call
 sites — never `current_schema_version`. **Both write into the same `comment_db_meta.schema_version`
 key**, so a consumer must check WHICH schema it opened (`Arch_db.schema` probes for
 `calls.caller_name`, per [`lib/arch_tools/arch_db.ml`](../lib/arch_tools/arch_db.ml)) before
@@ -121,6 +122,7 @@ flat-schema consumer read `"1.2"` and wrongly conclude `function_effects`/`attac
 | `1.0` | The base 16-table schema (`functions`, `calls`, `modules`, `comment_db_meta`, and the rest listed above) | `architecture-schema.sql` (baseline) |
 | `1.1` | `function_effects`, `value_kinds` — mutation/effect tracking (Phase 1 capability A) | `effects-schema-migration.sql` |
 | `1.2` | `reachability_class`, `actor_role`, `temporal_class`, `gating`, `value_touched`, `precondition` columns on `function_effects`; `attack_edges` table and `from_path`/`to_path` columns — attack-surface capability layer (Phase 2) | `capabilities-schema-migration.sql` |
+| `1.3` | `modules.language`, `functions.language`/`functions.universe` — roadmap Phase 1 item 1.1, `SPEC-sound-callgraph.md` FR-001 ("node identity carries a language tag + internal/external universe flag") | `architecture-schema.sql` (additive columns) |
 
 Versions `1.1` and `1.2` are retroactive: both migrations were applied to `main` before this
 versioning mechanism existed, so `schema_version` never actually recorded them at the time — this
@@ -130,3 +132,10 @@ have a version to refuse against, not degrade silently into a null or a zero (#5
 
 For out-of-band inspection (without opening a database), the exact schema text a given library
 build promises is also available at compile time as `Arch_index.schema_sql : string`.
+
+### Flat schema version history (`runner.ml`'s own 3-table shape, `Arch_index_db.current_flat_schema_version`)
+
+| Version | Added |
+|---|---|
+| `1.0` | The base 3-table shape (`comment_db_meta`, `functions`, `calls`) — baseline, has been stable since introduction. |
+| `1.1` | `functions.language` (optional) — roadmap Phase 1 item 1.1, threaded from `runner.ml`'s already-known `~language`/`~languages` parameter (never re-detected — the caller, `arch_index_cli`, already resolved it via `Language_registry.detect_language_roots`). |

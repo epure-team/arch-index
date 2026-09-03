@@ -199,6 +199,35 @@ let register () =
               "%L call edge(s) are not MAY_ENUMERATED — an untagged LSP edge \
                reads as MUST and forges a must-reach path") ;
 
+        (* Roadmap 1.1 ratchet: every row a producer actually emitted carries
+           its own language, and none reads NULL — the detector
+           (Language_registry.detect_language_roots) is threaded all the way
+           through to the functions table now, not discarded after deciding
+           which servers to launch. *)
+        Check.(
+          (Db.int db "SELECT count(*) FROM functions WHERE language IS NULL"
+           = 0)
+            int
+            ~error_msg:
+              "%L function row(s) have a NULL language — the detector's \
+               result was not threaded through to this row") ;
+        List.iter
+          (fun (name, expected_lang) ->
+            Check.(
+              (Db.string_opt db
+                 (Printf.sprintf
+                    "SELECT language FROM functions WHERE name = '%s' LIMIT 1"
+                    name)
+               = Some expected_lang)
+                (option string)
+                ~error_msg:
+                  (Printf.sprintf "%s should have language = %%R, got %%L"
+                     name)))
+          [
+            ("GoEntry", "go"); ("goHelper", "go"); ("tsEntry", "typescript");
+            ("tsHelper", "typescript");
+          ] ;
+
         (* And the index must NOT claim the ⊤-marking contract: callHierarchy
            never reports the call sites it failed to resolve, so the ⊤ frontier
            is unknown, not empty. `unreachable`/`escapes` have to keep
