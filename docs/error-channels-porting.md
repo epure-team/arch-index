@@ -145,3 +145,10 @@ Before claiming a channel is supported:
       (three corpora, stable 18–25 % bounded, ⊤ dominated by `external` and `may_top_edge`).
 - [ ] The other channels' numbers are unchanged by your addition (assert on an external corpus
       you do not control, not on this repository — its own counts move whenever code is added).
+
+One gap to be aware of rather than work around: `arch-coverage-matrix`'s analysis vocabulary
+(`callgraph`, `effects`, `types`, `coverage`, `decisions`) predates this feature and has no
+`error_channels` row, so the coverage matrix currently says nothing about whether error channels
+were analysed for your language. `comment_db_meta.error_contract` is the authority until that row
+exists. If you add a producer, adding the row is the natural companion change — it is the same
+honest-absence guarantee in the place users look for it.

@@ -65,6 +65,7 @@ arch-index makes call-graph reachability answerable as a SQL query:
 - **Agent access over MCP** — `arch_mcp` serves these verdicts to an agent, with a `provenance` block on every answer so it can tell "UNREACHABLE, proved over a ⊤-marked index" from "UNREACHABLE on an index that never marked ⊤". See [MCP server](docs/mcp-server.md).
 - **Browsable index** — `./arch-serve /tmp/repo.db` serves the call graph as a local SPA on `http://localhost:7371` (loopback only), for the questions that are faster to answer by looking than by querying. Reads the flat schema produced by `arch-index` and `arch-load`; a main-schema index (from `arch-callgraph-ocaml`) is declined with a pointer to `arch-query`. See [arch-serve](docs/arch-serve.md).
 - **Architecture fitness functions** — `./arch-rules /tmp/repo.db arch-rules.txt` enforces layering, export-surface and effect rules over the *sound* graph. Unlike ArchUnit/deptrac/import-linter, which check declared imports, it answers whether a call can actually reach — and says `UNKNOWN` instead of a green tick when it cannot tell. See [fitness functions](docs/fitness-functions.md).
+- **How can this function fail?** — `arch-query /tmp/repo.db may-fail parse --channel result` answers with the *identities* it can fail with, transitively, minus what the handlers around each call site actually catch — a `throws` clause you never had to write. It covers exceptions **and** error-carrying values (`result`, `option`, Tezos `tzresult`, or your own monad declared in `arch-errors.toml`). The four answers it can give are kept strictly apart: a complete set (`BOUNDED`), a lower bound with witnesses for where it lost track (`UNBOUNDED (⊤)`), "this function cannot fail this way" (`NOT_A_CARRIER`), and "nobody looked" (`NOT_ANALYSED`, exit 3) — because an empty set and an unperformed analysis must never be confusable. See [error channels](docs/error-channels.md) and [exception raise-sets](docs/exception-raise-sets.md).
 
 ## Documentation
 
@@ -75,6 +76,9 @@ arch-index makes call-graph reachability answerable as a SQL query:
 - [Browsing the index with arch-serve](docs/arch-serve.md)
 - [Change impact for reviewers and agents](docs/change-impact.md)
 - [Architecture fitness functions](docs/fitness-functions.md)
+- [Error channels: how can this function fail?](docs/error-channels.md)
+- [Exception raise-sets](docs/exception-raise-sets.md)
+- [Porting the error analysis to another language](docs/error-channels-porting.md)
 - [Edge-kind contract & soundness](docs/edge-kind-contract.md)
 - [DB schema reference](docs/schema.md)
 - [Curation workflow: measure → decide → ledger](docs/curation-workflow.md)
