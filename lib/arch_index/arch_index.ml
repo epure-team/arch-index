@@ -68,7 +68,99 @@ type result = {
 (* Main entry point                                                           *)
 (* -------------------------------------------------------------------------- *)
 
-let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
+(* -------------------------------------------------------------------------- *)
+(* Error-channels config discovery/precedence (specs/error-channels.md,      *)
+(* slice 0). No analysis change yet: builtin/profile/user declarations are   *)
+(* parsed, merged and validated against the paths the walk actually saw, but *)
+(* the producer still only ever emits the [exception] channel — [run] below  *)
+(* hardcodes [error_contract = "v1:exception"] regardless of what the        *)
+(* effective config declares.                                                *)
+(* -------------------------------------------------------------------------- *)
+
+(** [--errors-config <path>] > [arch-errors.toml] at the project root > none. *)
+let discover_user_config ~project_root ~errors_config =
+  match errors_config with
+  | Some path -> Some path
+  | None ->
+      let candidate =
+        if project_root = "" then "arch-errors.toml"
+        else Filename.concat project_root "arch-errors.toml"
+      in
+      if Sys.file_exists candidate then Some candidate else None
+
+(** [ARCH_ERRORS_PROFILES_DIR], then [<project root>/profiles], then
+    [<exe dir>/../../../profiles] (dune's install layout) — first hit wins;
+    the resolved path is printed (spec: "its path is printed"). *)
+let discover_profile ~project_root ~name =
+  let file = name ^ "-errors.toml" in
+  let candidates =
+    (match Sys.getenv_opt "ARCH_ERRORS_PROFILES_DIR" with
+    | Some d -> [Filename.concat d file]
+    | None -> [])
+    @ (if project_root = "" then []
+       else [Filename.concat (Filename.concat project_root "profiles") file])
+    @ [
+        Filename.concat
+          (Filename.concat
+             (Filename.dirname (Filename.dirname (Filename.dirname Sys.executable_name)))
+             "profiles")
+          file;
+      ]
+  in
+  List.find_opt Sys.file_exists candidates
+
+let read_file path =
+  let ic = open_in path in
+  Fun.protect
+    ~finally:(fun () -> close_in ic)
+    (fun () ->
+      let n = in_channel_length ic in
+      really_input_string ic n)
+
+(** Load and merge the effective error-channels config: built-in < profile <
+    user file, per Clarifications. Any parse failure (bad TOML, unknown key,
+    unresolved [--errors-profile]) is fatal — printed and [exit 1] — since a
+    silently-ignored bad config is exactly the "declaration matching
+    nothing" bug class this feature exists to catch. Returns the effective
+    config and the human-readable source description for
+    [comment_db_meta.error_config_source]. *)
+let load_errors_config ~project_root ~errors_config ~errors_profile =
+  let acc = ref Arch_errors_config.builtin in
+  let sources = ref ["builtin"] in
+  (match errors_profile with
+  | None -> ()
+  | Some name -> (
+      match discover_profile ~project_root ~name with
+      | None ->
+          Arch_io.eprintf
+            "arch-errors: --errors-profile %s: no profiles/%s-errors.toml found (checked \
+             ARCH_ERRORS_PROFILES_DIR, <project root>/profiles, <exe dir>/../../../profiles)\n"
+            name
+            name ;
+          exit 1
+      | Some path -> (
+          Arch_io.printf "arch-errors: using profile %s\n%!" path ;
+          match Arch_errors_config.of_toml (read_file path) with
+          | Error msg ->
+              Arch_io.eprintf "arch-errors: %s: %s\n" path msg ;
+              exit 1
+          | Ok cfg ->
+              acc := Arch_errors_config.merge !acc cfg ;
+              sources := path :: !sources))) ;
+  (match discover_user_config ~project_root ~errors_config with
+  | None -> ()
+  | Some path -> (
+      match Arch_errors_config.of_toml (read_file path) with
+      | Error msg ->
+          Arch_io.eprintf "arch-errors: %s: %s\n" path msg ;
+          exit 1
+      | Ok cfg ->
+          acc := Arch_errors_config.merge !acc cfg ;
+          sources := path :: !sources)) ;
+  (!acc, String.concat "," (List.rev !sources))
+
+let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors_profile
+    ?(errors_strict = false) ~build_dir () =
   (* Reset global state for re-entrancy *)
   project_root := "" ;
   (* The rejection tally and the dropped-node registry live at module level in
@@ -99,6 +191,15 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
    | None -> ()) ;
   if !project_root <> "" then
     Arch_io.printf "Project root: %s\n%!" !project_root ;
+  (* Error-channels config (specs/error-channels.md slice 0): load/merge now,
+     hand the walker a [seen] collector so every value/type path it visits
+     can flip a declared-path found-flag, validate once the whole corpus has
+     been walked. *)
+  let errors_effective, error_config_source =
+    load_errors_config ~project_root:!project_root ~errors_config ~errors_profile
+  in
+  let errors_seen = Arch_errors_config.create errors_effective in
+  Arch_index_cmt.set_seen_collector (Some errors_seen) ;
   Arch_io.printf
     "Scanning %s for .cmt/.cmti files...\n%!"
     build_dir ;
@@ -371,6 +472,57 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
           (Printexc.to_string exn))
     cmt_files ;
   exec_exn db "COMMIT" ;
+
+  (* The walk is over: stop feeding [errors_seen] (a run-scoped collector;
+     nothing else must mutate it after this point) and check every declared
+     path against what was actually seen. FR-023: a per-path miss is a
+     warning (recorded below); a channel whose whole carrier type matched
+     nothing, or any miss under [--errors-strict], is fatal — exit 1 naming
+     it, since a silently-inert declaration is precisely the bug class this
+     feature exists to catch.
+
+     DECISION (slice 0, no spec scenario covers it): the loud "carrier type
+     matched nothing" abort is for a declaration the user (or a shipped
+     profile) wrote and got wrong — not for the pure built-in defaults
+     applying to a corpus too small to use [result]/[option] at all (every
+     tezt OCaml fixture; some of épure's own tiny units). Skip validation
+     entirely when no [arch-errors.toml]/profile was ever loaded
+     ([error_config_source = "builtin"]): AC-15 scenario 1 only requires
+     [error_contract]/[error_config_source] for that case, and "the
+     built-ins didn't fire on a corpus with no result/option" is not the bug
+     class FR-023 exists to catch. Any real config file re-enables full
+     validation, builtins included, since [merge] can fold user overrides
+     into them. *)
+  Arch_index_cmt.set_seen_collector None ;
+  (if error_config_source <> "builtin" then
+     match Arch_errors_config.validate errors_effective errors_seen ~strict:errors_strict with
+     | Error msg ->
+         Arch_io.eprintf "%s\n" msg ;
+         exit 1
+     | Ok () -> ()) ;
+  let error_config_unmatched = String.concat "," (Arch_errors_config.unmatched errors_seen) in
+  let error_config_digest = Arch_errors_config.digest errors_effective in
+  (* Slices 0-1 only wire config discovery/validation and the schema's
+     [channel] columns end to end; the producer still only ever emits the
+     [exception] channel (specs/error-channels.md's byte-identical
+     requirement) — later slices widen this to whatever channels actually
+     got emitted. Bound, not sprintf'd, into the SQL text: [error_config_source]
+     and [error_config_unmatched] embed filesystem paths, which may contain a
+     single quote. *)
+  let stmt_meta =
+    Sqlite3.prepare db "INSERT OR REPLACE INTO comment_db_meta (key, value) VALUES (?, ?)"
+  in
+  List.iter
+    (fun (key, value) ->
+      Arch_index_db.bind_text stmt_meta 1 key ;
+      Arch_index_db.bind_text stmt_meta 2 value ;
+      Arch_index_db.exec_stmt db ~what:"comment_db_meta" stmt_meta)
+    [
+      ("error_contract", "v1:exception");
+      ("error_config_digest", error_config_digest);
+      ("error_config_source", error_config_source);
+      ("error_config_unmatched", error_config_unmatched);
+    ] ;
 
   (* Resolve and insert calls *)
   Arch_io.printf

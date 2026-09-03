@@ -85,6 +85,30 @@ val is_dropped_node : module_path:string -> name:string -> bool
     (none) *)
 val dropped_unit_paths : unit -> string list
 
+(** Set (or clear, with [None]) the [Arch_errors_config.seen] collector every
+    value/type path the walker visits at its existing recording sites is
+    reported to, for error-channels declaration validation
+    (specs/error-channels.md slice 0).
+
+    {pre}
+    None.
+
+    {post}
+    Every subsequent [note_seen_value_path]/[note_seen_type_path] call (fired
+    from the walker's own recording sites, not a new traversal) forwards to
+    [Arch_errors_config.note_value_path]/[note_type_path] on the given [seen]
+    when [Some], or is a no-op when [None]. Process-global like
+    {!reset_dropped}; {!Arch_index.run} sets it before walking and clears it
+    (passing [None]) right after, so a run's collector cannot leak into the
+    next one or into a caller that never sets it.
+
+    {violators}
+    (none)
+
+    {violates}
+    (none) *)
+val set_seen_collector : Arch_errors_config.seen option -> unit
+
 (** Extract doc comment from OCaml attributes.
 
     {pre}

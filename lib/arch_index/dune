@@ -15,8 +15,9 @@
   ppxlib
   eio
   eio.unix
-  yojson)
- (private_modules arch_index_db arch_index_cmt arch_index_exn)
+  yojson
+  otoml)
+ (private_modules arch_index_db arch_index_cmt arch_index_exn arch_errors_config)
  (inline_tests)
  (preprocessor_deps
   (file ts_shim.js)
