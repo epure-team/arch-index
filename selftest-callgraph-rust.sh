@@ -269,6 +269,34 @@ else
     || note "tailcall: expected a MUST edge from caller through the become-tailcall site, none found: $raw_tc"
 fi
 
+# ── Scenario 7 (CHECK-3, spec US-1 AC-4): a named `extern "C"` call site must
+# be MAY_TOP with the real symbol recorded, never the anonymous *TOP* sentinel
+# alone — distinguishes "target named but body unanalyzable" from "target
+# truly unknown". ──
+mkdir -p "$WS/ffi/src"
+cat >"$WS/ffi/Cargo.toml" <<'EOF'
+[package]
+name = "ffi_test"
+version = "0.1.0"
+edition = "2021"
+publish = false
+EOF
+cat >"$WS/ffi/src/lib.rs" <<'EOF'
+extern "C" { fn my_external_symbol(x: i32) -> i32; }
+pub fn caller() {
+    unsafe { my_external_symbol(1); }
+}
+EOF
+raw_ffi="$(ARCH_CG_RUST_NO_MERGE=1 "$DRIVER_HARNESS" "$WS/ffi" 2>/tmp/selftest-cg-rust-ffi.stderr)"
+if [ -z "$raw_ffi" ]; then
+  note "ffi: producer emitted nothing (see /tmp/selftest-cg-rust-ffi.stderr)"
+else
+  printf '%s\n' "$raw_ffi" | grep -q '"callee_name":"\*TOP\*"' \
+    && note "ffi: extern \"C\" call site emitted the anonymous *TOP* sentinel instead of the real symbol name: $raw_ffi"
+  printf '%s\n' "$raw_ffi" | grep -q 'my_external_symbol.*"kind":"MAY_TOP"' \
+    || note "ffi: expected a MAY_TOP edge naming my_external_symbol, none found: $raw_ffi"
+fi
+
 # ── Scenario 5: the documented direct-pipe usage ("arch-callgraph-rust <dir>
 # | arch-load out.db") must actually work — regression test for the CRITICAL
 # where the harness's raw per-crate output (trait_impl_fact/x_dyn_* records)
