@@ -1,0 +1,44 @@
+{
+  "task": "schema-versioning",
+  "date": "2026-09-03",
+  "status": "GO",
+  "auto_fixes_applied": [],
+  "findings": [],
+  "cross_runtime_findings": [],
+  "summary": "Fast-mode review of #51 part 1 (schema_version versioning + shipping). reviewer + architect specialists (blast radius >3 files) plus a mandatory cross-runtime pass (codex, degraded/non-conforming-output, no findings). reviewer found 1 HIGH: the first draft stamped the flat 3-table LSP schema with the constant describing the main (CMT-based) schema's migrations, while the main schema itself never got a schema_version write at all \u2014 fixed by giving the flat schema its own distinct version identity (current_flat_schema_version) and having Arch_index.run actually write schema_version for the main schema. architect found 3 stale docs/schema-versions.md references (copy-paste artifact \u2014 actual file is docs/schema.md), 1 stale docstring, and a MEDIUM architecture suggestion (bare-string public API inviting brittle comparisons) \u2014 all fixed same round, including a new schema_version_at_least helper. 1 LOW (manual version bump with no CI enforcement) accepted as a documented, explicitly-scoped-out residual. Verified end-to-end with fresh runs of both real production binaries (arch_index_cli for the flat path, arch_callgraph_ocaml for the main path), confirming distinct correct version stamps. Convergence gate: no violations.",
+  "no_go_reason": null,
+  "no_go_round": 0,
+  "round": 1,
+  "cycle": 1,
+  "rounds_audit": [
+    {
+      "round": 1,
+      "reviewed_sha": "ad6ad83",
+      "fix_sha": "d47dc49",
+      "specialists_run": [
+        {
+          "name": "reviewer",
+          "selection_reason": "always run"
+        },
+        {
+          "name": "architect",
+          "selection_reason": "blast radius >3 files (6 files touched) \u2014 Fast mode"
+        }
+      ],
+      "trace_schema_version": "1.0"
+    }
+  ],
+  "cross_runtime": {
+    "codex": {
+      "status": "degraded",
+      "reason": "non-conforming-output",
+      "config_digest": "codex:2702d145257b4beb",
+      "round": 1
+    }
+  },
+  "streak_override": null,
+  "mode": "fast",
+  "escalation_needed": false,
+  "escalation_reason": null,
+  "normalized_by": "review-normalize.js@2.0.0"
+}

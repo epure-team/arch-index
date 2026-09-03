@@ -1,0 +1,4 @@
+{"schema_version":"1.0","ts":"2026-09-03T15:32:46.195Z","task":"schema-versioning","round":1,"cycle":1,"event":"normalizer","actor":"review-normalize.js","outcome":"ran"}
+{"schema_version":"1.0","ts":"2026-09-03T15:33:00.367Z","task":"schema-versioning","round":1,"cycle":1,"event":"scope-gate","actor":"check-scope-diff.sh","outcome":"skipped","detail":"not-full-mode"}
+{"schema_version":"1.0","ts":"2026-09-03T15:33:00.388Z","task":"schema-versioning","round":1,"cycle":1,"event":"specialist","actor":"reviewer","outcome":"ran"}
+{"schema_version":"1.0","ts":"2026-09-03T15:33:00.411Z","task":"schema-versioning","round":1,"cycle":1,"event":"specialist","actor":"architect","outcome":"ran"}

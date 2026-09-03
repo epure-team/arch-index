@@ -1,0 +1,36 @@
+{
+  "task": "schema-versioning",
+  "mode": "fast",
+  "current_phase": "ship",
+  "events": [
+    {
+      "phase": "intake",
+      "outcome": "VALIDATED",
+      "by": "roster-intake"
+    },
+    {
+      "phase": "implement",
+      "outcome": "COMPLETED",
+      "reason": "schema_version becomes a hand-bumped major.minor string (Arch_index_db.current_schema_version), architecture-schema.sql embedded at compile time via ppx_blob and re-exported as Arch_index.schema_sql, dead schema_path default fixed. docs/schema.md documents version history retroactively. Verified end-to-end via a real LSP indexing CLI run, not just the constant in isolation. 89/89 repo tests + 2 new inline tests, all green.",
+      "by": "roster-implement"
+    },
+    {
+      "phase": "review",
+      "outcome": "GO",
+      "reason": "reviewer + architect specialists (cross-runtime codex degraded, no findings). reviewer found 1 HIGH: the flat LSP schema was being stamped with the main schema's version constant (implying tables it can never have), while the main schema itself never wrote schema_version at all — fixed by splitting into two distinct version identities (current_schema_version for the main/CMT schema, current_flat_schema_version for the flat/LSP schema) and having Arch_index.run actually write its own. architect found 3 stale doc-path references, 1 stale docstring, and a brittle-string-API suggestion (addressed with schema_version_at_least) — all fixed same round. 1 LOW (manual bump, no CI enforcement) accepted as an explicitly-scoped-out residual. Verified end-to-end with both real production binaries. Convergence gate: no violations.",
+      "by": "roster-review"
+    },
+    {
+      "phase": "qa",
+      "outcome": "GO",
+      "reason": "All gates pass (build 0.27s, 89/89 tezt + 6 new inline tests, 84.5s). No formal spec for this fix-type task, so no CHECK-N checks; instead independently reran both real production binaries (arch_callgraph_ocaml, arch_index_cli) against a fresh fixture, confirming schema_version=1.2 (main) and =1.0 (flat) respectively — distinct, matching the review round's fix. qa_no_go_round 0/5.",
+      "by": "roster-qa"
+    },
+    {
+      "phase": "ship",
+      "outcome": "COMPLETED",
+      "reason": "PR #53 merged via rebase merge (aa1fc97), remote branch deleted. A post-push CI failure (self-index golden-file mismatch — new public functions changed the count) was diagnosed and fixed with a one-line golden-file regen commit per docs/adr/001-self-index-golden.md, then CI passed. Local worktree and branch cleaned up.",
+      "by": "roster-ship"
+    }
+  ]
+}
