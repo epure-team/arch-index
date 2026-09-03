@@ -676,17 +676,44 @@ fn source_crate_sets_publish_false(source_file: &str) -> bool {
 /// under a `[section]` header (`section` is `"package"` or `"workspace.package"`,
 /// matched against `[package]`/`[workspace.package]` respectively). Returns
 /// `Some(true)` if `publish = false` is found, `Some(false)` if `publish = true`
-/// is found, `None` if the key is absent from that section.
+/// is found, `None` if the key is absent from that section OR delegates to the
+/// workspace (`publish.workspace = true` — the caller must resolve that via
+/// `toml_key_is_workspace_true` instead; see `source_crate_sets_publish_false`).
+///
+/// FIX (rust-cg-toml-comment-false-positive, CRITICAL, review round): the
+/// naive `trimmed.contains("false")` scanned the WHOLE line including any
+/// trailing `#` comment, so `publish = true  # was false before` matched
+/// "false" first and returned `Some(true)` — a false positive on the
+/// DANGEROUS direction (treats a publish=true crate as publish=false,
+/// weakening the safety gate). Fixed by scanning only the portion before any
+/// `#`.
+///
+/// FIX (rust-cg-toml-workspace-inherit-dead-code, CRITICAL, QA round): the
+/// same whole-line scan also matched `publish.workspace = true` on the
+/// literal substring "true" BEFORE the caller's dedicated
+/// `toml_key_is_workspace_true`/workspace-walk logic ever ran, misreading a
+/// workspace-inherited crate as "explicitly publish=true" and returning
+/// `Some(false)` immediately — making the entire inheritance-resolution code
+/// path unreachable dead code for the single most common real-world Cargo
+/// idiom for `publish = false` across a multi-crate workspace. Fixed by
+/// treating any `publish`-line containing `.workspace` as "not a literal
+/// value here" (returns `None` for THIS section, letting the caller's
+/// workspace-resolution logic actually execute) rather than pattern-matching
+/// its substrings as if it were a literal `true`/`false`.
 fn toml_publish_false(contents: &str, section: &str) -> Option<bool> {
     let header = format!("[{section}]");
     let mut in_section = false;
     for line in contents.lines() {
-        let trimmed = line.trim();
+        let before_comment = line.split('#').next().unwrap_or("");
+        let trimmed = before_comment.trim();
         if trimmed.starts_with('[') {
             in_section = trimmed == header;
             continue;
         }
         if in_section && trimmed.starts_with("publish") {
+            if trimmed.contains(".workspace") {
+                continue;
+            }
             if trimmed.contains("false") {
                 return Some(true);
             }
@@ -700,7 +727,8 @@ fn toml_publish_false(contents: &str, section: &str) -> Option<bool> {
 
 fn toml_key_is_workspace_true(contents: &str, key: &str) -> bool {
     for line in contents.lines() {
-        let trimmed = line.trim();
+        let before_comment = line.split('#').next().unwrap_or("");
+        let trimmed = before_comment.trim();
         if trimmed.starts_with(key) && trimmed.contains(".workspace") && trimmed.contains("true") {
             return true;
         }

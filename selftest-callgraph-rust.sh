@@ -317,6 +317,99 @@ else
   echo "selftest-callgraph-rust: skipping direct-pipe scenario — arch_load.exe not built (dune build bin/arch_load)"
 fi
 
+# ── Scenario 9 (CHECK-6 inheritance variant, QA-round regression): a root
+# `[workspace.package] publish = false` + a member's `publish.workspace =
+# true` must resolve to publish_false=true. This was DEAD CODE — the
+# workspace-inheritance branch in source_crate_sets_publish_false could never
+# execute, because toml_publish_false matched the literal substring "true" in
+# "publish.workspace = true" and returned before the inheritance-walk logic
+# ever ran. Caught by roster-qa testing the exact case its own scope brief
+# named, missed by every implement/review round before it. ──
+mkdir -p "$WS/wsinherit/crate_a/src" "$WS/wsinherit/crate_b/src"
+cat >"$WS/wsinherit/Cargo.toml" <<'EOF'
+[workspace]
+members = ["crate_a", "crate_b"]
+resolver = "2"
+
+[workspace.package]
+publish = false
+EOF
+cat >"$WS/wsinherit/crate_a/Cargo.toml" <<'EOF'
+[package]
+name = "crate_a"
+version = "0.1.0"
+edition = "2021"
+publish.workspace = true
+EOF
+cat >"$WS/wsinherit/crate_a/src/lib.rs" <<'EOF'
+pub trait Doer { fn do_it(&self); }
+impl Doer for i32 { fn do_it(&self) {} }
+pub fn use_dyn(d: &dyn Doer) { d.do_it(); }
+EOF
+cat >"$WS/wsinherit/crate_b/Cargo.toml" <<'EOF'
+[package]
+name = "crate_b"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+crate_a = { path = "../crate_a" }
+EOF
+cat >"$WS/wsinherit/crate_b/src/lib.rs" <<'EOF'
+pub fn entry(x: &i32) { crate_a::use_dyn(x); }
+EOF
+raw_wsinherit="$(ARCH_CG_RUST_NO_MERGE=1 "$DRIVER_HARNESS" "$WS/wsinherit" 2>/tmp/selftest-cg-rust-wsinherit.stderr)"
+if [ -z "$raw_wsinherit" ]; then
+  note "wsinherit: producer emitted nothing (see /tmp/selftest-cg-rust-wsinherit.stderr)"
+else
+  printf '%s\n' "$raw_wsinherit" | grep -q '"publish_false":true' \
+    || note "wsinherit: expected publish_false:true (inherited from [workspace.package]), got: $raw_wsinherit"
+fi
+
+# ── Scenario 10 (comment-parsing false-positive, review-round regression):
+# `publish = true  # was false during beta` must NOT be misread as
+# publish=false — the naive scanner used to match "false" inside the trailing
+# comment before ever checking for "true" on the real value. ──
+mkdir -p "$WS/pubcomment/crate_a/src" "$WS/pubcomment/crate_b/src"
+cat >"$WS/pubcomment/Cargo.toml" <<'EOF'
+[workspace]
+members = ["crate_a", "crate_b"]
+resolver = "2"
+EOF
+cat >"$WS/pubcomment/crate_a/Cargo.toml" <<'EOF'
+[package]
+name = "crate_a"
+version = "0.1.0"
+edition = "2021"
+publish = true  # was false during beta, now released
+EOF
+cat >"$WS/pubcomment/crate_a/src/lib.rs" <<'EOF'
+pub trait Doer { fn do_it(&self); }
+impl Doer for i32 { fn do_it(&self) {} }
+pub fn use_dyn(d: &dyn Doer) { d.do_it(); }
+EOF
+cat >"$WS/pubcomment/crate_b/Cargo.toml" <<'EOF'
+[package]
+name = "crate_b"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+crate_a = { path = "../crate_a" }
+EOF
+cat >"$WS/pubcomment/crate_b/src/lib.rs" <<'EOF'
+pub fn entry(x: &i32) { crate_a::use_dyn(x); }
+EOF
+raw_pubcomment="$(ARCH_CG_RUST_NO_MERGE=1 "$DRIVER_HARNESS" "$WS/pubcomment" 2>/tmp/selftest-cg-rust-pubcomment.stderr)"
+if [ -z "$raw_pubcomment" ]; then
+  note "pubcomment: producer emitted nothing (see /tmp/selftest-cg-rust-pubcomment.stderr)"
+else
+  printf '%s\n' "$raw_pubcomment" | grep -q '"publish_false":false' \
+    || note "pubcomment: expected publish_false:false (crate_a is actually publish=true; the comment must not fool the scanner), got: $raw_pubcomment"
+fi
+
 if [ "$fails" -eq 0 ]; then
   echo "selftest-callgraph-rust: OK"
   exit 0
