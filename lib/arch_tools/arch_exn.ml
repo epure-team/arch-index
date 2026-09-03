@@ -28,18 +28,20 @@
 module SM = Map.Make (String)
 module SS = Set.Make (String)
 
-type reason_kind = May_top_edge | External | Unknown_exn_value
+type reason_kind = May_top_edge | External | Unknown_exn_value | Inferred_bind
 
 let reason_kind_to_string = function
   | May_top_edge -> "may_top_edge"
   | External -> "external"
   | Unknown_exn_value -> "unknown_exn_value"
+  | Inferred_bind -> "inferred_bind"
 
 (* Dominant-reason order for exn-stats (spec C-8). *)
 let reason_rank = function
   | May_top_edge -> 0
   | External -> 1
   | Unknown_exn_value -> 2
+  | Inferred_bind -> 3
 
 type reason = {kind : reason_kind; witness : string}
 
@@ -341,6 +343,7 @@ let direct t key =
           else
             match (o.o_form, o.o_path) with
             | "reraise", _ -> acc
+            | "inferred_bind", Some witness -> join acc (top Inferred_bind witness)
             | "unknown", _ | _, None -> join acc (top Unknown_exn_value (key ^ ":" ^ o.o_form))
             | _, Some p -> join acc (Known (SS.singleton (canon t p))))
         (Known SS.empty) os

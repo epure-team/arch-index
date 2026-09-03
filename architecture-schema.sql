@@ -399,7 +399,7 @@ CREATE TABLE IF NOT EXISTS exn_origins (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     function_id INTEGER NOT NULL REFERENCES functions(id) ON DELETE CASCADE,
     scope_id INTEGER REFERENCES exn_scopes(id) ON DELETE SET NULL,
-    form TEXT NOT NULL CHECK(form IN ('raise','reraise','unknown','failwith','invalid_arg','assert','partial_match','compare','division','index')),
+    form TEXT NOT NULL CHECK(form IN ('raise','reraise','unknown','failwith','invalid_arg','assert','partial_match','compare','division','index','inferred_bind')),
     exn_path TEXT,
     escapes BOOLEAN NOT NULL DEFAULT 1,
     line INTEGER NOT NULL,

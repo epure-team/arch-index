@@ -5,7 +5,7 @@
 module SS : Set.S with type elt = string
 module SM : Map.S with type key = string
 
-type reason_kind = May_top_edge | External | Unknown_exn_value
+type reason_kind = May_top_edge | External | Unknown_exn_value | Inferred_bind
 
 val reason_kind_to_string : reason_kind -> string
 

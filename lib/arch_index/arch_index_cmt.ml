@@ -947,9 +947,17 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels
   let mark_sunk (e : Typedtree.expression) =
     match resolve_head_call e with Some ord -> Hashtbl.replace sunk_ords ord () | None -> ()
   in
+  (* [Head_local n]: a SAME-MODULE call, where [n] is already the definition
+     path the target is indexed under (e.g. ["Ec_a.add_err"] — see
+     [build_local_fn_stamps]/[binding_name]) — the same qualified spelling a
+     [binds]/[transforms]/[converters]/[handlers] declaration names, so it
+     matches here too (widening this from slice 2's Stdlib-only [binds]
+     checks changes nothing for them: no declared path is ever spelled like
+     a bare same-module name). *)
   let head_qualified_name = function
     | Head_qualified (Some m, n) -> Some (m ^ "." ^ n)
     | Head_qualified (None, n) -> Some n
+    | Head_local n -> Some n
     | _ -> None
   in
   let is_declared_bind (c : Arch_errors_config.channel) head =
@@ -1141,6 +1149,75 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels
           in
           add_call (Head_unknown (disp, Module_param)) loc
         else add_call (Head_qualified (callee_module, callee_name)) loc
+  in
+  (* SLICE 3 (specs/error-channels.md "Binds"/"Transforms"/"Converters"):
+     classify an application's head the same way [record_head] eventually
+     will, but WITHOUT emitting anything — used only to look the head up
+     against declared [binds]/[transforms]/[converters]/[handlers] paths and
+     against [Arch_index_errch.bind_shape_channel]'s undeclared-bind check.
+     Mirrors [record_head]'s [Texp_ident] cases (a lambda-stamp head never
+     names a declared config path, so that branch is folded into
+     [Head_unknown] here — harmless, it just never matches). *)
+  let classify_head_path (fn_expr : Typedtree.expression) : call_head option =
+    match fn_expr.exp_desc with
+    | Texp_ident (Path.Pident id, _, _) when ident_is_local_fn id ->
+        Some (Head_local (local_fn_name id))
+    | Texp_ident (Path.Pident id, _, _) -> Some (Head_unknown (Ident.name id))
+    | Texp_ident (path, _, _) ->
+        let callee_module, callee_name = path_to_module_name path in
+        if qualified_is_dynamic path then
+          let disp =
+            match callee_module with Some m -> m ^ "." ^ callee_name | None -> callee_name
+          in
+          Some (Head_unknown disp)
+        else Some (Head_qualified (callee_module, callee_name))
+    | _ -> None
+  in
+  let path_declared paths head =
+    match head_qualified_name head with Some qn -> List.mem qn paths | None -> false
+  in
+  let find_transform head =
+    match head_qualified_name head with
+    | None -> None
+    | Some qn ->
+        List.find_map
+          (fun (ch : Arch_errors_config.channel) ->
+            List.find_map
+              (fun (p, mode, argpos) -> if p = qn then Some (ch, mode, argpos) else None)
+              ch.Arch_errors_config.transforms)
+          value_channels
+  in
+  let find_converter head =
+    match head_qualified_name head with
+    | None -> None
+    | Some qn ->
+        List.find_map
+          (fun (ch : Arch_errors_config.channel) ->
+            List.find_map
+              (fun (p, from_, to_, argpos, err) ->
+                if p = qn then Some (from_, to_, argpos, err) else None)
+              ch.Arch_errors_config.converters)
+          value_channels
+  in
+  let find_handler head =
+    match head_qualified_name head with
+    | None -> None
+    | Some qn ->
+        List.find_map
+          (fun (ch : Arch_errors_config.channel) ->
+            List.find_map
+              (fun (p, argpos) -> if p = qn then Some (ch, argpos) else None)
+              ch.Arch_errors_config.handlers)
+          value_channels
+  in
+  (* Peel a lambda literal's curried parameters down to its final body
+     expression; [None] for a [function | p -> …] (pattern-matching mapper —
+     unsupported, the caller falls back to ⊤, the safe side). *)
+  let rec literal_return_of_lambda (e : Typedtree.expression) =
+    match e.exp_desc with
+    | Texp_function (_, Tfunction_body b) -> literal_return_of_lambda b
+    | Texp_function (_, Tfunction_cases _) -> None
+    | _ -> Some e
   in
   (* Diverging (noreturn) application head: a SATURATED call whose head Path
      resolves to a Stdlib primitive that never returns. Path-based detection is
@@ -1605,6 +1682,14 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels
                  callee body does not run → never MUST. A result that is itself
                  a function (arrow) is also under-saturated / returns-a-function. *)
               let partial = is_arrow expr.exp_type || nargs < head_arity in
+              (* SLICE 3: a declared [transforms]/[converters] path, or an
+                 UNDECLARED bind-shaped operator (specs/error-channels.md
+                 "Binds": [inferred_bind]), is excluded from the ordinary
+                 carrier-matching propagating-edge check on THIS call — set by
+                 the [None]-branch classification below, read by
+                 [record_head]. [Some _] (the default) is the unchanged
+                 slice-2 behaviour. *)
+              let callee_ty_for_channel = ref (Some fn_expr.exp_type) in
               (* The call fires AFTER its arguments evaluate, so the head (and
                  the residual/escape records) belong to the block reached AFTER
                  descending into fn + args: if an argument diverges
@@ -1615,7 +1700,7 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels
                 | Texp_ident (Path.Pident id, _, _) when ident_is_local_fn id ->
                     (* Same-module top-level function — MUST candidate; [cond]
                        and [partial] decide the final kind at resolution. *)
-                    add_call ~partial ~is_head_of:expr.exp_loc ~callee_ty:fn_expr.exp_type
+                    add_call ~partial ~is_head_of:expr.exp_loc ?callee_ty:!callee_ty_for_channel
                       (Head_local (local_fn_name id)) expr.exp_loc
                 | Texp_ident (Path.Pident id, _, _) -> (
                     match lam_stamp id with
@@ -1623,7 +1708,7 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels
                         (* Head application of a let-bound literal: resolves to
                            the lambda node — MUST when unconditional+saturated,
                            MAY_ENUMERATED otherwise (same rule as top-level). *)
-                        add_call ~partial ~is_head_of:expr.exp_loc ~callee_ty:fn_expr.exp_type
+                        add_call ~partial ~is_head_of:expr.exp_loc ?callee_ty:!callee_ty_for_channel
                           (Head_local node_name) expr.exp_loc
                     | None ->
                         (* Parameter / local / shadowing binding → unknowable. *)
@@ -1640,12 +1725,12 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels
                         | Some m -> m ^ "." ^ callee_name
                         | None -> callee_name
                       in
-                      add_call ~callee_ty:fn_expr.exp_type ~is_head_of:expr.exp_loc ~partial (Head_unknown (disp, Module_param)) expr.exp_loc
+                      add_call ?callee_ty:!callee_ty_for_channel ~callee_ty:fn_expr.exp_type ~is_head_of:expr.exp_loc ~partial (Head_unknown (disp, Module_param)) expr.exp_loc
                     else
                       add_call
                         ~partial
                         ~is_head_of:expr.exp_loc
-                        ~callee_ty:fn_expr.exp_type
+                        ?callee_ty:!callee_ty_for_channel
                         (Head_qualified (callee_module, callee_name))
                         expr.exp_loc
                 | Texp_function _ -> (
@@ -1655,11 +1740,13 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels
                     match Hashtbl.find_opt lam_names fn_expr.exp_loc with
                     | Some node_name ->
                         add_call ~partial (Head_local node_name) expr.exp_loc
+                        add_call ~partial ~is_head_of:expr.exp_loc ?callee_ty:!callee_ty_for_channel
+                          (Head_local node_name) expr.exp_loc
                     | None ->
-                        add_call ~callee_ty:fn_expr.exp_type ~is_head_of:expr.exp_loc ~partial (Head_unknown ("*TOP*", Callback_param)) expr.exp_loc)
+                        add_call ?callee_ty:!callee_ty_for_channel ~callee_ty:fn_expr.exp_type ~is_head_of:expr.exp_loc ~partial (Head_unknown ("*TOP*", Callback_param)) expr.exp_loc)
                 | _ ->
                     (* Computed function head → unresolvable. *)
-                    add_call ~callee_ty:fn_expr.exp_type ~is_head_of:expr.exp_loc ~partial (Head_unknown ("*TOP*", Callback_param)) expr.exp_loc) ;
+                    add_call ?callee_ty:!callee_ty_for_channel ~callee_ty:fn_expr.exp_type ~is_head_of:expr.exp_loc ~partial (Head_unknown ("*TOP*", Callback_param)) expr.exp_loc) ;
                 (* Over-application [f a b c] where [f] has arity 2: the head
                    call is saturated (handled above), but the extra args are
                    applied to the (unknown) returned function value — a residual
@@ -1702,6 +1789,141 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels
                       | [(_, Some arg)] -> mark_sunk arg
                       | _ -> ())
                   | _ -> ()) ;
+                  (* SLICE 3 (specs/error-channels.md "Transforms" /
+                     "Converters" / "Binds"): a declared transform/converter
+                     head, or an undeclared bind-shaped operator, is handled
+                     here instead of (in the first two cases) letting the
+                     ordinary carrier-matching rule treat this call as a
+                     ⊤-external/opaque propagating edge to itself. *)
+                  let head_opt = classify_head_path fn_expr in
+                  let transform_hit =
+                    match head_opt with Some h -> find_transform h | None -> None
+                  in
+                  let converter_hit =
+                    match head_opt with Some h -> find_converter h | None -> None
+                  in
+                  let handler_hit =
+                    match head_opt with Some h -> find_handler h | None -> None
+                  in
+                  let bind_shape_hit =
+                    match Arch_index_errch.bind_shape_channel ~channels:value_channels
+                            fn_expr.exp_type
+                    with
+                    | Some bc ->
+                        let declared =
+                          match head_opt with
+                          | Some h -> path_declared bc.Arch_errors_config.binds h
+                          | None -> false
+                        in
+                        if declared then None else Some bc
+                    | None -> None
+                  in
+                  (match head_opt with
+                  | Some h -> (
+                      match head_qualified_name h with
+                      | Some qn
+                        when transform_hit <> None || converter_hit <> None
+                             || handler_hit <> None ->
+                          note_seen_value_path qn
+                      | _ -> ())
+                  | None -> ()) ;
+                  (* (b) Declared handler: the value argument at [argpos] is a
+                     catch-all handler scope on [ch] covering its head call. *)
+                  (match handler_hit with
+                  | Some (ch, argpos) -> (
+                      match List.nth_opt args (argpos - 1) with
+                      | Some (_, Some argexpr) -> (
+                          match resolve_head_call argexpr with
+                          | Some ord ->
+                              let local_id =
+                                Arch_index_errch.add_scope (!cur).lerrch
+                                  ~channel:ch.Arch_errors_config.name ~catch_all:true ~caught:[]
+                                  ~loc:expr.exp_loc
+                              in
+                              Hashtbl.replace errch_call_scope ord (ch.Arch_errors_config.name, local_id)
+                          | None -> ())
+                      | _ -> ())
+                  | None -> ()) ;
+                  (* Converters: [arg] is BOTH a catch-all handler on [from]
+                     and an origin on [to] (specs/error-channels.md
+                     "Converters"). *)
+                  (match converter_hit with
+                  | Some (from_, to_, argpos, err) ->
+                      (match List.nth_opt args (argpos - 1) with
+                      | Some (_, Some argexpr) -> (
+                          match resolve_head_call argexpr with
+                          | Some ord ->
+                              let local_id =
+                                Arch_index_errch.add_scope (!cur).lerrch ~channel:from_
+                                  ~catch_all:true ~caught:[] ~loc:expr.exp_loc
+                              in
+                              Hashtbl.replace errch_call_scope ord (from_, local_id)
+                          | None -> ())
+                      | _ -> ()) ;
+                      let path =
+                        match err with
+                        | Some e -> Some e
+                        | None -> Some (Printf.sprintf "%s:converted_%s" to_ from_)
+                      in
+                      Arch_index_errch.add_origin (!cur).lerrch ~channel:to_ ~path ~form:"raise"
+                        ~loc:expr.exp_loc ()
+                  | None -> ()) ;
+                  (* Transforms: "add" unions in the literal at [arg] (the
+                     inner set survives, via the OTHER argument's own
+                     ordinary propagating edge if it is itself a carrier
+                     call — no special-casing needed for that half);
+                     "replace" sinks every OTHER argument (the inner set does
+                     NOT survive) and takes the literal-constructor return of
+                     the mapper at [arg] when it is a lambda literal, else ⊤
+                     (a named/parameter mapper — sound over-approximation;
+                     the "named function whose own set is Known" refinement
+                     is a deliberately unimplemented, always-⊤-safe residual). *)
+                  (match transform_hit with
+                  | Some (ch, Arch_errors_config.Add, argpos) -> (
+                      match List.nth_opt args (argpos - 1) with
+                      | Some (_, Some argexpr) ->
+                          let path =
+                            Arch_index_errch.literal_ctor_path_of_expr ~canon_type:canon_exn
+                              ~canon_exn argexpr
+                          in
+                          Arch_index_errch.add_origin (!cur).lerrch
+                            ~channel:ch.Arch_errors_config.name ~path ~loc:expr.exp_loc ()
+                      | _ -> ())
+                  | Some (ch, Arch_errors_config.Replace, argpos) ->
+                      List.iteri
+                        (fun i (_, argexpr_opt) ->
+                          if i <> argpos - 1 then
+                            match argexpr_opt with Some ae -> mark_sunk ae | None -> ())
+                        args ;
+                      let literal_path =
+                        match List.nth_opt args (argpos - 1) with
+                        | Some (_, Some mapper_expr) -> (
+                            match mapper_expr.exp_desc with
+                            | Texp_function _ -> (
+                                match literal_return_of_lambda mapper_expr with
+                                | Some final ->
+                                    Arch_index_errch.literal_ctor_path_of_expr
+                                      ~canon_type:canon_exn ~canon_exn final
+                                | None -> None)
+                            | _ -> None)
+                        | _ -> None
+                      in
+                      Arch_index_errch.add_origin (!cur).lerrch ~channel:ch.Arch_errors_config.name
+                        ~path:literal_path ~loc:expr.exp_loc ()
+                  | None -> ()) ;
+                  (* [inferred_bind]: NEVER silently treat an undeclared
+                     bind-shaped operator as a bind — record a ⊤ witness on
+                     the caller node instead. *)
+                  (match bind_shape_hit with
+                  | Some bc ->
+                      let site =
+                        Printf.sprintf "%s:%d" src_path expr.exp_loc.Location.loc_start.pos_lnum
+                      in
+                      Arch_index_errch.add_origin (!cur).lerrch ~channel:bc.Arch_errors_config.name
+                        ~path:(Some site) ~form:"inferred_bind" ~loc:expr.exp_loc ()
+                  | None -> ()) ;
+                  if transform_hit <> None || converter_hit <> None || bind_shape_hit <> None then
+                    callee_ty_for_channel := None ;
                   record_head () ;
                   (* Exception origin (identity-aware; primitive-keyed for
                      [raise], Stdlib-path-keyed for failwith/invalid_arg). *)
@@ -1750,6 +1972,7 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels
                         ~channel:c.Arch_errors_config.name
                         ~path:(Some opath)
                         ~loc:expr.exp_loc
+                        ()
                   | Some (opath, pos) -> (
                       note_seen_value_path opath ;
                       match List.nth_opt args (pos - 1) with
@@ -1773,7 +1996,8 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels
                                 (!cur).lerrch
                                 ~channel:c.Arch_errors_config.name
                                 ~path
-                                ~loc:expr.exp_loc)))
+                                ~loc:expr.exp_loc
+                                ())))
               | None -> ()) ;
               default_iterator.expr self expr
           | _ -> default_iterator.expr self expr);
@@ -2562,7 +2786,7 @@ let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
                                                 (fun (o : Arch_index_errch.origin) ->
                                                   insert_exn_origin db stmt_origin ~function_id:fid
                                                     ~scope_id:None
-                                                    ~form:(if o.o_path = None then "unknown" else "raise")
+                                                    ~form:o.o_form
                                                     ~exn_path:o.o_path ~escapes:true
                                                     ~line:o.o_line ~col:o.o_col ~channel:o.o_channel)
                                                 origins)
