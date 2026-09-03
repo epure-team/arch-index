@@ -21,21 +21,60 @@ A **channel** is one way a function can fail. Two shapes exist:
 | **unwinding** | out of band, through every frame, until a handler | OCaml/Java/Python exceptions, Rust `panic!`, Go `panic` |
 | **value** | in the returned value, only where the caller propagates it | OCaml `result`/`tzresult`, Rust `Result`, Go `(T, error)`, TS `neverthrow`/`Effect`, `option`/`Option`/`None` |
 
-Six roles describe any of them. Your producer's job is to recognise these six things in your
-language's syntax and record them:
+Seven roles describe any of them. Your producer's job is to recognise these seven things in your
+language's syntax and record them.
+
+**The "Recorded as" column below is what the reference producer actually writes**, verified
+against the code, not against the schema's vocabulary. The important surprise is that only three
+of the seven are rows of their own: **a transform, a converter and a sink are expressed through
+`exn_origins` and through the *absence* of a propagating edge**, never through a distinct
+`exn_edges.role`. See "Reserved-but-unused roles" below before you implement against the CHECK
+constraint.
 
 | Role | What it is | Recorded as |
 |---|---|---|
 | **origin** | where a failure is *created* with a known identity | an `exn_origins` row: `channel`, `form`, `exn_path` (the identity, or NULL if not statically known), `escapes`, line/col |
-| **carrier** | a function that can *return* this channel's failure | a `channel_carriers` row for the function node |
-| **propagating edge** | a call whose callee's failures can reach the caller | an `exn_edges` row with `role='propagates'` |
-| **handler scope** | a region where some identities are *caught* | an `exn_scopes` row + `exn_scope_catches` rows, linked to the covered call via `call_exn_scopes` |
-| **transform** | a call that rewrites the failure (`add` a new identity, or `replace` the set) | `exn_edges` `role='transform_add' \| 'transform_replace'` |
-| **converter** | a call that closes one channel and opens another (`try/catch` returning a `Result`) | `exn_edges` `role='convert'` |
-| **sink** | a call whose failure is *discarded* | `exn_edges` `role='sink'` |
+| **carrier** | a function that can *return* this channel's failure | a `channel_carriers` row for the function node: `(function_id, channel)` |
+| **propagating edge** | a call whose callee's failures can reach the caller | an `exn_edges` row with `role='propagates'` — **the only role the producer writes and the only one the solver reads** (`arch_index.ml`'s single `insert_exn_edge` call site; `arch_exn.ml`'s `role='propagates'` join) |
+| **handler scope** | a region where some identities are *caught* | an `exn_scopes` row (carries `channel`) + `exn_scope_catches` rows for the caught identities, linked to each covered call by a `call_exn_scopes` row |
+| **transform (`add`)** | a call that unions a new identity into the failure set | an `exn_origins` row on the transform's channel, at the call site, whose `exn_path` is the literal at the declared `arg`. The inner set survives on its own: the *other* argument's head call is an ordinary propagating edge, so nothing extra records it |
+| **transform (`replace`)** | a call that discards the inner set and substitutes its own | **no row says "replace".** Every argument other than the mapper is marked *sunk*, so those calls emit **no propagating edge** — the inner set disappears by absence. The mapper's literal return, when the mapper is a lambda literal, becomes an `exn_origins` row; otherwise an `unknown` origin, i.e. ⊤ |
+| **converter** | a call that closes one channel and opens another (`try/catch` returning a `Result`) | **two facts, no `convert` row.** (1) A catch-all `exn_scopes` row on the **`from`** channel covering the guarded argument's call, linked through `call_exn_scopes` — that is what closes the source channel. (2) An `exn_origins` row on the **`to`** channel naming the converted identity: the declared `error`, else the handler lambda's literal return, else the opaque `"<to>:converted_<from>"` |
+| **sink** | a call whose failure is *discarded* | **no row at all.** The call site simply emits no propagating edge. Absence *is* the record |
 
 Everything else — the lattice, the fixpoint, handler subtraction, ⊤ reasons, the verdicts — is
 computed by `lib/arch_tools/arch_exn.ml` from those rows.
+
+### Which tables carry a `channel`
+
+Four do: `exn_scopes`, `exn_origins`, `exn_edges`, `channel_carriers`. Three do **not**:
+
+- `exn_scope_catches (scope_id, exn_path)` — the scope it points at already carries the channel;
+- `call_exn_scopes (call_id, scope_id)` — likewise, and note `call_id` is its **primary key**, so
+  a call has at most one scope across all channels;
+- `exn_rebinds (alias_path, target_path)` — a name-canonicalisation table, channel-independent.
+
+Do not add a `channel` column to those in your adapter, and do not expect to filter on one.
+
+### Reserved-but-unused roles — do not implement these
+
+`exn_edges.role`'s CHECK constraint admits six values:
+
+```sql
+role TEXT NOT NULL CHECK(role IN ('propagates','bind_arg','sink','transform_add','transform_replace','convert'))
+```
+
+Only **`propagates`** is written by the reference producer and only `propagates` is read by the
+solver. `bind_arg`, `sink`, `transform_add`, `transform_replace` and `convert` are **reserved
+vocabulary with no consumer**: a row carrying one of them is accepted by the database and then
+ignored by every query. A producer that emitted them — and that therefore did *not* emit
+`propagates` — would silently answer nothing.
+
+The constraint is deliberately left wide rather than narrowed to `('propagates')`. Narrowing would
+be a schema change requiring a version bump and a migration, to buy nothing: an unknown role is
+already rejected, and the five reserved names cost only this paragraph. If a later slice gives one
+of them a consumer, it can start writing rows without touching the schema. Treat the CHECK list as
+*what the column may one day hold*, and this table as *what to emit today*.
 
 ---
 
@@ -43,7 +82,7 @@ computed by `lib/arch_tools/arch_exn.ml` from those rows.
 
 1. **Never omit a possible failure.** Omission is unsound and is treated as a CRITICAL defect in
    review. If you cannot determine an identity, emit an origin with `exn_path = NULL` and
-   `form = 'unknown'`; the query renders it ⊤ `unknown_error_value` with a witness. An honest ⊤
+   `form = 'unknown'`; the query renders it ⊤ `unknown_exn_value` with a witness. An honest ⊤
    is always acceptable; a missing element never is.
 2. **Over-approximate deliberately, and only in the safe direction.** Extra elements, or ⊤ where a
    precise answer was possible, cost precision. Missing elements cost correctness. When a rule is
@@ -136,7 +175,7 @@ Before claiming a channel is supported:
 - [ ] A failure caught by an enclosing handler **at the call site** disappears from the caller's
       set (this is the feature's whole point — subtraction happens per call, not per function).
 - [ ] A handler that re-emits the value it caught does **not** close it.
-- [ ] An unresolvable identity is ⊤ `unknown_error_value` *with a witness*, never absent.
+- [ ] An unresolvable identity is ⊤ `unknown_exn_value` *with a witness*, never absent.
 - [ ] A call through a function parameter / interface / dynamic dispatch yields ⊤ `may_top_edge`
       with the call site as witness.
 - [ ] `add` and `replace` transforms are distinguished (Go's `%w`, Rust's `context` vs `map_err`).

@@ -425,6 +425,19 @@ CREATE TABLE IF NOT EXISTS exn_rebinds (
 -- call_exn_scopes on the 'exception' channel only (FR-029's byte-identical
 -- requirement); value channels (result/option/...) start writing rows here in
 -- a later slice.
+--
+-- RESERVED VOCABULARY (review round 1): of the six roles the CHECK admits,
+-- only 'propagates' is ever written (arch_index.ml's single insert_exn_edge
+-- call site) and only 'propagates' is ever read (arch_exn.ml's role filter).
+-- 'bind_arg', 'sink', 'transform_add', 'transform_replace' and 'convert' have
+-- NO consumer: a row carrying one is stored and then ignored by every query.
+-- A transform's added identity is an exn_origins row on the target channel; a
+-- 'replace' transform and a sink are expressed as the ABSENCE of a
+-- propagating edge; a converter is a from-channel exn_scopes row plus a
+-- to-channel exn_origins row. See docs/error-channels-porting.md §1. The list
+-- is left wide rather than narrowed to ('propagates') so a later slice can
+-- give one of them a consumer without a schema version bump; do not read it
+-- as a menu for a new producer.
 CREATE TABLE IF NOT EXISTS exn_edges (
     call_id INTEGER NOT NULL REFERENCES calls(id) ON DELETE CASCADE,
     channel TEXT NOT NULL,
