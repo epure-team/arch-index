@@ -1,0 +1,44 @@
+{
+  "task": "provenance-columns",
+  "date": "2026-09-03",
+  "status": "GO",
+  "auto_fixes_applied": [],
+  "findings": [],
+  "cross_runtime_findings": [],
+  "summary": "Fast-mode review of roadmap 1.2 (provenance columns, ADR 002). reviewer + architect specialists (blast radius >3 files, 17 touched). Cross-runtime codex skipped (degraded, non-conforming-output, on every invocation this whole session). reviewer found 3 HIGH: producer_runs missing from Arch_index.run's drop-and-recreate table list (orphaned rows accumulate on re-index); the production write path for producer_run_id was untested (only hand-seeded SQL); architecture-schema.sql's own comment claimed invocation_digest is SHA-256 while every implementation is MD5. Fixing the second HIGH (adding a real double-invocation test) surfaced a second, independent, previously-undiscovered bug: PRAGMA foreign_keys=ON (already set unconditionally) made every re-index of an EXISTING non-empty database fail outright with a cryptic 'no such table' error, reproducible without producer_runs at all — fixed by disabling FK enforcement around the drop-then-recreate cycle (architecture-schema.sql's own PRAGMA re-enables it). reviewer also found 6 MEDIUM (invocation_digest hashing Sys.argv in library entry points rather than the function's own parameters; a silently-NULL-on-rejection producer_runs insert; three small bugs in bin/arch_load's new flag parsing — duplicated helper, an empty flag value writing a declared-but-blank key, an unrecognised flag silently becoming a positional filename; a CHECK-constraint test with no positive control; two hand-duplicated set_meta blocks in runner.ml) and 1 LOW (a misleading producer_runs.producer example) — all fixed. architect's independent pass converged on the same SHA-256/MD5 finding, confirmed no other issues, and rated the three-mechanism design (FK+table for the main schema, comment_db_meta keys for both flat schemas) as principled rather than unjustified inconsistency. Re-verified end-to-end: build clean, 96/96 tests (5 new/extended this round), self-index golden regenerated. Convergence gate: no violations.",
+  "no_go_reason": null,
+  "no_go_round": 0,
+  "round": 1,
+  "cycle": 1,
+  "rounds_audit": [
+    {
+      "round": 1,
+      "reviewed_sha": "c5ca407",
+      "fix_sha": "c5ca407",
+      "specialists_run": [
+        {
+          "name": "reviewer",
+          "selection_reason": "always run"
+        },
+        {
+          "name": "architect",
+          "selection_reason": "blast radius >3 files (17 files touched) — Fast mode"
+        }
+      ],
+      "trace_schema_version": "1.0"
+    }
+  ],
+  "cross_runtime": {
+    "codex": {
+      "status": "skipped-degraded",
+      "reason": "non-conforming-output",
+      "config_digest": null,
+      "round": 1
+    }
+  },
+  "streak_override": null,
+  "mode": "fast",
+  "escalation_needed": false,
+  "escalation_reason": null,
+  "normalized_by": "review-normalize.js@2.0.0"
+}

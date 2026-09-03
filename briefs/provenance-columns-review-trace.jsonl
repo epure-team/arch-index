@@ -1,0 +1,4 @@
+{"schema_version":"1.0","ts":"2026-09-03T19:00:44.417Z","task":"provenance-columns","round":1,"cycle":1,"event":"normalizer","actor":"review-normalize.js","outcome":"ran"}
+{"schema_version":"1.0","ts":"2026-09-03T19:00:44.539Z","task":"provenance-columns","round":1,"cycle":1,"event":"scope-gate","actor":"check-scope-diff.sh","outcome":"skipped","detail":"not-full-mode"}
+{"schema_version":"1.0","ts":"2026-09-03T19:00:44.670Z","task":"provenance-columns","round":1,"cycle":1,"event":"specialist","actor":"reviewer","outcome":"ran"}
+{"schema_version":"1.0","ts":"2026-09-03T19:00:44.762Z","task":"provenance-columns","round":1,"cycle":1,"event":"specialist","actor":"architect","outcome":"ran"}

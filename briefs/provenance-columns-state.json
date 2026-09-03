@@ -1,0 +1,25 @@
+{
+  "task": "provenance-columns",
+  "mode": "fast",
+  "current_phase": "review",
+  "events": [
+    {
+      "phase": "intake",
+      "outcome": "VALIDATED",
+      "reason": "Roadmap Phase 1 item 1.2, ADR 002: producer/producer_version/invocation_digest/soundness_class provenance. Scope taken directly from the roadmap's own implementer notes (docs/roadmap Phase 1 section) and ADR 002 — no separate research/question phase needed given both already specify the design (producer_runs table + FK on functions/calls for the main schema, distinct treatment per schema per Phase 1's 'every column must land in both schemas' discipline).",
+      "by": "roster-intake"
+    },
+    {
+      "phase": "implement",
+      "outcome": "COMPLETED",
+      "reason": "producer_runs table + functions/calls.producer_run_id FK on the main schema (soundness_class='sound_with_top' for the CMT walker); comment_db_meta keys (producer/producer_version/soundness_class/invocation_digest) on both flat schemas — runner.ml hardcodes producer='arch_index_lsp'/soundness_class='heuristic' (uniform per this backend), bin/arch_load gains --producer=/--producer-version=/--soundness-class= flags since it is producer-agnostic. invocation_digest is Stdlib Digest (MD5) over (producer, producer_version, argv), not SHA-256 over project content — a documented simplification. current_schema_version 1.3->1.4 (additive); flat schema versions unchanged (no structural change, only new comment_db_meta keys). 94/94 tests pass including 3 new provenance.ml tests and 3 new multilang.ml assertions. Self-index golden regenerated.",
+      "by": "roster-implement"
+    },
+    {
+      "phase": "review",
+      "outcome": "GO",
+      "reason": "reviewer + architect (cross-runtime codex skipped, degraded all session). 3 HIGH: producer_runs missing from the drop-and-recreate list (orphaned rows on re-index) - fixed; production write path untested - fixed with a real double-invocation test, which surfaced a SECOND independent pre-existing bug (PRAGMA foreign_keys=ON breaking re-index of any existing DB, unrelated to producer_runs) - fixed; architecture-schema.sql's own comment claimed SHA-256 while the implementation is MD5 - fixed (both specialists independently found this). 6 MEDIUM (invocation_digest hashing Sys.argv in library entry points, silent-NULL on a rejected producer_runs insert, three bin/arch_load flag-parsing bugs, a CHECK-constraint test with no positive control, two hand-duplicated set_meta blocks in runner.ml) and 1 LOW all fixed. architect confirmed the three-mechanism design is principled, not inconsistent. 96/96 tests pass post-fix, self-index golden regenerated.",
+      "by": "roster-review"
+    }
+  ]
+}
