@@ -239,10 +239,11 @@ and forcing a shared constant across two intentionally-independent binaries woul
 | `1.0` | The base 16-table schema (`functions`, `calls`, `modules`, `comment_db_meta`, and the rest listed above) | `architecture-schema.sql` (baseline) |
 | `1.1` | `function_effects`, `value_kinds` — mutation/effect tracking (Phase 1 capability A) | `effects-schema-migration.sql` |
 | `1.2` | `reachability_class`, `actor_role`, `temporal_class`, `gating`, `value_touched`, `precondition` columns on `function_effects`; `attack_edges` table and `from_path`/`to_path` columns — attack-surface capability layer (Phase 2) | `capabilities-schema-migration.sql` |
-| `1.3` | `modules.language`, `functions.language`/`functions.universe` — roadmap Phase 1 item 1.1, `SPEC-sound-callgraph.md` FR-001 ("node identity carries a language tag + internal/external universe flag") | `architecture-schema.sql` (additive columns) |
-| `1.4` | `producer_runs` table; `functions.producer_run_id`/`calls.producer_run_id` — roadmap Phase 1 item 1.2, ADR 002 | `architecture-schema.sql` (additive table + columns) |
-| `1.5` | `analysis_coverage` table — roadmap Phase 1 item 1.3, the honest-absence guarantee | `architecture-schema.sql` (additive table); also embedded standalone in `arch-coverage-matrix` |
-| `1.7` | `calls.top_reason`/`calls.top_anchor` — roadmap Phase 1 item 1.4, the ⊤-anchor taxonomy (see `docs/edge-kind-contract.md`) | `architecture-schema.sql` (additive columns); `bin/arch_load` gets its own `top_reason` in its NDJSON contract, version 1.1→1.2 |
+| `1.3` | `exn_origins.channel`, `exn_scopes.channel`, `exn_edges` — error-channels re-tag, no behaviour change (the producer still emits only `channel = 'exception'` rows; value channels start writing in a later slice) | `architecture-schema.sql` (in place; no separate migration file) |
+| `1.8` | `modules.language`, `functions.language`/`functions.universe` — roadmap Phase 1 item 1.1, `SPEC-sound-callgraph.md` FR-001 ("node identity carries a language tag + internal/external universe flag") | `architecture-schema.sql` (additive columns) |
+| `1.8` | `producer_runs` table; `functions.producer_run_id`/`calls.producer_run_id` — roadmap Phase 1 item 1.2, ADR 002 | `architecture-schema.sql` (additive table + columns) |
+| `1.8` | `analysis_coverage` table — roadmap Phase 1 item 1.3, the honest-absence guarantee | `architecture-schema.sql` (additive table); also embedded standalone in `arch-coverage-matrix` |
+| `1.8` | `calls.top_reason`/`calls.top_anchor` — roadmap Phase 1 item 1.4, the ⊤-anchor taxonomy (see `docs/edge-kind-contract.md`) | `architecture-schema.sql` (additive columns); `bin/arch_load` gets its own `top_reason` in its NDJSON contract, version 1.1→1.2 |
 
 Versions `1.1` and `1.2` are retroactive: both migrations were applied to `main` before this
 versioning mechanism existed, so `schema_version` never actually recorded them at the time — this

@@ -49,7 +49,7 @@ let schema_path =
    constant — a consumer reading schema_version="1.2" off a flat-schema
    database would wrongly conclude those tables exist. See
    [current_flat_schema_version] below, which runner.ml now uses instead. *)
-let current_schema_version = "1.7"
+let current_schema_version = "1.8"
 
 (* The flat schema (runner.ml's own inline 3-table [schema_sql]) — distinct
    version identity from [current_schema_version] above: the two schemas are
@@ -427,13 +427,14 @@ let insert_call_exn_scope db stmt ~call_id ~scope_id =
   bind_int stmt 2 scope_id ;
   exec_stmt db ~what:"call_exn_scopes" stmt
 
-let insert_exn_scope db stmt ~function_id ~parent_id ~form ~line ~col ~catch_all =
+let insert_exn_scope db stmt ~function_id ~parent_id ~form ~line ~col ~catch_all ~channel =
   bind_int stmt 1 function_id ;
   bind_int_opt stmt 2 parent_id ;
   bind_text stmt 3 form ;
   bind_int stmt 4 line ;
   bind_int stmt 5 col ;
   bind_bool stmt 6 catch_all ;
+  bind_text stmt 7 channel ;
   exec_stmt_rowid db ~what:"exn_scopes" stmt
 
 let insert_exn_scope_catch db stmt ~scope_id ~exn_path =
@@ -441,7 +442,7 @@ let insert_exn_scope_catch db stmt ~scope_id ~exn_path =
   bind_text stmt 2 exn_path ;
   exec_stmt db ~what:"exn_scope_catches" stmt
 
-let insert_exn_origin db stmt ~function_id ~scope_id ~form ~exn_path ~escapes ~line ~col =
+let insert_exn_origin db stmt ~function_id ~scope_id ~form ~exn_path ~escapes ~line ~col ~channel =
   bind_int stmt 1 function_id ;
   bind_int_opt stmt 2 scope_id ;
   bind_text stmt 3 form ;
@@ -449,6 +450,7 @@ let insert_exn_origin db stmt ~function_id ~scope_id ~form ~exn_path ~escapes ~l
   bind_bool stmt 5 escapes ;
   bind_int stmt 6 line ;
   bind_int stmt 7 col ;
+  bind_text stmt 8 channel ;
   exec_stmt db ~what:"exn_origins" stmt
 
 let insert_exn_rebind db stmt ~alias_path ~target_path =
