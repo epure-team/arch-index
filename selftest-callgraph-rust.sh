@@ -242,6 +242,33 @@ else
   [ "$n_enum" -eq 0 ] || note "nopublish: expected 0 MAY_ENUMERATED edges (publish-boundary gate must force MAY_TOP), got $n_enum"
 fi
 
+# ── Scenario 6 (FR-002 regression): `become f()` (explicit_tail_calls,
+# reachable since the harness always sets RUSTC_BOOTSTRAP=1) is a DISTINCT
+# TerminatorKind::TailCall the walk once silently skipped — never drop a
+# Call terminator. ──
+mkdir -p "$WS/tailcall/src"
+cat >"$WS/tailcall/Cargo.toml" <<'EOF'
+[package]
+name = "tailcall_test"
+version = "0.1.0"
+edition = "2021"
+publish = false
+EOF
+cat >"$WS/tailcall/src/lib.rs" <<'EOF'
+#![feature(explicit_tail_calls)]
+pub fn helper() {}
+pub fn caller() {
+    become helper();
+}
+EOF
+raw_tc="$(ARCH_CG_RUST_NO_MERGE=1 "$DRIVER_HARNESS" "$WS/tailcall" 2>/tmp/selftest-cg-rust-tailcall.stderr)"
+if [ -z "$raw_tc" ]; then
+  note "tailcall: producer emitted nothing (see /tmp/selftest-cg-rust-tailcall.stderr)"
+else
+  printf '%s\n' "$raw_tc" | grep -q '"caller_name":"tailcall_test::caller".*"kind":"MUST"' \
+    || note "tailcall: expected a MUST edge from caller through the become-tailcall site, none found: $raw_tc"
+fi
+
 # ── Scenario 5: the documented direct-pipe usage ("arch-callgraph-rust <dir>
 # | arch-load out.db") must actually work — regression test for the CRITICAL
 # where the harness's raw per-crate output (trait_impl_fact/x_dyn_* records)
