@@ -26,7 +26,7 @@
 val db_path : string
 
 (** Default schema path (from ARCH_SCHEMA_PATH env or
-    [docs/architecture-schema.sql]).
+    [architecture-schema.sql]).
 
     {pre}
     (none)
@@ -40,6 +40,20 @@ val db_path : string
     {violates}
     (none) *)
 val schema_path : string
+
+(** Current schema version, ["<major>.<minor>"] — bumped by hand at every
+    schema change (minor for additive, major for breaking). History:
+    [docs/schema-versions.md]. This is the single source of truth
+    [comment_db_meta.schema_version] is written from; there is no other
+    literal version string anywhere in the codebase. *)
+val current_schema_version : string
+
+(** [architecture-schema.sql]'s contents, embedded at compile time. Lets a
+    consumer of the [arch-index] library diff against the exact schema text a
+    given build promises without opening a database or resolving an
+    install-time filesystem path. Independent of [schema_path] above, which
+    still reads from a file at run time. *)
+val schema_sql : string
 
 (** Execute SQL directly, exit on error.
 

@@ -22,7 +22,56 @@ let db_path =
 let schema_path =
   match Sys.getenv_opt "ARCH_SCHEMA_PATH" with
   | Some p -> p
-  | None -> "docs/architecture-schema.sql"
+  | None -> "architecture-schema.sql"
+
+(* -------------------------------------------------------------------------- *)
+(* Schema version and shipped schema text (#51 part 1)                        *)
+(* -------------------------------------------------------------------------- *)
+
+(* [current_schema_version] is a "<major>.<minor>" string, bumped by hand at
+   every schema change — bump the minor component for an additive change
+   (new nullable column/table/index; every migration so far has been this
+   kind), the major component for a breaking one (a column/table removal or
+   type change an existing consumer's query could not survive unmodified).
+   History and the table/column set each version added: docs/schema-versions.md.
+   Read by [comment_db_meta.schema_version] at write time (see runner.ml) —
+   there is exactly one source of truth for "what version did this build
+   actually emit", not one hardcoded literal per call site. *)
+let current_schema_version = "1.2"
+
+(* [schema_sql] embeds architecture-schema.sql's contents at compile time via
+   ppx_blob (same mechanism ts_enricher.ml already uses for ts_shim.js) — a
+   consumer that depends on the arch-index library can diff against the exact
+   schema text a given build promises without opening a database or resolving
+   an install-time filesystem path (#51: "ship the schema... so a consumer
+   compiles against it rather than guessing"). This does NOT replace the
+   runtime schema-loading path above ([schema_path]/[ARCH_SCHEMA_PATH]), which
+   still reads from a file at run time — the two are independent, and this one
+   exists for out-of-band inspection only. *)
+let schema_sql : string = [%blob "../../architecture-schema.sql"]
+
+let%test "current_schema_version is a well-formed major.minor string" =
+  match String.split_on_char '.' current_schema_version with
+  | [ major; minor ] ->
+      let is_digits s =
+        s <> "" && String.for_all (fun c -> c >= '0' && c <= '9') s
+      in
+      is_digits major && is_digits minor
+  | _ -> false
+
+let%test "schema_sql is non-empty and defines the base tables" =
+  String.length schema_sql > 0
+  && (let contains needle =
+        let nlen = String.length needle and hlen = String.length schema_sql in
+        let rec go i =
+          i + nlen <= hlen
+          && (String.sub schema_sql i nlen = needle || go (i + 1))
+        in
+        go 0
+      in
+      contains "CREATE TABLE IF NOT EXISTS functions"
+      && contains "CREATE TABLE IF NOT EXISTS calls"
+      && contains "CREATE TABLE IF NOT EXISTS comment_db_meta")
 
 (* -------------------------------------------------------------------------- *)
 (* Low-level helpers                                                          *)
