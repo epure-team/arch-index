@@ -1,7 +1,7 @@
 {
   "task": "coverage-matrix",
   "mode": "fast",
-  "current_phase": "qa",
+  "current_phase": "ship",
   "events": [
     {
       "phase": "intake",
@@ -26,6 +26,12 @@
       "outcome": "GO",
       "reason": "Build clean, 105/105 tests. No spec exists (Fast mode) so Step 3 was substituted with independent fresh-fixture reverification outside the review round's own test files: Rust with no driver anywhere (not_analysed, correct instruction), Rust with only the driver stub planted (not_analysed naming the merge pass specifically - confirms the review round's two-gate HIGH fix holds), and a clean single-language OCaml project (exit 0 in both a would-be-gap and clean scenario - confirms the has_gap MEDIUM fix holds). All three independently reconfirm the review round's fixes. Cross-runtime QA skipped (breaker: codex degraded, unchanged since review).",
       "by": "roster-qa"
+    },
+    {
+      "phase": "ship",
+      "outcome": "COMPLETED",
+      "reason": "PR #57 merged (rebase-merge, 0c749c3). CI green on first attempt. Worktree/branch cleaned up post-merge.",
+      "by": "roster-ship"
     }
   ]
 }
