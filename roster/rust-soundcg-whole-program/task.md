@@ -1,0 +1,9 @@
+# Task — rust-soundcg-whole-program
+
+Item 4.3 / roadmap phase 4: make trait_impls_of whole-program rather than per-crate in the Rust sound-callgraph work.
+
+Background: an existing branch feat/rust-soundcg-a1+a2 is DO-NOT-MERGE with 5 CRITICAL findings from a prior review. The core one: trait_impls_of only sees the current crate's trait impls, so when analysis A2 (whatever A2 does) relies on trait_impls_of to resolve a trait method call, it silently misses implementations that live in other crates (downstream crates, or crates the current one depends on) — making A2 a net soundness regression for any trait that is visible/implementable outside the crate being analyzed, versus the pre-A2 baseline which presumably used a safer MAY_TOP fallback for such calls.
+
+Roadmap decision (already made 2026-09-02, not up for re-litigation): commit to whole-program analysis mode for trait_impls_of, rather than the alternative of keeping per-crate analysis and falling back to MAY_TOP for downstream-visible traits. This means trait_impls_of needs to be redesigned to gather trait impl information across all crates in the compilation/analysis unit, not just the current one.
+
+Full issue context and the branch's existing code should be investigated via `gh` and by reading the branch itself (available as a worktree at /mnt/ssd-external-2to/arch-index-wt-rust-a1 and /mnt/ssd-external-2to/arch-index-wt-rust-a2, or via `git log`/`git show` on branches feat/rust-soundcg-a1 and feat/rust-soundcg-a2 in /home/mathias/dev/arch-index). The existing branch's approach should be treated as a strong starting point to investigate, not discarded outright — re-derive correctness against it, per this session's established pattern for issue #41. The other 4 CRITICAL findings from the prior review (whatever they are — need to be discovered) must also be understood before a fix plan can be committed to, since some may interact with the whole-program-mode change.

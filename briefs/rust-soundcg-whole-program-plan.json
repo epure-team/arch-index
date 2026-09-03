@@ -1,0 +1,40 @@
+{
+  "task": "rust-soundcg-whole-program",
+  "mode": "full",
+  "schema_version": "1.0",
+  "steps": [
+    {
+      "id": "step-1",
+      "skill": "roster-implement",
+      "inputs": ["briefs/rust-soundcg-whole-program-implementer.md"],
+      "outputs": ["callgraph-rust/", "lib/arch_index/arch_load.ml"],
+      "hook": false
+    },
+    {
+      "id": "step-2",
+      "skill": "roster-review",
+      "inputs": ["briefs/rust-soundcg-whole-program-reviewer.md"],
+      "outputs": ["briefs/rust-soundcg-whole-program-review.json"],
+      "hook": false
+    },
+    {
+      "id": "step-3",
+      "skill": "roster-qa",
+      "inputs": ["briefs/rust-soundcg-whole-program-qa-scope.md"],
+      "outputs": ["briefs/rust-soundcg-whole-program-qa.md"],
+      "hook": false
+    },
+    {
+      "id": "step-4",
+      "skill": "roster-ship",
+      "inputs": ["briefs/rust-soundcg-whole-program-qa.md"],
+      "outputs": [],
+      "hook": false
+    }
+  ],
+  "quality_gates": {
+    "build": "cd callgraph-rust && RUSTC_BOOTSTRAP=1 cargo build --release",
+    "test": "./selftest-callgraph-rust.sh",
+    "lint": ""
+  }
+}

@@ -1,0 +1,10 @@
+{"schema_version":"1.0","ts":"2026-09-03T08:56:30.374Z","task":"rust-soundcg-whole-program","round":1,"cycle":1,"event":"normalizer","actor":"review-normalize.js","outcome":"ran"}
+{"schema_version":"1.0","ts":"2026-09-03T08:58:09.298Z","task":"rust-soundcg-whole-program","round":1,"cycle":1,"event":"scope-gate","actor":"check-scope-diff.sh","outcome":"skipped","detail":"no-manifest"}
+{"schema_version":"1.0","ts":"2026-09-03T08:58:09.322Z","task":"rust-soundcg-whole-program","round":1,"cycle":1,"event":"specialist","actor":"spec-compliance","outcome":"ran"}
+{"schema_version":"1.0","ts":"2026-09-03T08:58:09.349Z","task":"rust-soundcg-whole-program","round":1,"cycle":1,"event":"specialist","actor":"architect","outcome":"ran"}
+{"schema_version":"1.0","ts":"2026-09-03T08:58:09.370Z","task":"rust-soundcg-whole-program","round":1,"cycle":1,"event":"specialist","actor":"reviewer","outcome":"ran"}
+{"schema_version":"1.0","ts":"2026-09-03T08:58:09.391Z","task":"rust-soundcg-whole-program","round":1,"cycle":1,"event":"normalizer","actor":"review-normalize.js","outcome":"ran"}
+{"schema_version":"1.0","ts":"2026-09-03T12:33:08.645Z","task":"rust-soundcg-whole-program","round":1,"cycle":2,"event":"normalizer","actor":"review-normalize.js","outcome":"ran"}
+{"schema_version":"1.0","ts":"2026-09-03T12:33:21.646Z","task":"rust-soundcg-whole-program","round":1,"cycle":2,"event":"scope-gate","actor":"check-scope-diff.sh","outcome":"skipped","detail":"no-manifest"}
+{"schema_version":"1.0","ts":"2026-09-03T12:33:21.667Z","task":"rust-soundcg-whole-program","round":1,"cycle":2,"event":"specialist","actor":"spec-compliance","outcome":"ran"}
+{"schema_version":"1.0","ts":"2026-09-03T12:33:21.688Z","task":"rust-soundcg-whole-program","round":1,"cycle":2,"event":"specialist","actor":"reviewer","outcome":"ran"}

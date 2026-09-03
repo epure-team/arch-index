@@ -1,0 +1,80 @@
+{
+  "task": "rust-soundcg-whole-program",
+  "mode": "full",
+  "current_phase": "ship",
+  "events": [
+    {
+      "phase": "question",
+      "outcome": "COMPLETED",
+      "by": "roster-question"
+    },
+    {
+      "phase": "research",
+      "outcome": "COMPLETED",
+      "by": "roster-research"
+    },
+    {
+      "phase": "intake",
+      "outcome": "VALIDATED",
+      "by": "roster-intake"
+    },
+    {
+      "phase": "spec",
+      "outcome": "VALIDATED",
+      "by": "roster-spec"
+    },
+    {
+      "phase": "plan",
+      "outcome": "COMPLETED",
+      "by": "roster-plan"
+    },
+    {
+      "phase": "implement",
+      "outcome": "PARTIAL",
+      "reason": "US-1's single-crate MIR walker corrected and verified (4 CRITICALs + 2 HIGHs + several MEDIUM/LOW fixed and empirically tested against the real pinned toolchain), but US-2's whole-program merge pass, repo-integrated selftest fixtures, cross-producer naming check, scope guard automation, CI-wiring ticket, and accepted-residual README docs all remain \u2014 genuinely multi-day scope, deliberate checkpoint rather than budget exhaustion",
+      "by": "roster-implement"
+    },
+    {
+      "phase": "implement",
+      "outcome": "COMPLETED",
+      "reason": "US-2 merge pass built and verified against 5 repo-integrated multi-crate fixtures (sibling narrowing, blanket gate, missing-facts fallback, publish-boundary gate, and the spec's CHECK-4 flat-union hard requirement); README documents accepted residuals (RTA-union not implemented, whole-batch not per-trait missing-facts fallback \u2014 both flagged as deviations from the validated plan, not silently absorbed); repo-wide dune build+runtest clean; scope guard (CHECK-8) clean",
+      "by": "roster-implement"
+    },
+    {
+      "phase": "review",
+      "outcome": "GO",
+      "reason": "3 parallel specialists (spec-compliance, architect, reviewer) plus a mandatory cross-runtime pass (codex, degraded/non-conforming-output, contributed no findings) converged on the same CRITICAL root cause (cross-crate node-identity fragmentation: ordinary function/MUST-edge naming was crate-relative, only trait_impl_fact/x_dyn_* fields had been made crate-independent) plus 2 more CRITICALs (documented direct-pipe usage broken; publish-flag TOML scanner had a comment-parsing false-positive) and 1 HIGH (extern \"C\" symbol name dropped) plus 2 MEDIUM (TailCall terminator silently dropped; a vacuous test) and 1 LOW (non-cross-crate CHECK-5 fixture) — all fixed and empirically re-verified same round (ratchet-exempt, no loop-back needed). One MEDIUM residual (build-script name collision) and the missing-manifest scope-gate note accepted as documented, non-blocking. Convergence gate: no violations.",
+      "by": "roster-review"
+    },
+    {
+      "phase": "qa",
+      "outcome": "NO-GO",
+      "reason": "All deterministic gates pass (clean build 0.72s, 8/8 selftest scenarios, repo-wide dune build+test 89/89) and CHECK-4 (flat-union) independently reverified via raw SQL + arch-query against a fresh 4-crate fixture per the #41 precedent. CHECK-6 fails on the workspace-inheritance form: publish.workspace = true never resolves against [workspace.package] because source_crate_sets_publish_false's toml_publish_false call matches the literal substring \"true\" in \"publish.workspace = true\" and returns before the dedicated inheritance-walk code (toml_key_is_workspace_true) ever runs — dead code, confirmed by direct fixture test. Precision-only (still conservative, no soundness violation), but this is the single most common real-world Cargo publish=false idiom and QA's own scope brief named this exact case to verify — not incidental. Return to /roster-implement.",
+      "by": "roster-qa"
+    },
+    {
+      "phase": "implement",
+      "outcome": "COMPLETED",
+      "reason": "Fixed the publish.workspace=true inheritance dead-code bug QA found (CHECK-6). Also fixed, in the same commit, a comment-parsing false-positive CRITICAL that the prior review round's verdict had incorrectly marked RESOLVED without the code edit ever having been applied — caught while re-reading the same function. Both verified against fresh fixtures and folded into selftest-callgraph-rust.sh as permanent regressions (scenarios 9-10, 10/10 passing). Repo-wide dune build+runtest clean, scope guard clean.",
+      "by": "roster-implement"
+    },
+    {
+      "phase": "review",
+      "outcome": "GO",
+      "reason": "Loop-back review cycle 2 after QA's NO-GO. reviewer + spec-compliance specialists (architect skipped, blast radius <=3 files) plus cross-runtime (codex, degraded/non-conforming-output again, no findings). spec-compliance found nothing (both fixes independently re-verified as genuinely applied in code). reviewer found 1 more HIGH in the same TOML-scanning function family (publish=[\"registry\"] array form misread via the same substring-matching pattern) — fixed same round with exact-value comparison, applied consistently to both TOML helpers. 1 LOW (self-referential single-manifest workspace) accepted as a documented, safe-direction-only residual. All verified with fresh fixtures, folded into selftest-callgraph-rust.sh (11/11). Convergence gate: no violations.",
+      "by": "roster-review"
+    },
+    {
+      "phase": "qa",
+      "outcome": "GO",
+      "reason": "Round 2. All gates pass (clean build 0.74s, 11/11 selftest scenarios, repo-wide 89/89). CHECK-6 independently reverified with a fresh workspace-inheritance fixture (publish_false: true, confirmed genuinely fixed). CHECK-1/2/3/4/5/7/8/9 unaffected by this round's diff, carried forward from round-1 independent verification. qa_no_go_round reset to 0/5.",
+      "by": "roster-qa"
+    },
+    {
+      "phase": "ship",
+      "outcome": "COMPLETED",
+      "reason": "PR #52 merged via rebase merge (9032b2d), remote branch deleted. Local worktree and branch cleaned up.",
+      "by": "roster-ship"
+    }
+  ]
+}
