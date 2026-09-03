@@ -1,0 +1,57 @@
+Project root: /home/mathias/dev/tezos/tezos
+Scanning /home/mathias/dev/tezos/tezos/_build/default/src/proto_alpha/lib_protocol for .cmt/.cmti files...
+Found 499 .cmt and 267 .cmti files
+Found 5497 exposed names, 1906 doc comments
+Backed up 0 module intents, 0 function intents, 0 type intents
+Resolving 73588 pending calls...
+Inserted 73588 calls (26693 resolved to known functions)
+Resolving 746 module dependencies...
+Inserted 746 module deps (429 resolved to known modules)
+Resolving 48278 type usages...
+Inserted 48278 type usages (6434 resolved to known types)
+
+Done! Indexed:
+  468 modules
+  14452 functions
+  1177 types (1274 record fields, 1254 variant constructors)
+  73588 calls (26693 resolved)
+  746 module deps (429 resolved)
+  48278 type usages (6434 resolved)
+Database: /mnt/ssd-external-2to/arch-index-runs/proto-alpha-exn.db
+Indexed: 468 modules, 14452 functions, 1177 types, 73588 calls
+index exit 0 (3s)
+== exn-stats
+nodes|14452
+bounded|3436 (23.8%)
+unbounded|11016 (76.2%)
+unbounded.external|3273
+unbounded.may_top_edge|7743
+origins|1219
+escaping_origins|1219
+scopes|18
+fixpoint_seconds|0.378
+stats exit 0 (1s)
+== exn-stats --assume-externals-pure
+hypothesis: externals_pure — callees outside the index assumed not to raise
+nodes|14452
+bounded|6705 (46.4%)
+unbounded|7747 (53.6%)
+unbounded.may_top_edge|7743
+unbounded.unknown_exn_value|4
+origins|1219
+escaping_origins|1219
+scopes|18
+fixpoint_seconds|0.175
+== origins by form
+assert|585
+compare|262
+division|150
+failwith|58
+index|124
+invalid_arg|14
+raise|20
+reraise|1
+unknown|5
+scopes|18
+links|35
+rebinds|6
