@@ -365,11 +365,28 @@ Honest limits, so nobody reads more into a verdict than it carries:
 
   Without `--errors-strict` the run exits 0 and those declarations are simply inert; the misses
   are listed in `comment_db_meta.error_config_unmatched`.
-- **Arm order is not considered.** A closing arm subtracts what it catches even when an *earlier*
-  arm re-returns the same identity — `match f () with Error A -> Error A | Error A | Error B -> Ok 0`
-  reports `{B, …}` where `A` is still reachable. This under-reports, which is the unsafe direction,
-  so it is worth knowing: reaching it needs a redundant match (OCaml's `Warning 11` fires on every
-  shape that triggers it), and the non-redundant guarded variant is handled correctly.
+- **Arm order is not considered, and the worst case compiles without a warning.** A closing arm
+  subtracts what it catches even when an *earlier* arm lets that same value through. The sharpest
+  shape is a guarded arm that returns the scrutinee unchanged:
+
+  ```ocaml
+  match multi n with
+  | (Error A as z) when n > 5 -> z          (* A escapes here whenever n > 5 *)
+  | Error A | Error C -> Ok 0
+  | r -> r
+  ```
+
+  reports `{B}` where the truth is `{A, B}` — **a reachable error is dropped from the answer**,
+  which is the unsound direction. Nothing flags it: at default settings this compiles silently
+  (only `Warning 4 [fragile-match]`, off by default, fires under `-w +A`; there is no `Warning 11`
+  and no `Warning 12`). The unguarded pass-through variant under-reports the same way and does at
+  least raise `Warning 12 [redundant-subpat]`.
+
+  This is **pre-existing and independent of or-patterns** — on a build without arm-level
+  or-pattern support, a guarded non-or arm already loses `A` the same way. What or-pattern support
+  changes is the *scope*: one more syntactic form now reaches the same blind spot. That is the
+  unavoidable price of making arm-level disjunctions close at all, not a defect introduced by it.
+  Pinned as a characterisation test (`rr_guarded_passthrough`), so a future fix has to notice it.
 - **A profile's rule cannot be removed, only added to.** Declaring an existing channel *extends*
   it field by field, which is what lets a profile add vocabulary to a built-in without restating
   it — but it also means a user cannot drop a rule a profile got wrong; they can only add. No

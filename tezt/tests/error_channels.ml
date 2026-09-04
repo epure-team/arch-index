@@ -155,6 +155,32 @@ let or_binding_repropagates n =
 let or_mixed n =
   match multi n with Error A | exception Not_found -> Ok 0 | r -> r
 
+(* PINNED LIMITATION, not a passing test looking for a bug.
+
+   Arm order is not considered: a closing arm subtracts what it catches even
+   when an EARLIER arm lets that same value through. Here [A] escapes via the
+   guarded first arm whenever [n > 5], and the second arm subtracts it anyway,
+   so the reported set is {B} where the truth is {A, B} — a reachable error
+   dropped, the unsound direction.
+
+   Pinned rather than described because the description has now been wrong
+   twice. The first attempt claimed the whole shape did not exist; the second
+   gave an example the analysis handles CORRECTLY (an earlier arm that
+   RE-CONSTRUCTS `Error A` re-mints A as a direct origin, so it comes back
+   after the subtraction) and claimed a redundant match and Warning 11 were
+   needed. Measured: this compiles clean at default warnings — only
+   Warning 4 [fragile-match], off by default, under -w +A. No Warning 11, no
+   Warning 12. So the unsafe case is reachable from code that compiles
+   silently, the opposite of what was claimed.
+
+   The blindness is PRE-EXISTING and independent of or-patterns (a guarded
+   non-or arm loses A the same way without this feature). Arm-level or-pattern
+   support extends its SCOPE by one syntactic form, which is the price of
+   making those arms close at all. When someone fixes arm ordering, this test
+   fails and makes them decide knowingly. *)
+let rr_guarded_passthrough n =
+  match multi n with (Error A as z) when n > 5 -> z | Error A | Error C -> Ok 0 | r -> r
+
 exception Boom of int
 
 let boom_raiser n = if n = 0 then raise (Boom 0) else raise (Boom 1)
@@ -449,16 +475,30 @@ let register_query () =
       Batch.contains b
         ~msg:"US-2.17b a GUARDED arm-level or-pattern closes nothing (the arm may not run)"
         ~haystack:(may_fail "myres" "or_guarded") "BOUNDED: {Ec_a.A, Ec_a.B, Ec_a.C}" ;
-      (* [B] is matched by the first alternative but RE-RETURNED by the
-         right-hand side, so it is still reachable through the arm; [Wrap] is
-         matched only when its argument is [B x], a constrained argument, so it
-         is not closed either. Nothing may be subtracted. *)
+      (* Nothing may be subtracted, and for ONE reason, not two: the
+         right-hand side RE-RETURNS [Error (B x)], so the arm is not closing at
+         all. That is what protects both identities. An earlier version of this
+         comment said [Wrap] survives because [B x] "constrains" the argument —
+         wrong: [B x] BINDS, it does not constrain, and an irrefutable binder
+         is exactly what does NOT narrow a constructor pattern. *)
       Batch.contains b
         ~msg:"US-2.17b an or-arm whose rhs re-returns what it matched does not subtract it"
         ~haystack:(may_fail "myres" "or_binding_repropagates") "BOUNDED: {Ec_a.B, Ec_a.Wrap}" ;
       Batch.contains b
         ~msg:"US-2.17b a mixed value/exception or-arm closes only its value alternative"
         ~haystack:(may_fail "myres" "or_mixed") "BOUNDED: {Ec_a.B, Ec_a.C}" ;
+      (* …and the OTHER half of the same property, which the comment stated but
+         nothing asserted: the exception alternative closes on the exception
+         channel. Stating a property in both directions and testing one of them
+         is how a half-true claim survives review. *)
+      Batch.contains b
+        ~msg:"US-2.17b …and its exception alternative closes on the exception channel"
+        ~haystack:(may_fail "exception" "or_mixed") "BOUNDED: {}" ;
+      (* PINNED LIMITATION: arm order is not considered. {B} is what the tool
+         answers; {Ec_a.A, Ec_a.B} is the truth. See rr_guarded_passthrough. *)
+      Batch.contains b
+        ~msg:"pinned: a guarded pass-through arm loses an identity a later arm closes"
+        ~haystack:(may_fail "myres" "rr_guarded_passthrough") "BOUNDED: {Ec_a.B}" ;
       Batch.contains b ~msg:"US-2.14 multi can fail with all three identities"
         ~haystack:(may_fail "myres" "multi") "BOUNDED: {Ec_a.A, Ec_a.B, Ec_a.C}" ;
       Batch.contains b ~msg:"US-2.14 an or-pattern of two literals closes BOTH, only C survives"
