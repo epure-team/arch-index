@@ -58,7 +58,9 @@ Subcommands:
                                root, a self-contained module under ':*', a recursive root) says
                                NOTHING TRAVERSED — note it may still report unresolved and ⊤
                                edges, which are edges it could not follow. Each row is marked MUST
-                               (definite call path) or MAY. An ambiguous root is REFUSED with
+                               (the root itself, or a definite call path from it) or MAY —
+                               under ':*' every member of the module IS a root, so an origin in a
+                               function nothing calls is still MUST. An ambiguous root is REFUSED with
                                its candidates listed; a root whose path does not align on a '/'
                                boundary is REFUSED as unmatched (there is nothing to list).
                                CHANNEL: origins are recorded per error channel and this command
@@ -538,13 +540,37 @@ let () =
                 "SELECT DISTINCT channel FROM exn_origins ORDER BY 1" ()
               |> List.filter_map (function c :: _ -> Some (Arch_db.string_of_cell c) | [] -> None)
             in
-            if channels_present <> [] && not (List.mem channel channels_present) then
-              die 3
-                (Printf.sprintf
-                   "arch-query: REFUSED — no origin in this index is on channel '%s'. \
-                    Channels present: %s. Answering with an empty table would read as \
-                    'nothing found' when the truth is 'nothing looked at'."
-                   channel (String.concat ", " channels_present)) ;
+            (* The guard is UNCONDITIONAL on the caller's value, and that matters
+               twice.
+
+               It used to short-circuit when [channels_present] was empty — an
+               exn_origins table that exists but holds no row, which a producer
+               that created the schema and wrote nothing leaves behind. On that
+               input ANY string was accepted and echoed back as authoritative:
+               [--channel totally_bogus] printed a scope line naming it, exit 0.
+               That is precisely the "empty table reads as NOTHING FOUND when
+               the truth is NOTHING LOOKED AT" this guard exists to prevent,
+               switched off on the one input where it is most needed.
+
+               And it is the only validation between a caller string and the
+               SQL. The value is interpolated, so refusing anything the index
+               does not itself report means no unvalidated text reaches the
+               query — better than escaping, because the accepted set is now
+               exactly what the data contains. *)
+            let channel_all = channel = "all" in
+            if not channel_all then
+              if channels_present = [] then
+                die 3
+                  "arch-query: REFUSED — this index records no exception origin at all \
+                   (exn_origins is empty), so no channel can be reported. An empty table \
+                   here would read as 'nothing found' when the truth is 'nothing recorded'."
+              else if not (List.mem channel channels_present) then
+                die 3
+                  (Printf.sprintf
+                     "arch-query: REFUSED — no origin in this index is on channel '%s'. \
+                      Channels present: %s (or 'all'). Answering with an empty table would \
+                      read as 'nothing found' when the truth is 'nothing looked at'."
+                     channel (String.concat ", " channels_present)) ;
             (* [escapes=1] is kept and is CURRENTLY VACUOUS: every one of the
                30526 exn_origins rows on proto_alpha has escapes=1, so it
                selects nothing today. It stays because it states the intended
@@ -842,7 +868,7 @@ let () =
                    WHERE o.function_id IN (SELECT id FROM reach)\n\
                   \  AND o.escapes=1 AND o.channel=%s AND o.form IN (%s)\n\
                    ORDER BY o.form, m.path, o.line"
-                  ("'" ^ String.concat "" (String.split_on_char '\'' channel) ^ "'")
+                  (if channel_all then "o.channel" else "'" ^ channel ^ "'")
                   forms_sql)
               (path_pat, root_name, root_name)
         | "fan-in" ->

@@ -117,6 +117,39 @@ let coverage out =
          match digits with n :: u :: t :: _ -> (n, u, t) | _ -> (-1, -1, -1))
   |> Option.value ~default:(-1, -1, -1)
 
+(* A fixture with origins on TWO channels, same form on both.
+
+   Round 5: the channel filter was disclosed and never verified. The tests
+   pinned that the banner NAMES a channel and that an absent one is refused —
+   both true of a build with the filter deleted. Neutralising the SQL predicate
+   (`AND (o.channel = ? OR 1)`) left all six green, because `fixture_files`
+   produces origins on one channel only, so no test COULD discriminate.
+
+   That is round 3 again one level out: the assertion was on a proxy (the
+   banner's text) instead of on the claim (which rows come back). Same cause,
+   same cure — a fixture that can tell the two apart.
+
+   Both origins are form 'raise' on purpose: if they differed by form, --forms
+   alone would separate them and the test would pass with the channel filter
+   gone. *)
+let two_channel_files =
+  [
+    Fixture.dune_project;
+    ( "dune",
+      "(library\n\
+      \ (name eo_chan_fixture)\n\
+      \ (wrapped false)\n\
+      \ (modules eo_chan)\n\
+      \ (flags (:standard -w -8-11-21-26-27-32-33-37-39)))\n" );
+    ( "eo_chan.ml",
+      {|exception Boom
+let ex_origin n = if n > 0 then raise Boom else n
+let opt_origin n : int option = if n > 0 then None else Some n
+let opt_get n = Option.get (opt_origin n)
+let entry n = ex_origin n + opt_get n
+|} );
+  ]
+
 let run ?(fmt = "list") db args =
   Arch_tezt.run_command
     ~env:[("ARCH_QUERY_FORMAT", fmt)]
@@ -439,8 +472,67 @@ let register_not_analysed () =
         (not (Arch_tezt.contains ~needle:"WITH RECURSIVE" out))) ;
   Lwt.return_unit
 
+let register_channel_filter () =
+  Test.register ~__FILE__
+    ~title:"escaping-origins: the reported channel is the one queried, both ways"
+    ~tags:["cmt"; "query"; "exn"; "origins"; "channel"]
+  @@ fun () ->
+  with_fixture ~name:"eo_chan" ~files:two_channel_files @@ fun fixture ->
+  let db = Arch_tezt.temp_db "eo_chan" in
+  let code, output = Arch_tezt.index_raw_into ~db fixture in
+  if code <> 0 then Test.fail "index failed (exit %d):\n%s" code output ;
+  let _, out_default = run db ["--roots"; "eo_chan.ml:*"; "--forms"; "raise"] in
+  let _, out_option =
+    run db ["--roots"; "eo_chan.ml:*"; "--forms"; "raise"; "--channel"; "option"]
+  in
+  let _, out_all = run db ["--roots"; "eo_chan.ml:*"; "--forms"; "raise"; "--channel"; "all"] in
+  let has n o = Arch_tezt.contains ~needle:n o in
+  Batch.run (fun b ->
+      (* Premise: the fixture really does record on both channels. Without this
+         every exclusion below could hold vacuously. *)
+      Batch.check b
+        ~msg:"premise: the fixture records origins on BOTH channels"
+        (has "ex_origin" out_all && has "opt_origin" out_all) ;
+      (* The claim, in both directions. Either half alone survives a mutant that
+         neutralises the predicate: only the EXCLUSIONS have teeth. *)
+      Batch.check b
+        ~msg:("the default channel includes its own origin:\n" ^ out_default)
+        (has "ex_origin" out_default) ;
+      Batch.check b
+        ~msg:("...and EXCLUDES the option-channel origin:\n" ^ out_default)
+        (not (has "opt_origin" out_default)) ;
+      Batch.check b
+        ~msg:("--channel option includes the option origin:\n" ^ out_option)
+        (has "opt_origin" out_option) ;
+      Batch.check b
+        ~msg:("...and EXCLUDES the exception-channel origin:\n" ^ out_option)
+        (not (has "ex_origin" out_option)) ;
+      (* MEDIUM-1: an exn_origins table that EXISTS but is empty must not let an
+         arbitrary channel name through and be echoed back as authoritative. *)
+      let empty_db = Arch_tezt.temp_db "eo_chan_empty" in
+      if Sys.file_exists empty_db then Sys.remove empty_db ;
+      Db.with_db_rw empty_db (fun conn ->
+          Db.exec conn
+            "CREATE TABLE modules(id INTEGER PRIMARY KEY, path TEXT);\n\
+             CREATE TABLE functions(id INTEGER PRIMARY KEY, name TEXT, module_id INT);\n\
+             CREATE TABLE calls(caller_id INT, callee_id INT, kind TEXT);\n\
+             CREATE TABLE exn_origins(id INTEGER PRIMARY KEY, function_id INT, form TEXT,\n\
+             exn_path TEXT, escapes INT, line INT, col INT, channel TEXT);\n\
+             CREATE TABLE comment_db_meta(key TEXT PRIMARY KEY, value TEXT);\n\
+             INSERT INTO comment_db_meta VALUES('callgraph_contract','v1');\n\
+             INSERT INTO modules VALUES(1,'a.ml');\n\
+             INSERT INTO functions VALUES(1,'f',1);") ;
+      let c_bogus, out_bogus = run empty_db ["--roots"; "a.ml:f"; "--channel"; "totally_bogus"] in
+      Batch.eq_int b
+        ~msg:"an EMPTY origin table does not wave an arbitrary channel through" c_bogus 3 ;
+      Batch.check b
+        ~msg:("...and does not echo the bogus channel as authoritative:\n" ^ out_bogus)
+        (not (has "channel totally_bogus" out_bogus))) ;
+  Lwt.return_unit
+
 let register () =
   register_surface () ;
+  register_channel_filter () ;
   register_root_anchoring () ;
   register_nothing_traversed () ;
   register_not_analysed () ;
