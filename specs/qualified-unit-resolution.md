@@ -7,18 +7,6 @@ see §11)
 **Intake:** `briefs/qualified-unit-resolution-intake.md`
 **Research:** `briefs/qualified-unit-resolution-research.md`
 
-**Relationship to `specs/sound-qualified-name-resolution.md`** (added round-5 review, to settle
-which document governs what after the two were found to contradict each other on the alias/facade
-case): THIS file is the descriptive account of what the resolver actually implements —
-`unit_readings`, `facade_readings`, the anchor gate, the 1 / 2+ / 0 arbitration rule, and the
-disclosed residuals (§10 below). `sound-qualified-name-resolution.md` is the adversarial GWT spec
-that states the property (P1/P2/P3) and the scenarios/falsifiers a change must satisfy; its S3 was
-amended by roadmap 1.6 to match the arbitration rule this file describes — see that file's S3
-status note for the amendment and why it is not a violation. When the two disagree on a POINT OF
-FACT about the code, this file wins (it is verified against source, per §2); when they disagree on
-what SHOULD be required, the other file's GWT scenarios and falsifiers win, and this file's §10
-residuals should be read as the current, disclosed gap against those requirements.
-
 ## 1. Problem
 
 A qualified call resolves by walking the dotted name and looking up each **bare segment** in a
@@ -418,6 +406,36 @@ rule that has become unprovable, which is the state three of the four are in.
 violated` into "0 failing" is not a summary, it is the loss of the distinction the tool exists to
 draw — and it fails in the reassuring direction, which is why it survived being repeated for a
 whole session. Report `1 proved / 3 UNKNOWN / 0 violations`.
+
+### 10.6 A check that looks like a check
+
+`arch-index-0e`'s generalisation, and the most expensive family identified in this work: a control
+that passes review **as proof** while testing nothing. Five instances, all found in one day, three
+of them in tooling built to catch exactly this:
+
+| where | why it wasn't a check |
+|---|---|
+| `or_mixed`'s exception assertion (#65) | its scrutinee cannot raise, so `BOUNDED: {}` held whether or not the arm closed — removing the exception channel's or-flattening **entirely** left the suite 130/130 green |
+| the exception channel's or-flattening itself | zero coverage, so deleting the precedent the whole PR argued from was a silent no-op |
+| `recalibrate.sh`'s golden write (#64) | round 2 moved the write to a scratch file and moved the verification with it, so an unchecked `mv` printed `✓ WROTE … byte-identical` and exited 0 having written nothing |
+| `metric_well_formed` (#64) | the guard between a silently-failed query and a written constant, stubbed to `return 0`, left `--self-test` reporting "all cases pass" |
+| scenarios E and G (roadmap 1.6) | asserted `dir = None \|\| dir = Some "inca"` without constraining `kind`, so they **blessed** a `MUST` with a NULL callee into an indexed unit — the shape the same file calls "a resolver miss dressed as a proven external leaf" |
+
+The common shape is not a wrong assertion. It is an assertion whose expected value is **also what a
+broken implementation produces** — `{}`, the full set, `None`, "current" — so it is satisfied by
+absence. Review does not catch it, because reading it tells you what it *intends*; only running it
+against a broken implementation tells you what it *detects*. And it is worse than no check, because
+it occupies the slot where a real one would have gone.
+
+**Rule:** for every assertion, name the mutation that makes it fail. If you cannot name one, it is
+not a check. Then apply it — break exactly what the assertion claims to cover and watch it fall.
+Suspect any expected value that a broken analysis also yields: an empty set, a full set, a `None`,
+a "no change".
+
+This is why red-then-green is not a nicety here. A characterisation test on already-correct
+behaviour has no natural red, so the red has to be **manufactured**: that is the only step that
+distinguishes "I derived this by hand" — a claim about the author's process — from evidence in the
+repository.
 
 ## 11. Errors in v1 of this spec, corrected here
 
