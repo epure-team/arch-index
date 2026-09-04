@@ -51,11 +51,10 @@
 #   scripts/recalibrate.sh --write          attribute, then write what is safe
 #   scripts/recalibrate.sh --explain        print the 2x2 and change nothing.
 #                                           Exits 0 even when STALE, but 2 on a
-#                                           DEGRADED cell: a measurement that did
-#                                           not happen is not a verdict, in any mode.
-#                                           (always exits 0, even when STALE —
-#                                           it is a report, not a gate; use
-#                                           --check for the enforced exit code)
+#                                           DEGRADED or IMPLAUSIBLE measurement:
+#                                           a measurement that did not happen is
+#                                           not a verdict, in any mode. Use
+#                                           --check for the enforced stale code.
 #   scripts/recalibrate.sh --self-test      exercise classify()/is_int() only;
 #                                           instant, needs no build or repo state
 #
@@ -120,20 +119,79 @@ if [ -z "$MODE" ]; then
 fi
 
 # ---------------------------------------------------------------------------
-# the verdict, as a pure function of the four cells
+# pure logic — everything --self-test can drive without a build or a repository
 # ---------------------------------------------------------------------------
-# Kept separate from the measuring so it can be exercised directly (--self-test).
-# The INTERACTION arm is unreachable from any branch in this repository today —
-# it needs a producer change that is inert on the old corpus and live on the new
-# one — and an arm that has never been seen fire is an arm nobody should trust.
+# Round 6 mutation-tested the shipped script and SEVEN mutants survived, every
+# one of them outside this section as it then stood: the write-verification read
+# (the entire subject of the previous commit), the PINNED integrity gate added
+# the commit before that, the headroom gate, the golden PINNED gate, the ratchet
+# loosening guard, bump_status's degraded arm, and the degraded-cell loop. The
+# untested region was precisely the region every shipped defect has lived in.
 #
-#   SOURCE_ONLY  both binaries agree on both corpora: only the code moved.
-#   BEHAVIOURAL  they disagree on the OLD corpus: the analysis itself changed.
-#   INTERACTION  they agree on the old corpus and disagree on the new one.
-#   DEGRADED     all four cells are empty: nothing was measured at all, not
-#                that everything agreed. Caught here as a defensive second
-#                layer; the main loop below also rejects a per-cell empty or
-#                malformed measurement before it ever reaches classify().
+# So the decisions were pulled OUT of the measuring loop and into named
+# functions above the --self-test dispatch. Nothing here touches the network,
+# the build, sqlite3, or $REPO_ROOT; every file any of it reads is passed in as
+# an argument, so --self-test drives all of it against temp fixtures.
+
+# A measured or pinned value is only comparable as a number if it IS one — and
+# "is a number" must mean "a number $(( )) evaluates the way a reader reads it",
+# not "a string of digits". `08` passed the old digits-only test and then made
+# the arithmetic comparison ABORT: bash reads a leading zero as octal, so
+# `$(( 08 + 25 ))` fails with "value too great for base", the whole if/elif/else
+# is skipped, NO arm runs, and CURRENT silently keeps whatever it held before.
+# §10.6's shape exactly — the guard's accepted set was wider than its consumer's
+# — and the self-test asserted the wrong half of it, pinning `00` as a pass.
+is_int() {
+  case "${1:-}" in
+    0) return 0 ;;
+    ''|*[!0-9]*|0*) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
+# ONE reader for every `let <name> = <int>` this tool reads out of OCaml source.
+# The file had three spellings of this read and two were anchored; the third was
+# not, and it was the one whose value enters the arithmetic.
+#
+# Anchoring is not cosmetic. `let headroom = 1_000` is legal OCaml meaning 1000;
+# an unanchored `\([0-9]\+\).*` reads it as **1**, is_int accepts 1, and the band
+# silently narrows from +/-1000 to +/-1 with no refusal and no diagnostic.
+# Measured on the shipped script: pin 400 with `headroom = 1_000` made
+# `--write --only ceiling` rewrite 400 -> 340 and report success, when 340 is
+# inside the real band and nothing should have been written at all.
+#
+# And a read that matches TWICE is a defect, not something to take the first of:
+# the old `| head -1` silently picked one of two contradictory definitions.
+# Multi-match returns failure here, which the degradedness gate reports as an
+# unreadable pin rather than resolving it by guess.
+#   status 0  a single readable definition, echoed
+#   status 1  no definition this reader accepts
+#   status 2  defined more than once — a contradiction, not a choice
+#
+# The two statuses are distinct DELIBERATELY, and the story is worth recording
+# because it is this review's own recurring finding, committed while fixing it.
+# The first version of this function ended:
+#
+#     [ "$n" -eq 1 ] || return 1
+#     is_int "$out" || return 1
+#
+# and the multi-match conjunct was DEAD: two matches make $out a two-LINE
+# string, `is_int` rejects it for containing a newline, and `[ "$n" -eq 1 ]`
+# therefore decided nothing on its own. Mutation-testing this file caught it —
+# widening `-eq 1` to `-ge 1` left --self-test fully green. That is MEDIUM-2's
+# finding exactly: a conjunct kept for comfort behind a justification that does
+# not hold. It is not deleted but made LIVE, because "defined twice" and
+# "unreadable" are different defects with different fixes and the caller says so
+# in its diagnostic; --self-test pins both status codes.
+read_pinned_int() {
+  local file="$1" name="$2" out n
+  out="$(sed -n "s/^let $name = \([0-9]\+\)[[:space:]]*\$/\1/p" "$file" 2>/dev/null)"
+  n="$(printf '%s\n' "$out" | grep -c '[^[:space:]]')"
+  [ "$n" -le 1 ] || return 2
+  is_int "$out" || return 1
+  printf '%s\n' "$out"
+}
+
 # A cell is well-formed for a metric when it is USABLE as that metric's value,
 # not merely non-empty-as-a-string. is_int alone would do for the ratchet, but
 # the golden is multi-line free text — "is an integer" is the wrong question
@@ -143,24 +201,36 @@ fi
 # underlying query returned nothing (e.g. a renamed column) instead of erroring
 # loudly. Applied to every one of A/B/C/D, before classify() and before the
 # currency comparison, in every mode: a degraded cell must never reach either.
+#
+# WELL-FORMED IS NOT ADEQUATE. This answers "could this be a value?", never "is
+# this a measurement?" — `0` is a perfectly well-formed ceiling. The adequacy
+# and plausibility gates below answer the second question, and they exist
+# because this one was being read as though it already did.
 metric_well_formed() {
   local metric="$1" val="$2"
   # No separate non-empty guard: it is dead. `is_int ""` already returns 1, an
   # empty golden yields 0 matching lines against a required 3, and an unknown
   # metric falls to the catch-all. Round 5 found it as a surviving mutant —
-  # removing it changed nothing — and a surviving mutant on a line that cannot
-  # affect the outcome means the line, not the test, is the defect. Same call
-  # as round 4's trailing-label conjunct, one line up.
+  # removing it changed nothing — and for THIS line that reasoning is sound;
+  # round 6 re-derived it independently. (For its sibling one arm down, it was
+  # not: see the correction there.)
   case "$metric" in
     ceiling) is_int "$val" ;;
     golden)
-      # Arity is the whole check. Round 5 found five surviving mutants here,
-      # including that round 4's own trailing-label conjunct was DEAD: the
-      # count already rejects an empty value (it yields 2 lines, not 3), so
-      # all three golden reject-cases were discriminated by the count alone.
-      # A guard cited in specs/qualified-unit-resolution.md §10.6 as an
-      # instance of "a check that looks like a check" is the last place a
-      # dead conjunct belongs, so it is gone rather than kept for comfort.
+      # Arity is the whole check.
+      #
+      # CORRECTION, round 6. The comment that stood here claimed round 4's
+      # trailing-label conjunct had been DEAD, citing round 5's surviving mutant
+      # as the evidence. Review disproved it by running the round-4 code both
+      # ways on `modules: 23 / functions: 781 / calls: 5068 / extra:`
+      # (lines=3, total=4): conjunct PRESENT rejects, conjunct DELETED accepts.
+      # The conjunct was LIVE. Deleting it is still correct, because the
+      # `[ "$total" -eq 3 ]` added in the same edit strictly dominates it — but
+      # the recorded reason was false, and it inverted round 5's own lesson: a
+      # surviving mutant means the TEST did not cover the line, never that the
+      # line is dead. Corrected in place rather than quietly dropped, because a
+      # false justification in a comment is §10.3's failure mode exactly — it is
+      # read as evidence by people who cannot re-run it.
       #
       # The regex is anchored and lower-case-only ON PURPOSE: CI compares
       # exactly the three lines `modules:`/`functions:`/`calls:` that
@@ -175,9 +245,6 @@ metric_well_formed() {
   esac
 }
 
-# A measured or pinned value is only comparable as a number if it IS one.
-is_int() { case "${1:-}" in ''|*[!0-9]*) return 1 ;; *) return 0 ;; esac; }
-
 classify() {
   local a="$1" b="$2" c="$3" d="$4"
   # All four cells empty is not "the binaries and corpora all agree" — it is
@@ -187,11 +254,211 @@ classify() {
   # it: "" = "" on all four marginals. A single cell being empty is still
   # informative (something differs from something else) and is left to
   # BEHAVIOURAL/INTERACTION below; only total failure is special-cased here.
+  #
+  # This arm only ever caught the EMPTY degeneracy. The far commoner one is
+  # A=B=C=D=0, which is not empty, is not caught here, and is the cleanest
+  # possible SOURCE_ONLY — see plausibility_failures below for that one.
   if [ -z "$a" ] && [ -z "$b" ] && [ -z "$c" ] && [ -z "$d" ]; then echo DEGRADED
   elif [ "$a" != "$b" ]; then echo BEHAVIOURAL
   elif [ "$c" != "$d" ]; then echo INTERACTION
   else echo SOURCE_ONLY
   fi
+}
+
+# ---------------------------------------------------------------------------
+# adequacy — the gate between a degenerate-but-integer number and a write
+# ---------------------------------------------------------------------------
+# THE HOLE THIS CLOSES. A query that succeeds but matches nothing returns `0`,
+# not an error. sqlite3 prints nothing on stderr, so QERR stays empty and the
+# degraded arm never fires; `0` is an integer, so metric_well_formed accepts it;
+# and A=B=C=D=0 is the cleanest possible SOURCE_ONLY attribution. Reproduced in
+# review by editing the ceiling predicate to simulate a column rename that still
+# returns a number — the shape this file's own comment calls frequent here:
+#
+#     -  AND callee_name NOT LIKE 'Stdlib.%'
+#     +  AND callee_name LIKE 'ZzzNoSuchModule.%'
+#     => A=B=C=D=0, "attributable to source change only",
+#        "TIGHTENED clean_measured 347 -> 0 (installed file re-read and
+#        confirmed)", exit 0.
+#
+# The same hole on the golden left the CHANGE DETECTOR reading
+# `modules: 0 / functions: 0 / calls: 0`, "installed file verified
+# byte-identical", exit 0.
+#
+# AND THIS IS WHY "A TIGHTEN IS ALWAYS SAFE" IS FALSE. That axiom is about
+# DIRECTION and says nothing about MAGNITUDE — but every way a measurement can
+# silently break (a renamed column, a renamed table, a predicate that stops
+# matching, an under-built corpus) moves the number DOWN, into the direction the
+# axiom calls always-safe. So a broken run and a spectacular win have the same
+# shape, only magnitude separates them, and the axiom routes the broken one
+# straight to a write. A tighten is safe for the INVARIANT and destructive for
+# the CONSTANT: `clean_measured = 0` cannot fail CI, and it also cannot ever
+# catch anything again.
+#
+# Two independent floors, because they catch different things and neither
+# subsumes the other:
+#
+#   relative  every component must be at least 1/PLAUSIBILITY_DEN of what is
+#             pinned. Needs no invented constant and cannot go stale. Catches
+#             the degeneracies above, where the corpus is fine and the QUERY is
+#             broken.
+#   absolute  the corpus itself must contain enough to have been measured at
+#             all. Catches the shape the relative floor cannot — an under-built
+#             tree, where nothing was there to count. Mirrored from
+#             must_null_ceiling.ml's own [min_total_calls] rather than invented
+#             here; see the read of it in the loop below.
+#
+# Neither is a judgement that a large drop is WRONG. It is a judgement that a
+# large drop is not a SCRIPT'S to absorb: --write refuses and prints the table,
+# and a human recalibrates by hand with a recorded reason — the same contract
+# the BEHAVIOURAL arm has always had.
+PLAUSIBILITY_DEN=2
+
+# Echoes one line per implausible component; empty output means plausible.
+# Components are matched by LABEL, not by line order: pairing the golden's three
+# lines positionally would silently compare modules against functions the day a
+# line is added or reordered.
+plausibility_failures() {
+  local metric="$1" measured="$2" pinned="$3"
+  case "$metric" in
+    ceiling)
+      if ! is_int "$measured" || ! is_int "$pinned"; then
+        echo "ceiling: unreadable (measured='$measured' pinned='$pinned')"
+        return 0
+      fi
+      if [ "$(( measured * PLAUSIBILITY_DEN ))" -lt "$pinned" ]; then
+        echo "ceiling: measured $measured is below 1/$PLAUSIBILITY_DEN of pinned $pinned"
+      fi
+      ;;
+    golden)
+      local line label val pin
+      while IFS= read -r line; do
+        [ -n "$line" ] || continue
+        label="${line%%:*}"
+        val="${line##*: }"
+        pin="$(printf '%s\n' "$pinned" | sed -n "s/^$label: *\([0-9]\+\)[[:space:]]*\$/\1/p")"
+        if ! is_int "$val" || ! is_int "$pin"; then
+          echo "$label: unreadable (measured='$val' pinned='$pin')"
+          continue
+        fi
+        if [ "$(( val * PLAUSIBILITY_DEN ))" -lt "$pin" ]; then
+          echo "$label: measured $val is below 1/$PLAUSIBILITY_DEN of pinned $pin"
+        fi
+      done <<PLAUS
+$measured
+PLAUS
+      ;;
+    *) echo "unknown metric '$metric'" ;;
+  esac
+  return 0
+}
+
+# ---------------------------------------------------------------------------
+# the per-cell gates, as functions rather than inline loops
+# ---------------------------------------------------------------------------
+# All four cells, not just D. Every one of them feeds classify(), and four
+# degenerate cells are the cleanest possible SOURCE_ONLY — gating D alone would
+# leave the attribution itself computed from nothing.
+cells_degraded() {  # metric A B C D -> " A B" style label list, empty if all ok
+  local metric="$1"; shift
+  local label out=""
+  for label in A B C D; do
+    metric_well_formed "$metric" "${1:-}" || out="$out $label"
+    shift
+  done
+  printf '%s' "$out"
+}
+
+cells_implausible() {  # metric PINNED A B C D -> label list, empty if all ok
+  local metric="$1" pinned="$2"; shift 2
+  local label out=""
+  for label in A B C D; do
+    [ -z "$(plausibility_failures "$metric" "${1:-}" "$pinned")" ] || out="$out $label"
+    shift
+  done
+  printf '%s' "$out"
+}
+
+# PINNED too, and for a ratchet it must be an INTEGER, because the headroom
+# band does arithmetic on it. Round 4 added `is_int "$hr"` for the value it
+# introduced and not for the value it started computing with two lines later
+# — and bash coerces an empty operand to 0 inside $(( )), so `--check`
+# printed "pinned value is current" and exited 0 having read no pinned value.
+pinned_degraded() {  # kind pinned -> " PINNED" or ""
+  local kind="$1" pinned="$2"
+  if [ "$kind" = ratchet ]; then
+    is_int "$pinned" || { printf ' PINNED'; return 0; }
+  else
+    [ -n "$pinned" ] || { printf ' PINNED'; return 0; }
+  fi
+  printf ''
+}
+
+# ---------------------------------------------------------------------------
+# the ratchet band and the ratchet write, as pure decisions
+# ---------------------------------------------------------------------------
+# Currency for a ratchet is the ENFORCED predicate, not exact equality.
+# tezt/tests/must_null_ceiling.ml asserts `must_null <= clean_measured +
+# headroom`, and headroom exists (its own comment) to "absorb ordinary future
+# growth without demanding a recalibration commit for every unrelated PR".
+# Testing D = PINNED converted that into an exact-equality gate and reinstated
+# the treadmill this tool exists to end. Round 4 found it.
+#
+#   D > PINNED + headroom  -> BREACH;  must be argued, never auto-written
+#   D < PINNED - headroom  -> GAIN;    candidate for an automatic tighten
+#   otherwise              -> CURRENT; inside the band, advisory, exit 0
+band_verdict() {  # D PINNED HR -> CURRENT | BREACH | GAIN | ERR
+  local d="$1" p="$2" hr="$3"
+  if ! is_int "$d" || ! is_int "$p" || ! is_int "$hr"; then echo ERR; return 0; fi
+  if   [ "$d" -gt "$(( p + hr ))" ]; then echo BREACH
+  elif [ "$d" -lt "$(( p - hr ))" ]; then echo GAIN
+  else echo CURRENT
+  fi
+}
+
+# The asymmetry. Raising a bound to meet the code is precisely the failure this
+# repository already suffered; it stays a human act.
+ratchet_write_verdict() {  # D PINNED -> WRITE | REFUSE_LOOSEN | REFUSE_D | REFUSE_PINNED
+  local d="$1" p="$2"
+  if ! is_int "$d"; then echo REFUSE_D; return 0; fi
+  if ! is_int "$p"; then echo REFUSE_PINNED; return 0; fi
+  if [ "$d" -gt "$p" ]; then echo REFUSE_LOOSEN; return 0; fi
+  echo WRITE
+}
+
+# Edit a COPY, verify the copy with an anchored read, and echo what the copy
+# reads back. The caller installs it only on a match, so a refusal leaves the
+# tracked file untouched rather than merely "reported as wrong".
+#
+# BOTH sides of the sed are anchored. Unanchored on the right,
+# `let clean_measured = 1_000` became `let clean_measured = 340_000` — the
+# read-back then refused, so the tracked file survived, but the scratch file was
+# silently corrupt and the refusal named the wrong cause. Anchored, that line is
+# not matched at all and the read-back reports exactly that.
+ceiling_write_to() {  # src scratch value -> echoes the value the scratch reads back
+  local src="$1" scratch="$2" val="$3"
+  cp "$src" "$scratch" || return 2
+  sed -i "s/^let clean_measured = [0-9]\+[[:space:]]*\$/let clean_measured = $val/" "$scratch" || return 2
+  read_pinned_int "$scratch" clean_measured
+}
+
+# ---------------------------------------------------------------------------
+# exit status
+# ---------------------------------------------------------------------------
+STATUS=0
+# Monotonic: once degraded (2), stays degraded regardless of what a LATER
+# metric in this same run reports, and a stale/refused (1) never falls back to
+# ok (0). Without this, a --check running both metrics could see golden come
+# back degraded (2) and ceiling merely stale (1) — direct assignment would
+# leave the final exit code at 1, understating the more severe failure.
+# Defined above the --self-test dispatch so the self-test can drive it: a mutant
+# deleting the `*:2` arm survived round 6 because nothing did.
+bump_status() {
+  case "$STATUS:$1" in
+    2:*) ;;
+    *:2) STATUS=2 ;;
+    0:1) STATUS=1 ;;
+  esac
 }
 
 self_test() {
@@ -201,12 +468,25 @@ self_test() {
   # is why the multi-line case below had to be hand-rolled instead of living in
   # this table.
   #
-  # SCOPE, stated because it was overstated once: this exercises classify() and
-  # is_int() only. Every defect this script has actually shipped — a pipe eating
-  # a build failure, an asymmetric corpus, a guard failing open on a non-integer,
-  # a trailing newline — lived in the parts NOT covered here, and review found
-  # them all. A self-test that certifies the one function that was already
-  # correct is not evidence the script is correct.
+  # SCOPE. This used to exercise classify(), metric_well_formed() and is_int()
+  # and nothing else, and it said so honestly. That honesty was not a fix:
+  # round 6 applied 17 mutants to the shipped script, killed all nine that lay
+  # inside those three functions, and watched SEVEN survive — every fix from
+  # rounds 2 through 5, including the write-verification read that was the whole
+  # subject of the last commit. With that mutant applied, this self-test still
+  # printed "all cases pass" AND round 5's CRITICAL-1 reproduced verbatim.
+  #
+  # So the decisions moved into pure functions above and the cases below drive
+  # them against temp fixtures. Each block names the mutant it exists to kill;
+  # every one was applied and observed to turn this self-test RED, rather than
+  # assumed to be covered. What is still NOT covered here is the measuring half
+  # — the builds, the four index_cell runs, the sqlite3 queries — which needs a
+  # repository and is exercised by --check in CI.
+  chk() {  # want got label
+    if [ "$1" = "$2" ]; then printf '  ok   %-34s %s\n' "$3" "$2"
+    else printf '  FAIL %-34s want %-14s got %s\n' "$3" "$1" "$2"; fails=$(( fails + 1 )); fi
+  }
+
   local cases="
 SOURCE_ONLY#340#340#340#340
 SOURCE_ONLY#761#761#780#780
@@ -218,6 +498,7 @@ BEHAVIOURAL#340##340#340
 INTERACTION#340#340##340
 DEGRADED####
 "
+  local a b c d want
   while IFS='#' read -r want a b c d; do
     [ -z "${want:-}" ] && continue
     got="$(classify "$a" "$b" "$c" "$d")"
@@ -244,6 +525,12 @@ f: 780")"
   # written constant. It had NO coverage: stubbing it to `return 0` left this
   # self-test reporting "all cases pass". That is the arm round 2's CRITICAL
   # lived in, so it is the last place that should have been untested.
+  #
+  # `0` is asserted to be ACCEPTED here, deliberately and with its own reason:
+  # well-formedness answers "could this be a ceiling value?", and 0 could. What
+  # 0 must not do is reach a WRITE, and the round-6 finding was that nothing
+  # else stopped it. That is now the plausibility block further down, and the
+  # two assertions are complementary rather than in tension.
   local m
   for m in "340" "0"; do
     if metric_well_formed ceiling "$m"; then echo "  ok   well_formed ceiling '$m'"
@@ -260,7 +547,7 @@ calls: 5068"
   if metric_well_formed golden "$good_golden"; then echo "  ok   well_formed golden (full triple)"
   else echo "  FAIL well_formed REJECTED a valid golden"; fails=$(( fails + 1 )); fi
   for m in "" "modules: 23
-functions: 
+functions:
 calls: 5068" "modules: 23"; do
     if metric_well_formed golden "$m"; then
       echo "  FAIL well_formed ACCEPTED a degraded golden"; fails=$(( fails + 1 ))
@@ -270,8 +557,8 @@ calls: 5068" "modules: 23"; do
   # These five cases exist because round 5 mutation-tested metric_well_formed
   # and five mutants SURVIVED: dropping the non-empty guard, accepting an
   # unknown metric, widening [a-z] to [a-zA-Z], dropping the ^…$ anchors, and
-  # deleting round 4's trailing-label conjunct (which was dead). §10.6 names
-  # this function as an instance; an unkilled mutant in it is the finding.
+  # deleting round 4's trailing-label conjunct. §10.6 names this function as an
+  # instance; an unkilled mutant in it is the finding.
   if metric_well_formed bogus "340"; then
     echo "  FAIL well_formed ACCEPTED an unknown metric"; fails=$(( fails + 1 ))
   else echo "  ok   well_formed rej unknown metric"; fi
@@ -301,18 +588,181 @@ oops"
   if metric_well_formed golden "$g_junk"; then
     echo "  FAIL well_formed ACCEPTED trailing junk"; fails=$(( fails + 1 ))
   else echo "  ok   well_formed rej trailing junk"; fi
+  # The exact input round 6 used to disprove the "the conjunct was dead" claim:
+  # lines=3 (the trailing `extra:` has no value, so it does not match), total=4.
+  # Pinned here so the correction cannot rot back into the old story.
+  local g_trailing_label="modules: 23
+functions: 781
+calls: 5068
+extra:"
+  if metric_well_formed golden "$g_trailing_label"; then
+    echo "  FAIL well_formed ACCEPTED a trailing valueless label"; fails=$(( fails + 1 ))
+  else echo "  ok   well_formed rej trailing valueless label"; fi
 
   # is_int guards the ratchet write. An empty or non-numeric value reaching the
   # comparison is what made that guard fail OPEN and emit an uncompilable file.
   local v
-  for v in 0 340 00; do
+  for v in 0 340 1 12980; do
     if is_int "$v"; then echo "  ok   is_int      '$v'"
     else echo "  FAIL is_int rejected '$v'"; fails=$(( fails + 1 )); fi
   done
-  for v in "" " " "34a" "-1" "3.4" "321 " "let clean_measured"; do
+  # `08` and `00` are the MEDIUM-3 cases and they used to be asserted the wrong
+  # way round: `00` was pinned as a PASS. A leading zero is octal to $(( )), so
+  # `[ "$D" -gt "$(( PINNED + hr ))" ]` aborts with "value too great for base",
+  # every arm of the if/elif/else is skipped, and CURRENT keeps its prior value
+  # while a bash error goes to stderr. The guard was wider than its consumer.
+  for v in "" " " "34a" "-1" "3.4" "321 " "let clean_measured" "08" "00" "0x200" "1_000"; do
     if is_int "$v"; then echo "  FAIL is_int ACCEPTED '$v' — this is the fail-open path"; fails=$(( fails + 1 ))
     else echo "  ok   is_int rej  '$v'"; fi
   done
+
+  # -------------------------------------------------------------------------
+  # temp fixtures — the file-reading and file-writing halves
+  # -------------------------------------------------------------------------
+  local FX; FX="$(mktemp -d "${TMPDIR:-/tmp}/recal-selftest.XXXXXX")" || {
+    echo "self-test: cannot create a temp dir"; return 1; }
+  printf 'let clean_measured = 347\n\nlet headroom = 25\n\nlet min_total_calls = 8000\n' > "$FX/ok.ml"
+  # `1_000` is legal OCaml meaning 1000. This is HIGH-1's fixture.
+  printf 'let clean_measured = 1_000\n\nlet headroom = 1_000\n' > "$FX/underscore.ml"
+  printf 'let clean_measured = 347\nlet clean_measured = 340\n' > "$FX/duplicate.ml"
+  printf 'let clean_measured : int = 347\n' > "$FX/annotated.ml"
+
+  # --- read_pinned_int: HIGH-1, and mutant M14 (the headroom gate) ----------
+  chk 347 "$(read_pinned_int "$FX/ok.ml" clean_measured || echo REFUSED)" "read_pinned_int clean_measured"
+  chk 25  "$(read_pinned_int "$FX/ok.ml" headroom       || echo REFUSED)" "read_pinned_int headroom"
+  chk 8000 "$(read_pinned_int "$FX/ok.ml" min_total_calls || echo REFUSED)" "read_pinned_int min_total_calls"
+  # The whole of HIGH-1 in one assertion: unanchored, this returns 1 and the
+  # band silently becomes +/-1. It must REFUSE, not truncate.
+  chk REFUSED "$(read_pinned_int "$FX/underscore.ml" headroom       || echo REFUSED)" "headroom 1_000 refused"
+  chk REFUSED "$(read_pinned_int "$FX/underscore.ml" clean_measured || echo REFUSED)" "clean_measured 1_000 refused"
+  # A read that matches twice is a defect, not a first-match. `| head -1` used
+  # to pick one of two contradictory definitions silently.
+  chk REFUSED "$(read_pinned_int "$FX/duplicate.ml" clean_measured || echo REFUSED)" "duplicate definition refused"
+  chk REFUSED "$(read_pinned_int "$FX/annotated.ml" clean_measured || echo REFUSED)" "type-annotated pin refused"
+  chk REFUSED "$(read_pinned_int "$FX/ok.ml" no_such_constant      || echo REFUSED)" "absent constant refused"
+  # The STATUS, not just the value. Without these the multi-match conjunct is
+  # dead — `is_int` already rejects a two-line result — and widening it to
+  # `-ge 1` left the whole self-test green. "Defined twice" and "unreadable"
+  # are different defects and the caller reports them differently.
+  local rc
+  read_pinned_int "$FX/ok.ml"         clean_measured >/dev/null 2>&1; rc=$?
+  chk 0 "$rc" "status: readable pin"
+  read_pinned_int "$FX/annotated.ml"  clean_measured >/dev/null 2>&1; rc=$?
+  chk 1 "$rc" "status: unreadable pin"
+  read_pinned_int "$FX/underscore.ml" headroom       >/dev/null 2>&1; rc=$?
+  chk 1 "$rc" "status: 1_000 headroom unreadable"
+  read_pinned_int "$FX/duplicate.ml"  clean_measured >/dev/null 2>&1; rc=$?
+  chk 2 "$rc" "status: defined more than once"
+
+  # --- ceiling_write_to: mutant M12, the subject of the last commit ---------
+  chk 340 "$(ceiling_write_to "$FX/ok.ml" "$FX/w1.ml" 340 || echo REFUSED)" "write-verify reads back 340"
+  chk "let clean_measured = 340" "$(grep '^let clean_measured' "$FX/w1.ml")" "write-verify installed line"
+  # Re-unanchor the read (M12) and this pair goes red: the sed leaves
+  # `340_000` and an unanchored read reports a confident `340`.
+  chk REFUSED "$(ceiling_write_to "$FX/underscore.ml" "$FX/w2.ml" 340 || echo REFUSED)" "write-verify refuses 1_000 pin"
+  chk "let clean_measured = 1_000" "$(grep '^let clean_measured' "$FX/w2.ml")" "refused write left the copy intact"
+  chk REFUSED "$(ceiling_write_to "$FX/annotated.ml" "$FX/w3.ml" 340 || echo REFUSED)" "write-verify refuses annotated pin"
+  rm -rf "$FX"
+
+  # --- band_verdict: mutant M14, and round 4's headroom regression ----------
+  chk CURRENT "$(band_verdict 340 347 25)"   "band 340 in 347+/-25"
+  chk CURRENT "$(band_verdict 372 347 25)"   "band at the upper edge"
+  chk CURRENT "$(band_verdict 322 347 25)"   "band at the lower edge"
+  chk BREACH  "$(band_verdict 373 347 25)"   "band one past the ceiling"
+  chk GAIN    "$(band_verdict 321 347 25)"   "band one below the floor"
+  # HIGH-1's measured consequence, as a decision: with headroom truly 1000, 340
+  # against a pin of 321 is CURRENT. Read as 1 (unanchored) it is a BREACH, and
+  # the shipped script exited 1 "STALE" on exactly this input.
+  chk CURRENT "$(band_verdict 340 321 1000)" "band 340 in 321+/-1000"
+  chk BREACH  "$(band_verdict 340 321 1)"    "band 340 in 321+/-1 (the misread)"
+  chk ERR     "$(band_verdict 340 321 '')"   "band refuses empty headroom"
+  chk ERR     "$(band_verdict 340 '' 25)"    "band refuses empty pin"
+  chk ERR     "$(band_verdict '' 321 25)"    "band refuses empty measurement"
+  # MEDIUM-3: `08` must not reach $(( )). Before, this aborted the comparison.
+  chk ERR     "$(band_verdict 340 08 25)"    "band refuses octal-looking pin"
+
+  # --- ratchet_write_verdict: mutant M16, the loosening guard ---------------
+  chk REFUSE_LOOSEN  "$(ratchet_write_verdict 400 347)" "ratchet refuses a raise"
+  chk REFUSE_LOOSEN  "$(ratchet_write_verdict 348 347)" "ratchet refuses a raise by one"
+  chk WRITE          "$(ratchet_write_verdict 347 347)" "ratchet allows equal"
+  chk WRITE          "$(ratchet_write_verdict 300 347)" "ratchet allows a tighten"
+  chk REFUSE_D       "$(ratchet_write_verdict ''  347)" "ratchet refuses empty measurement"
+  chk REFUSE_PINNED  "$(ratchet_write_verdict 300 '')"  "ratchet refuses empty pin"
+
+  # --- pinned_degraded: mutants M13 (ratchet) and M15 (golden) --------------
+  # M13 deletes the ratchet arm; round 5's CRITICAL-1 then reproduces verbatim
+  # — "pinned value is current", exit 0, empty pinned value.
+  chk " PINNED" "$(pinned_degraded ratchet '')"      "ratchet pin empty is degraded"
+  chk " PINNED" "$(pinned_degraded ratchet 'abc')"   "ratchet pin non-numeric is degraded"
+  chk " PINNED" "$(pinned_degraded ratchet '1_000')" "ratchet pin 1_000 is degraded"
+  chk ""        "$(pinned_degraded ratchet '347')"   "ratchet pin 347 is fine"
+  chk " PINNED" "$(pinned_degraded descriptive '')"  "golden pin empty is degraded"
+  chk ""        "$(pinned_degraded descriptive 'modules: 23')" "golden pin non-empty is fine"
+
+  # --- cells_degraded: mutant M17, the loop that marks nothing --------------
+  chk ""      "$(cells_degraded ceiling 340 340 340 340)" "four good ceiling cells"
+  chk " B"    "$(cells_degraded ceiling 340 '' 340 340)"  "one empty ceiling cell"
+  chk " A B C D" "$(cells_degraded ceiling '' '' '' '')"  "four empty ceiling cells"
+  chk " C"    "$(cells_degraded ceiling 340 340 x 340)"   "one non-numeric ceiling cell"
+  chk ""      "$(cells_degraded golden "$good_golden" "$good_golden" "$good_golden" "$good_golden")" \
+              "four good golden cells"
+  chk " D"    "$(cells_degraded golden "$good_golden" "$good_golden" "$good_golden" "modules: 23")" \
+              "one truncated golden cell"
+
+  # --- plausibility_failures / cells_implausible: CRITICAL-1 ---------------
+  # The reviewer's reproduction, as a decision. A ceiling predicate that stops
+  # matching returns 0 from a healthy database: well-formed, integer, and the
+  # cleanest possible SOURCE_ONLY. Only magnitude separates it from a win.
+  local pf
+  pf="$(plausibility_failures ceiling 340 347)"; chk "" "$pf" "ceiling 340 vs pin 347 plausible"
+  pf="$(plausibility_failures ceiling 174 347)"; chk "" "$pf" "ceiling 174 vs pin 347 plausible (edge)"
+  pf="$(plausibility_failures ceiling 173 347)"; [ -n "$pf" ] \
+    && echo "  ok   ceiling 173 vs pin 347 implausible" \
+    || { echo "  FAIL ceiling 173 vs pin 347 accepted"; fails=$(( fails + 1 )); }
+  pf="$(plausibility_failures ceiling 0 347)"; [ -n "$pf" ] \
+    && echo "  ok   ceiling 0 vs pin 347 implausible   <- CRITICAL-1" \
+    || { echo "  FAIL ceiling 0 vs pin 347 ACCEPTED — CRITICAL-1 is open"; fails=$(( fails + 1 )); }
+  # A rise is always plausible: the floor is one-sided. Raising is refused by
+  # ratchet_write_verdict, not by this.
+  pf="$(plausibility_failures ceiling 900 347)"; chk "" "$pf" "ceiling 900 vs pin 347 plausible"
+  local pinned_golden="modules: 23
+functions: 804
+calls: 5170"
+  pf="$(plausibility_failures golden "$pinned_golden" "$pinned_golden")"
+  chk "" "$pf" "golden identical to pin is plausible"
+  local zero_golden="modules: 0
+functions: 0
+calls: 0"
+  pf="$(plausibility_failures golden "$zero_golden" "$pinned_golden")"
+  [ "$(printf '%s\n' "$pf" | grep -c .)" -eq 3 ] \
+    && echo "  ok   golden 0/0/0 implausible on all 3   <- CRITICAL-1" \
+    || { echo "  FAIL golden 0/0/0 not caught on all three — CRITICAL-1 is open"; fails=$(( fails + 1 )); }
+  # Partial degeneracy: one table renamed, the other two fine. Positional
+  # pairing would still line up here; label pairing is what catches a reorder.
+  local part_golden="modules: 23
+functions: 0
+calls: 5170"
+  pf="$(plausibility_failures golden "$part_golden" "$pinned_golden")"
+  [ "$(printf '%s\n' "$pf" | grep -c .)" -eq 1 ] \
+    && echo "  ok   golden one degenerate component caught" \
+    || { echo "  FAIL golden partial degeneracy not caught"; fails=$(( fails + 1 )); }
+  local reordered="calls: 5170
+modules: 23
+functions: 804"
+  pf="$(plausibility_failures golden "$reordered" "$pinned_golden")"
+  chk "" "$pf" "golden matched by label, not by order"
+  chk " A B C D" "$(cells_implausible ceiling 347 0 0 0 0)" "four degenerate ceiling cells"
+  chk ""         "$(cells_implausible ceiling 347 340 340 345 345)" "four healthy ceiling cells"
+  chk " D"       "$(cells_implausible ceiling 347 340 340 340 0)"   "only D degenerate"
+
+  # --- bump_status: mutant M10, the monotonic exit status -------------------
+  local before after
+  for m in "0 1 1" "0 2 2" "1 1 1" "1 2 2" "2 1 2" "2 2 2" "0 0 0" "1 0 1" "2 0 2"; do
+    set -- $m
+    before="$1"; STATUS="$1"; bump_status "$2"; after="$STATUS"
+    chk "$3" "$after" "bump_status $before + $2"
+  done
+  STATUS=0
 
   # 1, not "$fails": the count would collide with exit 2 (degraded input) at two
   # failures, and a caller reading the exit code cares whether it passed.
@@ -329,6 +779,12 @@ if [ "$MODE" = "self-test" ]; then self_test; exit $?; fi
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || {
   echo "recalibrate: not inside a git repository" >&2; exit 2; }
 cd "$REPO_ROOT" || exit 2
+
+# Named once, used everywhere below. Both are read AND written by this script,
+# and spelling either of them out at each site is how a read and its matching
+# write drift onto different files.
+CEILING_FILE="$REPO_ROOT/tezt/tests/must_null_ceiling.ml"
+GOLDEN_FILE="$REPO_ROOT/test/fixtures/self-index-stats.txt"
 
 # Preflight: every metric_value() query runs through sqlite3, and it was never
 # checked for — its absence looks identical to every column it queries having
@@ -546,14 +1002,13 @@ metric_value() {
 
 metric_pinned() {
   case "$1" in
-    golden)  cat "$REPO_ROOT/test/fixtures/self-index-stats.txt" 2>/dev/null ;;
-    # Anchored, refusing forms it cannot read rather than truncating them.
-    # Round 5: `1_000` yielded 1 and `0x200` yielded 0 — a WRONG number where
-    # the correct answer is a refusal, the same class as CRITICAL-1. An
-    # unreadable pin now produces no value, which the degradedness gate
-    # reports as degraded (exit 2).
-    ceiling) sed -n 's/^let clean_measured = \([0-9]\+\)[[:space:]]*$/\1/p' \
-               "$REPO_ROOT/tezt/tests/must_null_ceiling.ml" 2>/dev/null ;;
+    golden)  cat "$GOLDEN_FILE" 2>/dev/null ;;
+    # Through read_pinned_int, which is the ONE anchored reader for every
+    # `let <name> = <int>` in this file. Anchored, it refuses forms it cannot
+    # read rather than truncating them: `1_000` used to yield 1 and `0x200`
+    # used to yield 0 — a WRONG number where the correct answer is a refusal.
+    # An unreadable pin produces no value, which gate 1 reports as degraded.
+    ceiling) read_pinned_int "$CEILING_FILE" clean_measured ;;
   esac
 }
 
@@ -563,20 +1018,6 @@ metric_kind() { case "$1" in golden) echo descriptive ;; ceiling) echo ratchet ;
 # ---------------------------------------------------------------------------
 # the 2x2
 # ---------------------------------------------------------------------------
-STATUS=0
-# Monotonic: once degraded (2), stays degraded regardless of what a LATER
-# metric in this same run reports, and a stale/refused (1) never falls back to
-# ok (0). Without this, a --check running both metrics could see golden come
-# back degraded (2) and ceiling merely stale (1) — direct assignment would
-# leave the final exit code at 1, understating the more severe failure.
-bump_status() {
-  case "$STATUS:$1" in
-    2:*) ;;
-    *:2) STATUS=2 ;;
-    0:1) STATUS=1 ;;
-  esac
-}
-
 # --only was already validated in the arg loop (see there for why: this used
 # to run after both pristine builds, so a typo cost minutes). ONLY is here
 # either empty or one of golden/ceiling.
@@ -587,77 +1028,111 @@ for metric in ${METRICS}; do
   QERR="$WORK/$metric-query.err"; : > "$QERR"
   [ -n "$corpus_rel" ] || { echo "recalibrate: unknown metric '$metric'" >&2; exit 2; }
 
-  index_cell "$BASE_TREE" "$BASE_TREE/$corpus_rel" "$WORK/aa.db" \
+  # Per-metric database paths. These were four FIXED names (aa/ba/ab/bb.db)
+  # reused across every metric, so correctness depended on the producer
+  # TRUNCATING an existing file rather than appending to it. It does today —
+  # but nothing states that invariant, nothing tests it, and if it ever stopped
+  # holding the symptom would be a perfectly plausible number measured over two
+  # corpora at once: §10.1's trap, with no second scope left to compare against.
+  AA_DB="$WORK/$metric-aa.db"; BA_DB="$WORK/$metric-ba.db"
+  AB_DB="$WORK/$metric-ab.db"; BB_DB="$WORK/$metric-bb.db"
+
+  index_cell "$BASE_TREE" "$BASE_TREE/$corpus_rel" "$AA_DB" \
     "$WORK/$metric-A.log" "$metric A (base bin / base corpus)" || exit 2
-  index_cell "$NEW_TREE"  "$BASE_TREE/$corpus_rel" "$WORK/ba.db" \
+  index_cell "$NEW_TREE"  "$BASE_TREE/$corpus_rel" "$BA_DB" \
     "$WORK/$metric-B.log" "$metric B (new bin / base corpus)"  || exit 2
-  index_cell "$BASE_TREE" "$NEW_TREE/$corpus_rel"  "$WORK/ab.db" \
+  index_cell "$BASE_TREE" "$NEW_TREE/$corpus_rel"  "$AB_DB" \
     "$WORK/$metric-C.log" "$metric C (base bin / new corpus)"  || exit 2
-  index_cell "$NEW_TREE"  "$NEW_TREE/$corpus_rel"  "$WORK/bb.db" \
+  index_cell "$NEW_TREE"  "$NEW_TREE/$corpus_rel"  "$BB_DB" \
     "$WORK/$metric-D.log" "$metric D (new bin / new corpus)"   || exit 2
 
   # The byte-exact artifact CI will diff against, kept alongside the captured
   # value: a variable cannot represent a trailing newline, so the check that the
   # written file is correct cannot be made from "$D" alone.
+  #
+  # This deliberately does NOT go through metric_value(), and review's LOW-3
+  # (fold it in, it is "a second textually-different source of truth for the
+  # same three numbers") is declined on that point. It is a transcription of
+  # ci.yml's own "Self-index smoke test" command — one sqlite3 invocation with
+  # three concatenating SELECTs — whereas metric_value builds the same three
+  # lines from three separate q() calls and a printf. Comparing them is a
+  # DIFFERENTIAL check against the thing CI actually runs; making them one
+  # function would turn the comparison below into a tautology and delete the
+  # only place this tool checks itself against CI. What LOW-3 is right about is
+  # the error handling, and that is fixed here: the exit status was unchecked
+  # and stderr went outside $QERR, so this one call had exactly the silent
+  # failure shape q() exists to close.
   if [ "$metric" = golden ]; then
     GOLDEN_RAW="$WORK/golden.raw"
-    sqlite3 "$WORK/bb.db" \
-      "SELECT 'modules: ' || count(*) FROM modules; \
-       SELECT 'functions: ' || count(*) FROM functions; \
-       SELECT 'calls: ' || count(*) FROM calls;" > "$GOLDEN_RAW"
+    if ! sqlite3 "$BB_DB" \
+         "SELECT 'modules: ' || count(*) FROM modules; \
+          SELECT 'functions: ' || count(*) FROM functions; \
+          SELECT 'calls: ' || count(*) FROM calls;" > "$GOLDEN_RAW" 2>>"$QERR"
+    then
+      echo
+      echo "── $metric (measured over $corpus_rel)"
+      echo "   ✗ REFUSED: the raw golden query failed on $BB_DB" >&2
+      tail -20 "$QERR" >&2
+      bump_status 2
+      continue
+    fi
   fi
 
-  A="$(metric_value "$metric" "$WORK/aa.db")"
-  B="$(metric_value "$metric" "$WORK/ba.db")"
-  C="$(metric_value "$metric" "$WORK/ab.db")"
-  D="$(metric_value "$metric" "$WORK/bb.db")"
+  A="$(metric_value "$metric" "$AA_DB")"
+  B="$(metric_value "$metric" "$BA_DB")"
+  C="$(metric_value "$metric" "$AB_DB")"
+  D="$(metric_value "$metric" "$BB_DB")"
   PINNED="$(metric_pinned "$metric")"
   KIND="$(metric_kind "$metric")"
 
-  # Reject a degraded cell HERE — before classify() and before the currency
-  # comparison, in every mode (--explain included, since it must not report a
-  # tree as current when nothing was actually measured). The bug this closes:
-  # `[ "$D" = "$PINNED" ]` had no integrity test, so a query returning empty
-  # (a renamed column; q() swallows sqlite3's error same as any other) made an
-  # unmeasured cell compare equal to an unmeasured... anything, and `--check`
-  # printed "✓ pinned value is current" having measured nothing. Found in
-  # review.
-  degraded=""
-  for pair in "A:$A" "B:$B" "C:$C" "D:$D"; do
-    label="${pair%%:*}"; val="${pair#*:}"
-    metric_well_formed "$metric" "$val" || degraded="$degraded $label"
-  done
-  # PINNED too, and for a ratchet it must be an INTEGER, because the headroom
-  # band does arithmetic on it. Round 4 added `is_int "$hr"` for the value it
-  # introduced and not for the value it started computing with two lines later
-  # — and bash coerces an empty operand to 0 inside $(( )), so `--check`
-  # printed "✓ pinned value is current" and exited 0 having read no pinned
-  # value. Before round 4 this path did not exist: PINNED was only
-  # string-compared. Fifth round running in which a fix moved a value into a
-  # new comparison without moving its integrity check with it.
-  if [ "$KIND" = ratchet ]; then
-    is_int "$PINNED" || degraded="$degraded PINNED"
-  else
-    [ -n "$PINNED" ] || degraded="$degraded PINNED"
-  fi
-  if [ -n "$degraded" ]; then
+  # -------------------------------------------------------------------------
+  # gate 1 — well-formedness: is each cell USABLE as a value at all?
+  # -------------------------------------------------------------------------
+  # Rejected HERE, before classify() and before the currency comparison, in
+  # every mode (--explain included, since it must not report a tree as current
+  # when nothing was actually measured). The bug this closes: `[ "$D" =
+  # "$PINNED" ]` had no integrity test, so a query returning empty (a renamed
+  # column; q() swallows sqlite3's error same as any other) made an unmeasured
+  # cell compare equal to an unmeasured anything, and `--check` printed
+  # "✓ pinned value is current" having measured nothing.
+  cell_bad="$(cells_degraded "$metric" "$A" "$B" "$C" "$D")"
+  pin_bad="$(pinned_degraded "$KIND" "$PINNED")"
+  if [ -n "$cell_bad$pin_bad" ]; then
     echo
     echo "── $metric ($KIND, measured over $corpus_rel)"
-    echo "   ✗ REFUSED: cell(s)$degraded did not produce a well-formed $metric measurement" >&2
-    echo "     (empty, or a non-numeric value). For a CELL that means a query likely
-         failed silently; for PINNED it means the constant could not be read
-         from the source in a form this tool accepts." >&2
-    # The path this used to name is removed by the EXIT trap before the shell
-    # prompt returns, so the ONE arm guarding the silent-query-failure class
-    # had a dangling path as its sole evidence. Tail inline, as build_or_die
-    # and index_cell already do.
-    if [ -s "${QERR:-/dev/null}" ]; then
-      echo "     --- sqlite3 stderr ---" >&2
-      tail -20 "$QERR" >&2
-    else
-      echo "     sqlite3 reported no error, so the query returned an empty" >&2
-      echo "     result rather than failing — check the column names against" >&2
-      echo "     the current schema." >&2
+    echo "   ✗ REFUSED: no well-formed $metric measurement for:$cell_bad$pin_bad" >&2
+    # The two causes are DIFFERENT and this used to print the sqlite3
+    # explanation for both. Reproduced in five separate runs: an unreadable
+    # CONSTANT was reported as "sqlite3 reported no error, so the query returned
+    # an empty result — check the column names against the current schema", when
+    # no query is involved and the cause is how the constant is spelled. Round 5
+    # fixed this for cells and left PINNED pointing at the wrong thing.
+    if [ -n "$cell_bad" ]; then
+      if [ -s "${QERR:-/dev/null}" ]; then
+        echo "     cells$cell_bad — sqlite3 wrote to stderr:" >&2
+        tail -20 "$QERR" >&2
+      else
+        echo "     cells$cell_bad — sqlite3 reported no error, so the query returned an" >&2
+        echo "     empty result rather than failing. Check the column names in" >&2
+        echo "     metric_value() against the current schema." >&2
+      fi
+    fi
+    if [ -n "$pin_bad" ]; then
+      case "$metric" in
+        ceiling)
+          echo "     PINNED — no single 'let clean_measured = <int>' could be read from" >&2
+          echo "       $CEILING_FILE" >&2
+          echo "     The read is anchored on both ends (^let clean_measured = <digits>\$)," >&2
+          echo "     so it refuses rather than truncates: a type annotation" >&2
+          echo "     ('let clean_measured : int = 347'), an underscored literal ('1_000')," >&2
+          echo "     a hex literal, a trailing comment, or two competing definitions all" >&2
+          echo "     land here. Candidate lines in that file:" >&2
+          grep -n '^let clean_measured' "$CEILING_FILE" >&2 || echo "       (none)" >&2
+          ;;
+        golden)
+          echo "     PINNED — $GOLDEN_FILE is empty or unreadable." >&2
+          ;;
+      esac
     fi
     bump_status 2
     continue
@@ -670,6 +1145,87 @@ for metric in ${METRICS}; do
   printf '   %-28s %s\n' "B  NEW bin/base src"   "$(echo "$B" | tr '\n' ' ')"
   printf '   %-28s %s\n' "C base bin/ NEW src"   "$(echo "$C" | tr '\n' ' ')"
   printf '   %-28s %s\n' "D  NEW bin/ NEW src"   "$(echo "$D" | tr '\n' ' ')"
+
+  # -------------------------------------------------------------------------
+  # gate 2 — adequacy: was this corpus big enough to have been measured?
+  # -------------------------------------------------------------------------
+  # The ABSOLUTE floor, ceiling only. Mirrored from must_null_ceiling.ml's own
+  # [min_total_calls] rather than invented here: that tezt already carries
+  # exactly this guard, for exactly this reason ("an under-built _build/default
+  # indexes fewer calls across the board, which would otherwise read as a
+  # comfortable pass on the ceiling rather than as 'nothing was measured'"), and
+  # over the SAME corpus this metric uses (_build/default). It is READ FROM THE
+  # FILE, not copied, so the two cannot drift apart — a copied 8000 would be a
+  # number with no harness behind it, §10.3.
+  #
+  # It is a live guard, not a theoretical one: it fired during this round's own
+  # baseline run, on a `dune test --force` that had under-built the tree —
+  # "only 6783 calls were indexed, below the floor of 8000".
+  #
+  # The golden gets no absolute floor. Its corpus is lib/arch_index alone, a
+  # different scope (§10.1), and min_total_calls was never calibrated over it;
+  # inventing a second constant here would be the very thing this comment
+  # objects to. The golden is covered by gate 3.
+  if [ "$metric" = ceiling ]; then
+    MTC="$(read_pinned_int "$CEILING_FILE" min_total_calls)" || MTC=""
+    if ! is_int "$MTC"; then
+      echo "   ✗ REFUSED: no single 'let min_total_calls = <int>' could be read from" >&2
+      echo "     $CEILING_FILE — the corpus adequacy floor is unavailable, and a" >&2
+      echo "     measurement with no adequacy floor is not a measurement." >&2
+      bump_status 2
+      continue
+    fi
+    inadequate=""
+    for pair in "A:$AA_DB" "B:$BA_DB" "C:$AB_DB" "D:$BB_DB"; do
+      label="${pair%%:*}"; dbf="${pair#*:}"
+      tot="$(q "$dbf" 'SELECT count(*) FROM calls;')"
+      is_int "$tot" && [ "$tot" -ge "$MTC" ] || inadequate="$inadequate $label(total=${tot:-none})"
+    done
+    if [ -n "$inadequate" ]; then
+      echo "   ✗ REFUSED: corpus adequacy floor not met by:$inadequate" >&2
+      echo "     Each cell's database must hold at least $MTC rows in [calls] —" >&2
+      echo "     must_null_ceiling.ml's own min_total_calls — before its ceiling" >&2
+      echo "     count means anything. An under-built tree indexes fewer calls" >&2
+      echo "     across the board, and that reads as a comfortable TIGHTENING" >&2
+      echo "     rather than as 'nothing was measured'." >&2
+      if [ -s "${QERR:-/dev/null}" ]; then
+        echo "     --- sqlite3 stderr ---" >&2
+        tail -20 "$QERR" >&2
+      fi
+      bump_status 2
+      continue
+    fi
+  fi
+
+  # -------------------------------------------------------------------------
+  # gate 3 — plausibility: is this measurement believable against the pin?
+  # -------------------------------------------------------------------------
+  # CRITICAL-1. See the block above plausibility_failures() for the
+  # reproduction and for why "a tighten is always safe" is false. Applied to all
+  # four cells, not just D: every one of them feeds classify(), and four
+  # degenerate cells are the cleanest possible SOURCE_ONLY.
+  implausible="$(cells_implausible "$metric" "$PINNED" "$A" "$B" "$C" "$D")"
+  if [ -n "$implausible" ]; then
+    echo "   ✗ REFUSED: implausible measurement in cell(s):$implausible" >&2
+    for pair in "A:$A" "B:$B" "C:$C" "D:$D"; do
+      label="${pair%%:*}"; val="${pair#*:}"
+      plausibility_failures "$metric" "$val" "$PINNED" | while IFS= read -r pline; do
+        [ -n "$pline" ] && echo "       $label $pline" >&2
+      done
+    done
+    echo "     A component that has collapsed below 1/$PLAUSIBILITY_DEN of the pinned" >&2
+    echo "     value is far likelier a query that stopped matching than a real" >&2
+    echo "     movement of that size. sqlite3 does not error on a predicate that" >&2
+    echo "     matches nothing — it returns 0 — so a broken measurement and a" >&2
+    echo "     spectacular gain have the same shape, and only this floor tells" >&2
+    echo "     them apart. That is also why 'a ratchet may always be TIGHTENED'" >&2
+    echo "     is not enough on its own: every silent breakage moves the number" >&2
+    echo "     DOWN, into the direction that axiom calls always-safe." >&2
+    echo "     If the movement is REAL, recalibrate by hand and record why — one" >&2
+    echo "     commit message, the same contract the BEHAVIOURAL arm has." >&2
+    bump_status 2
+    continue
+  fi
 
   # The attribution. The movement is source-only when the two binaries agree on
   # BOTH corpora — then every difference between D and A is code that was added
@@ -707,38 +1263,44 @@ for metric in ${METRICS}; do
   # projection of the thing the gate actually checks.
   CURRENT=0
   if [ "$metric" = golden ] && [ -n "${GOLDEN_RAW:-}" ]; then
-    diff -q "$REPO_ROOT/test/fixtures/self-index-stats.txt" "$GOLDEN_RAW" >/dev/null 2>&1 && CURRENT=1
+    diff -q "$GOLDEN_FILE" "$GOLDEN_RAW" >/dev/null 2>&1 && CURRENT=1
   elif [ "$metric" = ceiling ]; then
-    # Currency for a ratchet is the ENFORCED predicate, not exact equality.
-    # tezt/tests/must_null_ceiling.ml asserts `must_null <= clean_measured +
-    # headroom`, and headroom exists (its own comment) to "absorb ordinary
-    # future growth without demanding a recalibration commit for every
-    # unrelated PR". Testing D = PINNED converted that into an exact-equality
-    # gate: on this very branch 340 sits inside 321+25 = 346, so the tezt
-    # PASSES and the tree is healthy — while --check reported STALE, exit 1,
-    # and --write refused as a loosening. No invocation returned 0, and the
-    # only route to green was to hand-raise the constant, which is the exact
-    # act this tool exists to prevent. Round 4 found it; it reinstated the
-    # treadmill the tool was written to end.
-    #   D > PINNED + headroom  -> breach; must be argued, never auto-written
-    #   D < PINNED - headroom  -> a real gain; auto-tighten
-    #   otherwise              -> inside the band; advisory, exit 0
-    hr="$(sed -n 's/^let headroom = \([0-9]\+\).*/\1/p' \
-          "$REPO_ROOT/tezt/tests/must_null_ceiling.ml" | head -1)"
-    if ! is_int "$hr"; then
-      echo "   ✗ REFUSED: cannot read 'let headroom = <int>' from must_null_ceiling.ml" >&2
+    # One anchored reader for every pinned integer; see read_pinned_int. The
+    # `| head -1` that used to terminate this read is gone: a pinned constant
+    # that is defined twice is a defect to report, not a coin to flip.
+    hr="$(read_pinned_int "$CEILING_FILE" headroom)"; hr_rc=$?
+    if [ "$hr_rc" -ne 0 ] || ! is_int "$hr"; then
+      echo "   ✗ REFUSED: no single 'let headroom = <int>' could be read from" >&2
+      echo "     $CEILING_FILE. This value enters the arithmetic that decides" >&2
+      echo "     whether anything is written, so an unreadable one is refused" >&2
+      echo "     rather than defaulted." >&2
+      [ "$hr_rc" = 2 ] && \
+        echo "     It is defined MORE THAN ONCE below; this tool will not choose." >&2
+      echo "     Candidate lines:" >&2
+      grep -n '^let headroom' "$CEILING_FILE" >&2 || echo "       (none)" >&2
       bump_status 2
       continue
     fi
-    if [ "$D" -gt "$(( PINNED + hr ))" ]; then
-      CURRENT=0
-    elif [ "$D" -lt "$(( PINNED - hr ))" ]; then
-      CURRENT=0
-    else
-      CURRENT=1
-      [ "$D" = "$PINNED" ] || \
-        echo "   • within headroom: measures $D against pinned $PINNED (+/-$hr) — advisory, not stale"
-    fi
+    case "$(band_verdict "$D" "$PINNED" "$hr")" in
+      CURRENT)
+        CURRENT=1
+        [ "$D" = "$PINNED" ] || \
+          echo "   • within headroom: measures $D against pinned $PINNED (+/-$hr) — advisory, not stale"
+        ;;
+      BREACH)
+        CURRENT=0
+        echo "   • BREACH: $D is above pinned $PINNED + headroom $hr = $(( PINNED + hr ))"
+        ;;
+      GAIN)
+        CURRENT=0
+        echo "   • GAIN: $D is below pinned $PINNED - headroom $hr = $(( PINNED - hr ))"
+        ;;
+      *)
+        echo "   ✗ REFUSED: the band could not be computed (D='$D' pinned='$PINNED' headroom='$hr')" >&2
+        bump_status 2
+        continue
+        ;;
+    esac
   else
     [ "$D" = "$PINNED" ] && CURRENT=1
   fi
@@ -759,24 +1321,25 @@ for metric in ${METRICS}; do
       bump_status 1
       ;;
     write)
+      WVERDICT=WRITE
+      [ "$KIND" = ratchet ] && WVERDICT="$(ratchet_write_verdict "$D" "$PINNED")"
       if [ "$BEHAVIOURAL" = 1 ]; then
         echo "   ✗ REFUSED: movement is not attributable to source change alone."
         bump_status 1
-      elif [ "$KIND" = ratchet ] && ! is_int "$D"; then
+      elif [ "$WVERDICT" = REFUSE_D ]; then
         # `[ "$D" -gt "$PINNED" ]` returns 2 on a non-integer operand, and the
         # old code read any non-zero as "not a loosening" and fell THROUGH to
         # the write. An empty $D is reachable — q() swallows sqlite3 errors —
         # so the guard failed open and sed produced `let clean_measured = `,
-        # a file that does not compile. Found in review. (Now additionally
-        # unreachable in practice, since a non-integer/empty $D is already
-        # caught by the well-formedness gate above — kept as defence in depth.)
+        # a file that does not compile. (Now additionally unreachable in
+        # practice, since gate 1 catches a non-integer D — defence in depth.)
         echo "   ✗ REFUSED: measured value is not an integer (got '$D')." >&2
         bump_status 1
-      elif [ "$KIND" = ratchet ] && ! is_int "$PINNED"; then
+      elif [ "$WVERDICT" = REFUSE_PINNED ]; then
         echo "   ✗ REFUSED: pinned value is not an integer (got '$PINNED') —" >&2
         echo "     the constant may have been reformatted out of the regex's reach." >&2
         bump_status 1
-      elif [ "$KIND" = ratchet ] && [ "$D" -gt "$PINNED" ]; then
+      elif [ "$WVERDICT" = REFUSE_LOOSEN ]; then
         # The asymmetry. Raising a bound to meet the code is precisely the
         # failure this repository already suffered; it stays a human act.
         echo "   ✗ REFUSED: a ratchet may be tightened automatically, never loosened."
@@ -806,17 +1369,13 @@ for metric in ${METRICS}; do
               # with it; nothing then checked the artifact that matters. With
               # the target directory read-only this printed
               # "✓ WROTE … byte-identical to a raw measurement" and exited 0
-              # having written NOTHING. For a tool whose entire product is a
-              # trustworthy verdict about a written constant, that is the worst
-              # available failure. Third round of review, third fix that had
-              # moved the verification off the thing being verified.
-              if ! mv "$WORK/golden.new" "$REPO_ROOT/test/fixtures/self-index-stats.txt"; then
+              # having written NOTHING.
+              if ! mv "$WORK/golden.new" "$GOLDEN_FILE"; then
                 echo "   ✗ REFUSED: could not install test/fixtures/self-index-stats.txt" >&2
                 bump_status 2
-              elif ! diff -q "$REPO_ROOT/test/fixtures/self-index-stats.txt" "$GOLDEN_RAW" \
-                     >/dev/null 2>&1; then
+              elif ! diff -q "$GOLDEN_FILE" "$GOLDEN_RAW" >/dev/null 2>&1; then
                 echo "   ✗ INSTALLED file does not match a raw measurement:" >&2
-                diff "$REPO_ROOT/test/fixtures/self-index-stats.txt" "$GOLDEN_RAW" >&2
+                diff "$GOLDEN_FILE" "$GOLDEN_RAW" >&2
                 bump_status 2
               else
                 echo "   ✓ WROTE test/fixtures/self-index-stats.txt (installed file verified byte-identical)"
@@ -834,19 +1393,15 @@ for metric in ${METRICS}; do
             # read it back afterward, so a reformatting that put the constant
             # out of the regex's reach ("let clean_measured : int = 321")
             # still left a partially-touched tracked file on the refusal path.
-            # Editing a scratch copy means a refusal leaves the tracked file
-            # untouched, not merely "reported as wrong".
-            cp "$REPO_ROOT/tezt/tests/must_null_ceiling.ml" "$WORK/ceiling.new"
-            sed -i "s/^let clean_measured = [0-9]\+/let clean_measured = $D/" "$WORK/ceiling.new"
-            # Anchored like metric_pinned: an unanchored read truncates a legal
-            # literal here too, and this is the read that decides whether the
-            # write is confirmed.
-            written="$(sed -n 's/^let clean_measured = \([0-9]\+\)[[:space:]]*$/\1/p' "$WORK/ceiling.new")"
+            # ceiling_write_to edits a COPY and reads it back with the one
+            # anchored reader; --self-test drives it against temp fixtures,
+            # which is what the previous round's fix here was missing.
+            written="$(ceiling_write_to "$CEILING_FILE" "$WORK/ceiling.new" "$D")" || written=""
             if [ "$written" = "$D" ]; then
-              # Same as the golden: check the mv, then re-read the INSTALLED
-              # file. "(read back and confirmed)" was literally false — the
-              # read-back was on $WORK/ceiling.new.
-              if ! mv "$WORK/ceiling.new" "$REPO_ROOT/tezt/tests/must_null_ceiling.ml"; then
+              # Check the mv, then re-read the INSTALLED file. "(read back and
+              # confirmed)" was literally false — the read-back was on
+              # $WORK/ceiling.new.
+              if ! mv "$WORK/ceiling.new" "$CEILING_FILE"; then
                 echo "   ✗ REFUSED: could not install tezt/tests/must_null_ceiling.ml" >&2
                 bump_status 2
               else
@@ -861,7 +1416,7 @@ for metric in ${METRICS}; do
             else
               echo "   ✗ REFUSED to write: clean_measured would read '$written', expected $D —" >&2
               echo "     the tracked file is UNCHANGED. The constant is probably not spelled" >&2
-              echo "     'let clean_measured = <int>'." >&2
+              echo "     'let clean_measured = <int>' on a line of its own." >&2
               bump_status 1
             fi
             ;;

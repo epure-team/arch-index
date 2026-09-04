@@ -124,6 +124,36 @@ jobs:
           diff test/fixtures/self-index-stats.txt "$RUNNER_TEMP/self-stats.txt" \
             || { echo "Golden file mismatch — update: see docs/adr/001-self-index-golden.md"; exit 1; }
 
+      # The recalibration gate. Until now this script was wired to nothing: no CI
+      # step ran it, no dune rule ran it, and six rounds of review on it moved
+      # no existing test because there was no test to move. Its --self-test half
+      # now runs in the Tezt suite above; this is the measuring half.
+      #
+      # --check attributes each pinned constant's movement across a 2x2 (base vs
+      # new binary, base vs new corpus) and exits 1 when a constant is stale, 2
+      # when the measurement is degraded, implausible, or the pin is unreadable.
+      # It builds two pristine worktrees of its own, which is why it is a
+      # separate step rather than folded into the smoke test above.
+      #
+      # `fetch-depth: 0` on the checkout is load-bearing here: the default
+      # baseline is merge-base(HEAD, origin/main), which does not exist in a
+      # shallow clone. The explicit fetch covers the push-event case, where the
+      # remote-tracking ref for main may not have been created.
+      #
+      # continue-on-error is deliberate FOR THIS FIRST LANDING and is meant to
+      # be removed. The gate is new, it refuses on conditions no PR has yet
+      # exercised in anger, and a brand-new check that reddens unrelated PRs is
+      # one people learn to ignore -- which is the failure mode this whole tool
+      # exists to argue against. The step still shows red in the UI, so a
+      # refusal is visible rather than silent. Flipping it to a hard gate is a
+      # one-line follow-up once it has a track record.
+      - name: Recalibration gate (self)
+        continue-on-error: true
+        run: |
+          eval "$(opam env)"
+          git fetch --no-tags origin main
+          ./scripts/recalibrate.sh --check
+
       - name: Architecture rules (self)
         run: |
           # --on-vacuous fail is the point: if a rule's selector stops matching (a rename, a
