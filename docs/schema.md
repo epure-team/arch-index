@@ -117,9 +117,9 @@ producing an empty database with exit 0). `status ∈ {covered, not_analysed, fa
 language. Snapshot semantics: each run deletes and re-inserts every row — this table describes the
 run that just computed it, not accumulating history.
 
-The roadmap's own vocabulary of six analysis kinds
-(`callgraph`/`effects`/`cfg`/`decisions`/`coverage`/`types`) is **not** uniformly invocable, and
-`arch-coverage-matrix` does not pretend otherwise:
+The analysis kinds — the roadmap's own vocabulary of six
+(`callgraph`/`effects`/`cfg`/`decisions`/`coverage`/`types`), plus `error_channels` added since —
+are **not** uniformly invocable, and `arch-coverage-matrix` does not pretend otherwise:
 
 - `callgraph` and `effects` are real, independently invocable producers, detected on genuinely
   different terms per language: OCaml (both) — a bundled dune executable, "available" once built;
@@ -146,12 +146,31 @@ The roadmap's own vocabulary of six analysis kinds
   `not_analysed` unless `--lcov <path>` names an existing file.
 - `decisions` (`poc/decision-lint`) is a proof-of-concept outside the main dune build graph
   entirely — always `not_analysed`.
+- `error_channels` is evidence-backed rather than probed: it reads
+  `comment_db_meta.error_contract` from the database this run writes into, which the producer
+  writes only after the transaction carrying the channel rows commits — so its presence is a
+  completion marker, not a statement of intent. `covered` when the contract parses and names at
+  least one channel (a SHORTER contract is still covered — a built-in channel whose carrier type
+  does not occur in the corpus is deliberately omitted, so fewer channels means less to analyse,
+  not less analysis); `not_analysed` when the contract is unparseable, names nothing, or is
+  absent from a database that HAS been indexed; derived from the `callgraph` probe when there is
+  no database yet, the one case where capability is the honest answer. It is emitted for every
+  detected language, but only OCaml's producer can earn it today.
 
 `arch-coverage-matrix --project <dir> --db-path <out.db> [--allow-partial] [--lcov <path>]` exits 1
-if any **language-scoped** row (`callgraph`/`effects`/`cfg`/`types`, `language IS NOT NULL`) is
-`not_analysed`/`failed`/`partial` and `--allow-partial` was not given, per the roadmap's own
-ratchet ("a non-zero exit unless `--allow-partial` is given"). The two cross-language rows
-(`coverage`, `decisions`) never gate the exit code: neither can become `covered` by anything this
+if any row THIS RUN COULD HAVE CLOSED is `not_analysed`/`failed`/`partial` and `--allow-partial`
+was not given, per the roadmap's own ratchet ("a non-zero exit unless `--allow-partial` is
+given"). Two classes of row are excluded from that test — and an exclusion is **not** a claim the
+analysis happened, only that re-running this tool could not change it; read the row's own `status`
+for what was actually analysed.
+
+The first excluded class is `error_channels` on a language whose producer cannot emit it (today,
+anything but OCaml). Counting it would make this tool exit 1 on every polyglot repository until
+that producer ships — the same always-firing gate rejected just below. The row is still emitted as
+`not_analysed`, with a reason.
+
+The second is the two cross-language rows (`coverage`, `decisions`), which never gate the exit
+code: neither can become `covered` by anything this
 tool run alone could fix (an LCOV tracefile is supplied externally or it is not; `decisions` is a
 standing fact about this codebase's own build graph), so counting them would make every
 invocation without `--allow-partial` exit 1 unconditionally — a gate that always fires carries no

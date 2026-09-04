@@ -108,8 +108,8 @@ val find_sibling_tool : from_dir:string -> string -> string option
     (none) *)
 val find_repo_root : from_dir:string -> string option
 
-(** [compute ~project_dir ~repo_root ?lcov ()] builds the full coverage
-    matrix for [project_dir] (the project being analysed).
+(** [compute ~project_dir ~repo_root ?lcov ?db_path ()] builds the full
+    coverage matrix for [project_dir] (the project being analysed).
 
     Per-kind detection strategy:
     - [callgraph]: OCaml — [Some d] when [project_dir/_build/default] exists
@@ -143,23 +143,16 @@ val find_repo_root : from_dir:string -> string option
       case [Covered].
     - [decisions]: language [None]. Always [Not_analysed] —
       [poc/decision-lint] is outside the main dune build graph.
+    - [error_channels]: emitted only for a language whose producer can emit
+      error-channel rows at all (today OCaml alone — one list,
+      [error_channel_producers]). Its evidence is [db_path]'s
+      [comment_db_meta.error_contract]; see the paragraph on [db_path] below
+      for the three cases. For a language with no such producer the row is
+      still EMITTED as [Not_analysed] — silence is the failure this table
+      exists to prevent — but it is exempt from the exit-code gate, since no
+      re-run of this tool could close it (see [has_gap]).
 
-    {pre}
-    [project_dir] should be a real, readable directory. [repo_root] should
-    be this arch-index checkout's own root (where its wrapper scripts live).
-
-    {post}
-    Returns one row per (language, analysis) pair considered — every
-    language {!Language_registry.detect_language_roots} finds in
-    [project_dir], times every analysis kind whose scope includes that
-    language, plus the two cross-language rows.
-
-    {violators}
-    (none)
-
-    {violates}
-    (none) *)
-(** [db_path] is the database this run will WRITE its rows into. It is read
+    [db_path] is the database this run will WRITE its rows into. It is read
     first, read-only and best-effort, for [comment_db_meta.error_contract] —
     the record of which error channels a producer actually emitted, written
     only after the transaction carrying those rows commits, so its presence is
@@ -180,7 +173,25 @@ val find_repo_root : from_dir:string -> string option
       the one case where capability is the honest answer: this run is about to
       create it.
 
-    Any read failure is treated as "no evidence", never an error. *)
+    Any read failure is treated as "no evidence", never an error.
+
+    {pre}
+    [project_dir] should be a real, readable directory. [repo_root] should
+    be this arch-index checkout's own root (where its wrapper scripts live).
+
+    {post}
+    Returns one row per (language, analysis) pair considered — every
+    language {!Language_registry.detect_language_roots} finds in
+    [project_dir], times every analysis kind whose scope includes that
+    language, plus the two cross-language rows. [error_channels] is one of
+    those kinds: it is emitted for every detected language, [Not_analysed]
+    for those whose producer cannot emit it.
+
+    {violators}
+    (none)
+
+    {violates}
+    (none) *)
 val compute :
   project_dir:string -> repo_root:string -> ?lcov:string -> ?db_path:string -> unit -> row list
 
@@ -202,16 +213,36 @@ val compute :
     (none) *)
 val write_coverage : Sqlite3.db -> row list -> unit
 
-(** [has_gap rows] — whether any row is [Not_analysed] or [Failed]. Callers
-    use this to decide an exit code: a gap without [--allow-partial] is a
-    hard failure, per the roadmap's own ratchet ("a non-zero exit unless
-    --allow-partial is given").
+(** [has_gap rows] — whether any row represents a gap THIS RUN COULD HAVE
+    CLOSED. Callers use it to decide an exit code: a gap without
+    [--allow-partial] is a hard failure, per the roadmap's own ratchet ("a
+    non-zero exit unless --allow-partial is given").
+
+    "Gap" is [Not_analysed], [Failed] {b or} [Partial] — a half-built
+    [_build] is a gap, not a pass.
+
+    Two classes of row are excluded, and both decide the exit code, so they
+    belong here rather than in the implementation alone:
+    - [language = None] — the cross-language rows ([coverage], [decisions]).
+      [coverage] needs an LCOV file this tool cannot produce; [decisions]'
+      linter is outside the main dune build graph. Counting them would make
+      every invocation exit 1 forever.
+    - [error_channels] on a language whose producer cannot emit it
+      ([emits_error_channels] is false — today, anything but OCaml). Counting
+      it would make this tool exit 1 on every polyglot repository until that
+      producer ships.
+
+    Both rows are still EMITTED — silence is the failure this table exists to
+    prevent. They simply do not pretend a re-run could fix them. An exclusion
+    is therefore NOT a claim the analysis happened; read the row's [status] for
+    that, never this function's [false].
 
     {pre}
     (none)
 
     {post}
-    Returns a bool.
+    Returns a bool: true iff some row is [Not_analysed], [Failed] or [Partial]
+    AND is not one of the two excluded classes above.
 
     {violators}
     (none)

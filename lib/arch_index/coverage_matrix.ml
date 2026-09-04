@@ -308,9 +308,20 @@ let builtin_channels = ["exception"; "result"; "option"]
    by every site that needs the answer, so the two cannot drift apart — a
    review found the language literal spelled separately in two places, where
    the day a second producer gains the capability nothing would have fired.
-   Adding a language here is the whole change; [error_channels_capability_is_pinned]
-   below fails if a call site stops consulting it. *)
+   Adding a language here is the whole change; the test "capability is read
+   from the list, not hard-coded" below fails if a call site stops consulting
+   it. *)
 let error_channel_producers = ["ocaml"]
+
+(* The analysis name, spelled ONCE. It was spelled literally at three sites —
+   the row constructor, the capability fallback, and [fixable_by_this_run]'s
+   exemption — and the exemption is the one that decides the exit code. If any
+   one spelling drifted, the exemption would silently stop matching and the
+   gate would go back to firing unconditionally on every polyglot repository,
+   with nothing to catch it: both [has_gap] tests build the literal themselves,
+   so they would agree with the drift rather than detect it. Same remedy as
+   [error_channel_producers] above, for the same reason. *)
+let error_channels_analysis = "error_channels"
 
 let emits_error_channels = function
   | Some lang -> List.mem lang error_channel_producers
@@ -402,7 +413,7 @@ let sanitise_detail s =
 let error_channels_row ?(producers = error_channel_producers) ~contract ~from:callgraph_row () =
   let language = callgraph_row.language in
   let capable = match language with Some l -> List.mem l producers | None -> false in
-  let row status detail = {language; analysis = "error_channels"; status; detail} in
+  let row status detail = {language; analysis = error_channels_analysis; status; detail} in
   (* The contract describes ONE producer's output, and only a capable producer
      writes it, so it informs that producer's row and no other. Caught by
      running it: applying an OCaml-written contract to every detected language
@@ -455,7 +466,7 @@ let error_channels_row ?(producers = error_channel_producers) ~contract ~from:ca
   | No_database when capable ->
       (* Nothing indexed yet: the matrix legitimately answers from capability,
          since this run is about to create the database. *)
-      derived_rows ~from:callgraph_row "error_channels"
+      derived_rows ~from:callgraph_row error_channels_analysis
   | No_database ->
       row Not_analysed
         (Some
@@ -589,7 +600,7 @@ let write_coverage db rows =
    could have fixed it. *)
 let fixable_by_this_run r =
   r.language <> None
-  && not (r.analysis = "error_channels" && not (emits_error_channels r.language))
+  && not (r.analysis = error_channels_analysis && not (emits_error_channels r.language))
 
 let has_gap rows =
   List.exists
@@ -679,6 +690,32 @@ let%test "a capable producer's error_channels gap DOES fire the ratchet" =
   has_gap
     [cg "ocaml"; {language = Some "ocaml"; analysis = "error_channels"; status = Not_analysed; detail = None}]
   = true
+
+(* PINNED RESIDUAL, deliberate — not a passing test looking for a bug.
+
+   A database file that was CREATED but never indexed reports
+   [error_channels: covered], with [functions = 0], and keeps reporting it
+   indefinitely. That is a green for a reason other than the one the word
+   "covered" suggests, which is the exact shape this table exists to prevent;
+   it is recorded as an executable assertion rather than a comment, because a
+   comment does not stop the next reader from taking the green as evidence —
+   they will read the row, not the note.
+
+   Why it is not simply fixed here: [cfg] and [types] answer from capability
+   for the same reason and neither has any evidence available to answer from,
+   so for them the fallback IS the best available answer. Tightening
+   [No_database] would change all three, which is a semantic change and not
+   this change's business.
+
+   The asymmetry is the reason to revisit it: [error_channels] is the only one
+   of the three with real evidence obtainable (the contract key), so for it the
+   fallback is a substitute where an answer exists. The day someone tightens
+   [No_database], THIS test fails and makes them decide knowingly, instead of
+   believing they are fixing a bug. That is the whole point of pinning it. *)
+let%test "a never-indexed database reports covered from capability alone — pinned, not endorsed" =
+  match error_channels_row ~contract:No_database ~from:(cg "ocaml") () with
+  | {status = Covered; language = Some "ocaml"; _} -> true
+  | _ -> false
 
 let%test "capability is read from the list, not hard-coded" =
   (* A REAL detector now, not the documentation anchor this used to be: the
