@@ -30,7 +30,7 @@ let run project db_path lcov allow_partial verbose =
            (searched upward for architecture-schema.sql) — Go/Rust callgraph detection needs it\n%!" ;
         exit 2
   in
-  let rows = Arch_index.Coverage_matrix.compute ~project_dir:project ~repo_root ?lcov () in
+  let rows = Arch_index.Coverage_matrix.compute ~project_dir:project ~repo_root ?lcov ~db_path () in
   let db = Sqlite3.db_open db_path in
   (match Sqlite3.exec db Arch_index.schema_sql with
   | Sqlite3.Rc.OK -> ()

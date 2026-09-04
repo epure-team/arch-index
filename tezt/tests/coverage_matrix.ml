@@ -310,6 +310,49 @@ let register_existing_main_schema () =
           ~error_msg:"analysis_coverage should be populated even in a pre-existing database, got %L") ;
       Lwt.return_unit)
 
+let register_error_channels_from_contract () =
+  Test.register ~__FILE__
+    ~title:"coverage-matrix: the error_channels row reads the producer's contract"
+    ~tags:["coverage_matrix"; "error_channels"]
+  @@ fun () ->
+  with_project ~name:"covmatrix_error_channels" ~files:ocaml_files @@ fun project ->
+  (* A database that already records what a producer emitted. The matrix must
+     report what the contract SAYS, not what the environment could do. *)
+  let db =
+    Fixture.main ~name:"covmatrix-error-channels"
+      ~seed:
+        "INSERT INTO comment_db_meta(key, value) VALUES ('error_contract', 'v1:exception');"
+      ()
+  in
+  let code, output = run_matrix ~allow_partial:true project db in
+  Check.(
+    (code = 0) int
+      ~error_msg:(Printf.sprintf "--allow-partial should exit 0, got %%L:\n%s" output)) ;
+  Db.with_db db (fun conn ->
+      (* PARTIAL, not covered: a database carrying only the exception channel
+         is not one carrying all three, and flattening that would overstate
+         what was analysed. *)
+      Check.(
+        (Db.string_opt conn
+           "SELECT status FROM analysis_coverage WHERE language = 'ocaml' AND analysis = 'error_channels'"
+         = Some "partial")
+          (option string)
+          ~error_msg:"a contract listing only 'exception' must be partial, got %L") ;
+      Check.(
+        (Db.string_opt conn
+           "SELECT detail FROM analysis_coverage WHERE language = 'ocaml' AND analysis = 'error_channels'"
+         = Some "analysed exception; NOT analysed result,option")
+          (option string)
+          ~error_msg:"the detail must name which channels were and were not analysed, got %L") ;
+      (* The row exists for every detected language — silence is the failure
+         this table exists to prevent — but a contract written by the OCaml
+         producer never speaks for another one. *)
+      Check.(
+        (Db.int conn "SELECT count(*) FROM analysis_coverage WHERE analysis = 'error_channels'" >= 1)
+          int
+          ~error_msg:"every detected language needs an error_channels row, got %L") ;
+      Lwt.return_unit)
+
 let register () =
   register_ocaml_not_built () ;
   register_ocaml_built () ;
@@ -319,4 +362,5 @@ let register () =
   register_rust_driver_and_merge_built () ;
   register_cross_language_rows () ;
   register_snapshot_semantics () ;
-  register_existing_main_schema ()
+  register_existing_main_schema () ;
+  register_error_channels_from_contract ()

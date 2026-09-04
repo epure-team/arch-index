@@ -159,7 +159,17 @@ val find_repo_root : from_dir:string -> string option
 
     {violates}
     (none) *)
-val compute : project_dir:string -> repo_root:string -> ?lcov:string -> unit -> row list
+(** [db_path] is the database this run will WRITE its rows into. It is read
+    first, read-only and best-effort, for
+    [comment_db_meta.error_contract] — the record of which error channels a
+    producer actually emitted. Present and complete ⇒ the [error_channels] row
+    is [Covered]; present but listing fewer than the built-in channels ⇒
+    [Partial], because a database carrying only [exception] is not the same as
+    one carrying all three; absent ⇒ fall back to the build probe. Any read
+    failure is treated as "no evidence", never an error: the target database
+    legitimately may not exist yet. *)
+val compute :
+  project_dir:string -> repo_root:string -> ?lcov:string -> ?db_path:string -> unit -> row list
 
 (** [write_coverage db rows] replaces the entire contents of
     [analysis_coverage] with [rows] — snapshot semantics: this describes the
