@@ -21,6 +21,16 @@ jobs:
       # merged polyglot index and it ran zero assertions, reporting SUCCESS,
       # when the registry was unreachable.
       ARCH_TEZT_REQUIRE_NETWORK: '1'
+      # $RUNNER_TEMP, not /tmp. The self-index database is written by one step and
+      # read by two more, so it needs a stable name — and a stable name directly
+      # in a world-writable /tmp is symlink-preemptable, the same class as the
+      # fixed scratch names review removed from scripts/callgraph-diff.sh.
+      # runner.temp is the runner's own per-job scratch directory, emptied between
+      # jobs, so it gives the stability those steps need without the shared-
+      # directory exposure. Declared here rather than exported through $GITHUB_ENV
+      # so all three steps read one definition.
+      SELF_DB: ${{ runner.temp }}/self.db
+      SELF_STATS: ${{ runner.temp }}/self-stats.txt
     steps:
       - uses: actions/checkout@v4
         with:
@@ -85,27 +95,27 @@ jobs:
           BIN="./_build/default/bin/arch_callgraph_ocaml/arch_callgraph_ocaml.exe"
           opam exec -- "$BIN" \
             --build-dir=_build/default/lib/arch_index \
-            --db-path=/tmp/self.db \
+            --db-path="$SELF_DB" \
             --schema-path=architecture-schema.sql
-          sqlite3 /tmp/self.db \
+          sqlite3 "$SELF_DB" \
             "SELECT 'modules: ' || count(*) FROM modules; \
              SELECT 'functions: ' || count(*) FROM functions; \
              SELECT 'calls: ' || count(*) FROM calls;" \
-            > /tmp/self-stats.txt
-          diff test/fixtures/self-index-stats.txt /tmp/self-stats.txt \
+            > "$SELF_STATS"
+          diff test/fixtures/self-index-stats.txt "$SELF_STATS" \
             || { echo "Golden file mismatch — update: see docs/adr/001-self-index-golden.md"; exit 1; }
 
       - name: Architecture rules (self)
         run: |
           # --on-vacuous fail is the point: if a rule's selector stops matching (a rename, a
           # split), it turns green forever and looks like coverage. That must break the build.
-          ./arch-rules /tmp/self.db arch-rules.txt --on-vacuous fail
+          ./arch-rules "$SELF_DB" arch-rules.txt --on-vacuous fail
 
       - name: Change-impact briefing (self)
         run: |
           # Not a gate — but running it on every build is how a broken briefing gets noticed
           # before someone relies on it in review.
-          ./arch-impact /tmp/self.db --diff "${{ github.event.pull_request.base.sha || 'HEAD~1' }}..HEAD" --repo .
+          ./arch-impact "$SELF_DB" --diff "${{ github.event.pull_request.base.sha || 'HEAD~1' }}..HEAD" --repo .
 
   # mcp-kit lives in a PRIVATE repo (epure-team/ocaml-mcp), so `opam pin` needs credentials that
   # a fork or an unconfigured checkout does not have. Rather than let the mcp job fail on every
