@@ -13,6 +13,12 @@ type call_row = {
   callee_name : string;
   callee_file : string option;
   call_site : string;
+  edge_form : string option;
+      (** [Some "value_alias"] for a point-free binding, [None] for an ordinary
+          call — see specs/point-free-aliases.md. Always [None] on the LSP path:
+          callHierarchy reports calls, and a point-free binding makes none, so
+          this backend cannot observe the distinction. It is the shared OCaml
+          cmt walk that can. *)
 }
 
 (** [extract_calls client ~project_dir fn_rows] issues callHierarchy/prepare

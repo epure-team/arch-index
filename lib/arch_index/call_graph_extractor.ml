@@ -13,6 +13,7 @@ type call_row = {
   callee_name : string;
   callee_file : string option;
   call_site : string;
+  edge_form : string option;
 }
 
 (* Third duplicate of the strip; delegates to the module that owns the pair. *)
@@ -216,6 +217,10 @@ let outgoing_calls ~seen client ~project_dir
                   callee_name = call.to_.name;
                   callee_file;
                   call_site;
+                  (* The LSP path reports CALLS. A point-free binding makes
+                     none, so callHierarchy cannot observe one and this backend
+                     has nothing to mark. *)
+                  edge_form = None;
                 }
           | Error _ -> None)
         lst
@@ -316,6 +321,7 @@ let extract_calls_from_cmts ~project_dir fn_rows =
                           callee_name;
                           callee_file;
                           call_site = pc.call_site;
+                          edge_form = pc.edge_form;
                         })
                       !pending)
             | _ -> []))
