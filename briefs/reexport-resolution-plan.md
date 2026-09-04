@@ -2,10 +2,27 @@
 
 **Date:** 2026-09-04
 **Status: VALIDATED**
-**Gate: BLOCKED ON MERGE of `feat/qualified-unit-resolution` (roadmap 1.6).** No step below
-may start before that branch lands on `main`. This is not caution; §"The sequencing
-decision" states why the target function does not exist under this plan's assumptions
-until then.
+**Gate: LIFTED 2026-09-04.** #67 (roadmap 1.6) merged; `main` is at `bfbabf5`, rebase-merge,
+30 commits, linear. The gate below stood for roughly one hour. It is kept, not deleted,
+because the reasoning is what carries forward — see §"The sequencing decision" and the
+two corrections it since received.
+
+**Two corrections from the 1.6 author, both accepted:**
+
+1. **`mod_name_to_path` is no longer fed at `:722-729`.** That fill is dead since 1.6 —
+   the resolver reads `paths_of_unit`, and the one remaining consumer (the module-dependency
+   site) repopulates the table itself immediately before reading it. So the feasibility
+   argument below is stale *for the resolver* and **exact for the site this task actually
+   uses**: `module_deps` keeps the basename erasure. That is residual 4 of
+   `docs/adr/003-qualified-unit-resolution-accepted-residuals.md`, and it is now a named
+   accepted property rather than an incidental defect. It does not weaken the gate's
+   conclusion; it relocates it, and makes it permanent rather than transitional.
+2. **Consuming `paths_of_unit` has a rule attached, learned the hard way on 1.6's round 6:**
+   *a unit key mapping to several paths is not a choice to make, it is an absence of proof.*
+   The 1.6 resolver initially found a function row in exactly one candidate path and called
+   that a resolution — emitting a MUST into a library the caller does not even link, where
+   `main` had emitted an honest unresolved leaf. It was closed at zero corpus cost by
+   treating the case as ⊤ (`ambiguous_unit`). **D3 adopts this verbatim.**
 
 ## The sequencing decision
 
@@ -35,6 +52,10 @@ The two findings resolve each other. The sibling branch's `unit_paths` registry 
 
 **Decision: wait.** The cost of waiting is delay. The cost of not waiting is a rewritten
 merge base plus a duplicate registry we have already decided not to build.
+
+*Outcome: the wait cost about an hour and the merge landed with a clean base, 143/143
+tezt, a byte-identical self-index golden, and five explicitly-accepted residuals
+documented in an ADR — including the one this task inherits.*
 
 **The ahead-count is moving, not merely stale.** The research brief said 15; this phase
 measured 29, then 30 twenty minutes later. Re-measure before acting on any figure here.
