@@ -17,8 +17,16 @@
 
   The CI step separates the two non-zero exits. A **refusal** (exit 2 — a degraded cell, a corpus
   below the adequacy floor, a component collapsed below half its pin, an unreadable or
-  doubly-defined constant) fails the build: none of those is a property of the branch, each says
-  the gate itself is not working, and a gate that cannot measure must not report success. A
+  doubly-defined constant) fails the build, because a gate that cannot measure must not report
+  success. But those causes are *not* alike, and the step says so rather than lumping them:
+  three of them mean the gate itself is broken, while **implausibility may genuinely be a
+  property of the branch** — a real >50% resolution gain has exactly the same shape as a query
+  that stopped matching, and this repository has recorded a MAY_TOP move of 79% → 3.9%. Telling
+  the author of such a branch that the gate is broken is both wrong and unactionable, so the
+  script prints a machine-readable `refusal-class=` line for every exit-2 cause and CI takes the
+  "this may be your branch, recalibrate by hand and say why" arm only when **every** class line
+  in the run is `implausible`. With no class line at all it falls to the "the gate is broken"
+  arm — fail-closed. A
   **stale** constant (exit 1) is a warning here only because it is already hard-gated twice over —
   the self-index smoke test diffs the golden, and `must_null_ceiling` fails the suite on a breach.
   So the step adds no new way for an ordinary PR to fail, and one new way for a broken measurement
