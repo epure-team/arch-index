@@ -91,29 +91,26 @@ func main() { cgoBranch(true) }
 let build_producer () =
   let bin = Filename.concat (Temp.dir "cggo_bin") "arch-callgraph-go" in
   let code, output =
-    (* [-buildvcs=false]: Go stamps VCS metadata into a binary by default, and to do that it
-     looks for a [.git] DIRECTORY to identify the repository root. A git WORKTREE has a
-     [.git] FILE (pointing at the real gitdir elsewhere), not a directory, so Go does not
-     recognise the worktree root as a repository at all.
+    (* [-buildvcs=false]: Go stamps VCS metadata into a binary by default, and to do that
+       it looks for a [.git] DIRECTORY to identify the repository root. A git WORKTREE has
+       a [.git] FILE pointing at the real gitdir elsewhere, so Go does not recognise a
+       worktree root as a repository at all.
 
-     Verified (go1.26.4): this does NOT reproduce as a build failure under any worktree
-     construction tried (under /tmp with no ancestor .git, under ~/.cache, nested in an
-     unrelated repo, a [.git] file pointing at a missing gitdir) — every case exits 0
-     with or without this flag. What IS confirmed is quieter: [go version -m] on a binary
-     built from a normal clone shows [build vcs=git] and [vcs.revision] lines; built from a
-     worktree, those lines are simply absent — Go declines to stamp rather than erroring.
-     Not reproducible in a WORKTREE on go1.26.4: there Go finds no
-     recognisable repository root and silently omits the vcs stamp lines
-     instead of failing. The `exit status 128` failure IS reproducible where
-     the VCS lookup itself fails — a repo root git refuses (safe.directory,
-     for instance) gives `error obtaining VCS status: exit status 128` and
-     exit 1 without this flag, exit 0 with it. That is what the flag earns,
-     and it is why the worktree evidence alone does not justify removing it
+       That, on go1.26.4, is quiet rather than fatal: Go declines to stamp instead of
+       erroring. Verified — [go version -m] on a binary built from a normal clone shows
+       [build vcs=git] and [vcs.revision] lines, and built from a worktree those lines are
+       simply absent, exit 0 with or without this flag. Every worktree construction tried
+       behaved that way: under /tmp with no ancestor [.git], under ~/.cache, nested in an
+       unrelated repo, and with a [.git] file pointing at a missing gitdir.
 
-     The flag is kept anyway: it costs nothing, makes the no-stamp behavior explicit rather
-     than incidental, and guards other toolchains/configurations where the VCS lookup IS
-     fatal — e.g. a [safe.directory] refusal, which also exits 128. *)
-     run_command ~cwd:(callgraph_go_src ()) "go" ["build"; "-buildvcs=false"; "-o"; bin; "."]
+       So this flag is NOT what keeps the worktree case working, and the worktree evidence
+       alone would not justify keeping it. What does is the other failure mode, where the
+       VCS lookup runs and fails rather than finding nothing: a repository root git refuses
+       — a [safe.directory] violation, say — gives [error obtaining VCS status: exit status
+       128] and exit 1 without the flag, exit 0 with it. That is reproducible, that is what
+       the flag earns, and the tests here build inside throwaway repos whose ownership and
+       [safe.directory] status are not ours to guarantee. *)
+    run_command ~cwd:(callgraph_go_src ()) "go" ["build"; "-buildvcs=false"; "-o"; bin; "."]
   in
   if code <> 0 then Test.fail "building arch-callgraph-go failed (exit %d):\n%s" code output ;
   bin
