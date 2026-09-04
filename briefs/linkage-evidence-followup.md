@@ -4,6 +4,29 @@ Opened 2026-09-04 from roadmap 1.6's disclosed residual (scenario F,
 `tezt/tests/qualified_library_scoping.ml`). Not part of 1.6 — recorded here with its
 evidence so the next slice starts from a measurement rather than from the idea.
 
+## Scope — TWO shapes, not one
+
+Review found the residual is wider than this brief first described. Both leak, and both need the
+same evidence:
+
+- **(a) rooted outside the index** — `Stdlib.Buffer.add_string` in a project owning a `buffer.ml`,
+  `Unix.*`, a vendored duplicate, any unlinked library. Pinned by scenario F.
+- **(b) rooted INSIDE it, and the caller LINKS the library it wrongly reaches** — an anchor exists,
+  and the facade tier re-interprets a segment strictly below it:
+
+      ginca/api.ml = "include Base_impl"        (no Inner.run row of its own)
+      Ginca.Api.Inner.run  ->  gincb/inner.ml   MUST
+
+  while the correct answer `ginca/base_impl.ml:Inner.run` IS indexed. This is FR-001's defect one
+  qualification level deeper than scenario A, and an earlier revision of this brief excluded it by
+  scoping the residual to "a library the caller does not link". That exclusion was wrong: (b) is
+  the more common shape in dune projects, and it is what scenario G's title used to claim was
+  closed.
+
+A gate over the data already in the index cannot separate (b) from the LEGITIMATE facade it must
+serve — `Facade.Protocol.Script_int` reaching `Rawlib__Script_int` has the identical shape. That is
+the whole argument for linkage evidence.
+
 ## The residual
 
 A qualified reference rooted entirely outside the index still binds a local homonym, as a
@@ -19,17 +42,32 @@ tier is what makes it reachable through a bare segment, so 1.6 owns the follow-u
 
 ## Why the cheap fixes do not work — both measured, not argued
 
-| candidate gate | result |
-|---|---|
-| facade tier requires SOME prefix reading to name an indexed unit | **−1638** correct resolutions on proto_alpha |
-| ... plus the ROOT prefix to name an indexed unit | **−1616**, and a plausible-looking 25 116 resolved against a baseline of 26 693 |
+All figures are resolved-call counts on proto_alpha/lib_protocol (468 modules / 73 588 calls,
+`--errors-profile tezos`), measured by patching the gate in place and rebuilding the producer
+explicitly:
 
-Both fail for one reason: **a facade library is routinely not indexed at all at the scope being
-analysed.** `Tezos_protocol_alpha.Protocol.Main.acceptable_pass` legitimately reaches
-`lib_protocol/main.ml` while none of `Tezos_protocol_alpha`, `Tezos_protocol_alpha__Protocol`,
-`Tezos_protocol_alpha__Protocol__Main` is a stored row. Index membership therefore cannot
-distinguish "reference into a facade we do not index" from "reference into a library we do not
-link" — they are the same shape.
+| tree | resolved |
+|---|---|
+| `origin/main` | 26 693 |
+| this branch | 26 762 |
+| this branch, facade tier disabled entirely | 25 116 |
+| this branch + "require SOME reading to name an indexed unit" | 25 135 |
+
+So the facade tier is worth **1 646** resolutions, and the tempting conjunct would cost **1 627**
+of them.
+
+An earlier revision of this brief cited **−1638** and **−1616 against a 26 693 baseline**. Those
+are wrong twice over: they came from a wider corpus scope (`src/proto_alpha`, 690 modules) and from
+a set-diff that counts a re-target as a loss, and they do not reconcile even with each other
+(26 693 − 25 116 = 1 577, not 1 616). They are the same figures `lib/arch_index/arch_index.ml`
+already flags as reproducing nowhere — so this brief was, in the same commit, republishing numbers
+the code called unreproducible. Found by review; recorded here rather than quietly deleted, because
+the failure is the interesting part.
+
+Both candidates fail for one reason: **a facade library is routinely not indexed at all at the
+scope being analysed.** `Tezos_protocol_alpha.Protocol.Main.acceptable_pass` legitimately reaches
+`lib_protocol/main.ml` while none of `Tezos_protocol_alpha`,
+`Tezos_protocol_alpha__Protocol` or `Tezos_protocol_alpha__Protocol__Main` is a stored row.
 
 ## The evidence that does distinguish them, and it is already in the .cmt
 

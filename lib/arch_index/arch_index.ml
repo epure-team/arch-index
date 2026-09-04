@@ -880,24 +880,28 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
                      underscores), which names nothing. Measured cost of getting
                      this wrong, measured on this repository's own
                      [_build/default] by patching [join] to the naive
-                     ["__"]-join and re-indexing: 195 in-project references
-                     (112 distinct names, all [Arch_index__.*]) falling through
-                     to MUST-with-NULL — resolver misses stamped as proven
-                     external leaves.
+                     ["__"]-join and re-indexing:
 
-                     WITH THE FACADE TIER ON, that difference is currently
-                     ZERO: 5306 resolved either way (a clean
-                     [dune build --root .] of this tree; the 5293 an earlier
-                     revision cited came from a partially-built _build), because the facade tier
-                     reaches the same references from the bare segment. So this
-                     special case is not load-bearing as shipped, and an earlier
-                     version of this comment claimed a cost (86) that is
-                     reproducible in neither configuration.
+                       facade tier OFF:  shipped join - naive join = 196
+                                         references (112 distinct names, all
+                                         [Arch_index__.*])
+                       facade tier ON :  the difference is ZERO
 
-                     It stays anyway, and deliberately. The facade tier is the
-                     WEAKER evidence path, it is gated, and the linkage slice
-                     (briefs/linkage-evidence-followup.md) exists to gate it
-                     further. A prefix tier that is correct only because a
+                     DELTAS ONLY, deliberately. Three revisions of this comment
+                     have carried three different absolute counts — 5306, 5329,
+                     5349 — and each was correct when taken: the corpus is this
+                     repository's own build, so it grows with every commit and
+                     an absolute is unreproducible by construction. The
+                     difference is the claim; the total is not. Recipe: patch
+                     [join] to [a ^ "__" ^ b], `dune build --root .`, index
+                     [_build/default], count [callee_id IS NOT NULL].
+
+                     So this special case is not load-bearing as shipped: the
+                     facade tier reaches the same references from the bare
+                     segment. It stays anyway, and deliberately. The facade tier
+                     is the WEAKER evidence path, it is gated, and the linkage
+                     slice (briefs/linkage-evidence-followup.md) exists to gate
+                     it further. A prefix tier that is correct only because a
                      weaker tier covers for it would break silently the moment
                      that tier tightens. *)
                   let join a b =
@@ -1043,11 +1047,23 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
 
                (a) rooted outside the index — [Stdlib.Buffer.add_string] in a
                    project owning a [buffer.ml];
-               (b) rooted INSIDE it — [Owner.Submod.f] where [owner.ml] is
-                   [module Submod = Base]: the root [Owner] is indexed, the
-                   right answer [owner/base.ml] is indexed, and the reference
-                   still binds [other/submod.ml] in a library the caller does
-                   not link.
+               (b) rooted INSIDE it, WHETHER OR NOT the caller links the
+                   library it wrongly reaches. Two measured shapes:
+                     - [Owner.Submod.f] where [owner.ml] is
+                       [module Submod = Base]: root indexed, right answer
+                       [owner/base.ml] indexed, and it binds
+                       [other/submod.ml] in an UNLINKED library
+                       (scenario J);
+                     - [Ginca.Api.Inner.run] where [ginca/api.ml] is
+                       [include Base_impl] and [gincb/inner.ml] exists: the
+                       caller LINKS both, the right answer
+                       [ginca/base_impl.ml] is indexed, and it binds
+                       [gincb/inner.ml] as MUST (scenario L).
+                   An earlier revision of this paragraph said "in a library the
+                   caller does not link", which excluded the second and more
+                   common shape — and scenario G's title claimed that shape was
+                   closed while asserting only that one function id was avoided.
+                   Both corrected after review.
 
              (b) is the more common shape in dune projects and an earlier
              version of this comment did not admit it, describing the hole as
@@ -1055,6 +1071,12 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
              [origin/main] — retained, not introduced — and both are pinned by
              {!Qualified_library_scoping.register_unlinked_residual} and
              {!Qualified_library_scoping.register_aliased_nested_residual}.
+
+             Confining the tier BELOW the anchor removed the case where it
+             re-interpreted the anchor's own segment (scenario G). It did not,
+             and cannot, decide which LIBRARY a segment below the anchor may
+             reach: in scenario L exactly one indexed unit ends in [__Inner], so
+             it wins outright.
 
              Note (b) is structurally IDENTICAL to the legitimate facade this
              tier exists for ([Facade.Protocol.Script_int] -> [Rawlib__…]):
@@ -1074,7 +1096,8 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
                origin/main                                       26 693
                HEAD                                              26 762
                HEAD, facade tier disabled entirely               25 116
-               HEAD + "some reading names an indexed unit"       25 135
+               HEAD + REQUIRING an anchor (facade tier fires only
+                 when SOME reading names an indexed unit)             25 135
 
              So the facade tier is worth 1 646 resolutions, and the withdrawn
              conjunct would have cost 1 627 of them. An earlier version of this
