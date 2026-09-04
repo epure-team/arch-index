@@ -3,6 +3,14 @@
 Adversarial spec for the `MUST`-to-wrong-homonym defect. PR #20 failed for lack of a stated
 property; this file states it, then states what would falsify it.
 
+**Relationship to `specs/qualified-unit-resolution.md`** (added round-5 review): THIS file states
+the REQUIRED property (P1/P2/P3) and the GWT scenarios/falsifiers a change must satisfy — it is the
+adversarial spec, not a description of the implementation. `qualified-unit-resolution.md` is the
+descriptive account of what the resolver in `lib/arch_index/arch_index.ml` actually does,
+including its disclosed residuals. On a point of FACT about the code, that file wins; on what
+SHOULD be required, this file's scenarios and falsifiers win. See this file's S3 status note for
+the one place the two were found to disagree, and how it was resolved.
+
 ## The property
 
 **P1 (soundness of MUST).** For every row in `calls` with `kind = 'MUST'`, the `callee_id` is the
@@ -41,6 +49,31 @@ see the falsifier F3.
 - *Given* `module A = Liba.Api` / `include A` and a call through the alias
 - *Then* the edge is `MAY_TOP` — never a `MUST` to any candidate
 
+> **AMENDED by roadmap 1.6 (round-5 review; found by the contradiction between this line and
+> scenario D, `tezt/tests/qualified_library_scoping.ml`).** As first written, S3/CHECK-2 forbade
+> `MUST` through *any* alias or `include` unconditionally — the safe default before a function-table
+> arbitration existed. Roadmap 1.6 introduces exactly that arbitration (the 1 / 2+ / 0 rule: every
+> reading of a qualified name is tried, and the count of DISTINCT function ids they reach is the
+> verdict), and it is what scenarios A, B and D depend on: `module Bar = Bar` (scenario B) and a
+> cross-library re-export facade (scenario D, `Facade.Protocol.Script_int` → `Rawlib__Script_int`,
+> verified on proto_alpha as `Tezos_protocol_alpha.Protocol.Main.acceptable_pass` →
+> `lib_protocol/main.ml`) are BOTH aliases/re-exports through which a `MUST` is now legitimately
+> emitted, precisely because exactly one candidate answers. S3 is not violated by this — it is
+> narrowed: an alias/`include` call site is `MAY_TOP` (or `MAY_ENUMERATED`) exactly when the
+> function table finds ZERO or TWO-OR-MORE candidates (scenarios C, I), and `MUST` exactly when it
+> finds ONE (scenarios A, B, D). CHECK-2 is amended to match: it must assert `MAY_TOP` on an
+> AMBIGUOUS alias/include site (two+ candidates — scenario C's shape), not on every alias/include
+> site unconditionally; scenario B stays the regression guard against the opposite failure
+> (demoting an unambiguous alias to `MAY_TOP` when a fix over-reaches the OTHER way). Recorded here
+> rather than left as an unexplained contradiction between this spec and the tests that pass
+> against it. See `specs/qualified-unit-resolution.md` for the resolver-level statement of the 1 /
+> 2+ / 0 rule and the facade tier this amendment sanctions.
+
+**S4 — the three sites.**
+- *Given* the same cross-library homonym shape
+- *When* module dependencies (`arch_index.ml:421`) and type usages (`:479`) are resolved
+- *Then* neither attributes the dependency/usage to the wrong library
+
 > **STATUS after roadmap 1.6 (`feat/qualified-unit-resolution`): NOT MET, deliberately.**
 > Only the CALL site is fixed. `module_deps` and `type_usage` still key on the capitalised file
 > basename in a last-writer-wins table, so both still attribute a cross-library homonym to the
@@ -52,12 +85,8 @@ see the falsifier F3.
 > `fn_lookup` already is and routing both sites through `unit_readings` — its own slice, with its
 > own corpus validation, because both feed consumers that treat their output as proof.
 > Found by adversarial review, which is the only reason it is written down here rather than
-> silently unmet.
-
-**S4 — the three sites.**
-- *Given* the same cross-library homonym shape
-- *When* module dependencies (`arch_index.ml:421`) and type usages (`:479`) are resolved
-- *Then* neither attributes the dependency/usage to the wrong library
+> silently unmet. (Moved here from S3, round-5 review: this block is entirely about `module_deps`
+> and `type_usage`, i.e. S4, and had been sitting inside the S3 section since it was first added.)
 
 **S5 — self-index integrity.**
 - *When* arch-index indexes itself after the change
@@ -82,8 +111,12 @@ see the falsifier F3.
 - **CHECK-1** → S1: new multi-library Tezt fixture; assert `callee_id` is `liba`'s `run`, or
   `kind ∈ {MAY_ENUMERATED, MAY_TOP}`; assert **no** `MUST` row to `libc`'s `run`.
   Red-then-green: must fail on `main` before the fix.
-- **CHECK-2** → S3: assert the alias/include call site is `MAY_TOP` (guards against a fix that
-  over-reaches into re-exports).
+- **CHECK-2** → S3 (amended, see the status note under S3): assert an AMBIGUOUS alias/include call
+  site (two or more distinct function ids answer to it — scenario C's shape) is `MAY_TOP`, and that
+  an UNAMBIGUOUS one (scenarios A, B, D) stays `MUST`. Guards against a fix that over-reaches into
+  a genuine two-answer case in EITHER direction: demoting an unambiguous alias to `MAY_TOP`
+  (scenario B's regression) is as much a failure as promoting an ambiguous one to `MUST`
+  (scenario C's would-be regression).
 - **CHECK-3** → S5: `arch-callgraph-ocaml` on self + `arch-rules --on-vacuous fail` exit 0; golden
   diff reviewed, not auto-accepted.
 
