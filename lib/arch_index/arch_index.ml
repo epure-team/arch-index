@@ -206,6 +206,25 @@ let load_errors_config ~project_root ~errors_config ~errors_profile =
           sources := path :: !sources)) ;
   (!acc, String.concat "," (List.rev !sources), !operator_paths)
 
+(* Roadmap 1.6 (R3 detector), extracted as a pure function (round-6 review) so
+   it has a seam a test can fault-inject through. As shipped, this had ZERO
+   coverage: nothing in the tree referenced [registry_gaps] or
+   [registered_paths], and forcing [registry_gaps] to [[]] left the full
+   142-test suite green — a diagnostic guarding a silent failure was itself
+   silently unverified. [known_unit_names]/[paths_of_unit] are passed in
+   rather than read from {!Arch_index_cmt}'s global tables so a test can
+   supply a synthetic registry without indexing a real project — real code can
+   never produce a genuine gap here (see the invariant note below), so a real
+   fixture cannot exercise the detector at all; only a directly-injected fault
+   can. *)
+let compute_registry_gaps ~stored_module_paths ~known_unit_names ~paths_of_unit =
+  let registered_paths = Hashtbl.create 256 in
+  List.iter
+    (fun unit_name ->
+      List.iter (fun p -> Hashtbl.replace registered_paths p ()) (paths_of_unit unit_name))
+    known_unit_names ;
+  List.filter (fun path -> not (Hashtbl.mem registered_paths path)) stored_module_paths
+
 let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors_profile
     ?(errors_strict = false) ~build_dir () =
   (* Reset global state for re-entrancy *)
@@ -744,14 +763,27 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
 
      NARROWER THAN IT SOUNDS (found by review). This only sees a whole unit
      missing from the registry — a gap in [known_unit_names ()] itself. It does
-     NOT see, and cannot see, a reference into a unit that IS registered but
-     whose named function has no row of its own because the definition arrives
-     through an [include] elsewhere in the same unit (scenarios E and G below):
-     there the registry has no gap, [resolve_qualified_unit] still reaches
-     `Not_found`, and the same kind=MUST/NULL-callee shape is emitted with zero
-     count here. That variant is not a registry-completeness defect; it is
-     accepted and budgeted against [must_null_ceiling] (see the resolver's
-     [`Not_found] arm and scenarios E/G's comments). *)
+     NOT see, and cannot see, two shapes that produce the identical
+     kind=MUST/NULL-callee symptom with zero count here:
+
+       - a reference into a unit that IS registered but whose named function
+         has no row of its own because the definition arrives through an
+         [include] elsewhere in the same unit (scenarios E and G — a DISCLOSED
+         RESIDUAL, not merely "accepted", per round-6 review: see the
+         resolver's [`Not_found] arm and scenarios E/G's comments);
+       - a unit name registered with TWO OR MORE paths (the (wrapped false) /
+         wrapped-main-module collision shape scenario C pins, and which
+         [ids_of_reading] treats as AMBIGUOUS rather than a leaf since
+         `6e7b429` closed the shape scenario M used to leak through). Every
+         path in [paths_of_unit unit_name] is present in [registered_paths]
+         regardless of how many there are, so a unit with two registered paths
+         is exactly as invisible to this detector as a unit with one — this
+         detector counts STORED PATHS WITH NO UNIT, not units whose own
+         resolution is unreliable.
+
+     Neither is a registry-completeness defect in the sense this detector
+     checks — the path IS registered, just not usably so — so this detector,
+     by design, reports zero for both. *)
   (* Built ONCE into a set rather than re-derived per path. The obvious phrasing
      — for each stored path, scan every known unit's path list — rebuilds
      [known_unit_names ()] (a fold plus a sort) and re-sorts [paths_of_unit] on
@@ -766,15 +798,10 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
      print NOTHING would have cost tens of seconds. With the set built once,
      branch and baseline are indistinguishable (+0.004s at 800, +0.003s at
      1600 on the reviewer's machine). *)
-  let registered_paths = Hashtbl.create 256 in
-  List.iter
-    (fun unit_name ->
-      List.iter
-        (fun p -> Hashtbl.replace registered_paths p ())
-        (Arch_index_cmt.paths_of_unit unit_name))
-    (Arch_index_cmt.known_unit_names ()) ;
   let registry_gaps =
-    List.filter (fun path -> not (Hashtbl.mem registered_paths path)) !stored_module_paths
+    compute_registry_gaps ~stored_module_paths:!stored_module_paths
+      ~known_unit_names:(Arch_index_cmt.known_unit_names ())
+      ~paths_of_unit:Arch_index_cmt.paths_of_unit
   in
   if registry_gaps <> [] then
     Arch_io.eprintf
@@ -893,26 +920,48 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
                      [_build/default] by patching [join] to the naive
                      ["__"]-join and re-indexing:
 
-                       facade tier OFF:  shipped join - naive join = 200
-                                         references (112 distinct names, all
-                                         [Arch_index__.*])
+                       facade tier OFF:  shipped join - naive join = 199
+                                         references, all [Arch_index__.*]
                        facade tier ON :  the difference is ZERO
 
-                     DELTAS ONLY, deliberately. Four revisions of this comment
-                     have now carried four different absolute counts — 5306,
-                     5329, 5349, and a "196" that round-5 review found did NOT
-                     reproduce (re-running the recipe below gave 200, and it
-                     was already 200 at the commit whose title claimed to
-                     "correct every number it cited" — so it was wrong when
-                     written, not stale from corpus drift): each total was
-                     correct when taken, since the corpus is this repository's
-                     own build and grows with every commit, so an absolute is
-                     unreproducible by construction. The difference is the
-                     claim; the total is not, and the 196->200 miss is exactly
-                     why deltas are re-derived rather than copied forward.
-                     Recipe: patch [join] to [a ^ "__" ^ b], `dune build --root
-                     .`, index [_build/default], count [callee_id IS NOT
-                     NULL].
+                     DELTAS ONLY, deliberately. Five revisions of this comment
+                     have now carried five different absolute counts — 5306,
+                     5329, 5349, a "196" that round-5 review found did NOT
+                     reproduce, and a "200" that round-6 review found does NOT
+                     reproduce EITHER when the recipe below is followed
+                     literally (it gives delta ZERO, not 200): the recipe as
+                     written patched only [join], and with the facade tier
+                     left ON it reaches the same references from the bare
+                     segment regardless of which join produced the unit name,
+                     so the join alone changes nothing measurable. The 200 was
+                     real, but only with the facade tier ALSO disabled — a step
+                     the recipe never named. Corrected here rather than copied
+                     forward a sixth time: each total was correct when taken,
+                     since the corpus is this repository's own build and grows
+                     with every commit, so an absolute is unreproducible by
+                     construction; the difference is the claim, and it must be
+                     re-derived by the recipe below, not copied from this
+                     comment.
+
+                     Recipe (corrected, round-6 review — BOTH edits are
+                     required, in the SAME build, or the delta is zero):
+                     patch [join] to [fun a b -> a ^ "__" ^ b], AND patch
+                     [facade_readings] to ignore its arguments and return
+                     [[]], `dune build --root .`, index [_build/default] with
+                     the patched binary, count [callee_id IS NOT NULL], and
+                     subtract the same count measured with [join] reverted to
+                     the shipped version and [facade_readings] still disabled
+                     (NOT the shipped, facade-tier-ON count — that comparison
+                     conflates the join change with the facade tier's own
+                     contribution, which round-6 review measured at ZERO on
+                     this corpus, so it happens not to matter today, but
+                     mixing them is the wrong recipe regardless). Re-measured
+                     round-6 review, all four cells back to back on this tree:
+                     shipped-join/facade-ON = 5495, naive-join/facade-ON =
+                     5495 (delta 0, confirming the "facade tier ON" line
+                     above), shipped-join/facade-OFF = 5495, naive-join/
+                     facade-OFF = 5296 (delta 199, confirming the "facade tier
+                     OFF" line above).
 
                      So this special case is not load-bearing as shipped: the
                      facade tier reaches the same references from the bare
@@ -1144,11 +1193,23 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
 
              (b) is the more common shape in dune projects and an earlier
              version of this comment did not admit it, describing the hole as
-             "rooted OUTSIDE the index" only. Both are identical on
-             [origin/main] — retained, not introduced — and both are pinned by
-             {!Qualified_library_scoping.register_unlinked_residual},
-             {!Qualified_library_scoping.register_aliased_nested_residual} and
-             {!Qualified_library_scoping.register_linked_homonym_residual}.
+             "rooted OUTSIDE the index" only. All three are pinned by
+             {!Qualified_library_scoping.register_unlinked_residual} (F),
+             {!Qualified_library_scoping.register_aliased_nested_residual} (J)
+             and {!Qualified_library_scoping.register_linked_homonym_residual}
+             (L). The DEFECT CLASS — a bare segment below the anchor binding a
+             library the index cannot rule out — is retained from
+             [origin/main], not introduced, for all three. But "identical on
+             origin/main" is true only for F and J, verified by running each
+             fixture through main's own producer; round-6 review measured that
+             L is NOT identical: main lands the same reference in the same
+             WRONG directory ([lincb/]) but at a DIFFERENT wrong function
+             ([lincb/api.ml:Inner.run] there, [lincb/inner.ml:run] on this
+             branch) — a different "__"-join tie-break over the same
+             homonym-below-the-anchor hole, not a byte-identical outcome. An
+             earlier revision of this paragraph and of scenario L's own
+             comment both claimed "identical on origin/main" for L too,
+             untested; that claim was false.
 
              Confining the tier BELOW the anchor removed the case where it
              re-interpreted the anchor's own segment (scenario G). It did not,

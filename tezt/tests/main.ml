@@ -7,6 +7,7 @@
 
 let () =
   Helpers.register () ;
+  Registry_gaps.register () ;
   Ocaml_shapes.register () ;
   Multilang.register () ;
   Curation_doc.register () ;
