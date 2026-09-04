@@ -102,8 +102,13 @@ let build_producer () =
      with or without this flag. What IS confirmed is quieter: [go version -m] on a binary
      built from a normal clone shows [build vcs=git] and [vcs.revision] lines; built from a
      worktree, those lines are simply absent — Go declines to stamp rather than erroring.
-     Do not assume the "error obtaining VCS status: exit status 128" failure some earlier
-     report claimed; it was not reproduced.
+     Not reproducible in a WORKTREE on go1.26.4: there Go finds no
+     recognisable repository root and silently omits the vcs stamp lines
+     instead of failing. The `exit status 128` failure IS reproducible where
+     the VCS lookup itself fails — a repo root git refuses (safe.directory,
+     for instance) gives `error obtaining VCS status: exit status 128` and
+     exit 1 without this flag, exit 0 with it. That is what the flag earns,
+     and it is why the worktree evidence alone does not justify removing it
 
      The flag is kept anyway: it costs nothing, makes the no-stamp behavior explicit rather
      than incidental, and guards other toolchains/configurations where the VCS lookup IS
