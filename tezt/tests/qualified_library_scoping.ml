@@ -324,8 +324,17 @@ let register_unwrapped_residual () =
    two names have no common prefix, so no prefix reading can ever bridge them
    and the reference falls through to "proven external leaf" — a NULL-free MUST
    into a library that IS in the index. Measured cost of not bridging it, before
-   the second resolution tier existed: 2385 lost resolutions on proto_alpha,
-   including src/proto_alpha/lib_protocol/script_interpreter.ml.
+   the second resolution tier existed: 1646 lost resolutions on
+   proto_alpha/lib_protocol (26 762 resolved with the tier, 25 116 without,
+   measured on this tree). An earlier version of this comment said 2385, which
+   came from a wider corpus scope and a set-diff that counts a re-target as a
+   loss; it reproduces nowhere.
+
+   GREEN ON origin/main, and that matters: unlike scenarios A, C, E, G and H,
+   this one is NOT a guarantee this change adds. It guards a regression the
+   BRANCH introduced at 9896fdd, when removing the bare-segment lookup also
+   removed the only thing bridging a re-export facade. It pins a restoration,
+   not a fix.
 
    This is the shape that makes the facade tier necessary, so it is pinned here
    rather than left to the next corpus run to rediscover. Note what it must NOT
@@ -416,10 +425,15 @@ let register_reexport_facade () =
 
      Liba.Api.run  ->  libb/api.ml:run   MUST
 
-   which is scenario A verbatim with one word changed. The gate is therefore on
-   UNIT evidence, not function evidence: when the DEEPEST reading names an
-   indexed unit, the reference has located its unit and a missing row there is
-   an external leaf or ⊤ — never another library's homonym. *)
+   which is scenario A verbatim with one word changed. Scenario A passed only
+   because both api.ml files define [run], forcing the prefix tier to answer.
+
+   SCOPE OF THIS TEST, narrowed after round-2 review. It pins the DEPTH-2 case
+   only: [Ginca.Api.run], where the reference stops at the compilation unit. It
+   does NOT establish the general property, and its header used to claim it did
+   — a reference qualified one level deeper walked around the first gate
+   entirely. That shape is {!register_nested_include_homonym} (scenario G), and
+   it is what the anchor-depth gate exists for. *)
 let inc_a_dune =
   ( "inca/dune",
     "(library\n (name inca)\n (modules api base_impl)\n (flags (:standard -w -a)))\n" )
@@ -467,9 +481,11 @@ let register_include_homonym () =
                 ~msg:
                   (Printf.sprintf
                      "E: from_a -> Inca.Api.run resolved to %s (kind=%s), which is incb/api.ml \
-                      run (%s) — the other library. inca/api.ml IS indexed; its [run] simply \
-                      arrives via include. A reference whose own unit is in the index must never \
-                      be handed to a homonym elsewhere, least of all as MUST"
+                      run (%s) — the other library. inca/api.ml IS indexed and [Inca__Api] is the \
+                      DEEPEST reading of this reference, so the prefix tier has identified the \
+                      segment and the facade tier must not re-interpret it. (This is the depth-2 \
+                      guarantee only — see scenario G for deeper references, and the residuals F \
+                      and J for what is still open.)"
                      (show callee) kind wrong)
                 (callee <> Some wrong))) ;
   Lwt.return_unit
@@ -477,10 +493,15 @@ let register_include_homonym () =
 (* Scenario F — DISCLOSED RESIDUAL, pinned and NOT endorsed.
 
    A reference rooted entirely outside the index — [Stdlib.Buffer.add_string],
-   or any library the caller does not link — still resolves to a local module
-   of the same basename, as a MUST. Scenario E's gate does not catch it: no
-   reading of [Stdlib.Buffer] names an indexed unit, so the deepest one does
-   not either, and the facade tier fires.
+   [Unix.*], a vendored duplicate, or any library the caller does not link —
+   still resolves to a local module of the same basename, as a MUST. No reading
+   of [Stdlib.Buffer] names an indexed unit, so there is no anchor, every
+   segment is fair game and the facade tier fires.
+
+   This is ONE OF TWO shapes in the same hole. The other has an indexed root
+   and is pinned separately by {!register_aliased_nested_residual} (scenario
+   J); an earlier version of this comment described the residual as
+   "rooted outside the index" only, which was narrower than the truth.
 
    This behaves identically on [origin/main]: retained, not introduced. It is
    pinned here rather than described in prose because a comment does not stop
@@ -489,10 +510,12 @@ let register_include_homonym () =
    decide deliberately instead of believing they fixed a bug.
 
    The fix needs LINKAGE evidence — the caller's own `.cmt` import list, which
-   is not captured today. The tempting cheap conjunct (require some prefix
-   reading to name an indexed unit) was implemented and measured: it costs 1616
-   correct resolutions on proto_alpha, because a facade library is routinely
-   not indexed at the scope being analysed. *)
+   names the unit the reference actually reaches and does not name the homonym.
+   Not captured today; see briefs/linkage-evidence-followup.md. The tempting
+   cheap conjunct (require some prefix reading to name an indexed unit) was
+   implemented and measured: it costs 1627 correct resolutions on
+   proto_alpha/lib_protocol, because a facade library is routinely not indexed
+   at the scope being analysed. *)
 let unlinked_lib_dune =
   ("unlmylib/dune", "(library\n (name unlmylib)\n (modules buffer)\n (flags (:standard -w -a)))\n")
 
@@ -550,4 +573,266 @@ let register_unlinked_residual () =
               | _ ->
                   Batch.note b "F: expected exactly one Stdlib.Buffer.add_string call row, got %d"
                     (List.length rows))) ;
+  Lwt.return_unit
+
+(* ------------------------------------------------------------------ *)
+(* Round-2 review — the shapes the first gate still let through         *)
+(* ------------------------------------------------------------------ *)
+
+(* Scenario G — scenario E, one qualification level deeper.
+
+   The first gate asked only whether the DEEPEST reading named an indexed
+   unit. Insert a nested module and the deepest reading is
+   [Ginca__Api__Inner], which names nothing — so the gate opened and the tier
+   re-interpreted segment [Api], the very segment the prefix tier had already
+   identified, against every library owning an [Api]:
+
+     Ginca.Api.Inner.run  ->  gincb/api.ml  MUST
+
+   Scenario E therefore did NOT establish the general property its header
+   claimed; it established it for depth-2 references only. The gate now anchors
+   on the deepest reading that names an indexed unit and lets the facade tier
+   use only segments strictly deeper than it.
+
+   Credit: found by adversarial review, not by this suite. *)
+let g_a_dune =
+  ("ginca/dune", "(library\n (name ginca)\n (modules api base_impl)\n (flags (:standard -w -a)))\n")
+
+let g_a_base = ("ginca/base_impl.ml", "module Inner = struct let run () : int = 1 end\n")
+
+let g_a_api = ("ginca/api.ml", "include Base_impl\n")
+
+let g_b_dune = ("gincb/dune", "(library\n (name gincb)\n (modules api)\n (flags (:standard -w -a)))\n")
+
+let g_b_api = ("gincb/api.ml", "module Inner = struct let run () : int = 2 end\n")
+
+let g_caller_dune =
+  ( "gcaller/dune",
+    "(library\n (name gcaller)\n (libraries ginca gincb)\n (modules g)\n (flags (:standard -w \
+     -a)))\n" )
+
+let g_caller_g =
+  ( "gcaller/g.ml",
+    "let from_a () : int = Ginca.Api.Inner.run ()\nlet from_b () : int = Gincb.Api.Inner.run ()\n" )
+
+let scenario_g_files =
+  [dune_project; g_a_dune; g_a_base; g_a_api; g_b_dune; g_b_api; g_caller_dune; g_caller_g]
+
+let register_nested_include_homonym () =
+  Test.register ~__FILE__
+    ~title:"cmt: a DEEPER include-defined homonym never resolves into the other library"
+    ~tags:["cmt"; "qualified_name"; "library_scoping"; "facade"]
+  @@ fun () ->
+  Batch.run (fun b ->
+      with_fixture ~name:"qual-scope-g" ~files:scenario_g_files @@ fun fixture ->
+      let db = index fixture in
+      Db.with_db db (fun conn ->
+          let wrong = fn_id conn ~mod_like:"%gincb/api.ml" ~name:"Inner.run" b ~label:"G" in
+          match wrong with
+          | None -> Batch.note b "G: gincb/api.ml Inner.run is not indexed at all"
+          | Some wrong ->
+              let callee, kind = single_call conn ~caller_fn:"from_a" ~label:"G" in
+              Batch.check b
+                ~msg:
+                  (Printf.sprintf
+                     "G: from_a -> Ginca.Api.Inner.run resolved to %s (kind=%s), which is \
+                      gincb/api.ml Inner.run (%s) — the other library. [Ginca__Api] IS an \
+                      indexed unit, so segment [Api] is already identified and the facade tier \
+                      must not re-interpret it. Gating on the deepest reading alone let this \
+                      through, because [Ginca__Api__Inner] names nothing"
+                     (show callee) kind wrong)
+                (callee <> Some wrong))) ;
+  Lwt.return_unit
+
+(* Scenario H — [include_subdirs qualified], a shape no test covered and which
+   this change fixes. Two libraries each own [sub/api.ml], compiled to
+   [Isa__Sub__Api] and [Isb__Sub__Api]. On main the basename key erases the
+   library and [Isa.Sub.Api.run] lands in [isb/]. Credit: adversarial review. *)
+let h_a_dune =
+  ("isa/dune", "(include_subdirs qualified)\n(library\n (name isa)\n (flags (:standard -w -a)))\n")
+
+let h_a_api = ("isa/sub/api.ml", "let run () : int = 1\n")
+
+let h_b_dune =
+  ("isb/dune", "(include_subdirs qualified)\n(library\n (name isb)\n (flags (:standard -w -a)))\n")
+
+let h_b_api = ("isb/sub/api.ml", "let run () : int = 2\n")
+
+let h_caller_dune =
+  ( "icaller/dune",
+    "(library\n (name icaller)\n (libraries isa isb)\n (modules i)\n (flags (:standard -w -a)))\n" )
+
+let h_caller_i =
+  ( "icaller/i.ml",
+    "let from_a () : int = Isa.Sub.Api.run ()\nlet from_b () : int = Isb.Sub.Api.run ()\n" )
+
+let scenario_h_files =
+  [
+    ("dune-project", "(lang dune 3.7)\n"); h_a_dune; h_a_api; h_b_dune; h_b_api; h_caller_dune;
+    h_caller_i;
+  ]
+
+let register_include_subdirs () =
+  Test.register ~__FILE__
+    ~title:"cmt: include_subdirs qualified — a nested module resolves within its own library"
+    ~tags:["cmt"; "qualified_name"; "library_scoping"]
+  @@ fun () ->
+  Batch.run (fun b ->
+      with_fixture ~name:"qual-scope-h" ~files:scenario_h_files @@ fun fixture ->
+      let db = index fixture in
+      Db.with_db db (fun conn ->
+          let in_a = fn_id conn ~mod_like:"%isa/sub/api.ml" ~name:"run" b ~label:"H" in
+          let in_b = fn_id conn ~mod_like:"%isb/sub/api.ml" ~name:"run" b ~label:"H" in
+          match (in_a, in_b) with
+          | None, _ | _, None -> Batch.note b "H: one of the two sub/api.ml run functions is absent"
+          | Some a_fn, Some _ ->
+              let callee, kind = single_call conn ~caller_fn:"from_a" ~label:"H" in
+              Batch.check b
+                ~msg:
+                  (Printf.sprintf
+                     "H: from_a -> Isa.Sub.Api.run resolved to %s (kind=%s), expected \
+                      isa/sub/api.ml run (%s). Both libraries use (include_subdirs qualified) and \
+                      own a sub/api.ml, so the compiled units are Isa__Sub__Api and Isb__Sub__Api \
+                      — distinct, and the reference names one of them"
+                     (show callee) kind a_fn)
+                (callee = Some a_fn))) ;
+  Lwt.return_unit
+
+(* Scenario I — DISCLOSED RESIDUAL, the precision cost of the 1/2+/0 rule.
+
+   A library main module that DEFINES [Bar] rather than aliasing it shadows the
+   sibling [bar.ml] for every external reference, so [Hfoo.Bar.baz] is
+   determinate in OCaml. The resolver sees two readings reaching two ids — unit
+   [Hfoo] with a row [Bar.baz], unit [Hfoo__Bar] with a row [baz] — and calls
+   that ambiguous. Main resolved it, correctly.
+
+   Sound direction (⊤, not a wrong MUST) and vanishingly rare: exactly ONE
+   [ambiguous_unit] row across proto_alpha's 73 588 calls, zero on
+   octez-manager. Pinned rather than described so that closing it — by
+   preferring the longest [__]-join that hits, say — is a deliberate edit.
+   Note scenario B passes only because ITS main module is a pure alias defining
+   no row; the moment it defines one, the tie-break inverts. Credit:
+   adversarial review. *)
+let i_lib_dune =
+  ("hfoo/dune", "(library\n (name hfoo)\n (modules hfoo bar)\n (flags (:standard -w -a)))\n")
+
+let i_lib_bar = ("hfoo/bar.ml", "let baz () : int = 2\n")
+
+let i_lib_main = ("hfoo/hfoo.ml", "module Bar = struct let baz () : int = 1 end\n")
+
+let i_caller_dune =
+  ( "hcaller/dune",
+    "(library\n (name hcaller)\n (libraries hfoo)\n (modules h)\n (flags (:standard -w -a)))\n" )
+
+let i_caller_h = ("hcaller/h.ml", "let go () : int = Hfoo.Bar.baz ()\n")
+
+let scenario_i_files =
+  [dune_project; i_lib_dune; i_lib_bar; i_lib_main; i_caller_dune; i_caller_h]
+
+let register_shadowing_residual () =
+  Test.register ~__FILE__
+    ~title:"cmt: a main module SHADOWING a sibling degrades to ⊤ — pinned, not endorsed"
+    ~tags:["cmt"; "qualified_name"; "library_scoping"; "residual"]
+  @@ fun () ->
+  Batch.run (fun b ->
+      with_fixture ~name:"qual-scope-i" ~files:scenario_i_files @@ fun fixture ->
+      let db = index fixture in
+      Db.with_db db (fun conn ->
+          let callee, kind = single_call conn ~caller_fn:"go" ~label:"I" in
+          (* Asserting a PRECISION LOSS against origin/main, which resolved this
+             to hfoo/hfoo.ml Bar.baz. The direction is safe and the corpus cost
+             is one row, but it is a real regression and must not be discovered
+             later as a surprise. *)
+          Batch.check b
+            ~msg:
+              (Printf.sprintf
+                 "I: go -> Hfoo.Bar.baz is kind=%s callee=%s. This pins a KNOWN PRECISION LOSS: \
+                  OCaml scoping makes the reference determinate (hfoo.ml's own Bar shadows \
+                  bar.ml) and origin/main resolved it, but two readings reach two ids and the \
+                  resolver calls that ambiguous. If this now resolves, the residual is closed — \
+                  good news, but update this test and its comment deliberately"
+                 kind (show callee))
+            (kind = "MAY_TOP" && callee = None))) ;
+  Lwt.return_unit
+
+(* Scenario J — DISCLOSED RESIDUAL, the half scenario F's description missed.
+
+   F pins a reference rooted OUTSIDE the index. This one is rooted INSIDE it
+   and leaks anyway:
+
+     owner/owner.ml  = "module Submod = Base"   (an alias, defining no row)
+     owner/base.ml   = the real definition
+     other/submod.ml = a homonym, in a library the caller does NOT link
+     caller          = Owner.Submod.f ()
+
+   The root [Owner] is an indexed unit, the correct target [owner/base.ml] is
+   indexed, and the reference still binds [other/submod.ml] as a NULL-free
+   MUST. The anchor is [Owner] at depth 0, segment [Submod] is deeper, and
+   below the anchor nothing constrains which library a bare segment may reach.
+
+   Identical on [origin/main] — retained, not introduced — and materially more
+   common in dune projects than F's [Stdlib] shape, since it is just an alias
+   in a library's main module.
+
+   Why it is not simply fixed: this is structurally IDENTICAL to scenario D,
+   the legitimate cross-library facade — indexed root, deeper segment naming a
+   unit in another library. D must resolve; J must not. The index alone cannot
+   separate them, which is why the fix is the caller's [.cmt] import list
+   (briefs/linkage-evidence-followup.md) and not a cleverer predicate over the
+   data already here. Closing it will flip this test; that is the point.
+
+   Credit: found by adversarial review, from a probe I had not written. *)
+let j_owner_dune =
+  ("jowner/dune", "(library\n (name jowner)\n (modules jowner base)\n (flags (:standard -w -a)))\n")
+
+let j_owner_base = ("jowner/base.ml", "let f () : int = 1\n")
+
+let j_owner_main = ("jowner/jowner.ml", "module Submod = Base\n")
+
+let j_other_dune =
+  ("jother/dune", "(library\n (name jother)\n (modules submod)\n (flags (:standard -w -a)))\n")
+
+let j_other_submod = ("jother/submod.ml", "let f () : int = 2\n")
+
+(* Links jowner ONLY. jother is in the index but not on this library's path. *)
+let j_caller_dune =
+  ( "jcaller/dune",
+    "(library\n (name jcaller)\n (libraries jowner)\n (modules j)\n (flags (:standard -w -a)))\n" )
+
+let j_caller_j = ("jcaller/j.ml", "let go () : int = Jowner.Submod.f ()\n")
+
+let scenario_j_files =
+  [dune_project; j_owner_dune; j_owner_base; j_owner_main; j_other_dune; j_other_submod;
+   j_caller_dune; j_caller_j]
+
+let register_aliased_nested_residual () =
+  Test.register ~__FILE__
+    ~title:
+      "cmt: an aliased nested module can still bind an unlinked homonym — pinned, not endorsed"
+    ~tags:["cmt"; "qualified_name"; "library_scoping"; "residual"]
+  @@ fun () ->
+  Batch.run (fun b ->
+      with_fixture ~name:"qual-scope-j" ~files:scenario_j_files @@ fun fixture ->
+      let db = index fixture in
+      Db.with_db db (fun conn ->
+          let unlinked = fn_id conn ~mod_like:"%jother/submod.ml" ~name:"f" b ~label:"J" in
+          let correct = fn_id conn ~mod_like:"%jowner/base.ml" ~name:"f" b ~label:"J" in
+          match (unlinked, correct) with
+          | None, _ | _, None -> Batch.note b "J: one of the two f functions is not indexed"
+          | Some unlinked, Some correct ->
+              let callee, kind = single_call conn ~caller_fn:"go" ~label:"J" in
+              (* Asserting the DEFECT, like F. If this fails, the residual has
+                 been closed — verify the answer is now jowner/base.ml (%s) and
+                 delete this scenario deliberately, together with F and the
+                 paragraph in the resolver that disclaims both. *)
+              Batch.check b
+                ~msg:
+                  (Printf.sprintf
+                     "J: go -> Jowner.Submod.f resolved to %s (kind=%s), expected the UNLINKED \
+                      jother/submod.ml f (%s). This pins a KNOWN DEFECT that also reproduces on \
+                      origin/main: the correct answer is jowner/base.ml f (%s), reachable through \
+                      the alias, but nothing below the anchor constrains which library a bare \
+                      segment may reach. A change here is good news and must be deliberate"
+                     (show callee) kind unlinked correct)
+                (callee = Some unlinked))) ;
   Lwt.return_unit
