@@ -1,7 +1,7 @@
 {
   "task": "point-free-aliases",
   "mode": "full",
-  "current_phase": "spec",
+  "current_phase": "plan",
   "events": [
     {
       "phase": "question",
@@ -26,6 +26,12 @@
       "outcome": "VALIDATED",
       "at": "2026-09-04T14:30:00Z",
       "by": "roster-spec"
+    },
+    {
+      "phase": "plan",
+      "outcome": "COMPLETED",
+      "at": "2026-09-04T15:10:00Z",
+      "by": "roster-plan"
     }
   ]
 }
