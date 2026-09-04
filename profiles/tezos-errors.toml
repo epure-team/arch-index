@@ -149,32 +149,26 @@ sinks = [
 # MERGED rather than DELETED. Deleting it would have made the config load
 # with the least churn, but it would have thrown away a vocabulary the
 # verified 276-unit inventory actually found, to keep a channel that could
-# never use it. Overriding `[channel.option]` instead gives the four
+# never use it. Extending `[channel.option]` instead gives the four
 # Option_syntax binds to the channel that DOES own every option-typed
 # carrier in the corpus — the analysis these four paths were declared for
-# now actually runs. Because `merge` replaces a same-named channel whole
-# rather than field by field, the built-in's own Stdlib.Option vocabulary
-# (arch_errors_config.ml's option_channel) is restated here verbatim; keep
-# the two in step when either changes.
+# now actually runs.
+#
+# Review round 2 (HIGH): this block used to restate the built-in's whole
+# Stdlib.Option vocabulary — six paths and an `underlying = ["Stdlib.option"]`
+# — because `merge` replaced a same-named channel wholesale, and that
+# restatement then counted against `--errors-strict`. `merge` now EXTENDS a
+# channel field by field (arch_errors_config.ml's merge_channel), so this
+# declares ONLY what it adds: `type` is required by the parser and names a
+# path the built-in already has (deduped, not doubled), and every other
+# built-in field is inherited untouched.
 [channel.option]
 type = "option"
-underlying = ["Stdlib.option"]
-error_type = ""
-origins = [{ path = "None", arg = 0 }]
+# The protocol environment's own option monad — the whole reason this block
+# exists. Unioned onto the built-in's Stdlib.Option binds.
 binds = [
-  # Built-in option_channel, restated (see above).
-  "Stdlib.Option.bind",
-  "Stdlib.Option.Syntax.let*",
-  "Stdlib.Option.Syntax.and*",
-  # The protocol environment's own option monad.
   "Tezos_protocol_environment_*.Error_monad.Option_syntax.let*",
   "Tezos_protocol_environment_*.Error_monad.Option_syntax.let+",
   "Tezos_protocol_environment_*.Error_monad.Lwt_option_syntax.let*",
   "Tezos_protocol_environment_*.Error_monad.Lwt_option_syntax.let*?",
-]
-handlers = [
-  # Built-in option_channel, restated (see above).
-  { path = "Stdlib.Option.value", arg = 1 },
-  { path = "Stdlib.Option.get", arg = 1 },
-  { path = "Stdlib.Option.fold", arg = 1 },
 ]

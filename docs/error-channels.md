@@ -244,8 +244,7 @@ arch-errors: <path>: arch-errors.toml: channel <c>: unknown key '<k>'
 arch-errors: channel <c>: carrier type matched nothing in the indexed corpus
 arch-errors: channel <c>: carrier type '<t>' is already claimed by channel '<c'>', declared
   earlier — channel selection is first-match-wins, so <c> could never own a carrier and every
-  query on it would answer NOT_A_CARRIER(<c>) about code it never examined. Reorder the channels
-  so the more specific one comes first, or merge the two declarations into one.
+  query on it would answer NOT_A_CARRIER(<c>) about code it never examined. <remedy>
 ```
 
 The last two are the interesting ones, and they are the same bug in two disguises: a declaration
@@ -259,13 +258,40 @@ that can never be honoured, published as if it were a fact about your code.
   one carrier type are fine when a distinguishing `error_type`/`error_arg` tells them apart; this
   fires only when the earlier channel would swallow everything.
 
+  `<remedy>` above is not boilerplate — which remedies exist depends on **who** shadows you, and
+  the message says only the ones you can actually carry out:
+
+  - shadowed by another **file-declared** channel → declare yours first, give it a distinguishing
+    `error_type`, or merge the two declarations;
+  - shadowed by a **built-in** (`exception`, `result`, `option`) → reordering is impossible, since
+    built-ins are always merged first and no config file can move them. Declare your vocabulary
+    under the built-in's own name instead (`[channel.result]`) — a same-named channel **extends**
+    the built-in, see below — or give yours an `error_type` the built-in does not accept.
+
 Declared paths that match nothing are recorded in `comment_db_meta.error_config_unmatched` as a
 warning; `--errors-strict` promotes those warnings to a fatal error, which is what you want in CI.
-Strict only counts declarations *you* are responsible for: an untouched built-in channel's own
-`Stdlib.*` paths stay warnings (one of them, `Stdlib.option`, is a spelling the compiler never
-prints, so counting them made `--errors-strict` unsatisfiable everywhere). Redeclare
-`[channel.option]` in your own file and the whole channel, built-in paths included, comes back
-under strict — it is yours now.
+Strict counts a miss only on a path **your own files spell**. Paths inherited from the built-ins
+stay warnings however you got them: holding you to a `Stdlib.*` path your corpus happens not to
+use is not a bug report about your config, and counting them made `--errors-strict` unsatisfiable
+everywhere.
+
+### Extending a built-in channel
+
+Naming a channel that already exists **extends** it field by field: every list
+(`type`/`underlying`/`aliases`, `lift`, `unwrap`, `origins`, `binds`, `handlers`, `transforms`,
+`converters`, `sinks`) becomes the base's entries followed by yours, deduped; `error_arg` and
+`error_type` are overridden only if you set them. So adding one bind to `option` is:
+
+```toml
+[channel.option]
+type = "option"          # required by the parser; already the built-in's, so deduped away
+binds = ["My_lib.Option_syntax.let*"]
+```
+
+and the built-in's `Stdlib.Option.bind` / `value` / `get` / `fold` all survive. You never restate
+what you are not changing, and — because those inherited paths are not yours — they never count
+against `--errors-strict`. Nothing can be *removed* from a built-in this way, deliberately: its
+vocabulary is `Stdlib` paths that are true wherever they occur.
 
 ## 5. What the database records
 
@@ -306,20 +332,39 @@ Honest limits, so nobody reads more into a verdict than it carries:
   extends `[channel.option]` with the environment's own bind vocabulary instead. If you genuinely
   need two channels over one carrier type, give them distinguishing `error_type`/`error_arg`
   declarations; discriminating by bind vocabulary as well as by carrier type is not implemented.
-- **The shipped Tezos profile is not `--errors-strict`-clean on `proto_alpha`.** Measured on a
-  fresh index of `tezos/_build/default/src/proto_alpha/lib_protocol`, `--errors-profile tezos
-  --errors-strict` exits 1 on 11 declared paths that never appear in that corpus: ten
-  `Error_monad…return_none/return_true/return_unit/return_false` sinks and the
-  `…Error_monad.Pervasives.result` underlying spelling. The identifiers are used heavily in the
-  sources, but that is not why the declarations miss, and the distinction matters to anyone
-  fixing the profile: **`return_unit` and its siblings are values, not functions** (`return_unit
-  = return ()`), so they are *referenced*, never *applied*. A `sinks` entry matches the head of a
-  call, and these never appear as one — the indexed corpus records no `return_unit` callee at all.
-  Declaring them as sinks was a category error in the profile, not a spelling mismatch, and no
-  amount of requalifying the path will make them match. Strict is reporting exactly what it is
-  for. Without
-  `--errors-strict` the run exits 0 and those declarations are simply inert; the misses are listed
-  in `comment_db_meta.error_config_unmatched`.
+- **The shipped Tezos profile is not `--errors-strict`-clean on `proto_alpha`.** Re-measured on a
+  fresh index after the review-round-2 fixes, with
+
+  ```
+  arch-callgraph-ocaml --build-dir tezos/_build/default/src/proto_alpha/lib_protocol \
+    --errors-profile tezos --errors-strict
+  ```
+
+  the run exits 1 on **11 declared paths, every one of them written by the profile itself**:
+
+  - **nine `sinks`** — `Error_monad.return_none`, `.return_unit`,
+    `Result_syntax.return_none/return_true/return_unit`,
+    `Lwt_result_syntax.return_false/return_none/return_true/return_unit`;
+  - **one `binds`** — `Error_monad.Lwt_option_syntax.let*?`;
+  - **one `underlying` type spelling** — `…Error_monad.Pervasives.result` (the *other* declared
+    spelling, `…Pervasives.result`, does match).
+
+  The nine sinks are the interesting ones, and their reason is not a spelling mismatch. The
+  identifiers are used heavily in the sources, but **`return_unit` and its siblings are values,
+  not functions** (`return_unit = return ()`), so they are *referenced*, never *applied*. A
+  `sinks` entry matches the head of a call, and these never appear as one — the indexed corpus
+  records no `return_unit` callee at all. Declaring them as sinks was a category error in the
+  profile, and no amount of requalifying the path will make them match. Strict is reporting
+  exactly what it is for.
+
+  Earlier rounds reported this as 17 misses over nine sinks. Six of those were `option`-channel
+  paths the profile never authored — it had to restate the built-in's whole `Stdlib.Option`
+  vocabulary because `merge` replaced a channel wholesale, and restating made them the operator's
+  — plus `Stdlib.option`, which is not a type constructor at all. Both causes are gone (§4,
+  "Extending a built-in channel"), and what is left is exactly the profile's own 11.
+
+  Without `--errors-strict` the run exits 0 and those declarations are simply inert; the misses
+  are listed in `comment_db_meta.error_config_unmatched`.
 - **Point-free re-exports (`let f = M.g`) record no call edge**, so they carry no error set. This
   is a pre-existing call-graph limitation, not specific to error channels, and it affects
   `Main.apply_operation` / `finalize_application` in `proto_alpha`.
