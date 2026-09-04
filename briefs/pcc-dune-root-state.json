@@ -27,7 +27,11 @@
    "by": "roster-review",
    "round": 3,
    "recorded": "retroactive, no detail",
-   "blocking": ["MEDIUM-1 world-writable /tmp inputs", "LOW-1 callgraph_go.ml comment", "LOW-3 mutate-check.sh cwd"]
+   "blocking": [
+    "MEDIUM-1 world-writable /tmp inputs",
+    "LOW-1 callgraph_go.ml comment",
+    "LOW-3 mutate-check.sh cwd"
+   ]
   },
   {
    "phase": "review",
@@ -44,9 +48,12 @@
     "LOW-1 callgraph_go.ml:94-117 -- round-3 defects all still present, now three overlapping statements of one claim; missing period; stray 5-space indent.",
     "LOW-3 mutate-check.sh:43 cwd-sensitivity undocumented; from a subdir dune re-roots, creates a stray lib/_build, exits 1 on an unrelated error."
    ],
-   "confirmed_fixed": ["MEDIUM-1 (re-attacked with symlinks; victim intact)", "LOW-2 SIGPIPE (herestring; every pipeline audited)"],
+   "confirmed_fixed": [
+    "MEDIUM-1 (re-attacked with symlinks; victim intact)",
+    "LOW-2 SIGPIPE (herestring; every pipeline audited)"
+   ],
    "gates_on_rebased_head": {
-    "tezt": "143 SUCCESS / 0 FAILURE, exit 0 (main bfbabf5 is 140/3, exit 1 -- this PR is what turns main green)",
+    "tezt": "143 SUCCESS / 0 FAILURE, exit 0. CORRECTION 2026-09-04: the round-4 reviewer recorded main as 140/3 and this PR as what turns it green. That is FALSE. Measured on a pristine worktree at 52c4941 with `dune test --root . --force`: main is 143 SUCCESS / 0 FAILURE, exit 0. Three agents reached the same result independently. The PR moves no suite count.",
     "self_index_golden": "byte-identical, 23 modules / 804 functions / 5170 calls",
     "arch_rules": "1 proved / 3 UNKNOWN / 0 violations -- UNCHANGED from main, not 'passing'",
     "callgraph_diff": "PASS, old=4834 new=4834 added=0, 33/33 phantom baseline"
@@ -59,6 +66,17 @@
    "by": "roster-implement",
    "round": 5,
    "note": "Author does not fix his own findings: dispatched to an independent implementer agent, which rebases onto bfbabf5 first. Round 5 is the convergence round cap (maxRounds=5) -- a further NO-GO escalates to the human rather than routing back automatically."
+  },
+  {
+   "phase": "review",
+   "outcome": "CORRECTION",
+   "at": "2026-09-04T22:55:00+02:00",
+   "by": "coordinator",
+   "note": "Retracting a claim this ledger asserted one commit ago: that PR #61 'is what turns main green'. Main was already green under the gate's own command. I took 140/3 from the round-4 reviewer and propagated it into five agent briefs, overriding my own earlier measurement that main is green under `dune test --root .`. The PR's real value is unchanged and narrower: /tmp/dune-project exists (verified, (lang dune 3.0), 3 Sept) and dune walks to the OUTERMOST ancestor, so unrooted dune calls reroot; the pcc: failures appear under DIRECT BINARY INVOCATION, not under `dune test --root .`. Note also that `dune test --root .` without --force can exit 0 having run nothing, which is section 10.4 and is a candidate explanation for how the two counts diverged.",
+   "measured": {
+    "main_52c4941": "143 SUCCESS / 0 FAILURE, exit 0",
+    "command": "dune test --root . --force"
+   }
   }
  ]
 }
