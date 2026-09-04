@@ -53,8 +53,10 @@ Subcommands:
                                fatal origins (assert/division/index/partial_match by default)
                                in the forward closure of the root. Prints root/scope/coverage
                                first: the closure stops at every unresolved edge, so the list is
-                               a LOWER BOUND, and a root with no outgoing edge says NOTHING
-                               TRAVERSED rather than reporting zero. Each row is marked MUST
+                               a LOWER BOUND, and a closure that never LEFT THE ROOT SET (a leaf
+                               root, a self-contained module under ':*', a recursive root) says
+                               NOTHING TRAVERSED — note it may still report unresolved and ⊤
+                               edges, which are edges it could not follow. Each row is marked MUST
                                (definite call path) or MAY. An ambiguous root is REFUSED with
                                its candidates listed; a root whose path does not align on a '/'
                                boundary is REFUSED as unmatched (there is nothing to list).
@@ -639,10 +641,10 @@ let () =
             let cov =
               Arch_db.rows t
                 ~params_ty:Arch_db.Ty.(t3 string string string)
-                ~shape:Arch_db.Ty.(t2 (t3 (option int) (option int) (option int))
+                ~shape:Arch_db.Ty.(t2 (t4 (option int) (option int) (option int) (option int))
                                      (t3 (option int) (option int) (option int)))
-                ~to_cells:(fun ((a, b, c), (d, e, f)) ->
-                  List.map Arch_db.int_cell [ a; b; c; d; e; f ])
+                ~to_cells:(fun ((a, b, c, d), (e, f, g)) ->
+                  List.map Arch_db.int_cell [ a; b; c; d; e; f; g ])
                 (ctes
                 ^ "SELECT (SELECT count(*) FROM reach),\n\
                   \       (SELECT count(*) FROM calls c JOIN reach r ON c.caller_id=r.id \
@@ -652,7 +654,8 @@ let () =
                   \       (SELECT count(*) FROM modules),\n\
                   \       (SELECT count(*) FROM functions),\n\
                   \       (SELECT count(*) FROM calls c JOIN reach r ON c.caller_id=r.id \
-                   WHERE c.callee_id IS NOT NULL)")
+                   WHERE c.callee_id IS NOT NULL),\n\
+                  \       (SELECT count(*) FROM reach) - (SELECT count(*) FROM root)")
                 (path_pat, root_name, root_name)
             in
             let cov_cells = match cov with r :: _ -> List.map Arch_db.string_of_cell r | [] -> [] in
@@ -728,12 +731,25 @@ let () =
                outgoing edge printed LOWER BOUND, which is round 1's output word
                for word.
 
-               "Was anything traversed" is exactly "does the closure have an
-               outgoing RESOLVED edge", so that is what is now counted. *)
+               THE SECOND VERSION WAS A PROXY TOO, and failed on the fixture I
+               had discarded while claiming its premise was wrong. "The closure
+               has an outgoing RESOLVED edge" is not "the closure left the root
+               set": an intra-module call under [<path>:*], or a recursive root,
+               resolves an edge whose callee is ALREADY a root. Measured on a
+               real index — [eo_store.ml:*], 3 functions, 3 nodes reached, said
+               LOWER BOUND; a recursive root, 1 function, 1 node, said the same.
+               The implication holds one way only (out = 0 ⟹ reach = root), so
+               the banner never fired wrongly — it simply failed to fire.
+
+               Now the condition IS the claim: did the closure leave the root
+               set. That reading is also what makes the banner's own sentence
+               true — "any row below is the ROOT'S OWN" holds exactly when
+               reach = root, and an intra-root edge does not make a row belong
+               to anything else. *)
             let cov_text =
               match cov_cells with
-              | [ n; u; top; m; f; out ] ->
-                  let traversed = (try int_of_string out with _ -> 1) > 0 in
+              | [ n; u; top; m; f; _out; beyond ] ->
+                  let traversed = (try int_of_string beyond with _ -> 1) > 0 in
                   Printf.sprintf
                     "root: %s\n\
                      scope: %s modules · %s functions indexed · schema %s · contract %s\n\
@@ -743,12 +759,18 @@ let () =
                     n u top
                     (if traversed then "LOWER BOUND (the closure stops at every unresolved edge)"
                      else
-                       "NOTHING TRAVERSED: the closure has no outgoing resolved edge, so any row \
-                        below is the ROOT'S OWN and an empty table means the closure was never \
-                        entered — NOT that the root is safe")
-              (* The degraded case must not drop [root:] and [scope:]: this same
-                 commit argues they are not optional, and a fallback that
-                 silently removes them contradicts that wherever it fires. *)
+                       "NOTHING TRAVERSED: the closure never left the root set, so any row below \
+                        is the ROOT'S OWN and an empty table means the closure was never entered \
+                        — NOT that the root is safe (unresolved and ⊤ edges above are edges the \
+                        closure could not follow, not evidence that it did)")
+              (* UNREACHABLE, and described as such rather than as a fix.
+                 [Arch_db.rows] on the fixed-column coverage SELECT always
+                 returns exactly one row of that width, so this arm is dead
+                 code and no mutation of it can be killed. It is kept because a
+                 future edit to the column list should land somewhere that
+                 still prints [root:] and [scope:] — but claiming it "keeps the
+                 lines this branch argues are not optional" would be claiming a
+                 behaviour change that cannot be exhibited. *)
               | _ ->
                   Printf.sprintf
                     "root: %s\nscope: schema %s · contract %s\ncoverage: UNAVAILABLE — the \
@@ -758,8 +780,8 @@ let () =
             in
             preamble
               ~h:[ "root"; "nodes_reached"; "edges_unresolved"; "top_edges"; "modules_indexed";
-                   "functions_indexed"; "resolved_out_edges"; "schema_version";
-                   "callgraph_contract" ]
+                   "functions_indexed"; "resolved_out_edges"; "nodes_beyond_root";
+                   "schema_version"; "callgraph_contract" ]
               ~cells:
                 ((root_label :: cov_cells)
                 @ [ ident "schema_version"; ident "callgraph_contract" ])
