@@ -49,14 +49,23 @@ let schema_path =
    constant — a consumer reading schema_version="1.2" off a flat-schema
    database would wrongly conclude those tables exist. See
    [current_flat_schema_version] below, which runner.ml now uses instead. *)
-let current_schema_version = "1.9"
+(* Bumped 1.9 -> 1.10 for [calls.edge_form] (specs/point-free-aliases.md).
+   NOT a decimal: the minor component is an integer, [parse_schema_version]
+   splits on '.' and compares [(major, minor)] as ints, so 1.10 > 1.9. *)
+let current_schema_version = "1.10"
 
 (* The flat schema (runner.ml's own inline 3-table [schema_sql]) — distinct
    version identity from [current_schema_version] above: the two schemas are
    structurally incomparable, and conflating them under one version number is
    a bug a review round once caught (see docs/schema.md's history). Bumped to
-   "1.1" for roadmap item 1.1: an optional [language] column on [functions]. *)
-let current_flat_schema_version = "1.1"
+   "1.1" for roadmap item 1.1: an optional [language] column on [functions];
+   to "1.2" for [calls.edge_form] (specs/point-free-aliases.md), which this
+   schema carries because its OCaml .cmt branch shares
+   [collect_calls_from_expr] with the main indexer and so receives
+   alias-marked edges whether or not the column exists. The number is
+   independent of the main schema's: "1.2" here and "1.10" there describe
+   different schemas, not comparable versions. *)
+let current_flat_schema_version = "1.2"
 
 (* FIX (review): [current_schema_version] is a raw string, so a naive consumer
    is tempted to write [Arch_index.schema_version = "1.2"] — brittle against
