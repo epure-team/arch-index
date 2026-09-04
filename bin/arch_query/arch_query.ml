@@ -51,11 +51,16 @@ Subcommands:
                                bounded/unbounded share of every node, ⊤ reasons, origin counts
   escaping-origins --roots <module-path>:<fn>|<module-path>:* [--forms <f1,f2,...>]
                                fatal origins (assert/division/index/partial_match by default)
-                               that ESCAPE their function, restricted to the forward closure of
-                               the root. Prints a coverage line first: the closure stops at every
-                               unresolved edge, so the list is a LOWER BOUND. Each row is marked
-                               MUST (definite call path) or MAY. An ambiguous root is REFUSED
-                               with its candidates, never unioned.
+                               in the forward closure of the root. Prints root/scope/coverage
+                               first: the closure stops at every unresolved edge, so the list is
+                               a LOWER BOUND, and a root with no outgoing edge says NOTHING
+                               TRAVERSED rather than reporting zero. Each row is marked MUST
+                               (definite call path) or MAY. An ambiguous root, or one whose path
+                               does not align on a '/' boundary, is REFUSED with its candidates.
+                               NOTE: rows are also filtered on escapes=1, which is currently
+                               NON-DISCRIMINATING — every origin recorded by the producers
+                               shipped today has escapes=1, so it selects nothing. It is a guard
+                               against a producer that starts computing it, not a live filter.
   fan-in       [N]             top-N most-called functions
   exported                     all exported functions
   useless-branches [limit]     decisions with an actionable verdict — dead logic
