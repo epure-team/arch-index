@@ -204,6 +204,10 @@ type top_reason =
           no binding site — see .ml for the full caveat *)
   | Module_param  (** functor argument or first-class module *)
   | Dropped_node  (** the callee's own row/unit was intentionally rejected *)
+  | Ambiguous_unit
+      (** roadmap 1.6: the reference names an INDEXED unit, but more than one
+          distinct function answers to it. Distinct from the external case (no
+          indexed unit at all), which stays a resolved leaf — see the .ml *)
 
 (** [top_reason_to_string r] — the exact string this reason is stored as in
     [calls.top_reason].
@@ -212,7 +216,8 @@ type top_reason =
     (none)
 
     {post}
-    Returns ["callback_param"], ["module_param"], or ["dropped_node"].
+    Returns ["callback_param"], ["module_param"], ["dropped_node"], or
+    ["ambiguous_unit"].
 
     {violators}
     (none)

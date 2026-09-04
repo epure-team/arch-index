@@ -506,11 +506,28 @@ type top_reason =
       (** The callee's own row (or its whole compilation unit) was
           intentionally rejected this run — its body exists but was never
           read, so the honest answer is ⊤, not "no such function." *)
+  | Ambiguous_unit
+      (** Roadmap 1.6. The reference names a unit that IS in this index, but
+          more than one DISTINCT function answers to it and nothing in a
+          [.cmt] says which one the caller was linked against.
+
+          Deliberately distinct from the external case: a root naming no
+          indexed unit at all (Stdlib, a vendored path, an unindexed
+          dependency) is a uniquely-resolved external leaf and keeps its
+          MUST — see [`Unknown] handling in {!Arch_index.run}. Collapsing the
+          two is what inflated the abandoned branch's repo-wide MAY_TOP from
+          660 to 875.
+
+          Rare in practice: a census of this repository found exactly one
+          ambiguous unit name out of 93 ([Dune__exe], a wrapper alias that
+          owns no functions and therefore resolves to zero candidates, not
+          two). It is the corpora, not this repo, where this fires. *)
 
 let top_reason_to_string = function
   | Callback_param -> "callback_param"
   | Module_param -> "module_param"
   | Dropped_node -> "dropped_node"
+  | Ambiguous_unit -> "ambiguous_unit"
 
 type call_head =
   | Head_local of string
