@@ -418,7 +418,10 @@ CREATE TABLE IF NOT EXISTS exn_origins (
 -- the second id space in the SIGN of the integer and then DROPPED the
 -- value-channel scope whenever an exception scope also covered the call — an
 -- over-approximation, so never unsound, but a permanent precision ceiling and
--- a second id space living inside one column. Both are gone.
+-- a second id space living inside one column. The key and the sign encoding
+-- are gone. The walker's own single-slot [errch_call_scope] is NOT: it still
+-- keeps one value-channel scope per call site, so two value channels covering
+-- the same head still lose one. Same sound direction, one layer up.
 CREATE TABLE IF NOT EXISTS call_exn_scopes (
     call_id INTEGER NOT NULL REFERENCES calls(id) ON DELETE CASCADE,
     scope_id INTEGER NOT NULL REFERENCES exn_scopes(id) ON DELETE CASCADE,

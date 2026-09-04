@@ -16,7 +16,12 @@ $BIN --build-dir=_build/default/lib/arch_index --db-path=/tmp/self.db --schema-p
 ./_build/default/bin/arch_rules/arch_rules.exe /tmp/self.db arch-rules.txt --on-vacuous fail
 sqlite3 /tmp/self.db "SELECT 'modules: '||count(*) FROM modules; SELECT 'functions: '||count(*) FROM functions; SELECT 'calls: '||count(*) FROM calls;" | diff test/fixtures/self-index-stats.txt -
 git diff origin/main --stat -- lib/arch_index/runner.ml    # empty
-git diff origin/main -- architecture-schema.sql | grep '^+' | grep -viE 'IF NOT EXISTS|ALTER TABLE .* ADD COLUMN|^\+\+\+|^\+\s*--|^\+\s*$|^\+\s+'   # empty
+git diff origin/main -- architecture-schema.sql | grep '^+' | grep -viE 'IF NOT EXISTS|ALTER TABLE .* ADD COLUMN|^\+\+\+|^\+\s*--|^\+\s*$'
+# NOT empty by design: this branch widens call_exn_scopes' PRIMARY KEY to
+# (call_id, scope_id). The old filter ended in '^\+\s+', which skipped EVERY
+# indented line — i.e. every column and constraint inside a CREATE TABLE, which
+# is the only place a non-additive change can hide. It reported 'empty' for a
+# key change. Read the remaining lines and judge them; do not re-add the filter.
 ```
 
 ## 2. Schema-version check (FR-034) — the number is contended
