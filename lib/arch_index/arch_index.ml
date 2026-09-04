@@ -744,11 +744,17 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
   (* Built ONCE into a set rather than re-derived per path. The obvious phrasing
      — for each stored path, scan every known unit's path list — rebuilds
      [known_unit_names ()] (a fold plus a sort) and re-sorts [paths_of_unit] on
-     every probe, which is O(N²·log N) in the number of modules. Measured before
-     this rewrite: 800 modules 0.109s → 0.174s, 1600 modules 0.258s → 0.662s.
-     Doubling the corpus multiplied the overhead by 6.2, so at octez scale
-     (~10k modules) a diagnostic expected to print NOTHING would have cost tens
-     of seconds. With the set it is indistinguishable from the baseline. *)
+     every probe, which is O(N²·log N) in the number of modules.
+
+     Reproduce rather than trust the numbers: generate synthetic dune projects
+     of 800 and 1600 modules and time indexing with and without this rewrite.
+     Absolute times are machine-specific and are deliberately not pinned here —
+     what matters is the SHAPE, and it was measured twice independently:
+     doubling the module count multiplied the pre-rewrite overhead by ~6, i.e.
+     super-linear, so at octez scale (~10k modules) a diagnostic expected to
+     print NOTHING would have cost tens of seconds. With the set built once,
+     branch and baseline are indistinguishable (+0.004s at 800, +0.003s at
+     1600 on the reviewer's machine). *)
   let registered_paths = Hashtbl.create 256 in
   List.iter
     (fun unit_name ->
@@ -872,9 +878,26 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
                      references then spell it [Arch_index__.Arch_index_db], and
                      a naive "__"-join yields [Arch_index____Arch_index_db] (four
                      underscores), which names nothing. Measured cost of getting
-                     this wrong: 86 in-project references falling through to
-                     MUST-with-NULL, i.e. resolver misses stamped as proven
-                     external leaves. *)
+                     this wrong, measured on this repository's own
+                     [_build/default] by patching [join] to the naive
+                     ["__"]-join and re-indexing: 195 in-project references
+                     (112 distinct names, all [Arch_index__.*]) falling through
+                     to MUST-with-NULL — resolver misses stamped as proven
+                     external leaves.
+
+                     WITH THE FACADE TIER ON, that difference is currently
+                     ZERO: 5293 resolved either way, because the facade tier
+                     reaches the same references from the bare segment. So this
+                     special case is not load-bearing as shipped, and an earlier
+                     version of this comment claimed a cost (86) that is
+                     reproducible in neither configuration.
+
+                     It stays anyway, and deliberately. The facade tier is the
+                     WEAKER evidence path, it is gated, and the linkage slice
+                     (briefs/linkage-evidence-followup.md) exists to gate it
+                     further. A prefix tier that is correct only because a
+                     weaker tier covers for it would break silently the moment
+                     that tier tightens. *)
                   let join a b =
                     if String.length a >= 2 && String.ends_with ~suffix:"__" a then a ^ b
                     else a ^ "__" ^ b
@@ -922,19 +945,24 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
              the function table arbitrates by the same 1 / 2+ / 0 rule as the
              prefix tier: a genuine homonym reaches two ids and goes to ⊤
              instead of being guessed. *)
-          let facade_readings mod_name name =
+          let facade_readings ~from_depth mod_name name =
             let parts = String.split_on_char '.' mod_name in
-            let rec go acc rest =
+            let rec go acc depth rest =
               match rest with
               | [] -> acc
               | seg :: deeper ->
-                  let residual = String.concat "." (deeper @ [name]) in
-                  let units =
-                    Option.value ~default:[] (Hashtbl.find_opt units_by_last_component seg)
+                  let acc =
+                    if depth < from_depth then acc
+                    else
+                      let residual = String.concat "." (deeper @ [name]) in
+                      let units =
+                        Option.value ~default:[] (Hashtbl.find_opt units_by_last_component seg)
+                      in
+                      List.map (fun u -> (u, residual)) units @ acc
                   in
-                  go (List.map (fun u -> (u, residual)) units @ acc) deeper
+                  go acc (depth + 1) deeper
             in
-            go [] parts
+            go [] 0 parts
           in
           let ids_of_readings readings =
             List.concat_map
@@ -969,34 +997,103 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
                deepest reading names an INDEXED unit
                  -> the reference located its unit. A missing row there is an
                     external leaf or ⊤, never another library's homonym.
-             WHAT THIS DOES NOT CLOSE. A reference rooted OUTSIDE the index
-             ([Stdlib.Buffer.add_string] in a project owning a [buffer.ml], or
-             any unlinked library) still resolves to the local homonym, as a
-             MUST. Identical on [origin/main] — retained, not introduced — but
-             not fixed here, and not to be read as fixed. Pinned red-side-up by
-             {!Qualified_library_scoping.register_unlinked_residual}.
+             WHERE THE PREFIX TIER HAS ALREADY SPOKEN. A reading that names
+             an indexed unit IDENTIFIES that segment: we know what
+             [Ginca.Api] means, because [Ginca__Api] is a stored row. The
+             facade tier must therefore never re-interpret that segment, or a
+             deeper reference walks straight around the gate:
 
-             The obvious extra conjunct — also require SOME prefix reading to
-             name an indexed unit — does not work, and the corpus said so
-             rather than review. It costs 1616 correct resolutions on
-             proto_alpha, because the facade library is frequently not indexed
-             at all at the scope being analysed:
+               ginca/api.ml = "include Base_impl"   (no [Inner.run] row)
+               Ginca.Api.Inner.run  ->  gincb/api.ml  MUST
+
+             Gating only on the DEEPEST reading missed this: the deepest is
+             [Ginca__Api__Inner], which names nothing, so the tier opened and
+             matched segment [Api] — the very segment the prefix tier had
+             already identified — against every library owning an [Api].
+
+             So the anchor is the DEEPEST reading that names an indexed unit,
+             and the facade tier may only use segments STRICTLY DEEPER than it.
+             At or above the anchor the prefix tier's answer stands; below it,
+             nothing in the index claims to know what the segment means, which
+             is exactly where a facade lives.
+
+             This subsumes the deepest-only gate rather than sitting beside it:
+             when the deepest reading is itself indexed the anchor is the last
+             segment, no deeper segment exists, and the tier contributes
+             nothing — [Liba.Api.run] with an indexed [Liba__Api] can no longer
+             reach [libb].
+
+             WHAT THIS STILL DOES NOT CLOSE, stated wider than it first was.
+             BELOW the anchor nothing constrains which library a bare segment
+             may reach, so two shapes leak, not one:
+
+               (a) rooted outside the index — [Stdlib.Buffer.add_string] in a
+                   project owning a [buffer.ml];
+               (b) rooted INSIDE it — [Owner.Submod.f] where [owner.ml] is
+                   [module Submod = Base]: the root [Owner] is indexed, the
+                   right answer [owner/base.ml] is indexed, and the reference
+                   still binds [other/submod.ml] in a library the caller does
+                   not link.
+
+             (b) is the more common shape in dune projects and an earlier
+             version of this comment did not admit it, describing the hole as
+             "rooted OUTSIDE the index" only. Both are identical on
+             [origin/main] — retained, not introduced — and both are pinned by
+             {!Qualified_library_scoping.register_unlinked_residual} and
+             {!Qualified_library_scoping.register_aliased_nested_residual}.
+
+             Note (b) is structurally IDENTICAL to the legitimate facade this
+             tier exists for ([Facade.Protocol.Script_int] -> [Rawlib__…]):
+             indexed root, deeper segment naming a unit in another library. The
+             index alone cannot tell them apart, which is why the fix is
+             linkage evidence and not a cleverer predicate.
+
+             Two cheaper gates were implemented, MEASURED, and withdrawn,
+             because a facade library is routinely not indexed at all at the
+             scope being analysed:
+
+             All figures below are resolved-call counts on
+             proto_alpha/lib_protocol (468 modules / 73 588 calls,
+             --errors-profile tezos), measured on THIS tree by patching the
+             gate in place — not carried over from an intermediate commit:
+
+               origin/main                                       26 693
+               HEAD                                              26 762
+               HEAD, facade tier disabled entirely               25 116
+               HEAD + "some reading names an indexed unit"       25 135
+
+             So the facade tier is worth 1 646 resolutions, and the withdrawn
+             conjunct would have cost 1 627 of them. An earlier version of this
+             comment cited 1 638 / 1 616 against a 26 693 baseline; those came
+             from a WIDER corpus scope (src/proto_alpha, 690 modules) and a
+             set-diff that counts a re-target as a loss, and reproduce
+             nowhere.
+
              [Tezos_protocol_alpha.Protocol.Main.acceptable_pass] legitimately
-             reaches [lib_protocol/main.ml] while NONE of the three units it
-             spells is a stored row. That phrasing was implemented, measured at
-             a plausible-looking 25116 resolved against a baseline of 26693,
-             and withdrawn.
+             reaches [lib_protocol/main.ml] while none of the three units it
+             spells is a stored row. Restricting facade candidates to the
+             anchor's own LIBRARY was rejected on the same grounds without
+             shipping: it breaks the genuine cross-library facade
+             ([Facade.Protocol.Script_int] -> [Rawlib__Script_int]) the moment
+             the facade module is itself indexed, which is precisely what
+             happens when the whole octez tree is analysed rather than
+             lib_protocol alone.
 
              Separating an unlinked homonym from a legitimate facade needs
-             LINKAGE evidence — the caller's own `.cmt` import list — which is
-             not captured today. A separate slice, not a conjunct guessed
-             here. *)
-          let facade_admissible mod_name name =
-            match unit_readings mod_name name with
-            | [] -> false
-            | readings ->
-                let deepest_unit, _ = List.nth readings (List.length readings - 1) in
-                Arch_index_cmt.paths_of_unit deepest_unit = []
+             LINKAGE evidence — the caller's own [.cmt] import list, which
+             names the unit the reference actually reaches and does not name
+             the homonym. Not captured today; see
+             briefs/linkage-evidence-followup.md. *)
+          (* Depth of the deepest reading naming an indexed unit, or -1. *)
+          let anchor_depth mod_name name =
+            let rec go i best = function
+              | [] -> best
+              | (unit_name, _) :: rest ->
+                  go (i + 1)
+                    (if Arch_index_cmt.paths_of_unit unit_name <> [] then i else best)
+                    rest
+            in
+            go 0 (-1) (unit_readings mod_name name)
           in
           let resolve_qualified_unit mod_name name =
             (* Tier order matters and is not an optimisation. A prefix reading
@@ -1008,13 +1105,12 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
             match ids_of_readings (unit_readings mod_name name) with
             | [id] -> `Resolved id
             | _ :: _ :: _ -> `Ambiguous
-            | [] ->
-                if not (facade_admissible mod_name name) then `Not_found
-                else (
-                  match ids_of_readings (facade_readings mod_name name) with
-                  | [id] -> `Resolved id
-                  | [] -> `Not_found
-                  | _ -> `Ambiguous)
+            | [] -> (
+                let from_depth = anchor_depth mod_name name + 1 in
+                match ids_of_readings (facade_readings ~from_depth mod_name name) with
+                | [id] -> `Resolved id
+                | [] -> `Not_found
+                | _ -> `Ambiguous)
           in
           (* "Not in [fn_lookup]" has two very different causes, and the
              resolver above cannot tell them apart: the callee is genuinely
@@ -1055,7 +1151,8 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
                 List.exists
                   (fun p -> Arch_index_cmt.is_dropped_node ~module_path:p ~name:residual)
                   (Arch_index_cmt.paths_of_unit unit_name))
-              (unit_readings mod_name name @ facade_readings mod_name name)
+              (unit_readings mod_name name
+              @ facade_readings ~from_depth:(anchor_depth mod_name name + 1) mod_name name)
           in
           let demoted = call.cond || call.partial in
           (* Roadmap 1.4 (⊤-anchor taxonomy): [top_reason] is [None] whenever

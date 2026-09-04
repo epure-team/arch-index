@@ -119,12 +119,23 @@ with the pre-change binary FIRST, and both reproduced the table above to the dig
 delta was read — octez-manager 12 317 nodes / 58 553 calls / 353 modules, proto_alpha 468 modules /
 14 452 functions / 73 588 calls, bounded 3 436 (23.8 %), tzresult 585/2 137 (27.4 %).
 
-**Nothing in the table above moves.** The exception channel's own inputs are bit-identical on both
+**Nothing in the table above moves**, with one clarification the first version of this appendix
+owed and did not pay: the table above is the EXCEPTION channel, and this change moves the
+**tzresult** channel too. That movement is recorded in §"The second channel" below rather than
+left out because the table does not mention it. The exception channel's own inputs are bit-identical on both
 corpora — octez-manager 491 scopes / 2 245 links / 18 758 origins / 31 identities / 1 158
 `exn_edges`, proto_alpha 19 scopes / 35 links / 11 exception identities / 377 tzresult identities /
 6 `exn_rebinds` **content-identical, not merely equal in count**. That is the expected result:
 identities come from `Arch_index_exn.canonical_path ~unit_declared ~cmt_modname`, computed in the
 cmt pass, which never consults the resolver this change touches.
+
+Read the counts above with their scope attached, because two of them are channel-filtered and two
+are not: octez-manager's 491 scopes and 2 245 links are `WHERE channel='exception'`, while its
+18 758 origins and 31 identities are **all channels** (its exception-channel identity count is 6).
+The "1 of 31" headline below is therefore an exception-channel numerator over an all-channel
+denominator; as a like-for-like it is 1 of 6. `exn_scopes`/`call_exn_scopes` have been shared
+across channels since #60, and a channel-blind link count reads 4 386 on octez-manager against
+2 245 filtered.
 
 What moves is **which functions a `fails-with` query returns**, because raise sets propagate along
 `calls` edges and this change moves where some calls resolve to.
@@ -154,6 +165,26 @@ after   network_short: UNBOUNDED (⊤): {Invalid_argument}
 
 `src/snapshots.ml:64 slug_of_network` → `strip_date_suffix` → `String.sub` ⇒ `Invalid_argument`,
 confirmed at source. The callee was in the index the whole time and was reported as outside it.
+
+### The second channel — proto_alpha's `tzresult`
+
+Undisclosed in the first version of this appendix, which discussed only the exception channel
+while G-2 asks for *any* movement. Found by review, not by me.
+
+| metric | before | after |
+|---|---|---|
+| bounded | 585 / 2 137 (27.4 %) | **581 / 2 137 (27.2 %)** |
+| identities whose answer set moved | — | **41 of 377** |
+| members added | — | **1 435** |
+| members removed | — | **0** |
+
+Same shape and same direction as the exception channel: `tzresult` sets propagate along the same
+`calls` edges, so re-attributing an edge moves them too, and nothing stopped being reported. The
+four nodes that lost `bounded` had **empty** bounded sets — that is what zero removals across all
+377 identities means — so no function that named a `tzresult` error stopped naming it. I did not
+enumerate those four individually: `arch-query` exposes no per-node bounded listing, and inferring
+them from a closure the way the exception channel's three were identified would be a guess dressed
+as a measurement.
 
 ### The one place precision is lost, and its exact cost
 
@@ -191,7 +222,17 @@ one gain, which reads as a regression it is not:
 | corpus | unchanged | NULL → resolved | resolved → NULL | re-targeted |
 |---|---|---|---|---|
 | octez-manager | 58 477 | 76 | **0** | 0 |
-| proto_alpha | 73 514 | 70 | **0** | 3 (the three rows above) |
+| proto_alpha | 73 514 | 70 | **1** | 3 (the three rows above) |
+
+Classification is by `calls.id`, joined across the two databases. Keying on
+`(caller, callee_name, call_site, kind)` instead — as a first pass here did — silently drops every
+row whose `kind` changed, which is exactly how that single proto_alpha loss was first reported as
+zero. It is call id 37255,
+`test/helpers/script_big_map.ml:update` → `Tezos_protocol_alpha.Protocol.Script_big_map.update`:
+`MUST` onto the helper's own `update` before, `MAY_TOP`/`ambiguous_unit` now. The loss is the
+desirable half of the same correction as the three re-targets — the previous answer was a
+self-recursive call that does not exist in the source — but a stated zero that is really one is a
+number a reader cannot check against, so it is corrected rather than explained away.
 
 Same class, also corrected: `Tezos_dal_alpha.RPC_directory.directory`, attributed to
 `lib_sc_rollup_node/RPC_directory.ml` and now landing in `lib_dal/RPC_directory.ml`.
