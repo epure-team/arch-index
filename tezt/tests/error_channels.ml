@@ -1005,9 +1005,76 @@ let use () = my_bind (src ()) (fun x -> Some x)
         (not (Batch.has_substring ~needle:"--errors-strict:" out))) ;
   Lwt.return_unit
 
+(* Review round 2, CRITICAL — a completion marker that outlives its evidence.
+
+   Moving [error_contract] after its transaction made its presence honest on a
+   FRESH database only. On a RE-INDEX the previous run's marker is already on
+   disk and nothing removed it: [comment_db_meta] is deliberately outside
+   [schema_tables_to_drop] (the [self_managed] allowlist in
+   tezt/tests/schema_drop_list.ml), on the grounds that "INSERT OR REPLACE, so
+   a re-index overwrites it" — true only for a run that REACHES the write.
+
+   This pins the fix without depending on process timing. The second run is
+   given a VALID but EMPTY build directory: it gets past the drop/recreate
+   step, indexes zero functions, and therefore never re-writes
+   [callgraph_contract]/[exn_contract], which are gated on a non-empty
+   universe. So whatever those keys hold afterwards can only have come from
+   run 1 — and before the fix, that is exactly what they held: run 1's
+   markers, standing over run 2's empty tables. A timing-based SIGKILL test
+   reproduces the same defect but cannot be made deterministic in CI; this
+   can, and it fails for the same reason. *)
+let register_stale_completion_markers () =
+  Test.register ~__FILE__
+    ~title:"error-channels: a re-index never inherits the previous run's completion markers"
+    ~tags:["cmt"; "error_channels"; "reindex"; "markers"]
+  @@ fun () ->
+  with_fixture ~name:"errch_markers" ~files:fixture_files @@ fun fixture ->
+  let db = Arch_tezt.temp_db "errch_markers" in
+  let marker_keys = ["callgraph_contract"; "exn_contract"] in
+  let marker key =
+    Db.with_db db (fun conn ->
+        Db.int conn
+          (Printf.sprintf
+             "SELECT count(*) FROM comment_db_meta WHERE key = '%s'" key))
+  in
+  let n_functions () =
+    Db.with_db db (fun conn -> Db.int conn "SELECT count(*) FROM functions")
+  in
+  (* Run 1: a real corpus. Every marker is legitimately earned here. *)
+  let code1, out1 = Arch_tezt.index_raw_into ~db fixture in
+  if code1 <> 0 then Test.fail "first index failed (exit %d):\n%s" code1 out1 ;
+  if n_functions () = 0 then
+    Test.fail "fixture indexed no functions — the test cannot distinguish anything" ;
+  List.iter
+    (fun key ->
+      if marker key <> 1 then
+        Test.fail "run 1 did not write %s; the test's premise is broken" key)
+    marker_keys ;
+  (* Run 2: same database, a valid but empty build directory. *)
+  let empty = Temp.dir "errch_markers_empty" in
+  let code2, out2 =
+    Arch_tezt.index_raw_into ~db {fixture with build_dir = empty}
+  in
+  Batch.run (fun b ->
+      Batch.eq_int b ~msg:"re-index over an empty build dir exits 0" code2 0 ;
+      if code2 <> 0 then Batch.note b "second index output:\n%s" out2 ;
+      Batch.eq_int b
+        ~msg:"run 2 indexed nothing, so no marker can have been earned"
+        (n_functions ()) 0 ;
+      List.iter
+        (fun key ->
+          Batch.eq_int b
+            ~msg:
+              (Printf.sprintf
+                 "%s does not survive from the previous run" key)
+            (marker key) 0)
+        marker_keys) ;
+  Lwt.return_unit
+
 let register () =
   register_producer () ;
   register_reindex () ;
+  register_stale_completion_markers () ;
   register_strict_success () ;
   register_unreachable_channel () ;
   register_unreachable_over_builtin () ;
