@@ -248,6 +248,63 @@ let register_fan_in_excludes () =
             1) ;
   Lwt.return_unit
 
+(* S4 — the reason the alias belongs in [calls] at all.
+
+   Every assertion above is about rows in a table. This one is about the
+   VERDICT, and it is a separate test rather than another batch because
+   [Arch_exn] is a SEPARATE LOADER: it re-reads the database from scratch, so
+   nothing the producer tests prove says the fixpoint actually walks these
+   edges. A feature whose whole rationale is "the raise-set chain will now
+   follow aliases" is not delivered until something asserts the chain follows
+   them. *)
+let register_raise_sets_propagate () =
+  Test.register ~__FILE__
+    ~title:"point-free aliases: an alias inherits its target's raise set"
+    ~tags:["cmt"; "exn"; "alias"; "edge_form"; "raises"]
+  @@ fun () ->
+  with_fixture ~name:"pfa_raises" ~files:fixture_files @@ fun fixture ->
+  let db = Arch_tezt.temp_db "pfa_raises" in
+  let code, output = Arch_tezt.index_raw_into ~db fixture in
+  if code <> 0 then Test.fail "index failed (exit %d):\n%s" code output ;
+  let raises fn =
+    let c, out =
+      Arch_tezt.run_command
+        ~env:[("ARCH_QUERY_FORMAT", "list")]
+        (Arch_tezt.arch_query ())
+        [db; "raises"; fn]
+    in
+    if c <> 0 then Test.fail "arch-query raises %s failed (exit %d):\n%s" fn c out ;
+    out
+  in
+  Batch.run (fun b ->
+      (* The premise. If [raiser] itself did not carry Boom, every assertion
+         below would be about an empty set being empty. *)
+      Batch.check b
+        ~msg:"premise: the target function raises at all"
+        (Arch_tezt.contains ~needle:"Boom" (raises "raiser")) ;
+      (* THE BUG THIS FEATURE EXISTS FOR. Before it, [alias] had no outgoing
+         edge and its verdict was BOUNDED: {} — indistinguishable from "raises
+         nothing", which is why it was worse than a ⊤. *)
+      Batch.check b
+        ~msg:"a local alias inherits its target's exception (was BOUNDED: {})"
+        (Arch_tezt.contains ~needle:"Boom" (raises "alias")) ;
+      (* Cross-module, both spellings. These travel through the qualified
+         resolver, so they also demonstrate that the alias edge carries a real
+         callee_id rather than an external leaf. *)
+      Batch.check b
+        ~msg:"an explicitly qualified alias inherits across modules"
+        (Arch_tezt.contains ~needle:"Not_found" (raises "qualified_alias")) ;
+      Batch.check b
+        ~msg:"an open-mediated alias inherits across modules (S2: same path shape)"
+        (Arch_tezt.contains ~needle:"Not_found" (raises "via_open")) ;
+      (* The exclusions must not leak into the verdict either: [make] returns
+         [raiser] without calling it, so [make]'s own raise set is empty. *)
+      Batch.check b
+        ~msg:"a combinator that RETURNS the raiser does not inherit its exception"
+        (not (Arch_tezt.contains ~needle:"Boom" (raises "make")))) ;
+  Lwt.return_unit
+
 let register () =
   register_local_slice () ;
-  register_fan_in_excludes ()
+  register_fan_in_excludes () ;
+  register_raise_sets_propagate ()
