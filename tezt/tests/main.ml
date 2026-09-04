@@ -101,6 +101,7 @@ let () =
   Qualified_library_scoping.register_include_subdirs () ;
   Qualified_library_scoping.register_shadowing_residual () ;
   Qualified_library_scoping.register_aliased_nested_residual () ;
+  Qualified_library_scoping.register_sibling_sites_residual () ;
   Must_null_ceiling.register () ;
   Query_limits.register () ;
   Exn_raise_sets.register () ;

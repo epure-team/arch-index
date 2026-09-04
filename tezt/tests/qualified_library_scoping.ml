@@ -155,6 +155,25 @@ let single_call conn ~caller_fn ~label =
       Test.fail "expected exactly one call row for `%s` in %s, got %d" caller_fn label
         (List.length rows)
 
+(* The [top_reason] of the single call made by [caller_fn]. Schema 1.9's entire
+   observable content is one new member of this vocabulary, and nothing asserted
+   it: mutating the resolver to stamp "module_param" on every ambiguous row left
+   the whole suite green. A version bump whose only content is a value nobody
+   checks is a bump nobody can rely on. *)
+let single_call_reason conn ~caller_fn ~label =
+  let rows =
+    Db.rows conn
+      (Printf.sprintf
+         "SELECT ifnull(c.top_reason, '<null>') FROM calls c JOIN functions f ON f.id = \
+          c.caller_id WHERE f.name = '%s'"
+         caller_fn)
+  in
+  match rows with
+  | [[r]] -> Db.to_string ~sql:"top_reason" r
+  | _ ->
+      Test.fail "expected exactly one call row for `%s` in %s, got %d" caller_fn label
+        (List.length rows)
+
 let show = Option.value ~default:"<none>"
 
 let register () =
@@ -303,7 +322,18 @@ let register_unwrapped_residual () =
                       unresolvable reference must carry no callee, or downstream reads it as \
                       resolved"
                      kind (show callee))
-                (callee = None))) ;
+                (callee = None) ;
+              (* Schema 1.9's one new vocabulary member. Without this the whole
+                 version bump is unobservable to the suite. *)
+              let reason = single_call_reason conn ~caller_fn:"go" ~label:"C" in
+              Batch.check b
+                ~msg:
+                  (Printf.sprintf
+                     "C: go -> Api.run carries top_reason=%s, expected 'ambiguous_unit'. Two \
+                      indexed units answer to this name; saying so is the entire point of the \
+                      1.9 vocabulary member, and any other reason misattributes the cause"
+                     reason)
+                (reason = "ambiguous_unit"))) ;
   Lwt.return_unit
 
 (* ------------------------------------------------------------------ *)
@@ -752,7 +782,14 @@ let register_shadowing_residual () =
                   resolver calls that ambiguous. If this now resolves, the residual is closed — \
                   good news, but update this test and its comment deliberately"
                  kind (show callee))
-            (kind = "MAY_TOP" && callee = None))) ;
+            (kind = "MAY_TOP" && callee = None) ;
+          let reason = single_call_reason conn ~caller_fn:"go" ~label:"I" in
+          Batch.check b
+            ~msg:
+              (Printf.sprintf
+                 "I: go -> Hfoo.Bar.baz carries top_reason=%s, expected 'ambiguous_unit'"
+                 reason)
+            (reason = "ambiguous_unit"))) ;
   Lwt.return_unit
 
 (* Scenario J — DISCLOSED RESIDUAL, the half scenario F's description missed.
@@ -835,4 +872,108 @@ let register_aliased_nested_residual () =
                       segment may reach. A change here is good news and must be deliberate"
                      (show callee) kind unlinked correct)
                 (callee = Some unlinked))) ;
+  Lwt.return_unit
+
+(* Scenario K — DISCLOSED RESIDUAL: the two sites this change does NOT fix.
+
+   specs/sound-qualified-name-resolution.md S4 names THREE resolution sites.
+   This change fixes one — calls. Module dependencies and type usages still key
+   on the capitalised file BASENAME in a last-writer-wins table
+   ([arch_index.ml] module-dependency and type-usage sites), so the owning
+   library is erased there exactly as it was for calls before this change.
+
+   Reproduced with the branch's own binary, on a caller linking [liba] ONLY:
+
+     module Alias = Liba.Api        -> module_deps target = libb/api.ml
+     let use (x : Liba.Api.t) = x   -> type_usage  type_id = libb/api.ml : t
+
+   This is NOT cosmetic. arch-rules builds its [forbid dep] verdict directly
+   from module_deps.target_module, so on this fixture it reports:
+
+     [ FAIL ] callerlib must not depend on libb   <- callerlib does NOT
+     [ pass ] callerlib must not depend on liba   <- callerlib DOES
+
+   A real architecture violation reports pass and a nonexistent one reports
+   FAIL — the precise failure mode scenario A exists to eliminate, in the
+   sibling channels the spec names.
+
+   Identical on [origin/main]: retained, not introduced. It is pinned here
+   because an earlier revision of this branch shipped nine green scoping tests
+   against a spec claiming three sites, with no test and no prose saying two of
+   them were untouched — which reads as "all three are fixed". Found by
+   adversarial review; disclosing it was the review's recommendation and the
+   right call, since re-keying [type_lookup] on (path, name) and routing both
+   sites through [unit_readings] is its own slice with its own corpus
+   validation.
+
+   When that slice lands, this test fails. That is the point. *)
+let k_a_dune =
+  ("kliba/dune", "(library\n (name kliba)\n (modules api)\n (flags (:standard -w -a)))\n")
+
+let k_a_api = ("kliba/api.ml", "type t = int\nlet run () : int = 1\n")
+
+let k_b_dune =
+  ("klibb/dune", "(library\n (name klibb)\n (modules api)\n (flags (:standard -w -a)))\n")
+
+let k_b_api = ("klibb/api.ml", "type t = string\nlet run () : string = \"b\"\n")
+
+(* Links kliba ONLY. Every reference below names kliba explicitly. *)
+let k_caller_dune =
+  ( "kcaller/dune",
+    "(library\n (name kcaller)\n (libraries kliba)\n (modules k)\n (flags (:standard -w -a)))\n" )
+
+let k_caller_k =
+  ("kcaller/k.ml", "module Alias = Kliba.Api\nlet use (x : Kliba.Api.t) : int = x\n")
+
+let scenario_k_files =
+  [dune_project; k_a_dune; k_a_api; k_b_dune; k_b_api; k_caller_dune; k_caller_k]
+
+let register_sibling_sites_residual () =
+  Test.register ~__FILE__
+    ~title:"cmt: module_deps and type_usage still erase the owning library — pinned, not endorsed"
+    ~tags:["cmt"; "qualified_name"; "library_scoping"; "residual"]
+  @@ fun () ->
+  Batch.run (fun b ->
+      with_fixture ~name:"qual-scope-k" ~files:scenario_k_files @@ fun fixture ->
+      let db = index fixture in
+      Db.with_db db (fun conn ->
+          let dep_targets =
+            Db.rows conn
+              "SELECT m.path FROM module_deps d JOIN modules m ON m.id = d.target_module \
+               WHERE d.target_path = 'Kliba.Api'"
+          in
+          (match dep_targets with
+          | [[p]] ->
+              let p = Db.to_string ~sql:"dep target" p in
+              Batch.check b
+                ~msg:
+                  (Printf.sprintf
+                     "K: module_deps for `Kliba.Api` targets %s, expected the WRONG library \
+                      klibb/api.ml. This pins a KNOWN DEFECT (spec S4, sites 2 and 3) that also \
+                      reproduces on origin/main. If it now targets kliba/api.ml the residual is \
+                      closed — good news, delete this half deliberately and update the spec"
+                     p)
+                (String.length p >= 11
+                && String.sub p (String.length p - 11) 11 = "klibb/api.ml"
+                   || Filename.dirname p = "klibb")
+          | _ -> Batch.note b "K: expected exactly one module_deps row for Kliba.Api, got %d"
+                   (List.length dep_targets)) ;
+          let usage_targets =
+            Db.rows conn
+              "SELECT m.path FROM type_usage u JOIN types t ON t.id = u.type_id JOIN modules m \
+               ON m.id = t.module_id WHERE t.name = 't'"
+          in
+          match usage_targets with
+          | [[p]] ->
+              let p = Db.to_string ~sql:"usage target" p in
+              Batch.check b
+                ~msg:
+                  (Printf.sprintf
+                     "K: type_usage for `Kliba.Api.t` resolves to %s, expected the WRONG library \
+                      klibb/api.ml. Same residual, the type channel"
+                     p)
+                (Filename.dirname p = "klibb")
+          | _ ->
+              Batch.note b "K: expected exactly one resolved type_usage row for t, got %d"
+                (List.length usage_targets))) ;
   Lwt.return_unit
