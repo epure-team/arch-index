@@ -1233,7 +1233,8 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels
   in
   (* Emit a call to a function named by a resolved [Path.t] — e.g. a let*/and*
      bind operator, which is applied but is not a [Texp_apply] node. *)
-  let add_path_call (path : Path.t) loc =
+  let add_path_call ?edge_form (path : Path.t) loc =
+    let add_call = add_call ?edge_form in
     note_seen_value_path (Path.name path) ;
     match path with
     | Path.Pident id when ident_is_local_fn id ->
@@ -2317,19 +2318,31 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels
          the honest test — [peel] returns its argument unchanged exactly when
          there was nothing to peel.
 
-       [Head_enumerated], never [Head_local]: the kind matrix demotes on
-       [cond || partial] (arch_index.ml:832), and an alias is neither
-       conditional nor an under-saturated application, so [Head_local] would
-       emit MUST — a proof-carrying claim that [f] ALWAYS calls [g], for an
-       edge where no call happens at all. [Head_enumerated] forces
-       MAY_ENUMERATED unconditionally, which is what a transferred body is. *)
+       The head classification is [add_path_call]'s, unchanged: it already
+       distinguishes same-module / qualified / functor-parameter and it is
+       tested. What makes an alias MAY_ENUMERATED rather than MUST is a
+       DEMOTION in the kind matrix keyed on [edge_form] (arch_index.ml), not a
+       different head — because "which function is this" and "may I treat this
+       as a definite call" are different questions, and the matrix is where the
+       second one is answered. Routing an alias through a head constructor
+       chosen for its kind side-effect would have answered the second question
+       by lying about the first. *)
     (match root.exp_desc with
-    | Texp_ident (Path.Pident id, _, _)
-      when root == e0 && ident_is_local_fn id && is_arrow root.exp_type ->
-        add_call
-          ~edge_form:"value_alias"
-          (Head_enumerated (local_fn_name id))
-          root.exp_loc
+    | Texp_ident (path, _, _) when root == e0 && is_arrow root.exp_type -> (
+        match path with
+        | Path.Pident id when not (ident_is_local_fn id) ->
+            (* The third class: a bare identifier that is not a same-module
+               top-level function — a parameter, or a local closure. Excluded
+               rather than emitted, per FR-003's scope.
+
+               NOTE, and it is a real gap rather than a tidy boundary: dropping
+               the edge is the ORIGINAL bug in miniature — the node inherits
+               nothing and reads BOUNDED: {}. The honest answer for "I cannot
+               tell what this aliases" is ⊤, not silence. Left as specified
+               because turning 38+10 silent drops into ⊤ edges moves the
+               ceiling ratchets and deserves its own measured slice. *)
+            ()
+        | _ -> add_path_call ~edge_form:"value_alias" path root.exp_loc)
     | _ -> ()) ;
     (match root.exp_desc with
     | Texp_function (_, Tfunction_cases {cases; partial; _}) ->

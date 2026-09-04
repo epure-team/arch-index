@@ -1378,7 +1378,19 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
               (unit_readings mod_name name
               @ facade_readings ~from_depth:(anchor_depth mod_name name + 1) mod_name name)
           in
-          let demoted = call.cond || call.partial in
+          (* specs/point-free-aliases.md FR-005b. A point-free alias is never
+             MUST, and this is where that is enforced — one rule in the matrix
+             rather than a head constructor picked for its kind side-effect.
+
+             MUST means "this call definitely happens". At an alias site no call
+             happens at all: the binding transfers a body. Emitting MUST there
+             would let a reachability query terminate on a claim nobody can
+             discharge. Demotion is the matrix's own vocabulary for "the
+             candidate set is right, the certainty is not", which is exactly
+             this case — so it is a third demotion REASON, not a fourth kind. *)
+          let demoted =
+            call.cond || call.partial || call.edge_form = Some "value_alias"
+          in
           (* Roadmap 1.4 (⊤-anchor taxonomy): [top_reason] is [None] whenever
              [kind] is not "MAY_TOP" (the column is meaningless for a
              resolved or bounded-candidate edge), [Some <reason>] otherwise.
