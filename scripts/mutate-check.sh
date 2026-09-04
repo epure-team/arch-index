@@ -22,10 +22,25 @@
 # Usage:
 #   scripts/mutate-check.sh <file> <expected-anchor-count> <anchor> <replacement> [test-cmd]
 #
-# Defaults to `dune runtest --root .` (`dune test` is an alias for `runtest`, so
-# this is correct in both this repo and arch-index). `--root .` guards against a
-# stray ancestor dune-project hijacking a bare invocation (dune roots itself by
-# searching upward). Override per call or via MUTATE_TEST_CMD.
+# Defaults to `dune runtest --root <repo root>` (`dune test` is an alias for
+# `runtest`, so this is correct in both this repo and arch-index). Override per
+# call or via MUTATE_TEST_CMD.
+#
+# The root is the git toplevel, NOT `.`, and that distinction is load-bearing:
+# `--root .` is only correct when the script is invoked FROM the repo root.
+# Measured from lib/: `dune runtest --root .` re-roots dune at the
+# subdirectory, warns `No dune-project file has been found in directory "."  A
+# default one is assumed`, CREATES a stray lib/_build, and then exits 1 on an
+# unrelated `public_name` error. This script would have read that as a RED
+# BASELINE and refused with a diagnostic pointing at the wrong thing, having
+# already polluted the tree. `--root "$(git rev-parse --show-toplevel)"` makes
+# the command mean the same thing from any directory. (The <file> argument is
+# still resolved relative to your cwd, as usual.)
+#
+# `--root` is also what keeps a stray ANCESTOR dune-project from hijacking a
+# bare invocation: dune roots itself by searching upward to the OUTERMOST
+# ancestor dune-project, and a real /tmp/dune-project on a developer machine is
+# enough to make `dune build` announce `Entering directory '/tmp'`.
 #
 # Exit codes: 0 = mutant KILLED (the test earned its keep)
 #             1 = mutant SURVIVED (the test does not detect the defect)
@@ -40,7 +55,11 @@ FILE=$1
 EXPECTED=$2
 ANCHOR=$3
 REPLACEMENT=$4
-TEST_CMD=${5:-${MUTATE_TEST_CMD:-dune runtest --root .}}
+REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null) \
+  || die "not inside a git repository — cannot root the default test command.
+  Pass an explicit [test-cmd] or set MUTATE_TEST_CMD."
+DEFAULT_TEST_CMD="dune runtest --root $(printf '%q' "$REPO_ROOT")"
+TEST_CMD=${5:-${MUTATE_TEST_CMD:-$DEFAULT_TEST_CMD}}
 
 [ -f "$FILE" ] || die "no such file: $FILE"
 case $EXPECTED in ''|*[!0-9]*) die "expected-count must be a non-negative integer, got '$EXPECTED'" ;; esac
