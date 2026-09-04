@@ -94,11 +94,20 @@ val value_arms : Typedtree.value Typedtree.case list -> arm list
     or-pattern is not lost.
 
     `Error A | Error C -> rhs` is a [Tpat_or] of two [Tpat_value]s at the
-    computation level, not a [Tpat_value]. Keeping only [Tpat_value] cases
-    dropped such an arm entirely, so it closed nothing — while the same intent
-    written inside the constructor, `Error (A | C)`, closed both. Sound in the
-    closing direction: OCaml requires every alternative to bind the same
-    variables, and the guard and right-hand side are shared. *)
+    computation level, NOT a [Tpat_value], so a walker that keeps only
+    [Tpat_value] cases loses the whole arm — and the same intent written inside
+    the constructor, `Error (A | C)`, is a plain [Tpat_value] and survives.
+    This flattens through the disjunction so both spellings yield the same
+    arms. `Error A | _ -> rhs` therefore yields the wildcard alternative too,
+    which is what makes such an arm catch-all.
+
+    Sound in the closing direction for each arm it returns: OCaml requires
+    every alternative to bind the same variables, and the guard and
+    right-hand side are shared, so if the arm closes then every alternative's
+    identity is caught. It carries no claim about whether the arm is REACHED —
+    arm order is not modelled anywhere in this module, a limitation pinned by
+    [rr_guarded_passthrough] in tezt/tests/error_channels.ml and documented in
+    docs/error-channels.md. *)
 val value_pats_of_computation :
   Typedtree.computation Typedtree.case list ->
   (Typedtree.value Typedtree.general_pattern

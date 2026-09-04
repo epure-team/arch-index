@@ -1585,18 +1585,13 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels
                  walk; an alias chain was set earlier, at its own [let]). *)
               (* Ordinary value arms of a [match] live in [comp_cases],
                  wrapped [Tpat_value] (Typedtree.mli: only an [effect P k] arm
-                 lands in [val_cases]).
-
-                 FIX: this used to keep ONLY [Tpat_value] cases and skip
-                 everything else, justified in a comment as "safe: a skipped
-                 arm cannot close anything, the over-approximating direction".
-                 Safe, but it silently dropped every arm-level or-pattern —
-                 `Error A | Error C` is a [Tpat_or] of two [Tpat_value]s at
-                 this level, not a [Tpat_value] — so such an arm closed
-                 nothing, while `Error (A | C)` closed both. An arm written
-                 `Error A | _ ->` caught everything and still closed nothing.
-                 [value_pats_of_computation] flattens them, exactly as
-                 [exception_arms] already did on the exception side. *)
+                 lands in [val_cases]) — but an arm-level or-pattern is a
+                 [Tpat_or] AT THIS LEVEL, so the wrapper has to be stripped
+                 through the disjunction rather than off the top.
+                 [Arch_index_exn.value_pats_of_computation] does that, over the
+                 same traversal the exception side uses; its .mli states the
+                 rule and the shape once. Behaviour pinned by [arm_level_or]
+                 and [arm_level_or_wild] in tezt/tests/error_channels.ml. *)
               let value_arms = Arch_index_exn.value_pats_of_computation comp_cases in
               (* The scrutinee's OWN type picks at most one channel — scanning
                  every declared channel's origin constructor NAME against
