@@ -101,7 +101,28 @@ let must_null_query =
    provenance-columns and language-universe tasks' own additions since the
    prior recalibration — genuine external leaves of the same class, not a
    new unsound edge kind. *)
-let clean_measured = 321
+(* Recalibrated 2026-09-04 (feat/coverage-error-channels): 321 -> 345, in two
+   attributable parts.
+
+   +19 is DRIFT ALREADY ON MAIN. Error channels (#60) landed without
+   recalibrating this constant, so main at 7fcf3c0 measures 340 against a
+   constant of 321. The gate still passed, which is exactly why it went
+   unnoticed: the change quietly spent 19 of the 25 headroom and left 6 for
+   everyone after it, and this ratchet's own note above says headroom "is not
+   slack for a real regression". Caught by the roadmap session while measuring
+   main to attribute its own delta; recorded here rather than absorbed
+   silently, because a ratchet that swallows one change's drift into the next
+   one's baseline has stopped ratcheting.
+
+   +5 is this branch: three Sqlite3.prepare/step/finalize calls from
+   coverage_matrix.ml's read-only contract probe, and two Arch_tezt.Check.option
+   calls from its tezt. Verified to be the same class as the existing rows and
+   not a new unsound edge kind — the 340 on main are dominated by Sqlite3 (117),
+   Arch_tezt (80), Eio (31) and Unix (24), all genuine external leaves.
+
+   Measured on the whole repo _build/default, which is what this test indexes —
+   not lib/arch_index alone, which reads 142 and is a different metric. *)
+let clean_measured = 345
 
 let headroom = 25
 
