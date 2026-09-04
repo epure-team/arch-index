@@ -599,22 +599,26 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
             (mod_name, name)
         | None -> ("", usage.type_path)
       in
-      let type_id =
-        match Hashtbl.find_opt type_lookup (mod_name, type_name) with
-        | Some id ->
-            incr n_type_usages_resolved ;
-            Some id
-        | None -> None
-      in
-      insert_type_usage
-        db
-        stmt_type_usage
-        ~function_id:usage.function_id
-        ~type_id
-        ~type_name:usage.type_path
-        ~usage_role:usage.usage_role
-        ~position:usage.position ;
-      incr n_type_usages)
+      let type_id = Hashtbl.find_opt type_lookup (mod_name, type_name) in
+      (* Both counters are read as row counts of [type_usage] — the caller's
+         own consistency check compares them against a COUNT query. So they
+         are incremented only once the row is known to be in the table, and
+         [n_type_usages_resolved] only inside that branch: resolving a type name
+         to an id is not the same event as writing the row, and counting the
+         resolution of a row that was then rejected also breaks the
+         [resolved <= total] bound. *)
+      if
+        insert_type_usage
+          db
+          stmt_type_usage
+          ~function_id:usage.function_id
+          ~type_id
+          ~type_name:usage.type_path
+          ~usage_role:usage.usage_role
+          ~position:usage.position
+      then (
+        incr n_type_usages ;
+        if Option.is_some type_id then incr n_type_usages_resolved))
     !all_pending_type_usages ;
   exec_exn db "COMMIT" ;
   Arch_io.printf

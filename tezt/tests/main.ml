@@ -80,6 +80,7 @@ let () =
   Lsp_readiness.register_silent_server () ;
   Rejection_attribution.register () ;
   Insert_rowid_attribution.register () ;
+  Type_usage_count_honesty.register () ;
   Dropped_node_dependents.register_dropped_function () ;
   Dropped_node_dependents.register_dropped_module () ;
   Dropped_node_dependents.register_dropped_type () ;

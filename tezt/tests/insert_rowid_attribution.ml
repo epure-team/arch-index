@@ -147,14 +147,20 @@ let register () =
       match orphan with
       | None -> ()
       | Some function_id ->
-          Db_under_test.insert_type_usage
-            conn
-            stmt_usage
-            ~function_id
-            ~type_id:None
-            ~type_name:"Orphan.t"
-            ~usage_role:"param"
-            ~position:(Some 0)) ;
+          (* The written/rejected verdict is discarded here on purpose: this
+             test's evidence is the stored rows, and reaching this branch at all
+             is already the regression it guards against. The sibling
+             [type_usage_count_honesty.ml] is what pins the verdict itself. *)
+          ignore
+            (Db_under_test.insert_type_usage
+               conn
+               stmt_usage
+               ~function_id
+               ~type_id:None
+               ~type_name:"Orphan.t"
+               ~usage_role:"param"
+               ~position:(Some 0)
+              : bool)) ;
   Db.with_db db_path (fun conn ->
       Batch.run (fun b ->
           (* The headline: the rejected binding's type usage must not have been

@@ -266,7 +266,7 @@ let insert_type_usage db stmt_usage ~function_id ~type_id ~type_name ~usage_role
   (match position with
   | Some p -> bind_int stmt_usage 5 p
   | None -> ignore (Sqlite3.bind stmt_usage 5 Sqlite3.Data.NULL)) ;
-  exec_stmt db ~what:"type_usage" stmt_usage
+  exec_stmt_ok db ~what:"type_usage" stmt_usage
 
 (* -------------------------------------------------------------------------- *)
 (* Inline tests — happy paths only (exec_exn calls exit 1 on errors;         *)

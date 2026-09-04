@@ -201,10 +201,12 @@ module Db : sig
     type_name:string ->
     usage_role:string ->
     position:int option ->
-    unit
-  (** Insert a type-usage row against [function_id]. The dependent insert whose
-      misattribution is the point of the check above. See
-      {!Arch_index_db.insert_type_usage}. *)
+    bool
+  (** Insert a type-usage row against [function_id], returning [true] only when
+      the row was written. The dependent insert whose misattribution is the
+      point of the check above, and the reason the boolean matters: a rejected
+      row must not be counted, or the reported total exceeds the number of rows
+      in the table. See {!Arch_index_db.insert_type_usage}. *)
 end
 
 (** [run_lsp_multi ~languages] indexes a project holding several languages into

@@ -418,13 +418,17 @@ val insert_module_dep :
   line_number:int ->
   unit
 
-(** Insert a type usage record.
+(** Insert a type usage record, reporting whether the row was actually written.
 
     {pre}
     [function_id] must reference an existing function row.
 
     {post}
-    Inserts the type usage row and returns unit.
+    Returns [true] when the row was inserted, [false] when the statement was
+    rejected (a dangling [function_id] or [type_id] fails the foreign key). The
+    caller must not count a [false] as an inserted row: the returned totals are
+    read as the number of rows in the table, and a caller that counts rejections
+    reports rows it never wrote.
 
     {violators}
     (none)
@@ -439,4 +443,4 @@ val insert_type_usage :
   type_name:string ->
   usage_role:string ->
   position:int option ->
-  unit
+  bool
