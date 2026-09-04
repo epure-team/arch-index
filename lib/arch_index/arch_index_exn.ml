@@ -295,6 +295,33 @@ let exception_arms (cases : Typedtree.computation Typedtree.case list) =
       List.map (fun v -> {a_pat = v; a_guard = c.c_guard; a_rhs = c.c_rhs}) (pats c.c_lhs))
     cases
 
+(* The value-side twin of [exception_arms], and it exists for the same reason.
+
+   A [match] arm written `Error A | Error C -> rhs` is, at the COMPUTATION
+   pattern level, a [Tpat_or] of two [Tpat_value]s — not a [Tpat_value]. A
+   walker that keeps only [Tpat_value] cases therefore drops the whole arm, and
+   the arm closes nothing: `Error A | Error C` reported both A and C as still
+   reachable, while the same intent written inside the constructor,
+   `Error (A | C)`, closed both. Worse, `Error A | _ -> ...` — an arm that
+   catches everything — also closed nothing.
+
+   Flattening is sound in the closing direction: OCaml requires every
+   alternative of an or-pattern to bind the same variables, and the guard and
+   right-hand side are shared, so if the arm is closing at all then each
+   alternative's identity really is caught. Kept beside [exception_arms] so the
+   two cannot drift: they are the same rule over two pattern universes. *)
+let value_pats_of_computation (cases : Typedtree.computation Typedtree.case list) =
+  let rec pats (p : Typedtree.computation Typedtree.general_pattern) =
+    match p.pat_desc with
+    | Tpat_value vp -> [(vp :> Typedtree.value Typedtree.general_pattern)]
+    | Tpat_or (a, b, _) -> pats a @ pats b
+    | _ -> []
+  in
+  List.concat_map
+    (fun (c : Typedtree.computation Typedtree.case) ->
+      List.map (fun vp -> (vp, c.c_guard, c.c_rhs)) (pats c.c_lhs))
+    cases
+
 let value_arms (cases : Typedtree.value Typedtree.case list) =
   List.map
     (fun (c : Typedtree.value Typedtree.case) -> {a_pat = c.c_lhs; a_guard = c.c_guard; a_rhs = c.c_rhs})
