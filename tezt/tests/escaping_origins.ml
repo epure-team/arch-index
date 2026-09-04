@@ -62,16 +62,33 @@ let unrelated n = assert (n < 0) ; n
 let anchor_files =
   [
     Fixture.dune_project;
-    ( "dune",
+    ( "sub/dune",
       "(library\n\
       \ (name eo_anchor_fixture)\n\
       \ (wrapped false)\n\
-      \ (modules eo_store)\n\
+      \ (modules eo_store eo_leafmod)\n\
       \ (flags (:standard -w -8-11-21-26-27-32-33-37-39)))\n" );
-    ( "eo_store.ml",
+    (* Under sub/ ON PURPOSE: the caller's spec ("eo_store.ml:only_here") must
+       then DIFFER from the resolved root ("sub/eo_store.ml:only_here"), which
+       is the only shape in which an assertion can tell the echo apart from the
+       input. A flat fixture makes the two identical and lets a mutant that
+       echoes the spec back pass — the one mutation that would re-hide the
+       unanchored-root defect. *)
+    ( "sub/eo_store.ml",
       {|let helper n = assert (n > 0) ; n
 let only_here n = helper n
 let leaf n = n + 1
+|} );
+    (* THREE functions, NONE calling another: the whole module has no outgoing
+       resolved edge. [eo_store.ml] cannot serve here — its [only_here] calls
+       [helper], so a ':*' root over it genuinely traverses. The broken guard
+       compared node count to ROOT count, and under ':*' the root count is a
+       MODULE count, always 1; so it could only fire on a single-function
+       module, and only a multi-function leaf distinguishes the fix from it. *)
+    ( "sub/eo_leafmod.ml",
+      {|let a n = assert (n > 0) ; n
+let b n = n / 0
+let c n = n + 1
 |} );
   ]
 
@@ -207,17 +224,34 @@ let register_root_anchoring () =
       Batch.eq_int b ~msg:"the correctly-named module is still accepted" c_ok 0 ;
       (* The answer must say what it rooted ON, so a mismatch is legible in the
          output and not only in the exit code. *)
+      (* The echo must be the RESOLVED root, not the caller's spec — hence the
+         "sub/" prefix, which the caller never typed. *)
       Batch.check b
-        ~msg:("the preamble echoes the RESOLVED root:\n" ^ out_ok)
+        ~msg:("the preamble echoes the RESOLVED root, directory included:\n" ^ out_ok)
         (Arch_tezt.contains ~needle:"root: " out_ok
-        && Arch_tezt.contains ~needle:"eo_store.ml:only_here" out_ok) ;
+        && Arch_tezt.contains ~needle:"sub/eo_store.ml:only_here" out_ok) ;
       (* Producer identity, not just corpus size: a reviewer measured a
          different count with a byte-identical scope line because the producer
          differed. *)
       Batch.check b
         ~msg:("the scope line carries schema and contract identity:\n" ^ out_ok)
         (Arch_tezt.contains ~needle:"schema " out_ok
-        && Arch_tezt.contains ~needle:"contract " out_ok)) ;
+        && Arch_tezt.contains ~needle:"contract " out_ok) ;
+      (* ...AND THE VALUES FOLLOW THE INDEX. This line exists because a
+         byte-identical scope line once hid a 21-vs-37 discrepancy whose real
+         variable was the producer version. Grepping the literal "schema "
+         passes against two hard-coded constants, and would not have caught the
+         thing the line was added for. So: change the stored version, and the
+         preamble must change with it. *)
+      Db.with_db_rw db (fun conn ->
+          Db.exec conn
+            "INSERT OR REPLACE INTO comment_db_meta(key,value) VALUES('schema_version','9.99')") ;
+      let _, out_bumped = run db ["--roots"; "eo_store.ml:only_here"] in
+      Batch.check b
+        ~msg:("the schema stamp is READ from the index, not hard-coded:\n" ^ out_bumped)
+        (Arch_tezt.contains ~needle:"schema 9.99" out_bumped) ;
+      Batch.check b ~msg:"changing the stored version changes the preamble"
+        (out_ok <> out_bumped)) ;
   Lwt.return_unit
 
 (* A root with no outgoing resolved edge printed "0 edges unresolved · 0 ⊤" and
@@ -233,13 +267,28 @@ let register_nothing_traversed () =
   let code, output = Arch_tezt.index_raw_into ~db fixture in
   if code <> 0 then Test.fail "index failed (exit %d):\n%s" code output ;
   let _, out = run db ["--roots"; "eo_store.ml:leaf"] in
+  (* THE ':*' CASE IS THE ONE THAT REGRESSED THROUGH ROUND 1. The first guard
+     compared the node count to the ROOT count, and under ':*' the root count is
+     a MODULE count — always 1 after the ambiguity check — so it could only ever
+     fire on a module with at most one function. A singleton fixture passes
+     against that broken guard, which is precisely why the defect survived. This
+     module has three functions and no outgoing edge. *)
+  let _, out_star = run db ["--roots"; "eo_leafmod.ml:*"] in
   Batch.run (fun b ->
       Batch.check b
         ~msg:("a root with no outgoing edge is reported as NOTHING TRAVERSED:\n" ^ out)
         (Arch_tezt.contains ~needle:"NOTHING TRAVERSED" out) ;
       Batch.check b
         ~msg:("...and does NOT claim a lower bound over a closure it never entered:\n" ^ out)
-        (not (Arch_tezt.contains ~needle:"LOWER BOUND" out))) ;
+        (not (Arch_tezt.contains ~needle:"LOWER BOUND" out)) ;
+      Batch.check b
+        ~msg:
+          ("a WHOLE-MODULE root with several functions and no outgoing edge says so too:\n"
+         ^ out_star)
+        (Arch_tezt.contains ~needle:"NOTHING TRAVERSED" out_star) ;
+      Batch.check b
+        ~msg:("...and the ':*' form does not claim a lower bound either:\n" ^ out_star)
+        (not (Arch_tezt.contains ~needle:"LOWER BOUND" out_star))) ;
   Lwt.return_unit
 
 (* An index with no exception analysis at all must refuse BEFORE printing a
@@ -262,8 +311,30 @@ let register_not_analysed () =
          INSERT INTO comment_db_meta VALUES('callgraph_contract','v1');\n\
          INSERT INTO modules VALUES(1,'a.ml');\n\
          INSERT INTO functions VALUES(1,'f',1);") ;
+  (* The FLAT schema is the other half of this finding, and round 1 removed the
+     symptom (an unused [flat] flag) without removing the defect: on a flat index
+     the command still leaked a raw sqlite error and the whole query, exit 2 —
+     while [reaches] answered and [unreachable]/[exn-stats] refused cleanly on
+     the SAME database. Being the only one of four that crashes is a missing
+     guard, not a schema question. *)
+  let flat_db = Arch_tezt.temp_db "eo_flat" in
+  if Sys.file_exists flat_db then Sys.remove flat_db ;
+  Db.with_db_rw flat_db (fun conn ->
+      Db.exec conn
+        "CREATE TABLE calls(caller_name TEXT, callee_name TEXT, kind TEXT);\n\
+         CREATE TABLE functions(id INTEGER PRIMARY KEY, name TEXT);\n\
+         CREATE TABLE comment_db_meta(key TEXT PRIMARY KEY, value TEXT);\n\
+         INSERT INTO comment_db_meta VALUES('callgraph_contract','v1');") ;
+  let c_flat, out_flat = run flat_db ["--roots"; "a.ml:entry"] in
   let c, out = run db ["--roots"; "a.ml:f"] in
   Batch.run (fun b ->
+      Batch.eq_int b ~msg:"a FLAT index is REFUSED (exit 3), not crashed into" c_flat 3 ;
+      Batch.check b
+        ~msg:("the flat refusal leaks no SQL:\n" ^ out_flat)
+        (not (Arch_tezt.contains ~needle:"SELECT" out_flat)) ;
+      Batch.check b
+        ~msg:("the flat refusal prints no coverage header:\n" ^ out_flat)
+        (not (Arch_tezt.contains ~needle:"coverage:" out_flat)) ;
       Batch.eq_int b ~msg:"an index with no exn_origins is REFUSED (exit 3)" c 3 ;
       Batch.check b
         ~msg:("the refusal comes BEFORE any coverage header:\n" ^ out)

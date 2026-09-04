@@ -55,8 +55,9 @@ Subcommands:
                                first: the closure stops at every unresolved edge, so the list is
                                a LOWER BOUND, and a root with no outgoing edge says NOTHING
                                TRAVERSED rather than reporting zero. Each row is marked MUST
-                               (definite call path) or MAY. An ambiguous root, or one whose path
-                               does not align on a '/' boundary, is REFUSED with its candidates.
+                               (definite call path) or MAY. An ambiguous root is REFUSED with
+                               its candidates listed; a root whose path does not align on a '/'
+                               boundary is REFUSED as unmatched (there is nothing to list).
                                NOTE: rows are also filtered on escapes=1, which is currently
                                NON-DISCRIMINATING — every origin recorded by the producers
                                shipped today has escapes=1, so it selects nothing. It is a guard
@@ -439,18 +440,45 @@ let () =
                empty table, which is the worst available answer to "what can
                crash this". The refusal has to come first or the header is a
                lie already written. *)
+            (* The flat schema has no [modules] and no [functions] join to make.
+               Round 1 saw the symptom (an unused [flat] flag) and round 2 found
+               that deleting the flag did not remove the defect it flagged: on a
+               flat index this command still leaked a raw sqlite error and the
+               entire query to stdout, exit 2, while [reaches] answered and
+               [unreachable]/[exn-stats] refused cleanly. Being the only one of
+               four that crashes is not a schema question, it is a missing
+               guard. *)
+            if not (Arch_db.has_table t "modules" && Arch_db.has_table t "functions") then
+              die 3
+                "arch-query: REFUSED — escaping-origins needs the main schema's modules and \
+                 functions tables to root a closure and name its origins; this index has \
+                 neither (flat schema). Use the cmt indexer to produce one." ;
             if not (Arch_db.has_table t "exn_origins") then
               die 3
                 "arch-query: REFUSED — this index has no exn_origins table, so no exception \
                  origin was ever recorded. escaping-origins cannot report a surface it never \
                  analysed; re-index with an exception-aware producer." ;
+            (* A flag given twice used to take the FIRST silently, so
+               [--roots a --roots b] answered about [a] while the caller read
+               the command line and expected [b]. For a command whose whole
+               contract is "the answer states what it was asked", quietly
+               discarding half the question is the same defect as the
+               unanchored root, one layer up. *)
             let flag_val name =
-              let rec go = function
-                | x :: y :: _ when x = name -> Some y
-                | _ :: tl -> go tl
-                | [] -> None
+              let rec collect = function
+                | x :: y :: tl when x = name -> y :: collect tl
+                | _ :: tl -> collect tl
+                | [] -> []
               in
-              go rest
+              match collect rest with
+              | [] -> None
+              | [ v ] -> Some v
+              | vs ->
+                  die 2
+                    (Printf.sprintf
+                       "arch-query: %s given %d times (%s) — pass it once; this command will \
+                        not silently pick one."
+                       name (List.length vs) (String.concat ", " vs))
             in
             (* Fatal forms: the ones that abort rather than produce a value. The
                set is a WHITELIST, not caller text spliced into SQL. *)
@@ -612,9 +640,9 @@ let () =
               Arch_db.rows t
                 ~params_ty:Arch_db.Ty.(t3 string string string)
                 ~shape:Arch_db.Ty.(t2 (t3 (option int) (option int) (option int))
-                                     (t2 (option int) (option int)))
-                ~to_cells:(fun ((a, b, c), (d, e)) ->
-                  List.map Arch_db.int_cell [ a; b; c; d; e ])
+                                     (t3 (option int) (option int) (option int)))
+                ~to_cells:(fun ((a, b, c), (d, e, f)) ->
+                  List.map Arch_db.int_cell [ a; b; c; d; e; f ])
                 (ctes
                 ^ "SELECT (SELECT count(*) FROM reach),\n\
                   \       (SELECT count(*) FROM calls c JOIN reach r ON c.caller_id=r.id \
@@ -622,7 +650,9 @@ let () =
                   \       (SELECT count(*) FROM calls c JOIN reach r ON c.caller_id=r.id \
                    WHERE c.kind='MAY_TOP'),\n\
                   \       (SELECT count(*) FROM modules),\n\
-                  \       (SELECT count(*) FROM functions)")
+                  \       (SELECT count(*) FROM functions),\n\
+                  \       (SELECT count(*) FROM calls c JOIN reach r ON c.caller_id=r.id \
+                   WHERE c.callee_id IS NOT NULL)")
                 (path_pat, root_name, root_name)
             in
             let cov_cells = match cov with r :: _ -> List.map Arch_db.string_of_cell r | [] -> [] in
@@ -687,10 +717,23 @@ let () =
                about which binary did it or under which contract. Two numbers
                are comparable only when everything that produced them is. *)
             let ident key = match Arch_db.meta t key with Some v -> v | None -> "?" in
+            (* THE GUARD CONDITIONS ON THE THING IT CLAIMS, not on a proxy.
+
+               The first version compared the node count to [n_roots], and
+               [n_roots] counts MODULES when the root is [<path>:*] — so it was
+               always 1 there, and the guard could only fire on a module with at
+               most one function. It was structurally incapable of firing on the
+               very form the usage line recommends, and the usage line asserted
+               the behaviour anyway. A module with three functions and no
+               outgoing edge printed LOWER BOUND, which is round 1's output word
+               for word.
+
+               "Was anything traversed" is exactly "does the closure have an
+               outgoing RESOLVED edge", so that is what is now counted. *)
             let cov_text =
               match cov_cells with
-              | [ n; u; top; m; f ] ->
-                  let traversed = (try int_of_string n with _ -> 0) <= n_roots in
+              | [ n; u; top; m; f; out ] ->
+                  let traversed = (try int_of_string out with _ -> 1) > 0 in
                   Printf.sprintf
                     "root: %s\n\
                      scope: %s modules · %s functions indexed · schema %s · contract %s\n\
@@ -698,15 +741,25 @@ let () =
                     root_label m f
                     (ident "schema_version") (ident "callgraph_contract")
                     n u top
-                    (if traversed then
-                       "NOTHING TRAVERSED: the root has no outgoing resolved edge, so an empty \
-                        table here means the closure was never entered, NOT that the root is safe"
-                     else "LOWER BOUND (the closure stops at every unresolved edge)")
-              | _ -> "coverage: unavailable"
+                    (if traversed then "LOWER BOUND (the closure stops at every unresolved edge)"
+                     else
+                       "NOTHING TRAVERSED: the closure has no outgoing resolved edge, so any row \
+                        below is the ROOT'S OWN and an empty table means the closure was never \
+                        entered — NOT that the root is safe")
+              (* The degraded case must not drop [root:] and [scope:]: this same
+                 commit argues they are not optional, and a fallback that
+                 silently removes them contradicts that wherever it fires. *)
+              | _ ->
+                  Printf.sprintf
+                    "root: %s\nscope: schema %s · contract %s\ncoverage: UNAVAILABLE — the \
+                     coverage query returned nothing, so nothing below is bounded by a stated \
+                     scope"
+                    root_label (ident "schema_version") (ident "callgraph_contract")
             in
             preamble
               ~h:[ "root"; "nodes_reached"; "edges_unresolved"; "top_edges"; "modules_indexed";
-                   "functions_indexed"; "schema_version"; "callgraph_contract" ]
+                   "functions_indexed"; "resolved_out_edges"; "schema_version";
+                   "callgraph_contract" ]
               ~cells:
                 ((root_label :: cov_cells)
                 @ [ ident "schema_version"; ident "callgraph_contract" ])
