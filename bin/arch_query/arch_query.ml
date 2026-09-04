@@ -49,6 +49,13 @@ Subcommands:
                                functions whose may-raise set contains Exn (⊤ nodes listed apart)
   exn-stats    [--assume-externals-pure]
                                bounded/unbounded share of every node, ⊤ reasons, origin counts
+  escaping-origins --roots <module-path>:<fn>|<module-path>:* [--forms <f1,f2,...>]
+                               fatal origins (assert/division/index/partial_match by default)
+                               that ESCAPE their function, restricted to the forward closure of
+                               the root. Prints a coverage line first: the closure stops at every
+                               unresolved edge, so the list is a LOWER BOUND. Each row is marked
+                               MUST (definite call path) or MAY. An ambiguous root is REFUSED
+                               with its candidates, never unioned.
   fan-in       [N]             top-N most-called functions
   exported                     all exported functions
   useless-branches [limit]     decisions with an actionable verdict — dead logic
@@ -384,6 +391,196 @@ let () =
                  JOIN functions cf ON c.caller_id=cf.id WHERE c.caller_id IN (SELECT id FROM \
                  reach_res) AND (c.kind IS NULL OR c.kind NOT IN ('MUST','MAY_ENUMERATED')) ORDER BY 1"
                 a
+        | "escaping-origins" ->
+            (* specs/exn-raise-sets.md — the FATAL-origin surface reachable from
+               a named root.
+
+               What it computes and nothing more: rows of [exn_origins] whose
+               [form] is fatal and whose [escapes] is 1, restricted to functions
+               in the forward closure of the root. The only judgement in the
+               answer is which roots count as entry points, and that is the
+               caller's, not this command's.
+
+               Three properties this command must not lose, each of which was a
+               real defect before it existed as a command:
+
+               1. THE COVERAGE LINE IS NOT OPTIONAL. The closure stops at every
+                  unresolved edge, so the list is a LOWER BOUND and the size of
+                  what was not seen is itself the interesting number. A fatal-
+                  origin list printed without it reads as "these are the ways it
+                  can die", when the honest claim is "these are the ways it can
+                  die THAT I COULD SEE". On Tezos the unseen part is the whole
+                  functor-generated storage layer.
+
+               2. MUST AND MAY ARE DISTINGUISHED. [reaches] is MUST-only in this
+                  tool and [unreachable] is its sound dual; a command that
+                  silently mixed the two would break that contract. A MAY row is
+                  a site that may execute, not one proven to.
+
+               3. AN AMBIGUOUS ROOT IS REFUSED, NEVER UNIONED. On the whole
+                  Octez tree [apply_operation] names 60 functions — one in
+                  main.ml and one in apply.ml for each of 32 protocol versions,
+                  back to genesis. Rooting by bare name would answer for every
+                  protocol ever shipped at once, and the two same-named
+                  functions in one protocol have DIFFERENT verdicts (main.ml's
+                  is a point-free alias of apply.ml's), so the union also looks
+                  like the tool contradicting itself. Several candidates is an
+                  absence of proof, not a choice to make. *)
+            need_contract () ;
+            let flag_val name =
+              let rec go = function
+                | x :: y :: _ when x = name -> Some y
+                | _ :: tl -> go tl
+                | [] -> None
+              in
+              go rest
+            in
+            (* Fatal forms: the ones that abort rather than produce a value. The
+               set is a WHITELIST, not caller text spliced into SQL. *)
+            let known_forms =
+              ["assert"; "division"; "index"; "partial_match"; "failwith"; "invalid_arg";
+               "raise"; "reraise"; "compare"; "unknown"]
+            in
+            let forms =
+              match flag_val "--forms" with
+              | None -> ["assert"; "division"; "index"; "partial_match"]
+              | Some s ->
+                  let fs = String.split_on_char ',' s |> List.map String.trim
+                           |> List.filter (fun x -> x <> "") in
+                  (match List.filter (fun f -> not (List.mem f known_forms)) fs with
+                   | [] -> fs
+                   | bad ->
+                       die 2
+                         (Printf.sprintf
+                            "arch-query: unknown origin form(s): %s. Known forms: %s"
+                            (String.concat ", " bad) (String.concat ", " known_forms)))
+            in
+            if forms = [] then die 2 "arch-query: --forms needs at least one form" ;
+            let forms_sql =
+              String.concat ", " (List.map (fun f -> "'" ^ f ^ "'") forms)
+            in
+            let root_spec =
+              match flag_val "--roots" with
+              | Some r -> r
+              | None ->
+                  die 2
+                    "arch-query: escaping-origins needs --roots <module-path>:<function> \
+                     (a bare function name is refused when it is ambiguous)"
+            in
+            (* [path:name], or a bare [name] which becomes the '%' path pattern
+               and is then subject to the same ambiguity refusal. *)
+            let path_pat, root_name =
+              match String.rindex_opt root_spec ':' with
+              | Some i ->
+                  ( "%" ^ String.sub root_spec 0 i,
+                    String.sub root_spec (i + 1) (String.length root_spec - i - 1) )
+              | None -> ("%", root_spec)
+            in
+            if root_name = "" then die 2 "arch-query: --roots has an empty function name" ;
+            (* [<path>:*] roots at EVERY function of one module. This is the
+               shape the real question needs: "the protocol's entry points" is
+               all of main.ml, not one of its members. Rooting at
+               [main.ml:apply_operation] alone reaches 241 nodes on proto_alpha;
+               rooting at all of main.ml reaches 1287, and the extra thousand is
+               the other entry points the shell actually calls
+               (validate_operation, begin_application, finalize_*, init, ...).
+               The ambiguity rule still applies, one level up: the MODULE must
+               be unique, or several protocol versions answer at once. *)
+            let whole_module = root_name = "*" in
+            let n_roots =
+              if whole_module then
+                Arch_db.count1 t
+                  "SELECT count(*) FROM modules WHERE path LIKE ?" path_pat
+              else
+                Arch_db.count2 t
+                  "SELECT count(*) FROM functions f JOIN modules m ON f.module_id=m.id \
+                   WHERE m.path LIKE ? AND f.name = ?"
+                  (path_pat, root_name)
+            in
+            if n_roots = 0 then
+              die 3
+                (Printf.sprintf
+                   "arch-query: REFUSED — no %s matches --roots '%s' in this index."
+                   (if whole_module then "module" else "function")
+                   root_spec) ;
+            if n_roots > 1 && whole_module then (
+              q ~h:[ "candidate" ] ~shape:Arch_db.Rows.t1
+                ~cells:(fun a -> [ Arch_db.text_cell a ])
+                ~pty:Arch_db.Ty.string
+                "SELECT path FROM modules WHERE path LIKE ? ORDER BY 1" path_pat ;
+              die 3
+                (Printf.sprintf
+                   "arch-query: REFUSED — --roots '%s' matches %d modules (listed above). \
+                    Qualify the path so exactly one module answers."
+                   root_spec n_roots)) ;
+            if n_roots > 1 then (
+              (* Print the candidates BEFORE refusing: a refusal that does not
+                 say what to pick instead just moves the work to the caller. *)
+              q ~h:[ "candidate" ] ~shape:Arch_db.Rows.t1 ~cells:(fun a -> [ Arch_db.text_cell a ])
+                ~pty:Arch_db.Ty.(t2 string string)
+                "SELECT m.path || ':' || f.name FROM functions f JOIN modules m ON \
+                 f.module_id=m.id WHERE m.path LIKE ? AND f.name = ? ORDER BY 1"
+                (path_pat, root_name) ;
+              die 3
+                (Printf.sprintf
+                   "arch-query: REFUSED — --roots '%s' matches %d functions (listed above). \
+                    Several candidates is an absence of proof, not a choice to make: qualify \
+                    the root with its module path."
+                   root_spec n_roots)) ;
+            (* The two closures, shared by the coverage line and the table. *)
+            let ctes =
+              "WITH RECURSIVE root(id) AS (\n\
+              \  SELECT f.id FROM functions f JOIN modules m ON f.module_id=m.id\n\
+              \  WHERE m.path LIKE ? AND (? = '*' OR f.name = ?)),\n\
+               reach(id) AS (\n\
+              \  SELECT id FROM root UNION\n\
+              \  SELECT c.callee_id FROM calls c JOIN reach r ON c.caller_id=r.id\n\
+              \   WHERE c.callee_id IS NOT NULL),\n\
+               must_reach(id) AS (\n\
+              \  SELECT id FROM root UNION\n\
+              \  SELECT c.callee_id FROM calls c JOIN must_reach r ON c.caller_id=r.id\n\
+              \   WHERE c.callee_id IS NOT NULL AND c.kind='MUST')\n"
+            in
+            let cov =
+              Arch_db.rows t
+                ~params_ty:Arch_db.Ty.(t3 string string string)
+                ~shape:Arch_db.Rows.i_i_i
+                ~to_cells:(fun (a, b, c) ->
+                  [ Arch_db.int_cell a; Arch_db.int_cell b; Arch_db.int_cell c ])
+                (ctes
+                ^ "SELECT (SELECT count(*) FROM reach),\n\
+                  \       (SELECT count(*) FROM calls c JOIN reach r ON c.caller_id=r.id \
+                   WHERE c.callee_id IS NULL),\n\
+                  \       (SELECT count(*) FROM calls c JOIN reach r ON c.caller_id=r.id \
+                   WHERE c.kind='MAY_TOP')")
+                (path_pat, root_name, root_name)
+            in
+            let cov_cells = match cov with r :: _ -> List.map Arch_db.string_of_cell r | [] -> [] in
+            let cov_text =
+              match cov_cells with
+              | [ n; u; top ] ->
+                  Printf.sprintf
+                    "coverage: %s nodes reached · %s edges unresolved · %s ⊤ — LOWER BOUND \
+                     (the closure stops at every unresolved edge)"
+                    n u top
+              | _ -> "coverage: unavailable"
+            in
+            preamble ~h:[ "coverage" ] ~cells:cov_cells ~text:cov_text ;
+            q ~h:[ "function"; "site"; "form"; "exn"; "reach" ]
+              ~shape:Arch_db.Rows.t5' ~cells:Arch_db.Rows.c5
+              ~pty:Arch_db.Ty.(t3 string string string)
+              (ctes
+              ^ Printf.sprintf
+                  "SELECT f.name, m.path || ':' || o.line, o.form, COALESCE(o.exn_path,'-'),\n\
+                  \       CASE WHEN o.function_id IN (SELECT id FROM must_reach) THEN 'MUST' \
+                   ELSE 'MAY' END\n\
+                   FROM exn_origins o JOIN functions f ON o.function_id=f.id\n\
+                   JOIN modules m ON f.module_id=m.id\n\
+                   WHERE o.function_id IN (SELECT id FROM reach)\n\
+                  \  AND o.escapes=1 AND o.channel='exception' AND o.form IN (%s)\n\
+                   ORDER BY o.form, m.path, o.line"
+                  forms_sql)
+              (path_pat, root_name, root_name)
         | "fan-in" ->
             (* specs/point-free-aliases.md FR-006: a point-free alias
                ([let f = M.g]) is not a CALLER of [M.g] — nobody invokes
