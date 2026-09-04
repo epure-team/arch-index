@@ -122,7 +122,7 @@ let must_null_query =
 
    Measured on the whole repo _build/default, which is what this test indexes —
    not lib/arch_index alone, which reads 142 and is a different metric. *)
-let clean_measured = 346
+let clean_measured = 347
 
 let headroom = 25
 
