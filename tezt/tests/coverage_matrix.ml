@@ -332,18 +332,22 @@ let register_error_channels_from_contract () =
       (* PARTIAL, not covered: a database carrying only the exception channel
          is not one carrying all three, and flattening that would overstate
          what was analysed. *)
+      (* COVERED, not partial: a corpus using neither result nor option
+         legitimately produces a shorter contract, and calling that a gap made
+         the ratchet fire on a correctly analysed project. Which channels ran
+         stays visible in the detail. *)
       Check.(
         (Db.string_opt conn
            "SELECT status FROM analysis_coverage WHERE language = 'ocaml' AND analysis = 'error_channels'"
-         = Some "partial")
+         = Some "covered")
           (option string)
-          ~error_msg:"a contract listing only 'exception' must be partial, got %L") ;
+          ~error_msg:"a shorter contract is covered, not a gap, got %L") ;
       Check.(
         (Db.string_opt conn
            "SELECT detail FROM analysis_coverage WHERE language = 'ocaml' AND analysis = 'error_channels'"
-         = Some "analysed exception; NOT analysed result,option")
+         = Some "exception (no result/option carrier in this corpus)")
           (option string)
-          ~error_msg:"the detail must name which channels were and were not analysed, got %L") ;
+          ~error_msg:"the detail must still say which channels ran and why the others did not, got %L") ;
       (* The row exists for every detected language — silence is the failure
          this table exists to prevent — but a contract written by the OCaml
          producer never speaks for another one. *)
