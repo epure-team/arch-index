@@ -1,15 +1,15 @@
 {
-  "mode": "full",
-  "no_go_round": 2,
+  "mode": "static",
+  "no_go_round": 0,
   "max_rounds": 5,
   "legacy_no_go_round": false,
-  "round": 2,
+  "round": 3,
   "legacy_round": false,
-  "current_round_strike": true,
+  "current_round_strike": false,
   "config": {
     "max_rounds": 5,
     "strikes": 2,
-    "static": false
+    "static": true
   },
   "cause": null,
   "warnings": [],
@@ -17,7 +17,7 @@
   "checks": [],
   "trace": {
     "obligated": true,
-    "lines_seen": 13,
+    "lines_seen": 18,
     "schema_version": "1.0",
     "skipped": false
   }

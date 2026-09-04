@@ -54,6 +54,12 @@
       "outcome": "NO-GO",
       "at": "2026-09-04T02:13:55+02:00",
       "by": "roster-review"
+    },
+    {
+      "phase": "review",
+      "outcome": "GO",
+      "at": "2026-09-04T02:39:04+02:00",
+      "by": "roster-review"
     }
   ]
 }
