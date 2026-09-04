@@ -123,6 +123,29 @@ let arm_level_or n = match multi n with Error A | Error C -> Ok 0 | r -> r
 (* Worse case of the same bug: an arm that catches EVERYTHING closed nothing. *)
 let arm_level_or_wild n = match multi n with Error A | _ -> Ok 0
 
+(* US-2.17d (review round 6 of #65): a THREE-way arm-level or-pattern — the
+   only shape that NESTS, and so the only one that measures the recursion.
+
+   `Error A | Error (B _) | Error C` is left-associative, so at the
+   computation-pattern level it is Tpat_or (Tpat_or (A, B _), C): the outer
+   node's left child is itself a Tpat_or, not a Tpat_value, and therefore not
+   a leaf. Only a RECURSIVE flattener reaches the two alternatives underneath
+   it.
+
+   Every other arm-level fixture above is exactly two-way, which a single
+   level of unfolding handles. That made the recursion in
+   [Arch_index_exn.flatten_or] the sole reason it is a [let rec] while
+   nothing measured it — replacing it with a two-case match over one Tpat_or
+   left the whole suite green. The direction is safe (a lost alternative
+   closes less and over-reports, which is sound), so this is a coverage gap,
+   not a regression; it is pinned here so the recursion cannot be removed
+   silently.
+
+   [multi] has exactly three identities and this arm names all three, so the
+   answer is the empty set. A non-recursive flattener collects only the outer
+   right leaf [Error C] and answers {A, B}. *)
+let arm_level_or3 n = match multi n with Error A | Error (B _) | Error C -> Ok 0 | r -> r
+
 (* US-2.17b (review round 2 of #65): the SOUNDNESS directions of arm-level
    or-patterns. US-2.17 above pins the two CLOSING outcomes — if those regress
    the analysis loses precision, which is safe. These three pin the outcomes
@@ -497,6 +520,12 @@ let register_query () =
         ~haystack:(may_fail "myres" "arm_level_or") "BOUNDED: {Ec_a.B}" ;
       Batch.contains b ~msg:"US-2.17 an arm with a wildcard alternative closes everything"
         ~haystack:(may_fail "myres" "arm_level_or_wild") "BOUNDED: {}" ;
+      (* US-2.17d: the nesting case. Two-way arms are satisfied by one level of
+         unfolding; this one is not, so it is what makes [flatten_or]'s
+         recursion observable. See [arm_level_or3]. *)
+      Batch.contains b
+        ~msg:"US-2.17d a THREE-way arm-level or-pattern closes all three (nested Tpat_or)"
+        ~haystack:(may_fail "myres" "arm_level_or3") "BOUNDED: {}" ;
       (* US-2.17b: the directions where a regression is a WRONG ANSWER, not a
          precision loss. Each expects the FULL set — nothing subtracted. *)
       Batch.contains b
