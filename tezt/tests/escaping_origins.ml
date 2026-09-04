@@ -56,6 +56,25 @@ let unrelated n = assert (n < 0) ; n
 |} );
   ]
 
+(* [eo_store.ml] is named so that "store.ml" is a strict suffix of it WITHOUT a
+   '/' boundary — the exact shape that let an unanchored pattern answer for a
+   module nobody named. *)
+let anchor_files =
+  [
+    Fixture.dune_project;
+    ( "dune",
+      "(library\n\
+      \ (name eo_anchor_fixture)\n\
+      \ (wrapped false)\n\
+      \ (modules eo_store)\n\
+      \ (flags (:standard -w -8-11-21-26-27-32-33-37-39)))\n" );
+    ( "eo_store.ml",
+      {|let helper n = assert (n > 0) ; n
+let only_here n = helper n
+let leaf n = n + 1
+|} );
+  ]
+
 let run ?(fmt = "list") db args =
   Arch_tezt.run_command
     ~env:[("ARCH_QUERY_FORMAT", fmt)]
@@ -158,7 +177,106 @@ let register_ambiguous_root () =
       Batch.eq_int b ~msg:"a root matching nothing is refused (exit 3)" c_missing 3) ;
   Lwt.return_unit
 
+(* The defect this test exists for is NOT the one the ambiguity test covers.
+   There, several candidates matched and the command refused. Here EXACTLY ONE
+   matches — but it is in a module the caller never named, because the root
+   pattern was an unanchored suffix. The refusal never fires, and the command
+   answers, exit 0, about the wrong file. On the whole Octez tree the same shape
+   answers for the wrong protocol version. *)
+let register_root_anchoring () =
+  Test.register ~__FILE__
+    ~title:"escaping-origins: a root suffix must align on a path boundary"
+    ~tags:["cmt"; "query"; "exn"; "origins"; "ambiguity"; "anchoring"]
+  @@ fun () ->
+  with_fixture ~name:"eo_anchor" ~files:anchor_files @@ fun fixture ->
+  let db = Arch_tezt.temp_db "eo_anchor" in
+  let code, output = Arch_tezt.index_raw_into ~db fixture in
+  if code <> 0 then Test.fail "index failed (exit %d):\n%s" code output ;
+  (* [eo_store.ml] exists; [store.ml] does NOT. A suffix match without a '/'
+     boundary would find eo_store.ml, uniquely, and answer for it. *)
+  let c_sfx, _ = run db ["--roots"; "store.ml:only_here"] in
+  (* '_' is a LIKE metacharacter: unescaped it matches any character, so this
+     would match eo_store.ml one character at a time. *)
+  let c_meta, _ = run db ["--roots"; "eo_stor_.ml:only_here"] in
+  let c_ok, out_ok = run db ["--roots"; "eo_store.ml:only_here"] in
+  Batch.run (fun b ->
+      Batch.eq_int b
+        ~msg:"a suffix that does not align on '/' is REFUSED, not answered" c_sfx 3 ;
+      Batch.eq_int b
+        ~msg:"a LIKE metacharacter in the root is escaped, not honoured" c_meta 3 ;
+      Batch.eq_int b ~msg:"the correctly-named module is still accepted" c_ok 0 ;
+      (* The answer must say what it rooted ON, so a mismatch is legible in the
+         output and not only in the exit code. *)
+      Batch.check b
+        ~msg:("the preamble echoes the RESOLVED root:\n" ^ out_ok)
+        (Arch_tezt.contains ~needle:"root: " out_ok
+        && Arch_tezt.contains ~needle:"eo_store.ml:only_here" out_ok) ;
+      (* Producer identity, not just corpus size: a reviewer measured a
+         different count with a byte-identical scope line because the producer
+         differed. *)
+      Batch.check b
+        ~msg:("the scope line carries schema and contract identity:\n" ^ out_ok)
+        (Arch_tezt.contains ~needle:"schema " out_ok
+        && Arch_tezt.contains ~needle:"contract " out_ok)) ;
+  Lwt.return_unit
+
+(* A root with no outgoing resolved edge printed "0 edges unresolved · 0 ⊤" and
+   an empty table — the strongest completeness signal the format can emit, for
+   an analysis that traversed nothing. It needs its own word. *)
+let register_nothing_traversed () =
+  Test.register ~__FILE__
+    ~title:"escaping-origins: an unentered closure says so, rather than reading as clean"
+    ~tags:["cmt"; "query"; "exn"; "origins"; "coverage"]
+  @@ fun () ->
+  with_fixture ~name:"eo_leaf" ~files:anchor_files @@ fun fixture ->
+  let db = Arch_tezt.temp_db "eo_leaf" in
+  let code, output = Arch_tezt.index_raw_into ~db fixture in
+  if code <> 0 then Test.fail "index failed (exit %d):\n%s" code output ;
+  let _, out = run db ["--roots"; "eo_store.ml:leaf"] in
+  Batch.run (fun b ->
+      Batch.check b
+        ~msg:("a root with no outgoing edge is reported as NOTHING TRAVERSED:\n" ^ out)
+        (Arch_tezt.contains ~needle:"NOTHING TRAVERSED" out) ;
+      Batch.check b
+        ~msg:("...and does NOT claim a lower bound over a closure it never entered:\n" ^ out)
+        (not (Arch_tezt.contains ~needle:"LOWER BOUND" out))) ;
+  Lwt.return_unit
+
+(* An index with no exception analysis at all must refuse BEFORE printing a
+   header. Previously it printed scope: and coverage:, then dumped a raw sqlite
+   error and the whole query — a consumer reading stdout saw a plausible header
+   and an empty table. *)
+let register_not_analysed () =
+  Test.register ~__FILE__
+    ~title:"escaping-origins: an index with no origin table is refused before any output"
+    ~tags:["cmt"; "query"; "exn"; "origins"; "refusal"]
+  @@ fun () ->
+  let db = Arch_tezt.temp_db "eo_noexn" in
+  if Sys.file_exists db then Sys.remove db ;
+  Db.with_db_rw db (fun conn ->
+      Db.exec conn
+        "CREATE TABLE modules(id INTEGER PRIMARY KEY, path TEXT);\n\
+         CREATE TABLE functions(id INTEGER PRIMARY KEY, name TEXT, module_id INT);\n\
+         CREATE TABLE calls(caller_id INT, callee_id INT, kind TEXT);\n\
+         CREATE TABLE comment_db_meta(key TEXT PRIMARY KEY, value TEXT);\n\
+         INSERT INTO comment_db_meta VALUES('callgraph_contract','v1');\n\
+         INSERT INTO modules VALUES(1,'a.ml');\n\
+         INSERT INTO functions VALUES(1,'f',1);") ;
+  let c, out = run db ["--roots"; "a.ml:f"] in
+  Batch.run (fun b ->
+      Batch.eq_int b ~msg:"an index with no exn_origins is REFUSED (exit 3)" c 3 ;
+      Batch.check b
+        ~msg:("the refusal comes BEFORE any coverage header:\n" ^ out)
+        (not (Arch_tezt.contains ~needle:"coverage:" out)) ;
+      Batch.check b
+        ~msg:("no raw SQL is leaked to the caller:\n" ^ out)
+        (not (Arch_tezt.contains ~needle:"WITH RECURSIVE" out))) ;
+  Lwt.return_unit
+
 let register () =
   register_surface () ;
+  register_root_anchoring () ;
+  register_nothing_traversed () ;
+  register_not_analysed () ;
   register_form_filter () ;
   register_ambiguous_root ()

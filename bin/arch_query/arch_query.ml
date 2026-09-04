@@ -427,6 +427,18 @@ let () =
                   like the tool contradicting itself. Several candidates is an
                   absence of proof, not a choice to make. *)
             need_contract () ;
+            (* NOT_ANALYSED, refused BEFORE any output. Without this the command
+               printed [scope:] and [coverage:] and only then hit a missing
+               table, dumping a raw sqlite error and the whole query, exit 2 — a
+               consumer reading stdout saw a plausible header followed by an
+               empty table, which is the worst available answer to "what can
+               crash this". The refusal has to come first or the header is a
+               lie already written. *)
+            if not (Arch_db.has_table t "exn_origins") then
+              die 3
+                "arch-query: REFUSED — this index has no exn_origins table, so no exception \
+                 origin was ever recorded. escaping-origins cannot report a surface it never \
+                 analysed; re-index with an exception-aware producer." ;
             let flag_val name =
               let rec go = function
                 | x :: y :: _ when x = name -> Some y
@@ -456,6 +468,15 @@ let () =
                             (String.concat ", " bad) (String.concat ", " known_forms)))
             in
             if forms = [] then die 2 "arch-query: --forms needs at least one form" ;
+            (* [escapes=1] is kept and is CURRENTLY VACUOUS: every one of the
+               30526 exn_origins rows on proto_alpha has escapes=1, so it
+               selects nothing today. It stays because it states the intended
+               semantics — an origin caught by a handler in its own function is
+               not part of the escaping surface — and because a producer that
+               starts computing it must not silently widen this command's
+               answer. It is a guard against a future change, not a live
+               filter, and saying so is the difference between a check and
+               something that looks like one. *)
             let forms_sql =
               String.concat ", " (List.map (fun f -> "'" ^ f ^ "'") forms)
             in
@@ -467,20 +488,58 @@ let () =
                     "arch-query: escaping-origins needs --roots <module-path>:<function> \
                      (a bare function name is refused when it is ambiguous)"
             in
-            (* [path:name], or a bare [name] which becomes the '%' path pattern
-               and is then subject to the same ambiguity refusal. *)
-            let path_pat, root_name =
+            (* [path:name], or a bare [name].
+
+               THE PATTERN IS ANCHORED ON A '/' BOUNDARY, and that is not
+               cosmetic. The first version built "%" ^ fragment, so
+               [--roots 'storage.ml:finalize_attestation_history'] matched
+               [dal_slot_storage.ml], found EXACTLY ONE function there, and
+               therefore never triggered the ambiguity refusal — it answered,
+               exit 0, about a module the caller never named. That is the same
+               defect the refusal exists to prevent, arriving through the one
+               door the refusal does not watch: not "several candidates" but
+               "one candidate, wrong module". On the whole Octez tree the same
+               shape can answer for the wrong protocol version.
+
+               Matching against ('/' || path) with a "%/" prefix gives the
+               boundary for free and still accepts a full path from the repo
+               root: '/src/…/main.ml' LIKE '%/src/…/main.ml' holds, and
+               '%/storage.ml' no longer matches '/src/…/dal_slot_storage.ml'.
+
+               '%' and '_' in the caller's fragment are ESCAPED: they are LIKE
+               metacharacters, so an unescaped '_' silently matches any
+               character and re-opens the same hole one character at a time. *)
+            let path_frag, root_name =
               match String.rindex_opt root_spec ':' with
               | Some i ->
-                  ( "%" ^ String.sub root_spec 0 i,
+                  ( String.sub root_spec 0 i,
                     String.sub root_spec (i + 1) (String.length root_spec - i - 1) )
-              | None -> ("%", root_spec)
+              | None -> ("", root_spec)
+            in
+            let like_escape frag =
+              String.to_seq frag
+              |> Seq.fold_left
+                   (fun acc c ->
+                     match c with
+                     | '%' | '_' | '\\' -> acc ^ "\\" ^ String.make 1 c
+                     | c -> acc ^ String.make 1 c)
+                   ""
+            in
+            (* A BARE name (no path component) keeps the everything-pattern, so
+               it still matches every module and is then caught by the
+               ambiguity refusal — which is the point of allowing it at all.
+               Anchoring it to "%/" would make it match nothing and turn an
+               informative refusal into "no such function". *)
+            let path_pat =
+              if path_frag = "" then "%" else "%/" ^ like_escape path_frag
             in
             if root_name = "" then die 2 "arch-query: --roots has an empty function name" ;
             (* [<path>:*] roots at EVERY function of one module. This is the
                shape the real question needs: "the protocol's entry points" is
                all of main.ml, not one of its members. Rooting at
-               [main.ml:apply_operation] alone reaches 241 nodes on proto_alpha;
+               [main.ml:apply_operation] alone reaches 241 nodes on proto_alpha
+               (measured on that corpus, with that producer — the figure moves
+               with both, which is why the preamble stamps them);
                rooting at all of main.ml reaches 1287, and the extra thousand is
                the other entry points the shell actually calls
                (validate_operation, begin_application, finalize_*, init, ...).
@@ -490,11 +549,12 @@ let () =
             let n_roots =
               if whole_module then
                 Arch_db.count1 t
-                  "SELECT count(*) FROM modules WHERE path LIKE ?" path_pat
+                  "SELECT count(*) FROM modules WHERE ('/' || path) LIKE ? ESCAPE '\\'"
+                  path_pat
               else
                 Arch_db.count2 t
                   "SELECT count(*) FROM functions f JOIN modules m ON f.module_id=m.id \
-                   WHERE m.path LIKE ? AND f.name = ?"
+                   WHERE ('/' || m.path) LIKE ? ESCAPE '\\' AND f.name = ?"
                   (path_pat, root_name)
             in
             if n_roots = 0 then
@@ -507,7 +567,8 @@ let () =
               q ~h:[ "candidate" ] ~shape:Arch_db.Rows.t1
                 ~cells:(fun a -> [ Arch_db.text_cell a ])
                 ~pty:Arch_db.Ty.string
-                "SELECT path FROM modules WHERE path LIKE ? ORDER BY 1" path_pat ;
+                "SELECT path FROM modules WHERE ('/' || path) LIKE ? ESCAPE '\\' ORDER BY 1"
+                path_pat ;
               die 3
                 (Printf.sprintf
                    "arch-query: REFUSED — --roots '%s' matches %d modules (listed above). \
@@ -519,7 +580,8 @@ let () =
               q ~h:[ "candidate" ] ~shape:Arch_db.Rows.t1 ~cells:(fun a -> [ Arch_db.text_cell a ])
                 ~pty:Arch_db.Ty.(t2 string string)
                 "SELECT m.path || ':' || f.name FROM functions f JOIN modules m ON \
-                 f.module_id=m.id WHERE m.path LIKE ? AND f.name = ? ORDER BY 1"
+                 f.module_id=m.id WHERE ('/' || m.path) LIKE ? ESCAPE '\\' AND f.name = ? \
+                 ORDER BY 1"
                 (path_pat, root_name) ;
               die 3
                 (Printf.sprintf
@@ -531,7 +593,7 @@ let () =
             let ctes =
               "WITH RECURSIVE root(id) AS (\n\
               \  SELECT f.id FROM functions f JOIN modules m ON f.module_id=m.id\n\
-              \  WHERE m.path LIKE ? AND (? = '*' OR f.name = ?)),\n\
+              \  WHERE ('/' || m.path) LIKE ? ESCAPE '\\' AND (? = '*' OR f.name = ?)),\n\
                reach(id) AS (\n\
               \  SELECT id FROM root UNION\n\
               \  SELECT c.callee_id FROM calls c JOIN reach r ON c.caller_id=r.id\n\
@@ -561,33 +623,89 @@ let () =
             let cov_cells = match cov with r :: _ -> List.map Arch_db.string_of_cell r | [] -> [] in
             (* The SCOPE line answers "on what did you answer this?".
 
-               Without it the same command prints 241 origins or 145 for the
-               same root, depending only on which corpus was indexed, with
-               nothing in the output to explain the difference — and someone
-               comparing two runs would read a corpus change as a regression.
-               (Measured: rooted identically, proto_alpha alone reaches 241
-               nodes and 12 origins; the whole Octez src tree reaches 145 and 9,
-               because 28-32 copies of every protocol module make the resolver
-               correctly refuse and emit ⊤.)
+               Without it the same command prints a different count for the
+               same root depending on what produced the index, with nothing in
+               the output to explain the difference — and someone comparing two
+               runs would read that as a regression.
+
+               THE FIRST VERSION OF THIS COMMENT ASSERTED A RETRACTED
+               MEASUREMENT and is corrected here rather than left standing: it
+               said "241 origins or 145", offered as evidence that indexing more
+               code finds fewer crash sites. That comparison held only at the
+               SINGLE-FUNCTION root. At the granularity that matters — all of
+               main.ml's entry points — it reverses: 37 origins on proto_alpha
+               alone against 38 on the whole src tree. The commit message
+               retracted it; the comment did not, which is how a retracted
+               number survives into the code and gets quoted from there.
+
+               The scope line is also NOT sufficient on its own, which review
+               demonstrated: a reviewer measured 21 origins where this branch
+               reports 37 with a byte-identical scope line, because the hidden
+               variable was the producer version, not the corpus. Hence the
+               schema and contract stamps beside the counts.
 
                It is the same gesture as the coverage line one level out: that
                one states what was unreachable INSIDE the index, this one states
                which index. A number is only comparable against another number
                taken over the same universe. *)
+            (* The ROOT LINE. The output stated its scope and its coverage but
+               never what it had rooted on — so a root that silently resolved to
+               a module the caller did not name (the unanchored-LIKE defect
+               above) was invisible in the answer as well as in the exit code.
+               Echoing the RESOLVED root, not the caller's spec, is what makes
+               that mismatch legible without re-running anything. *)
+            let resolved_roots =
+              Arch_db.rows t
+                ~params_ty:Arch_db.Ty.(t2 string string)
+                ~shape:Arch_db.Rows.t1
+                ~to_cells:(fun a -> [ Arch_db.text_cell a ])
+                (if whole_module then
+                   "SELECT path FROM modules WHERE ('/' || path) LIKE ? ESCAPE '\\' \
+                    AND ? IS NOT NULL ORDER BY 1"
+                 else
+                   "SELECT m.path || ':' || f.name FROM functions f JOIN modules m ON \
+                    f.module_id=m.id WHERE ('/' || m.path) LIKE ? ESCAPE '\\' AND f.name = ? \
+                    ORDER BY 1")
+                (path_pat, root_name)
+              |> List.filter_map (function c :: _ -> Some (Arch_db.string_of_cell c) | [] -> None)
+            in
+            let root_label =
+              match resolved_roots with
+              | [ r ] -> if whole_module then r ^ ":*" else r
+              | l -> String.concat ", " l
+            in
+            (* PRODUCER IDENTITY. The scope line was added to make two runs
+               comparable, and it did not: a reviewer measured 21 origins where
+               this PR reports 37 with a BYTE-IDENTICAL scope line, because the
+               variable was the producer version, not the corpus. Module and
+               function counts describe how much was indexed; they say nothing
+               about which binary did it or under which contract. Two numbers
+               are comparable only when everything that produced them is. *)
+            let ident key = match Arch_db.meta t key with Some v -> v | None -> "?" in
             let cov_text =
               match cov_cells with
               | [ n; u; top; m; f ] ->
+                  let traversed = (try int_of_string n with _ -> 0) <= n_roots in
                   Printf.sprintf
-                    "scope: %s modules · %s functions indexed\n\
-                     coverage: %s nodes reached · %s edges unresolved · %s ⊤ — LOWER BOUND \
-                     (the closure stops at every unresolved edge)"
-                    m f n u top
+                    "root: %s\n\
+                     scope: %s modules · %s functions indexed · schema %s · contract %s\n\
+                     coverage: %s nodes reached · %s edges unresolved · %s ⊤ — %s"
+                    root_label m f
+                    (ident "schema_version") (ident "callgraph_contract")
+                    n u top
+                    (if traversed then
+                       "NOTHING TRAVERSED: the root has no outgoing resolved edge, so an empty \
+                        table here means the closure was never entered, NOT that the root is safe"
+                     else "LOWER BOUND (the closure stops at every unresolved edge)")
               | _ -> "coverage: unavailable"
             in
             preamble
-              ~h:[ "nodes_reached"; "edges_unresolved"; "top_edges"; "modules_indexed";
-                   "functions_indexed" ]
-              ~cells:cov_cells ~text:cov_text ;
+              ~h:[ "root"; "nodes_reached"; "edges_unresolved"; "top_edges"; "modules_indexed";
+                   "functions_indexed"; "schema_version"; "callgraph_contract" ]
+              ~cells:
+                ((root_label :: cov_cells)
+                @ [ ident "schema_version"; ident "callgraph_contract" ])
+              ~text:cov_text ;
             q ~h:[ "function"; "site"; "form"; "exn"; "reach" ]
               ~shape:Arch_db.Rows.t5' ~cells:Arch_db.Rows.c5
               ~pty:Arch_db.Ty.(t3 string string string)
