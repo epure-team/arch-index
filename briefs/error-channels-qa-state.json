@@ -1,0 +1,26 @@
+{
+  "task": "error-channels",
+  "date": "2026-09-04",
+  "status": "GO",
+  "round": 1,
+  "cycle": 1,
+  "qa_no_go_round": 0,
+  "causes": [],
+  "cross_runtime": {
+    "codex": {
+      "status": "degraded-sandbox",
+      "config_digest": "codex:eb1805ecc8f4af35",
+      "reason": "the wrapper's sandbox mounts /mnt/ssd-external-2to read-only and denied a tezt temp dir, so 8 of 11 checks could not EXECUTE; the 3 that did (build, schema-version rule, zero-diff invariants) agree with the primary run. No divergence on anything actually run.",
+      "round": 1
+    }
+  },
+  "rounds_audit": [
+    {
+      "round": 1,
+      "date": "2026-09-04",
+      "verdict": "GO",
+      "causes": [],
+      "qualifying": false
+    }
+  ]
+}
