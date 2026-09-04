@@ -354,6 +354,35 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
         ('schema_version', '%s')"
        Arch_index_db.current_schema_version) ;
 
+  (* FIX (review round 2, CRITICAL): clear every COMPLETION MARKER before the
+     run does any work.
+
+     Moving [error_contract] after its transaction (below) made its presence
+     honest only on a FRESH database. On a RE-INDEX — the case that actually
+     occurs, since nobody re-indexes into an empty file — the PREVIOUS run's
+     marker is still on disk, and nothing here removed it: [comment_db_meta]
+     is deliberately outside [schema_tables_to_drop] (the [self_managed]
+     allowlist in tezt/tests/schema_drop_list.ml), justified there by "INSERT
+     OR REPLACE, so a re-index overwrites it". That justification holds only
+     for a run that REACHES the write. A producer killed mid-analysis never
+     reaches it, so the stale marker survives and answers for a run that
+     produced nothing — reproduced with SIGKILL at five different instants,
+     each leaving the contract present against zero rows.
+
+     [INSERT OR REPLACE] can keep a key CURRENT at the end of a successful
+     run; it cannot make that key's PRESENCE meaningful. Only deleting it up
+     front can, which is what this does.
+
+     All three markers are one class and share the failure — fixing only
+     [error_contract] would leave two siblings lying on exactly the same kill.
+     They are cleared here, in the same autocommitted step as the schema
+     drop/recreate above and before the first BEGIN TRANSACTION, so the window
+     in which a marker can outlive its evidence does not exist. *)
+  exec_exn
+    db
+    "DELETE FROM comment_db_meta WHERE key IN ('error_contract', \
+     'exn_contract', 'callgraph_contract')" ;
+
   (* Roadmap 1.2 (ADR 002): one producer_runs row for this whole invocation.
      'sound_with_top' is a deliberate, explicit claim, not the module's
      conservative default — the CMT walker is the one producer in this
