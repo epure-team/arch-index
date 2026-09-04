@@ -136,7 +136,19 @@ metric_well_formed() {
   [ -n "$val" ] || return 1
   case "$metric" in
     ceiling) is_int "$val" ;;
-    golden)  ! printf '%s\n' "$val" | grep -qE ': *$' ;;
+    golden)
+      # Arity, not just shape. Round 4 found --self-test RED on the head: its
+      # own reject-case "modules: 23" — a 1-of-3-line golden — was ACCEPTED,
+      # because this guard only checked non-emptiness and that no line ends in
+      # a bare label. The commit that added 13 cases to close a zero-coverage
+      # finding shipped one failing, so the arity hole and the red assertion
+      # were the same defect. The golden CI compares is exactly three
+      # `label: value` lines (modules/functions/calls), and a truncated
+      # measurement is precisely what a half-failed query produces.
+      local lines
+      lines="$(printf '%s\n' "$val" | grep -cE '^[a-z]+: *[0-9]+$')"
+      [ "$lines" -eq 3 ] && ! printf '%s\n' "$val" | grep -qE ': *$'
+      ;;
     *) return 1 ;;
   esac
 }
@@ -601,6 +613,38 @@ for metric in ${METRICS}; do
   CURRENT=0
   if [ "$metric" = golden ] && [ -n "${GOLDEN_RAW:-}" ]; then
     diff -q "$REPO_ROOT/test/fixtures/self-index-stats.txt" "$GOLDEN_RAW" >/dev/null 2>&1 && CURRENT=1
+  elif [ "$metric" = ceiling ]; then
+    # Currency for a ratchet is the ENFORCED predicate, not exact equality.
+    # tezt/tests/must_null_ceiling.ml asserts `must_null <= clean_measured +
+    # headroom`, and headroom exists (its own comment) to "absorb ordinary
+    # future growth without demanding a recalibration commit for every
+    # unrelated PR". Testing D = PINNED converted that into an exact-equality
+    # gate: on this very branch 340 sits inside 321+25 = 346, so the tezt
+    # PASSES and the tree is healthy — while --check reported STALE, exit 1,
+    # and --write refused as a loosening. No invocation returned 0, and the
+    # only route to green was to hand-raise the constant, which is the exact
+    # act this tool exists to prevent. Round 4 found it; it reinstated the
+    # treadmill the tool was written to end.
+    #   D > PINNED + headroom  -> breach; must be argued, never auto-written
+    #   D < PINNED - headroom  -> a real gain; auto-tighten
+    #   otherwise              -> inside the band; advisory, exit 0
+    local hr
+    hr="$(sed -n 's/^let headroom = \([0-9]\+\).*/\1/p' \
+          "$REPO_ROOT/tezt/tests/must_null_ceiling.ml" | head -1)"
+    if ! is_int "$hr"; then
+      echo "   ✗ REFUSED: cannot read 'let headroom = <int>' from must_null_ceiling.ml" >&2
+      bump_status 2
+      continue
+    fi
+    if [ "$D" -gt "$(( PINNED + hr ))" ]; then
+      CURRENT=0
+    elif [ "$D" -lt "$(( PINNED - hr ))" ]; then
+      CURRENT=0
+    else
+      CURRENT=1
+      [ "$D" = "$PINNED" ] || \
+        echo "   • within headroom: measures $D against pinned $PINNED (+/-$hr) — advisory, not stale"
+    fi
   else
     [ "$D" = "$PINNED" ] && CURRENT=1
   fi
