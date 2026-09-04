@@ -295,6 +295,17 @@ because no scope comparison can detect it.
 `dune runtest`, not to `dune exec` of an executable target — and `arch_tezt.ml:51` locates the
 producer by PATH on disk, so it happily runs the previous build's stale `.exe`.
 
+**The boundary is exact, and both halves were measured** — the first attempt to check this tested
+the wrong command and concluded the whole thing was a non-issue:
+
+| command | after a lib mutation |
+|---|---|
+| `dune test` / `dune runtest --force` | **safe** — producer rebuilt (hash changes), suite reddens |
+| `dune exec <test target>` | **unsafe** — producer hash UNCHANGED, reports SUCCESS |
+
+So neither "always rebuild first" (noise) nor "it's fine" (false) is the rule. `dune exec` of a
+test target builds that target and nothing else.
+
 Demonstrated, not deduced: fix removed + `dune exec` → SUCCESS; then an explicit
 `dune build bin/arch_callgraph_ocaml/arch_callgraph_ocaml.exe`, same test, same command → FAILURE
 with 2 assertions. Only binary freshness changed.
@@ -359,6 +370,42 @@ producer were stale, the red run would pass, because the pre-edit binary contain
 red-then-green is simultaneously a freshness proof of the artifact under test — which is why the
 discipline is mandatory here rather than encouraged, and why the exposure is confined to checks
 made WITHOUT a prior red: confirmation runs and corpus measurements.
+
+### 10.5 A three-state verdict reported as one number
+
+Found by the human, from a one-line challenge: *"arch-rules 4/0 ?"*.
+
+`arch-rules` was reported all day as **"4 rules, 0 failing"**, including in ship-gate summaries for
+three separate branches. What it actually returns:
+
+```
+[ pass  ] the comment parser must not reach the SQLite layer
+[UNKNOWN] the CFG builder must not reach the SQLite layer
+[UNKNOWN] the line counter must not reach the SQLite layer
+[UNKNOWN] the LSP client must not reach the CMT walker
+```
+
+**One of four invariants is proved.** The other three abstain: their source cone escapes through a
+⊤ edge, so nothing is established either way — and `arch-rules.txt`'s own header says exactly that
+(*"UNKNOWN = the cone escapes through a ⊤ edge, so nothing is proved either way; pass = proved
+unreachable in a closed universe"*). "0 failing" is a true statement about the third state only.
+
+The escaping edges are `callback_param` (36) and `module_param` (6) — higher-order calls and
+functor arguments. Not one is a resolution failure, so no amount of work on this task moves those
+three verdicts; they need roadmap 3.7. Identical on `main` and on this branch, which is the correct
+thing to claim: **the gate is unchanged**, not **the gate passes**.
+
+Two lessons, and the second is the general one:
+
+**`--on-vacuous fail` does not cover this.** That flag exists because a rule whose selector stops
+matching turns green forever and looks like coverage. But UNKNOWN is not vacuous — the selector
+matches; the cone escapes. So the guard against a silently-decaying rule does not guard against a
+rule that has become unprovable, which is the state three of the four are in.
+
+**Rule:** a verdict with N states must be reported with N numbers. Collapsing `proved / UNKNOWN /
+violated` into "0 failing" is not a summary, it is the loss of the distinction the tool exists to
+draw — and it fails in the reassuring direction, which is why it survived being repeated for a
+whole session. Report `1 proved / 3 UNKNOWN / 0 violations`.
 
 ## 11. Errors in v1 of this spec, corrected here
 
