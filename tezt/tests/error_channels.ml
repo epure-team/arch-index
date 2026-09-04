@@ -178,7 +178,7 @@ let or_mixed_raises n =
 
    Arm order is not considered: a closing arm subtracts what it catches even
    when an EARLIER arm lets that same value through. Here [A] escapes via the
-   guarded first arm whenever [n > 5], and the second arm subtracts it anyway,
+   guarded first arm whenever [n = 0], and the second arm subtracts it anyway,
    so the reported set is {B} where the truth is {A, B} — a reachable error
    dropped, the unsound direction.
 
@@ -198,7 +198,7 @@ let or_mixed_raises n =
    making those arms close at all. When someone fixes arm ordering, this test
    fails and makes them decide knowingly. *)
 let rr_guarded_passthrough n =
-  match multi n with (Error A as z) when n > 5 -> z | Error A | Error C -> Ok 0 | r -> r
+  match multi n with (Error A as z) when n = 0 -> z | Error A | Error C -> Ok 0 | r -> r
 
 exception Boom of int
 
@@ -519,10 +519,6 @@ let register_query () =
       Batch.contains b
         ~msg:"US-2.17b a mixed value/exception or-arm closes only its value alternative"
         ~haystack:(may_fail "myres" "or_mixed") "BOUNDED: {Ec_a.B, Ec_a.C}" ;
-      (* …and the OTHER half of the same property, which the comment stated but
-         nothing asserted: the exception alternative closes on the exception
-         channel. Stating a property in both directions and testing one of them
-         is how a half-true claim survives review. *)
       (* US-2.17c: the same property with a scrutinee that CAN raise, so the
          subtraction is observable. The [or_mixed] variant is kept as the
          value-channel case but is deliberately NOT asserted on the exception

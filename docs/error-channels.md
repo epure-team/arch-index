@@ -371,7 +371,7 @@ Honest limits, so nobody reads more into a verdict than it carries:
 
   ```ocaml
   match multi n with
-  | (Error A as z) when n > 5 -> z          (* A escapes here whenever n > 5 *)
+  | (Error A as z) when n = 0 -> z          (* A escapes here whenever n = 0 *)
   | Error A | Error C -> Ok 0
   | r -> r
   ```
