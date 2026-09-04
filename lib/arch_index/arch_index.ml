@@ -803,23 +803,84 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
              are tried from the most qualified function name to the least, and
              the first that resolves wins.  A name that resolves under no
              reading stays unresolved rather than being forced onto a homonym. *)
-          let resolve_qualified mod_name name =
+          (* Roadmap 1.6. Every way of reading [Root.File.…] as (compilation
+             unit, name within it).
+
+             dune spells a wrapped library's module [Lib__Mod], so a reference
+             [A.B.c] can mean unit [A] holding a nested [B.c], or unit [A__B]
+             holding [c] — and for deeper qualification, any split in between
+             (nested wrappers, [include_subdirs qualified]). Which one holds is
+             not decidable from the reference alone, so all are enumerated and
+             the FUNCTION TABLE decides, below.
+
+             The candidate unit is always the "__"-join of a PREFIX. A bare
+             later segment is deliberately never a candidate: that was the old
+             behaviour, and it is precisely the erasure this change removes —
+             looking up bare ["Api"] is what let [Liba.Api.run] land in
+             libb/api.ml. *)
+          let unit_readings mod_name name =
             let parts = String.split_on_char '.' mod_name in
-            let rec try_from prefix rest =
+            let rec go acc prefix_rev rest =
               match rest with
-              | [] -> None
-              | unit_name :: deeper -> (
-                  let qualified_name =
-                    String.concat "." (deeper @ [name])
+              | [] -> List.rev acc
+              | seg :: deeper ->
+                  let prefix_rev = seg :: prefix_rev in
+                  (* Join on "__", EXCEPT after a segment that already ends in
+                     "__". dune names a library's wrapper after the library
+                     ([Arch_index]) unless one of its own modules already owns
+                     that exact name — a library's "main module" — in which case
+                     the wrapper is disambiguated to [Arch_index__]. External
+                     references then spell it [Arch_index__.Arch_index_db], and
+                     a naive "__"-join yields [Arch_index____Arch_index_db] (four
+                     underscores), which names nothing. Measured cost of getting
+                     this wrong: 86 in-project references falling through to
+                     MUST-with-NULL, i.e. resolver misses stamped as proven
+                     external leaves. *)
+                  let join a b =
+                    if String.length a >= 2 && String.ends_with ~suffix:"__" a then a ^ b
+                    else a ^ "__" ^ b
                   in
-                  match Hashtbl.find_opt mod_name_to_path unit_name with
-                  | Some mod_path -> (
-                      match Hashtbl.find_opt fn_lookup (mod_path, qualified_name) with
-                      | Some _ as found -> found
-                      | None -> try_from (prefix @ [unit_name]) deeper)
-                  | None -> try_from (prefix @ [unit_name]) deeper)
+                  let unit_name =
+                    match List.rev prefix_rev with
+                    | [] -> seg
+                    | first :: more -> List.fold_left join first more
+                  in
+                  let residual = String.concat "." (deeper @ [name]) in
+                  go ((unit_name, residual) :: acc) prefix_rev deeper
             in
-            try_from [] parts
+            go [] [] parts
+          in
+          (* Resolve a qualified reference to the ONE function it names, or say
+             honestly that it cannot.
+
+             Every reading is evaluated and the DISTINCT function ids they reach
+             are collected — not the first hit, which would silently prefer
+             whichever reading happened to be tried first. The count is the
+             verdict:
+
+               1  -> resolved. Two readings landing on the SAME function are not
+                     ambiguous; that is the common alias case ([module Bar = Bar]
+                     in a library's main module), where the alias itself defines
+                     no function and only the implementation's reading has a row.
+               2+ -> genuinely ambiguous: the reference names units that ARE in
+                     this index and nothing in a .cmt says which one the caller
+                     linked against. ⊤, never a guess.
+               0  -> no indexed unit answers to it. That is an EXTERNAL, handled
+                     by the caller's existing leaf path — deliberately NOT ⊤.
+                     Conflating "not in the index" with "in the index but
+                     unidentifiable" is what took the abandoned branch's
+                     repo-wide MAY_TOP from 660 to 875. *)
+          let resolve_qualified_unit mod_name name =
+            let ids =
+              List.concat_map
+                (fun (unit_name, residual) ->
+                  List.filter_map
+                    (fun path -> Hashtbl.find_opt fn_lookup (path, residual))
+                    (Arch_index_cmt.paths_of_unit unit_name))
+                (unit_readings mod_name name)
+              |> List.sort_uniq compare
+            in
+            match ids with [id] -> `Resolved id | [] -> `Not_found | _ -> `Ambiguous
           in
           (* "Not in [fn_lookup]" has two very different causes, and the
              resolver above cannot tell them apart: the callee is genuinely
@@ -841,23 +902,27 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
           (* The same readings [resolve_qualified] tries, asked of the dropped
              set instead of the stored one. A whole dropped unit is matched by
              name because it has no stored path to match by. *)
+          (* Roadmap 1.6 (FR-005): re-targeted onto [unit_readings] in the SAME
+             commit as the resolver above, deliberately. These two walks must
+             agree on what a reference can mean — if the resolver enumerates
+             unit-name readings while this one still walked bare segments, a
+             dropped callee could be invisible here and get emitted as a proven
+             external leaf, which is the precise failure FR-005 guards. *)
           let dropped_qualified mod_name name =
-            let parts = String.split_on_char '.' mod_name in
-            let rec try_from rest =
-              match rest with
-              | [] -> false
-              | unit_name :: deeper ->
-                  let qualified_name = String.concat "." (deeper @ [name]) in
-                  Hashtbl.mem dropped_unit_names unit_name
-                  || (match Hashtbl.find_opt mod_name_to_path unit_name with
-                     | Some mod_path ->
-                         Arch_index_cmt.is_dropped_node
-                           ~module_path:mod_path
-                           ~name:qualified_name
-                     | None -> false)
-                  || try_from deeper
-            in
-            try_from parts
+            List.exists
+              (fun (unit_name, residual) ->
+                let paths = Arch_index_cmt.paths_of_unit unit_name in
+                (* A whole dropped unit indexed nothing, so it has no stored
+                   path and no per-function entry — it is matched by the unit
+                   owning a dropped path, not by a function lookup. *)
+                List.exists
+                  (fun p -> List.mem p (Arch_index_cmt.dropped_unit_paths ()))
+                  paths
+                || List.exists
+                     (fun p ->
+                       Arch_index_cmt.is_dropped_node ~module_path:p ~name:residual)
+                     paths)
+              (unit_readings mod_name name)
           in
           let demoted = call.cond || call.partial in
           (* Roadmap 1.4 (⊤-anchor taxonomy): [top_reason] is [None] whenever
@@ -914,9 +979,19 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
                             (if demoted then "MAY_ENUMERATED" else "MAY_TOP"),
                             (if demoted then None else Some "callback_param") ))
                 | Some mod_name -> (
-                    match resolve_qualified mod_name n with
-                    | Some id -> incr n_resolved ; (Some id, display_name, kind, None)
-                    | None ->
+                    match resolve_qualified_unit mod_name n with
+                    | `Resolved id ->
+                        incr n_resolved ;
+                        (Some id, display_name, kind, None)
+                    | `Ambiguous ->
+                        (* The reference names units that ARE in this index and
+                           more than one distinct function answers to it. ⊤ —
+                           and ⊤ regardless of [demoted]: MAY_ENUMERATED claims a
+                           candidate set of ONE, which is exactly what is not
+                           true here. Degrading to a bounded candidate would
+                           understate the frontier. *)
+                        (None, display_name, "MAY_TOP", Some "ambiguous_unit")
+                    | `Not_found ->
                         (* Unresolved. A genuine external is a leaf either way —
                            MUST leaf when unconditional, enumerated leaf when
                            demoted. A callee this run DROPPED only looks like
