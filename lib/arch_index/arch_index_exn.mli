@@ -89,6 +89,23 @@ val exception_arms : Typedtree.computation Typedtree.case list -> arm list
 
 val value_arms : Typedtree.value Typedtree.case list -> arm list
 
+(** The value-side twin of {!exception_arms}: flattens a [match]'s computation
+    cases into the value patterns they actually contain, so an arm-level
+    or-pattern is not lost.
+
+    `Error A | Error C -> rhs` is a [Tpat_or] of two [Tpat_value]s at the
+    computation level, not a [Tpat_value]. Keeping only [Tpat_value] cases
+    dropped such an arm entirely, so it closed nothing — while the same intent
+    written inside the constructor, `Error (A | C)`, closed both. Sound in the
+    closing direction: OCaml requires every alternative to bind the same
+    variables, and the guard and right-hand side are shared. *)
+val value_pats_of_computation :
+  Typedtree.computation Typedtree.case list ->
+  (Typedtree.value Typedtree.general_pattern
+  * Typedtree.expression option
+  * Typedtree.expression)
+  list
+
 (** {2 Recording (called by the walker at its own AST sites)} *)
 
 val enter_scope :

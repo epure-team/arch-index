@@ -114,6 +114,15 @@ let narrow_arm n = match multi_b n with Error (B 0) -> Ok 0 | r -> r
    this arm close nothing — sound, but a precision loss on a common shape. *)
 let wild_or_arm n = match multi_b n with Error (B 0 | _) -> Ok 0 | r -> r
 
+(* US-2.17: an or-pattern spanning the WHOLE arm. At the computation-pattern
+   level this is a Tpat_or of two Tpat_values, not a Tpat_value, and the walker
+   used to drop such an arm entirely — so it closed nothing, while the same
+   intent written inside the constructor closed both. *)
+let arm_level_or n = match multi n with Error A | Error C -> Ok 0 | r -> r
+
+(* Worse case of the same bug: an arm that catches EVERYTHING closed nothing. *)
+let arm_level_or_wild n = match multi n with Error A | _ -> Ok 0
+
 exception Boom of int
 
 let boom_raiser n = if n = 0 then raise (Boom 0) else raise (Boom 1)
@@ -396,6 +405,13 @@ let register_query () =
          than an arm really catches deletes a reachable error from the answer;
          closing less than it catches costs precision. Asserting the WHOLE
          verdict, not just "C appears", pins both directions at once. *)
+      (* US-2.17 : the arm-level or-pattern must close exactly what its
+         alternatives name — the same answer as writing it inside the
+         constructor. *)
+      Batch.contains b ~msg:"US-2.17 an arm-level or-pattern closes both its alternatives"
+        ~haystack:(may_fail "myres" "arm_level_or") "BOUNDED: {Ec_a.B}" ;
+      Batch.contains b ~msg:"US-2.17 an arm with a wildcard alternative closes everything"
+        ~haystack:(may_fail "myres" "arm_level_or_wild") "BOUNDED: {}" ;
       Batch.contains b ~msg:"US-2.14 multi can fail with all three identities"
         ~haystack:(may_fail "myres" "multi") "BOUNDED: {Ec_a.A, Ec_a.B, Ec_a.C}" ;
       Batch.contains b ~msg:"US-2.14 an or-pattern of two literals closes BOTH, only C survives"

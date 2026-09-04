@@ -1584,22 +1584,20 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels
                  been walked (a direct call sets [apply_head_ord] during that
                  walk; an alias chain was set earlier, at its own [let]). *)
               (* Ordinary value arms of a [match] live in [comp_cases],
-                 wrapped [Tpat_value] (Typedtree.mli: only an [effect P k]
-                 arm lands in [val_cases]) — unwrap before classifying. An
-                 [exception]/or-pattern computation case never matches an
-                 origin constructor, so it is simply skipped (safe: a
-                 skipped arm cannot close anything, the over-approximating
-                 direction). *)
-              let value_arms =
-                List.filter_map
-                  (fun (c : Typedtree.computation Typedtree.case) ->
-                    match c.c_lhs.pat_desc with
-                    | Tpat_value vp ->
-                        Some
-                          ((vp :> Typedtree.value Typedtree.general_pattern), c.c_guard, c.c_rhs)
-                    | _ -> None)
-                  comp_cases
-              in
+                 wrapped [Tpat_value] (Typedtree.mli: only an [effect P k] arm
+                 lands in [val_cases]).
+
+                 FIX: this used to keep ONLY [Tpat_value] cases and skip
+                 everything else, justified in a comment as "safe: a skipped
+                 arm cannot close anything, the over-approximating direction".
+                 Safe, but it silently dropped every arm-level or-pattern —
+                 `Error A | Error C` is a [Tpat_or] of two [Tpat_value]s at
+                 this level, not a [Tpat_value] — so such an arm closed
+                 nothing, while `Error (A | C)` closed both. An arm written
+                 `Error A | _ ->` caught everything and still closed nothing.
+                 [value_pats_of_computation] flattens them, exactly as
+                 [exception_arms] already did on the exception side. *)
+              let value_arms = Arch_index_exn.value_pats_of_computation comp_cases in
               (* The scrutinee's OWN type picks at most one channel — scanning
                  every declared channel's origin constructor NAME against
                  every arm (without this) would let an unrelated same-named
