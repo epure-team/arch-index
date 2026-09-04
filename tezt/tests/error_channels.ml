@@ -133,16 +133,17 @@ let arm_level_or_wild n = match multi n with Error A | _ -> Ok 0
    Closing on a guarded arm would remove errors that really do escape. *)
 let or_guarded n = match multi n with (Error A | Error C) when n > 5 -> Ok 0 | r -> r
 
-(* [or_binding_repropagates]: the arm binds, and its right-hand side RETURNS one
-   of the identities it matched. The identity is therefore still reachable
-   THROUGH the arm and must not be subtracted.
+(* [or_binding_repropagates]: the arm binds, and its right-hand side RETURNS
+   one of the identities it matched, so nothing may be subtracted.
 
-   This is the load-bearing case for the flattening's soundness argument. It
-   works because OCaml alpha-renames both alternatives' binders to a single
-   [Ident], so the shared right-hand side refers to one variable — which is
-   also why every alternative must bind the same names. If that ever stopped
-   holding, the analysis would start deleting reachable errors with nothing
-   failing. *)
+   Nothing is subtracted for TWO different reasons, one per identity — not for
+   one uniform reason. Which mechanism protects which identity was isolated by
+   probe and is recorded at this fixture's assertion in [register_query] below;
+   read it before touching the fixture. The one-mechanism story ("both
+   alternatives' binders alpha-rename to a single [Ident], so the shared rhs
+   re-returns whatever was matched") holds for [B] and does NOT hold for
+   [Wrap], and asserting it alone is what made the two earlier versions of this
+   comment wrong. *)
 let multi_c n : int myres = if n = 0 then Error (B 0) else Error (Wrap (B 1))
 
 let or_binding_repropagates n =
@@ -161,12 +162,19 @@ let or_mixed n =
    [or_mixed] above asserts `BOUNDED: {}` on the exception channel, and that
    assertion is VACUOUS: its scrutinee [multi] cannot raise, so the exception set
    is empty before any subtraction and the assertion holds whether the arm closes
-   or not. Demonstrated by removing arm-level or-flattening from the exception
-   channel entirely — the suite stayed 130/130.
+   or not. Demonstrated rather than deduced: deleting the exception channel's
+   arm-level or-flattening outright left the suite AS IT STOOD BEFORE THIS
+   BLOCK entirely green. (No count here on purpose — a bare figure in a comment
+   is a measurement nobody can re-run, per specs/qualified-unit-resolution.md
+   §10.3. The mutation is the reproducer: make [Arch_index_exn.exception_arms]
+   apply its [leaf] to [c.c_lhs] directly instead of through [flatten_or], then
+   [dune test --root .].)
 
-   This scrutinee raises, so the subtraction is observable: with flattening the
-   arm closes [Not_found] and the answer is `{}`; without it the arm is dropped
-   and [Not_found] escapes. It also closes a PRE-EXISTING hole — arm-level
+   [or_mixed_raises] is what makes that mutation observable, so on the CURRENT
+   tree the same mutation must go RED here — that, not the vacuous [or_mixed]
+   assertion, is the check. Its scrutinee raises: with flattening the arm closes
+   [Not_found] and the answer is `{}`; without it the arm is dropped and
+   [Not_found] escapes. It also closes a PRE-EXISTING hole — arm-level
    or-pattern flattening on the exception channel, the precedent this whole
    change rests on, had no coverage at all, and deleting it was a silent no-op. *)
 let raiser_nf n : int myres = if n = 0 then raise Not_found else Error A

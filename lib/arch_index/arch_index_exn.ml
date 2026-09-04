@@ -282,25 +282,18 @@ let classify_arms ~canon (arms : arm list) =
     arms
 
 (* ONE flattener over computation patterns, parameterised by what counts as a
-   leaf.
+   leaf: two leaf selectors over one traversal, so a change to the recursion
+   cannot reach one channel and miss the other. The rule it implements, and the
+   pattern shape it exists for, are stated once — on
+   {!value_pats_of_computation} in the .mli — and not restated here or at the
+   call sites.
 
-   An arm written `A | B -> rhs` is, at the COMPUTATION pattern level, a
-   [Tpat_or] — not a [Tpat_value] and not a [Tpat_exception]. A walker that
-   matches only the leaf shape therefore drops the whole arm. That is what made
-   the value channel report `Error A | Error C` as closing nothing while
-   `Error (A | C)`, the same intent written inside the constructor, closed both.
-
-   The two callers below used to carry a private copy of this recursion each,
-   with "kept adjacent so they cannot drift" as the stated protection. Physical
-   proximity is not a protection — it is exactly what the code already had when
-   the two channels diverged in the first place. One function, two leaf
-   selectors, so a change to the traversal cannot reach one channel and miss
-   the other.
-
-   Sound in the closing direction: OCaml requires every alternative of an
-   or-pattern to bind the same variables, and the guard and right-hand side are
-   shared, so if the arm closes at all then each alternative's identity really
-   is caught. *)
+   Sound in the closing direction FOR THE ARM IT IS HANDED: OCaml requires every
+   alternative of an or-pattern to bind the same variables, and the guard and
+   right-hand side are shared, so if that arm closes then each alternative's
+   identity really is caught. It says nothing about whether the arm is REACHED —
+   arm order is not modelled, and that gap is pinned as a limitation by
+   [rr_guarded_passthrough] in tezt/tests/error_channels.ml. *)
 let flatten_or :
     type a.
     leaf:(Typedtree.computation Typedtree.general_pattern -> a option) ->
