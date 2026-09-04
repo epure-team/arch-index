@@ -48,9 +48,53 @@ let dropped_nodes : (string * string, unit) Hashtbl.t = Hashtbl.create 16
    whole is the frontier. *)
 let dropped_units : (string, unit) Hashtbl.t = Hashtbl.create 8
 
+(* Roadmap 1.6: the compiler-assigned compilation-unit name ([cmt_modname]) ->
+   every rel_path bearing it.
+
+   This exists because qualified-call resolution otherwise has no way to know
+   which LIBRARY owns a file. It used to key on [capitalize (basename path)] in a
+   last-writer-wins table, so [Liba.Api] and [Libb.Api] both looked up ["Api"] and
+   whichever api.ml was indexed last won for both — a reference into one library
+   silently attributed to another, and stamped MUST.
+
+   The unit name is the fix because dune already encodes ownership in it
+   ([Liba__Api] vs [Libb__Api]), and the compiler hands it to us directly. It must
+   come from [cmt_modname], NEVER from the .cmt FILENAME: on disk those are
+   lowercase-prefixed ([arch_index__Arch_index_cfg.cmt]), so deriving a unit name
+   from the path reintroduces a guess in the middle of the thing removing guesses.
+
+   Populated at the two sites — and only the two — that decide a compilation
+   unit's fate: the [insert_module] success arm, and [record_dropped_unit]. Since
+   the DB is dropped and recreated every run and there is exactly one
+   [insert_module] call site, the registry is COMPLETE by construction with
+   respect to the [modules] table: no schema column, no migration, and no way for
+   a stale row to survive into the next run.
+
+   A name maps to a LIST because unit names are not guaranteed unique (a census
+   of this repository found one such name in 93: [Dune__exe], the executable
+   wrapper alias). Multiplicity must mean "genuinely distinct source files bear
+   this unit name", never "the same file was reached twice", so insertion
+   de-duplicates on rel_path — without that, indexing a build dir containing more
+   than one dune context would register every module twice and read as ambiguity
+   everywhere. *)
+let unit_paths : (string, string list) Hashtbl.t = Hashtbl.create 128
+
+let record_unit ~unit_name ~rel_path =
+  let existing = Option.value ~default:[] (Hashtbl.find_opt unit_paths unit_name) in
+  if not (List.mem rel_path existing) then
+    Hashtbl.replace unit_paths unit_name (rel_path :: existing)
+
+let paths_of_unit unit_name =
+  Option.value ~default:[] (Hashtbl.find_opt unit_paths unit_name)
+  |> List.sort String.compare
+
+let known_unit_names () =
+  Hashtbl.fold (fun k _ acc -> k :: acc) unit_paths [] |> List.sort String.compare
+
 let reset_dropped () =
   Hashtbl.reset dropped_nodes ;
-  Hashtbl.reset dropped_units
+  Hashtbl.reset dropped_units ;
+  Hashtbl.reset unit_paths
 
 let record_dropped_node ~module_path ~name =
   Hashtbl.replace dropped_nodes (module_path, name) ()
@@ -2390,8 +2434,15 @@ let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
                     modname
                     rel_path ;
                   record_dropped_unit ~rel_path ;
+                  (* Roadmap 1.6: a dropped unit still OWNS its name. A caller
+                     resolving through it must reach [dropped_node] (⊤, body
+                     exists but was never read), not fall through to "no such
+                     unit" and be emitted as a proven external leaf. Registering
+                     it here is what keeps those two outcomes distinguishable. *)
+                  record_unit ~unit_name:modname ~rel_path ;
                   ([], [], [])
               | Some module_id ->
+                  record_unit ~unit_name:modname ~rel_path ;
                   (* Collect calls, module deps, and type usages from value bindings *)
                   let pending_calls = ref [] in
                   let pending_deps = ref [] in

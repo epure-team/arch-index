@@ -85,6 +85,51 @@ val is_dropped_node : module_path:string -> name:string -> bool
     (none) *)
 val dropped_unit_paths : unit -> string list
 
+(** Every rel_path bearing the compilation-unit name [unit_name], as the
+    compiler assigned it ([cmt_modname], e.g. ["Liba__Api"]).
+
+    {pre}
+    None. Empty before any run, and reset by {!reset_dropped}.
+
+    {post}
+    Sorted, de-duplicated on rel_path. [[]] when no indexed unit answers to that
+    name — which a caller must read as "external", NOT as "ambiguous": a root
+    naming no indexed unit at all is a uniquely-resolved external leaf, whereas
+    a name with two or more bearers is in this index and unidentifiable. Those
+    two are different verdicts (⊤ vs a resolved leaf) and conflating them
+    inflates ⊤ across the whole index.
+
+    Covers dropped units too: a unit whose [modules] row was rejected still owns
+    its name, so a caller resolving through it reaches [dropped_node] rather
+    than being mistaken for an external.
+
+    Complete by construction w.r.t. the [modules] table — populated at the only
+    [insert_module] call site and at the drop path, with the DB rebuilt each run.
+
+    {violators}
+    (none)
+
+    {violates}
+    (none) *)
+val paths_of_unit : string -> string list
+
+(** Every compilation-unit name seen this run, sorted.
+
+    {pre}
+    None.
+
+    {post}
+    Sorted, unique. Intended for diagnostics — chiefly cross-checking the
+    registry against the [modules] table, where a stored module with no registry
+    entry would silently unresolve every reference into it.
+
+    {violators}
+    (none)
+
+    {violates}
+    (none) *)
+val known_unit_names : unit -> string list
+
 (** Set (or clear, with [None]) the [Arch_errors_config.seen] collector every
     value/type path the walker visits at its existing recording sites is
     reported to, for error-channels declaration validation
