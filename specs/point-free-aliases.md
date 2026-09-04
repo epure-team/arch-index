@@ -345,6 +345,40 @@ the expected value by hand **before** running.
 
 - A `.mli` that narrows an alias's contract (deprecation, narrowed type) is invisible
   to structural detection (C-21).
-- Multi-hop chains need a fixpoint that does not exist.
+- ~~Multi-hop chains need a fixpoint that does not exist.~~ **Closed** (FR-005c). No
+  fixpoint was needed, and that was the error in this line: each binder emits one edge
+  to its *immediate* predecessor, so a chain is just three ordinary edges and every
+  consumer's existing graph traversal follows it. Measured on octez-manager: **8 new
+  edges**, `0` dropped, and the `MUST`/`MAY_TOP` histograms bit-identical before and
+  after — the only delta is `MAY_ENUMERATED +8`.
+- **The alias binders are kept OUT of `local_fn_stamps`, and must stay out.** They live
+  in a separate table (`build_local_alias_stamps`) read at one site. Widening
+  `local_fn_stamps` instead is the obvious shortcut and it is **unsound**, measured
+  rather than argued: that table also supplies the *syntactic arity* used to detect
+  under-saturated applications, an alias binder's syntactic arity is `0`, so
+  `nargs < head_arity` never fires. Built that way, an application supplying 2 arguments
+  to a 3-ary target behind a type-alias-hidden arrow (`type unary = int -> int`, where
+  `is_arrow` on the result is false and the arity table is the *only* check) came out
+  **`MUST`** — a proof-carrying claim that a body ran when it did not. Pinned by
+  `arity_partial` in `tezt/tests/point_free_aliases.ml`.
+- **The parameter / local-closure remainder is still a silent drop.** A top-level
+  binding whose RHS is a bare identifier that is neither a same-module function body nor
+  an alias binder emits nothing, and the node reads `BOUNDED: {}`. Measured after the
+  chain fix: **2 on octez-manager** (`write`, `remove`), down from the 10 the S0 brief
+  counted for the whole third class — the other 8 were alias binders. The honest answer
+  here is ⊤, not silence; it is left because there is no top-level row to point an edge
+  at, and turning these into ⊤ edges moves the ceiling ratchets and deserves its own
+  measured slice. It is **not** the alias case: nothing at these sites transfers a
+  same-module body.
+- **Roughly a tenth of alias edges resolve to no `callee_id` and carry no `top_reason`.**
+  Measured on octez-manager: of 548 `value_alias` edges, **472 resolved**, **45**
+  `MAY_ENUMERATED` with `callee_id IS NULL` *and* `top_reason IS NULL`, and 31 `MAY_TOP`.
+  Those 45 follow the existing `Head_qualified`/`Not_found` "enumerated leaf"
+  convention, and many are plainly in-project rather than external. They are **not**
+  new unsoundness — observable raise-sets are unchanged, and the count is identical
+  before and after this feature (45 → 45), so the convention predates it. But they are
+  edges that *look* resolved while delivering none of the propagation the feature exists
+  for. Stated here rather than discovered later; fixing it means fixing the
+  enumerated-leaf convention, which is not this spec's subject.
 - `reaches` will not traverse an alias, by Decision 2. If that turns out to matter,
   the fix is to teach `reaches` about `edge_form`, not to promote the kind.

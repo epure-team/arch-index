@@ -435,6 +435,26 @@ let register_raise_sets_propagate () =
       Batch.check b
         ~msg:"an open-mediated alias inherits across modules (S2: same path shape)"
         (Arch_tezt.contains ~needle:"Not_found" (raises "via_open")) ;
+      (* HIGH-1, THROUGH THE SEPARATE LOADER. The producer test proves the three
+         chain EDGES exist; this proves the fixpoint actually walks them, which
+         is a different claim — [Arch_exn] re-reads the database from scratch.
+         And it is the claim that matters: the defect was never "a row is
+         missing", it was that [hop1] answered BOUNDED: {Chain_boom} while
+         [hop2] and [hop3], naming the identical function, answered
+         BOUNDED: {} — a stated certainty about a body nobody read, sitting
+         beside the correct answer for the same code. *)
+      let premise = raises "chain_target" in
+      Batch.check b
+        ~msg:"premise: the chain's target raises at all"
+        (Arch_tezt.contains ~needle:"Chain_boom" premise) ;
+      List.iter
+        (fun hop ->
+          Batch.check b
+            ~msg:
+              (Printf.sprintf
+                 "%s inherits through the alias chain — every hop, not just the first" hop)
+            (Arch_tezt.contains ~needle:"Chain_boom" (raises hop)))
+        ["hop1"; "hop2"; "hop3"] ;
       (* The exclusions must not leak into the verdict either: [make] returns
          [raiser] without calling it, so [make]'s own raise set is empty. *)
       Batch.check b
