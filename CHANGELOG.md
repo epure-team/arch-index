@@ -2,7 +2,59 @@
 
 ## [Unreleased]
 
+### Added
+- **`scripts/recalibrate.sh` — attribution-gated recalibration of the pinned constants**, and it
+  is now wired to something. The two constants this repository pins (the self-index golden in
+  `test/fixtures/self-index-stats.txt`, and `must_null_ceiling.ml`'s `clean_measured` ratchet)
+  both go stale on rebase, and the cheapest way to make CI green is to overwrite them with
+  whatever the branch measures — which is also how both stop working. The script instead
+  ATTRIBUTES the movement across a 2x2 (base vs new binary, base vs new corpus) and writes only
+  the part it can prove is source-only, never a ratchet loosening.
+
+  `--self-test` runs in the Tezt suite (`tezt/tests/recalibrate_self_test.ml`) and `--check` runs
+  in CI. Before this it was invoked by nothing at all: no CI step, no dune rule, no Makefile
+  target.
+
 ### Fixed
+- **The recalibration gate would write a degenerate measurement over a pinned constant.** A query
+  that succeeds but matches nothing returns `0`, not an error: sqlite3 writes nothing to stderr,
+  `0` passes an is-it-an-integer check, and `A=B=C=D=0` is the cleanest possible "attributable to
+  source change only". Simulating a column rename in the ceiling predicate made
+  `--write --only ceiling` report `TIGHTENED clean_measured 347 -> 0 (installed file re-read and
+  confirmed)` and exit 0; the same hole left the golden — the *change detector* — reading
+  `modules: 0 / functions: 0 / calls: 0`, "verified byte-identical", exit 0.
+
+  Two adequacy floors now stand between a measurement and a write, and every cell of the 2x2 is
+  gated, not just the one that gets written. A *relative* floor refuses any component that has
+  collapsed below half the pinned value; an *absolute* floor requires each cell's database to
+  hold at least `min_total_calls` rows in `calls` — read out of `must_null_ceiling.ml` rather
+  than copied, so the two cannot drift apart. `--check` now exits 2 on these inputs.
+
+  This is also a correction to the "a ratchet may always be TIGHTENED automatically" axiom the
+  script was built on. That axiom is about DIRECTION and says nothing about MAGNITUDE, but every
+  way a measurement can silently break moves the number DOWN — into the direction it calls
+  always-safe. A tighten is safe for the invariant and destructive for the constant:
+  `clean_measured = 0` cannot fail CI, and it can never catch anything again either.
+- **An unanchored read of `let headroom` truncated a legal OCaml literal.** `let headroom = 1_000`
+  means 1000 and was read as **1**, with no refusal and no diagnostic, because the pattern ended
+  in `.*` and the result was passed through a plain integer check. Measured: with the pin at 400
+  and `headroom = 1_000`, `--write --only ceiling` rewrote 400 -> 340 and reported success, when
+  340 is inside the real band and nothing should have been written. Read-only, the same misread
+  reported a healthy tree as `STALE`, exit 1. Every read of a pinned integer now goes through one
+  anchored reader, which also refuses a constant that is defined twice rather than silently
+  taking the first with `head -1`.
+- `is_int` accepted values `$(( ))` cannot evaluate. `08` passed, then made the band comparison
+  abort with "value too great for base" — so no arm of the `if/elif/else` ran, the currency
+  verdict silently kept its previous value, and a bash error went to stderr. The self-test had
+  pinned the wrong half of this by asserting `00` as a pass.
+- The refusal message for an unreadable pinned CONSTANT blamed sqlite3 and told the reader to
+  "check the column names against the current schema", when no query is involved. Cell failures
+  and pin failures now print separate diagnostics; the pin one names the file, the anchored
+  regex, and the candidate lines.
+- Each metric's four cell databases now get per-metric paths. They were four fixed names reused
+  across metrics, so correctness depended on an unstated (and untested) assumption that the
+  producer truncates rather than appends.
+
 - **A completion marker can no longer outlive its evidence.** `comment_db_meta`'s
   `error_contract` / `exn_contract` / `callgraph_contract` keys claim that an analysis RAN; they
   are now cleared twice — once before the schema is demolished, once after it is rebuilt — so a
