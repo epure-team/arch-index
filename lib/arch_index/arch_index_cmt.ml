@@ -654,6 +654,11 @@ type pending_call = {
          "Propagating edges" / "Binds"). Rewritten to nothing further; the
          caller (arch_index.ml) turns a [Some] here straight into an
          [exn_edges] row once dropped calls are known. *)
+  edge_form : string option;
+      (* [Some "value_alias"]: this edge came from a point-free binding
+         ([let f = M.g]), not from an application. Orthogonal to [kind] — see
+         the [calls.edge_form] comment in architecture-schema.sql for why it is
+         not a [kind] value. [None] for every ordinary call. *)
 }
 
 (** Flat display of a pending call's callee: [(name, module)] — the qualified
@@ -1063,7 +1068,7 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels
     | Some i -> String.sub p (i + 1) (String.length p - i - 1)
     | None -> p
   in
-  let add_call ?(partial = false) ?is_head_of ?callee_ty head loc =
+  let add_call ?(partial = false) ?is_head_of ?callee_ty ?edge_form head loc =
     let line = loc.Location.loc_start.pos_lnum in
     let call_site = Printf.sprintf "%s:%d" src_path line in
     let c = !cur in
@@ -1085,7 +1090,9 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels
       | _ -> None
     in
     raw :=
-      (ord, c.cid, c.lblk, c.lcaller, head, partial, call_site, exn_scope, errch_candidate) :: !raw
+      ( ord, c.cid, c.lblk, c.lcaller, head, partial, call_site, exn_scope,
+        errch_candidate, edge_form )
+      :: !raw
   in
   (* Current-context CFG shorthands. *)
   let blk () = (!cur).lblk in
@@ -2278,6 +2285,52 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels
       | _ -> e
     in
     let root = peel e0 in
+    (* specs/point-free-aliases.md S1 — the LOCAL alias slice.
+
+       A point-free binding ([let f = g]) peels to a bare [Texp_ident]: there is
+       no application anywhere in the body, so the expression iterator's
+       catch-all sees it and emits nothing, and [f]'s node ends up with no
+       outgoing edge at all. Its raise-set then comes back empty and the node
+       reads BOUNDED: {} — not because [g] raises nothing, but because nobody
+       ever asked [g].
+
+       Three exclusions, each measured rather than assumed (briefs/…-s0.md):
+
+       - NOT arrow-typed → not an alias of a function. [let k = M.pi] transfers
+         a value; there is no body to inherit. Half of all point-free bindings
+         on both corpora (390/376), so this is the common case, not a corner.
+       - [Path.Pdot] → resolves through [resolve_qualified], which roadmap 1.6
+         is rewriting. Deferred to S3 so this slice does not straddle that merge.
+       - [Path.Pident] NOT in [local_fn_stamps] → a third class S0 found and no
+         upstream artefact had named (38 on proto_alpha, 10 on octez-manager).
+         It is either a function PARAMETER — not an alias at all — or an
+         [open]-mediated reference needing qualified resolution. Excluded
+         explicitly here rather than allowed to fall into either slice.
+       - [root != e0], i.e. [peel] stripped parameters → NOT point-free.
+         [let make () = island] is a combinator that RETURNS [island]; nothing
+         is applied at that site and [make] does not inherit [island]'s body.
+         Without this guard the alias edge fired on every function whose body
+         happens to be a bare identifier, which is a different construct with
+         a different meaning. The dominance corpus caught it: the edge made
+         [computed_map]'s deliberately-⊤ island REACHABLE through
+         [make], turning a stated unknown into a claim. Physical equality is
+         the honest test — [peel] returns its argument unchanged exactly when
+         there was nothing to peel.
+
+       [Head_enumerated], never [Head_local]: the kind matrix demotes on
+       [cond || partial] (arch_index.ml:832), and an alias is neither
+       conditional nor an under-saturated application, so [Head_local] would
+       emit MUST — a proof-carrying claim that [f] ALWAYS calls [g], for an
+       edge where no call happens at all. [Head_enumerated] forces
+       MAY_ENUMERATED unconditionally, which is what a transferred body is. *)
+    (match root.exp_desc with
+    | Texp_ident (Path.Pident id, _, _)
+      when root == e0 && ident_is_local_fn id && is_arrow root.exp_type ->
+        add_call
+          ~edge_form:"value_alias"
+          (Head_enumerated (local_fn_name id))
+          root.exp_loc
+    | _ -> ()) ;
     (match root.exp_desc with
     | Texp_function (_, Tfunction_cases {cases; partial; _}) ->
         if partial = Partial then
@@ -2314,7 +2367,8 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels
     !all_ctxs ;
   let calls =
     List.rev_map
-      (fun (ord, cid, block, caller, head, partial, call_site, exn_scope, errch_candidate) ->
+      (fun ( ord, cid, block, caller, head, partial, call_site, exn_scope,
+             errch_candidate, edge_form ) ->
         let cond =
           match Hashtbl.find_opt verdicts cid with
           | Some v -> not (Arch_index_cfg.always_exec v block)
@@ -2351,6 +2405,7 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels
           exn_scope;
           errch_scope;
           errch_propagates;
+          edge_form;
         })
       !raw
   in

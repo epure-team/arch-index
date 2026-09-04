@@ -312,6 +312,13 @@ type pending_call = {
       (** [Some channel]: this call is a propagating edge on [channel]
           (specs/error-channels.md "Propagating edges") — an [exn_edges]
           role='propagates' row once resolved to a real [calls] row id. *)
+  edge_form : string option;
+      (** [Some "value_alias"]: this edge came from a point-free binding
+          ([let f = M.g]) rather than from an application
+          (specs/point-free-aliases.md). Orthogonal to {!field:kind} — an alias
+          is MAY_ENUMERATED like any other bounded candidate; what this records
+          is that no call happens at the site, which is what a caller-count
+          consumer needs. [None] for every ordinary call. *)
 }
 
 (** Flat [(name, module)] display of a pending call's callee, for kind-less

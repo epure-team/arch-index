@@ -89,6 +89,7 @@ let () =
   Rejection_attribution.register () ;
   Schema_drop_list.register () ;
   Completion_markers.register () ;
+  Point_free_aliases.register () ;
   Insert_rowid_attribution.register () ;
   Dropped_node_dependents.register_dropped_function () ;
   Dropped_node_dependents.register_dropped_module () ;
