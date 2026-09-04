@@ -109,6 +109,11 @@ let multi_b n : int myres = if n = 0 then Error (B 0) else Error (B 1)
 
 let narrow_arm n = match multi_b n with Error (B 0) -> Ok 0 | r -> r
 
+(* #60 review: an or-pattern with one irrefutable side really does catch
+   everything the constructor can carry, so it must close. Was `&&`, which made
+   this arm close nothing — sound, but a precision loss on a common shape. *)
+let wild_or_arm n = match multi_b n with Error (B 0 | _) -> Ok 0 | r -> r
+
 exception Boom of int
 
 let boom_raiser n = if n = 0 then raise (Boom 0) else raise (Boom 1)
@@ -400,6 +405,8 @@ let register_query () =
         ~haystack:(may_fail "myres" "wild_arm") "BOUNDED: {}" ;
       (* US-2.15 : `Error (B 0)` matches only when the argument is 0, so it
          may not close Ec_a.B — `Error (B 1)` is still reachable. *)
+      Batch.contains b ~msg:"US-2.15b an or-pattern with an irrefutable side closes its identity"
+        ~haystack:(may_fail "myres" "wild_or_arm") "BOUNDED: {}" ;
       Batch.contains b ~msg:"US-2.15 a constrained argument pattern does not close its identity"
         ~haystack:(may_fail "myres" "narrow_arm") "Ec_a.B" ;
       (* Same rule on the frozen exception channel: `with Boom 0 -> ()` must
