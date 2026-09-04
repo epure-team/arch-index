@@ -1,0 +1,19 @@
+{
+  "task": "reexport-resolution",
+  "mode": "full",
+  "current_phase": "research",
+  "events": [
+    {
+      "phase": "question",
+      "outcome": "COMPLETED",
+      "at": "2026-09-04T17:00:00Z",
+      "by": "roster-question"
+    },
+    {
+      "phase": "research",
+      "outcome": "COMPLETED",
+      "at": "2026-09-04T17:30:00Z",
+      "by": "roster-research"
+    }
+  ]
+}
