@@ -253,10 +253,25 @@ channel-blind count reads **4386** links on octez-manager (vs 2245) and **487** 
 
 ## 10. Verification obligations
 
-- `dune build --root . @all` and `dune test --root . --force`. **`--root .` is mandatory**: dune
-  searches upward for its project root and this environment's `/tmp` contains stray
-  `dune-project` files, which silently reroots a bare invocation (research Finding 6 — also the
-  true cause of the `callgraph-go`/`pcc` failures previously written off as environmental).
+- `dune build --root .` (the **default** target — see the warning below) and
+  `dune test --root . --force`. **`--root .` is mandatory**: dune searches upward for its
+  project root and this environment's `/tmp` contains stray `dune-project` files, which
+  silently reroots a bare invocation (research Finding 6 — also the true cause of the
+  `callgraph-go`/`pcc` failures previously written off as environmental).
+
+  **This line said `@all` until 2026-09-05, and that was wrong in a way that costs a
+  debugging session.** The `_build` corpus trap is **bilateral**, because
+  `must_null_ceiling` reads whatever `_build/default` happens to hold:
+
+  | state | symptom |
+  |---|---|
+  | **under**-built (no full build before `dune test`) | fails at `only 6783 calls were indexed, below the floor of 8000 — _build/default looks under-built` — **names its own cause** |
+  | **over**-built (after `@all` or `@check`, which compile units the default target does not) | fails at `765 > 372` with **18395 calls** — **names nothing, and reads as a genuine ratchet regression** |
+
+  The over-built direction is the dangerous one: it looks like the code broke. Two agents
+  hit it. Rule: `dune clean`, then a **plain** `dune build --root .`, before believing any
+  ceiling number in either direction. A ceiling breach immediately after running `@all` or
+  `@check` is the environment, not the code.
 - Self-index golden regenerated per ADR 001 **with the delta attributed**. It is a change
   detector, not a correctness gate — it is provably blind to this defect class.
 - S5's three-bucket set diff is the real gate.
