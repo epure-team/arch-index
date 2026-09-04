@@ -625,8 +625,10 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
       Arch_index_db.bind_text stmt_meta 1 key ;
       Arch_index_db.bind_text stmt_meta 2 value ;
       Arch_index_db.exec_stmt db ~what:"comment_db_meta" stmt_meta)
+    (* [error_contract] is deliberately NOT written here — see below, after the
+       call/exn transaction commits. The [error_config_*] keys describe the
+       CONFIG, which is fully known at this point, so they stay. *)
     [
-      ("error_contract", error_contract);
       ("error_config_digest", error_config_digest);
       ("error_config_source", error_config_source);
       ("error_config_unmatched", error_config_unmatched);
@@ -907,6 +909,26 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
        ('exn_contract', 'v1')"
   end ;
   exec_exn db "COMMIT" ;
+  (* FIX (coverage-matrix review, HIGH): [error_contract] is a claim that these
+     channels WERE ANALYSED, so it may only be recorded once the transaction
+     that writes the channel rows has committed. It used to be written before
+     [BEGIN TRANSACTION] above, which made it a statement of intent rather than
+     of fact: a producer that died mid-analysis left a database carrying the
+     contract and none of the rows, and any consumer reading the key — the
+     coverage matrix does exactly this — reported the analysis as complete on
+     evidence that was never written. Reproduced by deleting the scope rows and
+     leaving the key.
+
+     Its presence is now a completion marker by construction. Consumers must
+     NOT try to infer completeness by counting rows instead: a small corpus
+     legitimately produces zero scopes on a fully successful run. *)
+  (let stmt_contract =
+     Sqlite3.prepare db "INSERT OR REPLACE INTO comment_db_meta (key, value) VALUES (?, ?)"
+   in
+   Arch_index_db.bind_text stmt_contract 1 "error_contract" ;
+   Arch_index_db.bind_text stmt_contract 2 error_contract ;
+   Arch_index_db.exec_stmt db ~what:"comment_db_meta" stmt_contract ;
+   ignore (Sqlite3.finalize stmt_contract)) ;
   Arch_io.printf
     "Inserted %d calls (%d resolved to known functions)\n%!"
     !n_calls
