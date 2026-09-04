@@ -194,12 +194,12 @@ let register_local_slice () =
          construction. [via_open] appearing in this list, next to
          [qualified_alias] and resolved the same way, is that finding pinned. *)
       let rows = alias_rows db in
-      (* The EXACT set, not a count. A count says "six things happened"; this
-         says which six, so a row that silently retargets or a seventh that
+      (* The EXACT set, not a count. A count says "seven things happened"; this
+         says which seven, so a row that silently retargets or an eighth that
          appears from a shape nobody meant to admit both fail here rather than
          cancelling out. [alias_rows] orders by caller name. *)
       Batch.eq_string b
-        ~msg:"the alias edge set is exactly the six point-free bindings, each to its own target"
+        ~msg:"the alias edge set is exactly the seven point-free bindings, each to its own target"
         (String.concat ", " (List.map (fun (a, c, _, _) -> a ^ "->" ^ c) rows))
         "alias->raiser, arity_alias->arity_mk, hop1->chain_target, hop2->hop1, hop3->hop2, \
          qualified_alias->Pfa_b.cross_helper, via_open->Pfa_b.cross_helper" ;
@@ -527,15 +527,17 @@ let register_query_readers () =
          pfa_a functions with a resolved callee_id and edge_form IS NULL are
          [caller]->[raiser] and [via_open]/[qualified_alias]... which are
          aliases. So exactly one non-alias resolved in-module edge remains.
-         Six alias edges are excluded; counting them would give 5 (raiser gains
-         [alias], chain_target gains [hop1], hop1 gains [hop2], hop2 gains
-         [hop3], plus [caller]->[raiser] already counted under raiser). *)
+         All seven alias edges are excluded — the premise guard above asserts
+         that seven were emitted. Counting them instead would inflate this
+         number well past 1, since [raiser] would gain [alias], [chain_target]
+         [hop1], [hop1] [hop2], and [hop2] [hop3], each an alias binder that
+         invokes nothing. The assertion is on the excluded value, 1. *)
       (match module_fan_in with
       | None ->
           Batch.check b ~msg:("god-modules reported a pfa_a row; output was:\n" ^ gm) false
       | Some n ->
           Batch.eq_int b
-            ~msg:"god-modules counts the application but none of the six alias bindings"
+            ~msg:"god-modules counts the application but none of the seven alias bindings"
             n 1) ;
       (* LOW-3 / CHECK-2. The vocabulary is closed by a CHECK constraint, and a
          constraint nothing tries to violate is a constraint nobody knows is
@@ -564,8 +566,91 @@ let register_query_readers () =
              | Error _ -> true))) ;
   Lwt.return_unit
 
+(* THE FOURTH PRODUCER (S5), which nothing asserted on before.
+
+   [runner.ml]'s flat schema gained an [edge_form] column and its own version
+   bump to 1.2, and the OCaml .cmt branch of [Call_graph_extractor] threads
+   [pc.edge_form] into it (call_graph_extractor.ml:336) precisely because that
+   branch SHARES [collect_calls_from_expr] with the main indexer — so alias
+   edges arrive on this schema whether or not anyone asked for them.
+
+   A column added to a second schema with nothing reading it back is a column
+   that can be silently dropped: with [edge_form = pc.edge_form] mutated to
+   [None], every main-schema assertion in this file still passes, `fan-in` over
+   a flat index quietly counts point-free bindings as callers again, and the
+   1.2 bump documents a guarantee the data does not keep. That mutation is what
+   this test exists to kill.
+
+   Derived by hand from [fixture_files] BEFORE running. The flat path names its
+   caller with the bare [Ident.name] of the top-level [Tpat_var] binder and its
+   callee with the FIRST component of [pending_display] (the module qualifier is
+   dropped on this schema — [qualified_alias] and [via_open] both read
+   [cross_helper], not [Pfa_b.cross_helper], which is where this schema visibly
+   differs from the main one). The seven point-free bindings of pfa_a.ml, in
+   caller order: alias, arity_alias, hop1, hop2, hop3, qualified_alias,
+   via_open. *)
+let register_flat_schema_marks_aliases () =
+  Test.register ~__FILE__
+    ~title:"point-free aliases: the flat schema carries edge_form too (S5)"
+    ~tags:["flat"; "lsp"; "calls"; "alias"; "edge_form"]
+  @@ fun () ->
+  with_fixture ~name:"pfa_flat" ~files:fixture_files @@ fun fixture ->
+  let db = Arch_tezt.index_project ~name:"pfa_flat" fixture.root in
+  let count sql = Db.with_db db (fun c -> Db.int c sql) in
+  Batch.run (fun b ->
+      (* PREMISE. This path depends on an ocamllsp that may answer nothing and
+         on _build/default being present; "no alias rows" is also what a
+         producer that ran and found nothing looks like. Assert the schema and
+         the row population first, so a missing COLUMN and a producer that did
+         nothing each fail as themselves rather than as an empty result set. *)
+      Batch.eq_int b
+        ~msg:"premise: the flat schema has an edge_form column at all (runner.ml, flat 1.2)"
+        (count "SELECT count(*) FROM pragma_table_info('calls') WHERE name='edge_form'")
+        1 ;
+      Batch.check b
+        ~msg:"premise: the flat producer emitted call rows at all"
+        (count "SELECT count(*) FROM calls" > 0) ;
+      (* The EXACT set, for the same reason as the main-schema assertion: a
+         count would also be satisfied by seven rows pointing anywhere. *)
+      let flat_alias_rows =
+        Db.with_db db (fun c ->
+            Db.rows c
+              "SELECT caller_name, callee_name FROM calls WHERE edge_form='value_alias' \
+               ORDER BY caller_name, callee_name")
+        |> List.map (function
+             | [caller; callee] ->
+                 Db.to_string ~sql:"flat_alias" caller ^ "->"
+                 ^ Db.to_string ~sql:"flat_alias" callee
+             | _ -> Test.fail "flat alias row: unexpected shape")
+      in
+      Batch.eq_string b
+        ~msg:"the flat schema marks exactly the seven point-free bindings"
+        (String.concat ", " flat_alias_rows)
+        "alias->raiser, arity_alias->arity_mk, hop1->chain_target, hop2->hop1, hop3->hop2, \
+         qualified_alias->cross_helper, via_open->cross_helper" ;
+      (* The control. Without this, a producer that marked EVERY row would pass
+         the assertion above only by accident of the fixture's contents; with
+         it, over-marking is a distinct failure from under-marking. [caller]
+         applies [raiser] and must stay NULL. *)
+      Batch.eq_int b
+        ~msg:"an ordinary application is NOT marked on the flat schema either"
+        (count
+           "SELECT count(*) FROM calls WHERE caller_name='caller' AND callee_name='raiser' \
+            AND edge_form IS NULL")
+        1 ;
+      (* CHECK-2 on this schema as well: the vocabulary is one member wide here
+         too, and a second value would mean the two producers disagree about
+         what the column means. *)
+      Batch.eq_int b
+        ~msg:"CHECK-2 (flat): no flat row carries an out-of-vocabulary edge_form"
+        (count
+           "SELECT count(*) FROM calls WHERE edge_form IS NOT NULL AND edge_form <> 'value_alias'")
+        0) ;
+  Lwt.return_unit
+
 let register () =
   register_local_slice () ;
+  register_flat_schema_marks_aliases () ;
   register_fan_in_excludes () ;
   register_query_readers () ;
   register_raise_sets_propagate ()
