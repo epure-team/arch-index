@@ -1871,6 +1871,26 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels
                           value_channels
                     | None -> false
                   in
+                  (* A DECLARED bind APPLIED as an ordinary function. Found
+                     while adding the strict-over-an-extended-builtin test
+                     (review round 2): such a path had no
+                     [note_seen_value_path] anywhere — only let-operator binds
+                     were noted, through [add_path_call] — so
+                     [binds = ["my_bind"]] reported "matched nothing" however
+                     many times the corpus called it, and [--errors-strict]
+                     failed on a declaration that was in fact matching. Same
+                     root as round 1's [lift]/[unwrap] miscategorisation: a
+                     declared path whose actual occurrence form is never
+                     noted. *)
+                  let bind_hit =
+                    match head_opt with
+                    | Some h ->
+                        List.exists
+                          (fun (ch : Arch_errors_config.channel) ->
+                            path_declared ch.Arch_errors_config.binds h)
+                          value_channels
+                    | None -> false
+                  in
                   let bind_shape_hit =
                     match Arch_index_errch.bind_shape_channel ~channels:value_channels
                             fn_expr.exp_type
@@ -1889,7 +1909,8 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels
                       match head_qualified_name h with
                       | Some qn
                         when transform_hit <> None || converter_hit <> None
-                             || handler_hit <> None || origin_hit <> None || sink_hit ->
+                             || handler_hit <> None || origin_hit <> None || sink_hit
+                             || bind_hit ->
                           note_seen_value_path qn
                       | _ -> ())
                   | None -> ()) ;
