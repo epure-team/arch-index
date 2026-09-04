@@ -9,7 +9,18 @@
 #     expected during a dominance tightening, demoted→MUST must be justified.
 #
 # Usage: scripts/callgraph-diff.sh [<baseline-git-ref>]   (default: main)
-set -eu
+# pipefail is not hygiene here, it is the point of the script. Both build steps
+# below end in `| tail -2`, and without it `set -e` sees TAIL's status — always
+# 0 — so a build that FAILED continues silently. The working tree normally holds
+# an .exe from a previous build, so the run then proceeds with BOTH binaries
+# present, both databases populated, and a diff that is non-empty, plausible and
+# describing the wrong binary. Nothing downstream can catch that: this script's
+# whole job is to compare two binaries, and it would be comparing one of them
+# with itself-from-earlier.
+#
+# Found by review on this PR, in the sibling class to the `--root .` bug this PR
+# exists to fix — both are "the command ran, but not over what you think".
+set -euo pipefail
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
 REF="${1:-main}"
 eval "$(cd "$HERE" && opam env 2>/dev/null)" || true
@@ -19,13 +30,30 @@ trap 'git -C "$HERE" worktree remove --force "$WT" 2>/dev/null || true' EXIT
 git -C "$HERE" worktree add --detach "$WT" "$REF" >/dev/null
 
 echo "== building baseline ($REF) =="
-( cd "$WT" && eval "$(opam env 2>/dev/null)" && dune build --root . bin/arch_callgraph_ocaml 2>&1 | tail -2 ) || true
+# The baseline worktree is freshly created, so a failed build leaves no .exe and
+# the -x guard catches it. Keep the guard anyway: it is what turns a build
+# failure into a clear message instead of a confusing missing-file error.
+if ! ( cd "$WT" && eval "$(opam env 2>/dev/null)" && dune build --root . bin/arch_callgraph_ocaml ) >/tmp/cgdiff-base-build.log 2>&1
+then
+  echo "callgraph-diff: baseline ($REF) build FAILED — refusing to compare" >&2
+  tail -20 /tmp/cgdiff-base-build.log >&2
+  exit 2
+fi
 OLD_BIN="$WT/_build/default/bin/arch_callgraph_ocaml/arch_callgraph_ocaml.exe"
-[ -x "$OLD_BIN" ] || { echo "callgraph-diff: baseline build failed" >&2; exit 2; }
+[ -x "$OLD_BIN" ] || { echo "callgraph-diff: baseline produced no binary" >&2; exit 2; }
 
 echo "== building working tree =="
-( cd "$HERE" && dune build --root . bin/arch_callgraph_ocaml 2>&1 | tail -2 )
+# This is the dangerous one: unlike the baseline, $HERE usually HAS a binary
+# from an earlier build, so a swallowed failure produces a wrong answer rather
+# than a missing file.
+if ! ( cd "$HERE" && dune build --root . bin/arch_callgraph_ocaml ) >/tmp/cgdiff-new-build.log 2>&1
+then
+  echo "callgraph-diff: working-tree build FAILED — refusing to compare against a stale binary" >&2
+  tail -20 /tmp/cgdiff-new-build.log >&2
+  exit 2
+fi
 NEW_BIN="$HERE/_build/default/bin/arch_callgraph_ocaml/arch_callgraph_ocaml.exe"
+[ -x "$NEW_BIN" ] || { echo "callgraph-diff: working tree produced no binary" >&2; exit 2; }
 
 # Index the WORKING TREE's build dir with both binaries (same input universe).
 BUILD_DIR="$HERE/_build/default/lib/arch_index"
