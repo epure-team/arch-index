@@ -406,12 +406,23 @@ CREATE TABLE IF NOT EXISTS exn_origins (
     col INTEGER NOT NULL,
     channel TEXT NOT NULL DEFAULT 'exception'
 );
--- The innermost scope enclosing a call site (absent = no scope). Unlike
--- exn_scopes/exn_origins, this carries no channel of its own — the scope it
--- points at already does (specs/error-channels.md Clarifications: "Schema").
+-- The innermost scope enclosing a call site, PER CHANNEL (absent = no scope).
+-- This table carries no channel column of its own — the scope it points at
+-- already does (specs/error-channels.md Clarifications: "Schema"), so a
+-- consumer that wants one channel's scope joins exn_scopes and filters there.
+--
+-- PRIMARY KEY (call_id, scope_id), not (call_id): one call site can be covered
+-- by an exception-channel scope AND a value-channel scope at the same time (a
+-- carrier call inside a `try`, whose result is then matched on). With the
+-- single-column key only ONE of the two could be stored: the walker encoded
+-- the second id space in the SIGN of the integer and then DROPPED the
+-- value-channel scope whenever an exception scope also covered the call — an
+-- over-approximation, so never unsound, but a permanent precision ceiling and
+-- a second id space living inside one column. Both are gone.
 CREATE TABLE IF NOT EXISTS call_exn_scopes (
-    call_id INTEGER NOT NULL PRIMARY KEY REFERENCES calls(id) ON DELETE CASCADE,
-    scope_id INTEGER NOT NULL REFERENCES exn_scopes(id) ON DELETE CASCADE
+    call_id INTEGER NOT NULL REFERENCES calls(id) ON DELETE CASCADE,
+    scope_id INTEGER NOT NULL REFERENCES exn_scopes(id) ON DELETE CASCADE,
+    PRIMARY KEY (call_id, scope_id)
 );
 -- `exception Alias = Target`: queries canonicalise alias_path to target_path.
 CREATE TABLE IF NOT EXISTS exn_rebinds (

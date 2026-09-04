@@ -67,8 +67,22 @@ because this repository's own counts move whenever code is added to it.
 
 Every verdict-bearing number is unchanged. **Count scopes and links with a `channel` filter**: both
 tables are now shared with the value channels (octez-manager also holds 1 104 option and 1 063
-result scopes), so a channel-blind `SELECT count(*) FROM call_exn_scopes` reads 4 346 rather than
-2 245 and looks like a regression when nothing moved.
+result scopes), so a channel-blind `SELECT count(*) FROM call_exn_scopes` reads 4 386 rather than
+2 245 and looks like a regression when nothing moved:
+
+```sql
+SELECT count(*) FROM call_exn_scopes l JOIN exn_scopes s ON s.id = l.scope_id
+ WHERE s.channel = 'exception';
+```
+
+The channel-blind octez-manager figure was **4 346** before review round 2 and is **4 386** after,
+which is not drift: `call_exn_scopes` used to key on `call_id` alone, so a call site covered by
+both an exception scope and a value-channel scope could store only one link and the value-channel
+one was discarded. With `PRIMARY KEY (call_id, scope_id)` both are stored, and exactly **40**
+octez-manager call sites carry two — 4 346 + 40 = 4 386. On `proto_alpha` no call site carries
+two, so its blind figure stays **487**. The `channel = 'exception'` counts in the table above
+(2 245 and 35) are byte-identical either way, which is the point: the recovered links are all
+value-channel ones.
 
 ### The one delta, attributed
 

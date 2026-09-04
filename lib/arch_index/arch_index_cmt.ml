@@ -545,17 +545,22 @@ type pending_call = {
          analysis under-reports dead code and never over-claims. *)
   call_site : string; (* file:line *)
   exn_scope : int option;
-      (* innermost exception-handler scope enclosing the call site, in the
-         caller node ([Arch_index_exn] local id during the walk, rewritten to
-         the [exn_scopes] row id by [process_cmt] before resolution) OR a
-         value-channel scope covering THIS call's head (specs/error-channels.md
-         "Handler scopes") — the two never collide in practice (a
-         value-channel scope covers a call's head only when that call's
-         result is the immediate scrutinee of a later match, a lexically
-         separate site from any enclosing [try]), and the schema's
-         [call_exn_scopes] table has room for only one link per call, so an
-         exception-channel link wins if both were ever present (documented
-         residual, not exercised by any required scenario). *)
+      (* Innermost EXCEPTION-handler scope enclosing the call site, in the
+         caller node: an [Arch_index_exn] local id during the walk, rewritten
+         to the [exn_scopes] row id by [process_cmt] before resolution. *)
+  errch_scope : int option;
+      (* Innermost VALUE-CHANNEL scope covering THIS call's head
+         (specs/error-channels.md "Handler scopes"), in its own local id space
+         — [Arch_index_errch] mints ids independently of [Arch_index_exn] —
+         rewritten to the [exn_scopes] row id the same way.
+
+         A SEPARATE FIELD, not the same one (review round 2, MEDIUM). The two
+         ids used to share [exn_scope], the value-channel one distinguished by
+         being stored NEGATED, and the exception scope simply won when both
+         were present — because [call_exn_scopes] had [PRIMARY KEY (call_id)]
+         and could hold only one link per call. The key is now
+         [(call_id, scope_id)], so both are stored, and neither an id-space
+         sign trick nor a dropped fact is needed. *)
   errch_propagates : string option;
       (* [Some channel]: this call is a propagating edge candidate on
          [channel] — caller and callee are both c-carriers at this site, and
@@ -2222,20 +2227,14 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels
           | None -> false (* unknown ctx: never claim dead *)
         in
         (* A call whose head is SUNK (specs/error-channels.md "Sinks") never
-           propagates on any channel — override the type-based candidate. A
-           value-channel scope covering this call's head (if any) is folded
-           into the SAME [exn_scope] slot the exception channel uses; a
-           genuine exception scope (set above, from [lexn]) wins if both are
-           somehow present (documented residual, see the [pending_call] type
-           comment). *)
+           propagates on any channel — override the type-based candidate. *)
         let errch_propagates = if Hashtbl.mem sunk_ords ord then None else errch_candidate in
-        let exn_scope =
-          match exn_scope with
-          | Some _ -> exn_scope
-          | None -> (
-              match Hashtbl.find_opt errch_call_scope ord with
-              | Some (_, local_id) -> Some (-(local_id + 1)) (* negative: errch id-space marker *)
-              | None -> None)
+        (* Independent of [exn_scope]: a call can be covered by both, and
+           [call_exn_scopes] now has room for both. *)
+        let errch_scope =
+          match Hashtbl.find_opt errch_call_scope ord with
+          | Some (_, local_id) -> Some local_id
+          | None -> None
         in
         {
           caller_module;
@@ -2246,6 +2245,7 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels
           dead;
           call_site;
           exn_scope;
+          errch_scope;
           errch_propagates;
         })
       !raw
@@ -2896,34 +2896,28 @@ let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
                                                     ~line:o.o_line ~col:o.o_col ~channel:o.o_channel)
                                                 origins)
                                         errch_by_node ;
-                                      (* Calls carry the walker's LOCAL scope id;
-                                         rewrite to the row id (None if the
-                                         scope row was rejected: an unlinked
-                                         call over-approximates — sound). A
-                                         NEGATIVE local id (see
-                                         [collect_calls_from_expr]) names a
-                                         value-channel scope instead, decoded
-                                         via [errch_scope_ids]. *)
+                                      (* Calls carry the walker's LOCAL scope
+                                         ids; rewrite each to its row id (None
+                                         if the scope row was rejected: an
+                                         unlinked call over-approximates —
+                                         sound). Two independent id spaces,
+                                         two fields, two tables: no sign
+                                         encoding, and neither link displaces
+                                         the other. *)
                                       let calls =
                                         List.map
                                           (fun (c : pending_call) ->
-                                            match c.exn_scope with
-                                            | None -> c
-                                            | Some local when local >= 0 ->
-                                                {
-                                                  c with
-                                                  exn_scope =
+                                            {
+                                              c with
+                                              exn_scope =
+                                                Option.bind c.exn_scope (fun local ->
                                                     Hashtbl.find_opt scope_ids
-                                                      (c.caller_name, local);
-                                                }
-                                            | Some neg ->
-                                                let local_id = -neg - 1 in
-                                                {
-                                                  c with
-                                                  exn_scope =
+                                                      (c.caller_name, local));
+                                              errch_scope =
+                                                Option.bind c.errch_scope (fun local ->
                                                     Hashtbl.find_opt errch_scope_ids
-                                                      (c.caller_name, local_id);
-                                                })
+                                                      (c.caller_name, local));
+                                            })
                                           calls
                                       in
                                       pending_calls :=

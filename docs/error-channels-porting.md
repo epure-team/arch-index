@@ -50,8 +50,13 @@ computed by `lib/arch_tools/arch_exn.ml` from those rows.
 Four do: `exn_scopes`, `exn_origins`, `exn_edges`, `channel_carriers`. Three do **not**:
 
 - `exn_scope_catches (scope_id, exn_path)` — the scope it points at already carries the channel;
-- `call_exn_scopes (call_id, scope_id)` — likewise, and note `call_id` is its **primary key**, so
-  a call has at most one scope across all channels;
+- `call_exn_scopes (call_id, scope_id)` — likewise. Its primary key is the **pair**, so one call
+  site may carry several scopes: an exception-channel one (it sits inside a `try`) and a
+  value-channel one (its result is matched on) at the same time. A consumer that wants one
+  channel's scope for a call must therefore **join `exn_scopes` and filter on `channel` there** —
+  an unfiltered join both duplicates the call's row and can hand your solver another channel's
+  caught set. (Until review round 2 the key was `call_id` alone and the producer dropped the
+  value-channel link whenever an exception scope also covered the call.)
 - `exn_rebinds (alias_path, target_path)` — a name-canonicalisation table, channel-independent.
 
 Do not add a `channel` column to those in your adapter, and do not expect to filter on one.
