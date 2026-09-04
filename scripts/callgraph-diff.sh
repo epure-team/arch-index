@@ -5,18 +5,24 @@
 # ref and the working tree) and compares the full (caller, callee, site) edge
 # populations:
 #   - DROPPED edges (present in old, absent in new)  → HARD FAIL (false-UNREACHABLE risk)
-#   - kind movements per surviving edge              → reported; MUST→demoted is
-#     expected during a dominance tightening, demoted→MUST must be justified.
+#   - kind movements per surviving edge              → reported, NOT gated, and
+#     not decidable at small counts: a clean self-comparison already reports
+#     ±33 phantom movements. See the KNOWN DEFECT note above the movement
+#     report for the mechanism. Read the DROPPED gate as the verdict and the
+#     movement table as a lead to chase by hand.
 #
 # Usage: scripts/callgraph-diff.sh [<baseline-git-ref>]   (default: main)
-# pipefail is not hygiene here, it is the point of the script. Both build steps
-# below end in `| tail -2`, and without it `set -e` sees TAIL's status — always
-# 0 — so a build that FAILED continues silently. The working tree normally holds
-# an .exe from a previous build, so the run then proceeds with BOTH binaries
-# present, both databases populated, and a diff that is non-empty, plausible and
-# describing the wrong binary. Nothing downstream can catch that: this script's
-# whole job is to compare two binaries, and it would be comparing one of them
-# with itself-from-earlier.
+# pipefail is not hygiene here, it is the point of the script. The population
+# dumps below (`dump`, `sites`, `lam_edge_sites`, `lam_edge_caller_sites`) all
+# end in `| norm | LC_ALL=C sort`, and without pipefail `set -e` sees SORT's
+# status — always 0 — so a sqlite3 that FAILED yields an EMPTY population file
+# and the run continues. Two empty populations differ nowhere, so the gate
+# prints `PASS (zero dropped edges)` and exits 0 having compared nothing.
+#
+# (An earlier version of this note justified pipefail by a `| tail -2` on the
+# two build steps. Those pipes are gone — the builds redirect to log files and
+# are status-checked with `if ! (...)` — but the reason survived intact in the
+# dump pipelines, which is where it is pointed now.)
 #
 # Found by review on this PR, in the sibling class to the `--root .` bug this PR
 # exists to fix — both are "the command ran, but not over what you think".
@@ -26,30 +32,44 @@ REF="${1:-main}"
 eval "$(cd "$HERE" && opam env 2>/dev/null)" || true
 
 LOGDIR="$(mktemp -d)"
-# Everything this script writes goes in a private mktemp dir — the build logs
-# AND the six population files the gate then reads back. A fixed name in a
-# world-writable directory is symlink-preemptable, and review demonstrated it
-# rather than arguing it: symlinking $LOGDIR/old-sites.txt at a victim file and
-# running the gate destroyed the victim's contents through the link, exit 0.
-# Two concurrent runs also clobbered each other's -old-sites/-new-sites, after
-# which `comm` compared one run's baseline against the other's working tree —
-# an arbitrary PASS or FAIL from the gate itself.
+# EVERYTHING this script creates lives under $LOGDIR: the two build logs, the
+# six population files the gate reads back, the two SQLite databases, and the
+# baseline worktree. A fixed name in a world-writable directory is symlink-
+# preemptable, and review demonstrated it rather than arguing it: symlinking
+# $LOGDIR/old-sites.txt at a victim file and running the gate destroyed the
+# victim's contents through the link, exit 0. Two concurrent runs also
+# clobbered each other's -old-sites/-new-sites, after which `comm` compared one
+# run's baseline against the other's working tree — an arbitrary PASS or FAIL
+# from the gate itself.
 #
-# The first version of this comment hardened only the two build LOGS while
-# stating the principle in general terms. That was the class handled in one
-# place out of seven, with a comment claiming otherwise — so the wording now
-# says what is actually covered, and the trap removes the directory on exit
-# (the old fixed names also leaked ~1.1 MB per run into a /tmp this project
-# has already had fill to 100%).
-WT="$(mktemp -d)/baseline"
+# One directory, one trap, so nothing survives the run. Getting to that took
+# three tries and the second made it worse: it moved the population files under
+# $LOGDIR but left `OLD_DB`/`NEW_DB` on bare `mktemp` and $WT's parent on a
+# second `mktemp -d`, both OUTSIDE the trap, while claiming in its commit
+# message that all fourteen references now resolved under $LOGDIR. Review
+# counted /tmp/tmp.* across consecutive runs — 89 → 92 → 95, i.e. +3 leaked
+# artifacts per run, two of them 1.8 MB each — so the rewrite TRIPLED the
+# ~1.1 MB/run leak it claimed to have removed, into a /tmp this project has
+# already had fill to 100%. Anything new this script creates goes under
+# $LOGDIR; a fresh `mktemp` here is the bug, not the fix.
+WT="$LOGDIR/baseline"
 trap 'git -C "$HERE" worktree remove --force "$WT" 2>/dev/null || true; rm -rf "$LOGDIR"' EXIT
 git -C "$HERE" worktree add --detach "$WT" "$REF" >/dev/null
 
 echo "== building baseline ($REF) =="
+# BUILD WHAT YOU INDEX. Both build steps name `lib/arch_index` as well as the
+# exe, because BUILD_DIR below indexes the LIBRARY's .cmt files and linking
+# bin/arch_callgraph_ocaml needs only .cmx/.cmi — an exe-only build produces
+# no .cmt for the library at all. Measured on a clean tree: exe-only leaves 1
+# .cmt (arch_index__.cmt, the module-alias file) where
+# `dune build --root . lib/arch_index` leaves 24. So an exe-only build left
+# the corpus to be whatever some earlier, unrelated build happened to have
+# lying around — see the magnitude floor below for what that cost.
+#
 # The baseline worktree is freshly created, so a failed build leaves no .exe and
 # the -x guard catches it. Keep the guard anyway: it is what turns a build
 # failure into a clear message instead of a confusing missing-file error.
-if ! ( cd "$WT" && eval "$(opam env 2>/dev/null)" && dune build --root . bin/arch_callgraph_ocaml ) >$LOGDIR/base-build.log 2>&1
+if ! ( cd "$WT" && eval "$(opam env 2>/dev/null)" && dune build --root . lib/arch_index bin/arch_callgraph_ocaml ) >$LOGDIR/base-build.log 2>&1
 then
   echo "callgraph-diff: baseline ($REF) build FAILED — refusing to compare" >&2
   tail -20 $LOGDIR/base-build.log >&2
@@ -62,7 +82,7 @@ echo "== building working tree =="
 # This is the dangerous one: unlike the baseline, $HERE usually HAS a binary
 # from an earlier build, so a swallowed failure produces a wrong answer rather
 # than a missing file.
-if ! ( cd "$HERE" && dune build --root . bin/arch_callgraph_ocaml ) >$LOGDIR/new-build.log 2>&1
+if ! ( cd "$HERE" && dune build --root . lib/arch_index bin/arch_callgraph_ocaml ) >$LOGDIR/new-build.log 2>&1
 then
   echo "callgraph-diff: working-tree build FAILED — refusing to compare against a stale binary" >&2
   tail -20 $LOGDIR/new-build.log >&2
@@ -73,9 +93,56 @@ NEW_BIN="$HERE/_build/default/bin/arch_callgraph_ocaml/arch_callgraph_ocaml.exe"
 
 # Index the WORKING TREE's build dir with both binaries (same input universe).
 BUILD_DIR="$HERE/_build/default/lib/arch_index"
-OLD_DB="$(mktemp)"; NEW_DB="$(mktemp)"
+OLD_DB="$LOGDIR/old.db"; NEW_DB="$LOGDIR/new.db"
 "$OLD_BIN" --build-dir="$BUILD_DIR" --db-path="$OLD_DB" --schema-path="$HERE/architecture-schema.sql" >/dev/null 2>&1
 "$NEW_BIN" --build-dir="$BUILD_DIR" --db-path="$NEW_DB" --schema-path="$HERE/architecture-schema.sql" >/dev/null 2>&1
+
+# A population gate must not pass with no population — nor, and this is the
+# part that actually bit, with a FRACTION of one. The old guard tested
+# `sites == 0`, but the hazard is a PARTIAL corpus, which is never zero.
+# Review built 3 of the library's 23 modules' .cmt as real dune targets, ran
+# the gate, and got
+#   == populations: old=1643 new=1643 added=0 ==
+#   callgraph-diff: PASS (zero dropped edges)      exit 0
+# on 34% of the corpus. The zero case fired at all only by luck: the single
+# .cmt an exe-only build leaves is the module-alias file, which declares no
+# functions, so the count landed on exactly the one value the guard tested for.
+#
+# A partial corpus is undetectable by the comparison itself. Every unbuilt
+# module's edges are absent from BOTH databases, so a real drop inside them
+# cannot show up as a difference — the gate reports agreement about nothing.
+# Hence a MAGNITUDE floor, against the reference this repo already commits:
+# test/fixtures/self-index-stats.txt, the golden the CI self-index smoke test
+# diffs against. `-ge` and not `-eq`, because a branch may legitimately add
+# modules before its golden is refreshed; a corpus SMALLER than the golden's is
+# missing .cmt files, and that is the state that must refuse.
+#
+# The floor is a receipt, not the fix: the two `lib/arch_index` build targets
+# above are what make the corpus complete by construction. Both sides are
+# checked because they index the same BUILD_DIR — if one is short, so is the
+# other, and reporting whichever we notice first is enough.
+GOLDEN="$HERE/test/fixtures/self-index-stats.txt"
+want_modules="$(sed -n 's/^modules: *//p' "$GOLDEN")"
+[ -n "$want_modules" ] || { echo "callgraph-diff: no 'modules:' line in $GOLDEN — cannot establish a corpus floor" >&2; exit 2; }
+check_corpus() { # $1 = side label, $2 = db
+  local got
+  got="$(sqlite3 "$2" "SELECT count(*) FROM modules;")"
+  # `if`, not `[ ... ] && return 0`: under `set -e` a failing AND-list is not a
+  # tested condition, so the short-circuit would abort the script before the
+  # diagnostic below ever printed.
+  if [ "$got" -ge "$want_modules" ]; then return 0; fi
+  echo "callgraph-diff: REFUSING — the $1 index covers $got of the $want_modules modules" >&2
+  echo "  recorded by $GOLDEN, so the corpus under" >&2
+  echo "    $BUILD_DIR" >&2
+  echo "  is PARTIAL. Both sides then agree about the modules that are missing," >&2
+  echo "  and a dropped edge inside them cannot appear as a difference — the" >&2
+  echo "  comparison would pass while proving nothing. Run" >&2
+  echo "    dune build --root . lib/arch_index" >&2
+  echo "  and retry. (If modules were deliberately removed, refresh $GOLDEN.)" >&2
+  exit 2
+}
+check_corpus baseline "$OLD_DB"
+check_corpus "working tree" "$NEW_DB"
 
 # R2 normalization: the lambda-node redesign MOVES a lambda body's calls from
 # the parent to the synthetic lambda node (parent.<fun:L:C>…) — a sanctioned
@@ -115,24 +182,6 @@ sites "$OLD_DB" > $LOGDIR/old-sites.txt
 sites "$NEW_DB" > $LOGDIR/new-sites.txt
 lam_edge_sites "$NEW_DB" > $LOGDIR/new-lamsites.txt
 lam_edge_caller_sites "$NEW_DB" > $LOGDIR/new-lamcallersites.txt
-
-# A population gate must not pass with no population. `dune build` above
-# builds only bin/arch_callgraph_ocaml, while BUILD_DIR is lib/arch_index —
-# so on a FRESH worktree the corpus is whatever a previous, unrelated build
-# happened to leave, which review measured as
-#   == populations: old=0 new=0 added=0 ==
-#   callgraph-diff: PASS (zero dropped edges)   exit 0
-# i.e. the gate's own receipt was meaningful only by accident. This is the
-# same "the command ran, but not over what you think" class the --root .
-# change in this commit exists to fix, so it is closed here rather than
-# left as a footnote.
-if [ "$(wc -l < "$LOGDIR/old-sites.txt")" -eq 0 ]; then
-  echo "callgraph-diff: REFUSING — the baseline indexed ZERO call sites from" >&2
-  echo "  $BUILD_DIR" >&2
-  echo "  A population comparison over an empty population proves nothing. Run" >&2
-  echo "  'dune build --root .' so $BUILD_DIR holds .cmt files, then retry." >&2
-  exit 2
-fi
 
 raw_dropped=$(LC_ALL=C comm -23 $LOGDIR/old-sites.txt $LOGDIR/new-sites.txt)
 # Filter the sanctioned replacements:
