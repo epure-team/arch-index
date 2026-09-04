@@ -1,0 +1,96 @@
+{
+ "task": "type-usage-silent-drop",
+ "mode": "fast",
+ "current_phase": "closed",
+ "events": [
+  {
+   "phase": "question",
+   "outcome": "COMPLETED",
+   "at": "2026-08-26",
+   "by": "roster-investigate"
+  },
+  {
+   "phase": "intake",
+   "outcome": "VALIDATED",
+   "at": "2026-08-26",
+   "by": "roster-intake"
+  },
+  {
+   "phase": "implement",
+   "outcome": "COMPLETED",
+   "at": "2026-08-26",
+   "by": "roster-implement"
+  },
+  {
+   "phase": "review",
+   "outcome": "GO",
+   "at": "2026-08-26",
+   "by": "roster-review"
+  },
+  {
+   "phase": "ship",
+   "outcome": "COMPLETED",
+   "at": "2026-08-26",
+   "by": "roster-ship"
+  },
+  {
+   "phase": "note",
+   "outcome": "REOPENED",
+   "at": "2026-09-04",
+   "note": "The 2026-08-26 'ship COMPLETED' above closed an EARLIER cycle. PR #66 reopened the same subject on 2026-09-04 and is a separate two-round pipeline recorded below. A ledger reading COMPLETED is not evidence the current work was reviewed -- the reviewer of #66 was explicitly told not to treat it as such."
+  },
+  {
+   "phase": "review",
+   "outcome": "NO-GO",
+   "at": "2026-09-04T22:30:00+02:00",
+   "by": "roster-review",
+   "round": 1,
+   "head": "e188c04",
+   "blocking": [
+    "C1: the fix site was unguarded. THREE mutations at arch_index.ml:1673-1675 reverted the exact defect with the suite 144/144 green, because no in-repo test drove Arch_index.run on a corpus producing any rejection -- all 6 pre-existing rejections are synthetic direct exec_stmt calls in test code that never reach the flush loop.",
+    "H1: self-index golden shipped red (5170 committed vs 5171 measured), red on the branch's own base.",
+    "H2: partial fix of the class -- 2 of 6 increment-based counters, while the brief it implements names calls and deps in the same sentence."
+   ],
+   "note": "The prescribed test was already written down in briefs/type-usage-silent-drop-investigation.md and not used. The commit's stated blocker for it (Arch_tezt.index discards the summary line) was false: index_raw and index_raw_into both expose it, and error_channels.ml:820 already uses the exact triple needed."
+  },
+  {
+   "phase": "implement",
+   "outcome": "COMPLETED",
+   "at": "2026-09-05T00:05:00+02:00",
+   "by": "roster-implement",
+   "round": 2,
+   "head": "99e58f6",
+   "route_change": "Switched from the verdict route to SELECT COUNT(*), covering SIX counters instead of two and reverting the unit->bool churn on two .mli contracts. The premise was checked, not argued: run unconditionally DROPs every producer-written table, and tezt/tests/schema_drop_list.ml already derives that list mechanically from INSERT INTO scans, so it is enforced rather than assumed.",
+   "also": "Deleted n_dead_sites -- declared, incremented, dereferenced nowhere. Making an unreadable counter accurate is dead work."
+  },
+  {
+   "phase": "review",
+   "outcome": "GO",
+   "at": "2026-09-05T00:12:00+02:00",
+   "by": "roster-review",
+   "round": 2,
+   "head": "3370034",
+   "independently_reproduced": "M1 six-red and M2 four-red exactly as claimed; golden attributed edge by edge (arch_index.ml functions 75->72, calls 589->527 = -62, no other file moved a single edge); drop-list audit passed on all four points including the multi-producer case.",
+   "reviewer_own_mutants": "Wrote three the implementer had not: counting the wrong table (red), dropping WHERE type_id (red), and two that SURVIVED -- dropping WHERE callee_id and WHERE target_module, because the fixture had total == resolved for calls and module_deps.",
+   "coordinator_error_corrected": "I reported rejections_by_table as Hashtbl.fold-order flaky, citing arch_index_db.ml:197-198. The List.sort is on line 199. I quoted a range that excluded the fix."
+  },
+  {
+   "phase": "implement",
+   "outcome": "COMPLETED",
+   "at": "2026-09-05T00:36:00+02:00",
+   "by": "roster-implement",
+   "round": 3,
+   "head": "99e58f6",
+   "note": "Closed the reviewer's fixture gap rather than deferring it: three lines in cg.ml so total != resolved for all three pairs. Both previously-surviving mutants now die. The implementer also corrected the prescribed shape -- an `open` of an out-of-corpus library would have been REFUSED by the test's own trigger rather than stored unresolved, so module_deps would have stayed 0/0 and the mutant would still have passed. That correction was silent: it would have looked like a completed fix."
+  },
+  {
+   "phase": "ship",
+   "outcome": "MERGED",
+   "at": "2026-09-05T00:45:00+02:00",
+   "by": "roster-ship",
+   "pr": 66,
+   "golden": "804/5170 -> 801/5108, re-measured on the rebased head before merge, not carried over",
+   "note": "Rebased onto current main and the golden RE-MEASURED there before merging. A golden measured on a different base is section 10.2's shape -- the measured artifact is not the artifact under test."
+  }
+ ]
+}
