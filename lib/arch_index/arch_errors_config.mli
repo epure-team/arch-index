@@ -68,17 +68,40 @@ val path_matches : string -> string -> bool
     error naming it; a TOML syntax error is passed through as-is. *)
 val of_toml : string -> (t, string) result
 
-(** [merge base override] — channel/summary entries in [override] replace
-    same-named entries from [base]; entries present only in one side are
-    kept; declaration order is [base]'s order, then [override]'s new
-    entries appended. Composition order per Clarifications: builtin <
-    profile < user, so [merge (merge builtin profile) user]. *)
+(** [merge base override]:
+
+    - a channel present in BOTH is EXTENDED, not replaced — every
+      list-valued field ([type_paths] from [type]/[underlying]/[aliases],
+      [lift], [unwrap], [origins], [binds], [handlers], [transforms],
+      [converters], [sinks]) becomes [base]'s entries followed by
+      [override]'s new ones, deduped; the two scalars ([error_arg],
+      [error_type]) take [override]'s value only when it sets one. So a
+      profile adds vocabulary to a built-in by naming the channel and
+      listing only what is NEW, and cannot silently drop what it did not
+      restate (review round 2, HIGH: restating was previously mandatory,
+      duplicated six [Stdlib] paths into [profiles/tezos-errors.toml], and
+      made [--errors-strict] unsatisfiable);
+    - a SUMMARY present in both is replaced: a summary is a complete
+      statement of one callee's error set, so extending it could never
+      narrow one;
+    - entries present in only one side are kept; declaration order is
+      [base]'s, then [override]'s new entries appended.
+
+    Composition order per Clarifications: builtin < profile < user, so
+    [merge (merge builtin profile) user]. *)
 val merge : t -> t -> t
 
-(** [Digest.to_hex] of a canonical (sorted, structural — not textual)
+(** SHA-256 hex (FR-024) of a canonical (sorted, structural — not textual)
     serialisation of the effective config: stable across reformatting of
     the same declarations, changes when any declared list changes. *)
 val digest : t -> string
+
+(** Every path [t]'s channels declare, values and types alike. Used to give
+    {!validate} the set of paths the operator's own FILES spell, so a strict
+    run holds them to those and not to the built-ins' inherited [Stdlib]
+    vocabulary. Not deduped and not sorted — {!validate} only membership-tests
+    it. *)
+val declared_paths : t -> string list
 
 (** Refuse an effective config in which some channel is STRUCTURALLY
     unreachable: carrier selection is first-match-wins over the merged
@@ -87,7 +110,12 @@ val digest : t -> string
     published in [comment_db_meta.error_contract], making every query on it
     answer [NOT_A_CARRIER] (a claim about the analysed code) where the truth
     is "this channel was never applicable". [Error] names both channels and
-    the shared carrier type, and says to reorder or merge them. Independent
+    the shared carrier type, and gives a remedy the operator can actually
+    carry out: when the shadowing channel is a BUILT-IN it cannot be
+    reordered (built-ins are always merged first), so the message says to
+    declare the vocabulary under the built-in's own name — {!merge} extends
+    it — or to add a distinguishing [error_type]; reordering is offered only
+    between two file-declared channels, where it is possible. Independent
     of any corpus: it reads the config alone, so it is checked before
     indexing starts. Two channels sharing a carrier type but distinguished
     by [error_type]/[error_arg] are reachable and are NOT refused. *)
@@ -132,11 +160,19 @@ val unmatched : seen -> string list
     the same effective config came from a file.
 
     [~strict:true] additionally turns a per-path miss into a fatal error —
-    but only for a channel the operator is responsible for: one whose name
-    is not a built-in's, or whose declarations differ from that built-in's
-    (redeclaring [\[channel.option\]] in a profile puts the whole channel
-    back under strict). An UNTOUCHED built-in's misses stay warnings: they
-    are not the operator's declarations, and one of them ([Stdlib.option])
-    is a spelling the compiler never prints, which made [--errors-strict]
-    unsatisfiable for every config and every corpus (review round 1). *)
-val validate : t -> seen -> strict:bool -> ?builtin_names:string list -> unit -> (unit, string) result
+    but only for a path the operator is responsible for. [operator_paths]
+    (omitted = every path counts, which is what the inline tests want) is the
+    set of paths the loaded config FILES actually spell, from
+    {!declared_paths} applied to each parsed file; a miss on any other path
+    came from {!builtin} and stays a warning. Holding an operator to a
+    [Stdlib.*] path their corpus happens not to use is not a bug report about
+    their config, and before this rule [--errors-strict] was unsatisfiable
+    for [profiles/tezos-errors.toml] (review rounds 1 and 2). *)
+val validate :
+  t ->
+  seen ->
+  strict:bool ->
+  ?builtin_names:string list ->
+  ?operator_paths:string list ->
+  unit ->
+  (unit, string) result

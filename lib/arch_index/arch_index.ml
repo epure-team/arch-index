@@ -155,6 +155,10 @@ let read_file_or_die path =
 let load_errors_config ~project_root ~errors_config ~errors_profile =
   let acc = ref Arch_errors_config.builtin in
   let sources = ref ["builtin"] in
+  (* Paths the operator's own FILES spell, accumulated as each is parsed —
+     the merged config cannot tell them from the built-ins' inherited
+     vocabulary, and [--errors-strict] must only ever fail on the former. *)
+  let operator_paths = ref [] in
   (match errors_profile with
   | None -> ()
   | Some name -> (
@@ -175,6 +179,7 @@ let load_errors_config ~project_root ~errors_config ~errors_profile =
               exit 1
           | Ok cfg ->
               acc := Arch_errors_config.merge !acc cfg ;
+              operator_paths := Arch_errors_config.declared_paths cfg @ !operator_paths ;
               sources := path :: !sources))) ;
   (match discover_user_config ~project_root ~errors_config with
   | None -> ()
@@ -185,8 +190,9 @@ let load_errors_config ~project_root ~errors_config ~errors_profile =
           exit 1
       | Ok cfg ->
           acc := Arch_errors_config.merge !acc cfg ;
+          operator_paths := Arch_errors_config.declared_paths cfg @ !operator_paths ;
           sources := path :: !sources)) ;
-  (!acc, String.concat "," (List.rev !sources))
+  (!acc, String.concat "," (List.rev !sources), !operator_paths)
 
 let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors_profile
     ?(errors_strict = false) ~build_dir () =
@@ -224,7 +230,7 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
      hand the walker a [seen] collector so every value/type path it visits
      can flip a declared-path found-flag, validate once the whole corpus has
      been walked. *)
-  let errors_effective, error_config_source =
+  let errors_effective, error_config_source, errors_operator_paths =
     load_errors_config ~project_root:!project_root ~errors_config ~errors_profile
   in
   (* Reachability is a property of the CONFIG alone, so it is decided before
@@ -561,7 +567,7 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
   (if error_config_source <> "builtin" then
      match
        Arch_errors_config.validate errors_effective errors_seen ~strict:errors_strict
-         ~builtin_names ()
+         ~builtin_names ~operator_paths:errors_operator_paths ()
      with
      | Error msg ->
          Arch_io.eprintf "%s\n" msg ;

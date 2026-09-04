@@ -52,9 +52,12 @@ let exception_channel =
 let result_channel =
   {
     name = "result";
-    (* Both spellings the compiler can print for the same predefined type —
-       see roster/error-channels/feasibility-probe.md Q2, generalised here:
-       an unqualified alias occurrence and the [Stdlib.]-qualified one. *)
+    (* Both spellings the compiler really does print for the same predefined
+       type. VERIFIED (review round 2) rather than assumed: [stdlib.mli] does
+       re-export [result] ([type ('a,'b) result = ('a,'b) result = …]), so
+       source that spells [(int, string) Stdlib.result] keeps that path in the
+       typedtree — a probe over a .cmt of both spellings prints [option] and
+       [Stdlib.result] as two distinct [Tconstr] paths. *)
     type_paths = ["result"; "Stdlib.result"];
     error_arg = Some 2;
     lift = [];
@@ -77,7 +80,15 @@ let result_channel =
 let option_channel =
   {
     name = "option";
-    type_paths = ["option"; "Stdlib.option"];
+    (* ["option"] ONLY — no [Stdlib.]-qualified sibling to [Stdlib.result]
+       above. FIX (review round 2, HIGH): [stdlib.mli] re-exports [result] but
+       NOT [option], so ["Stdlib.option"] is not merely a spelling the
+       compiler declines to print — it is not a type constructor at all
+       ([int Stdlib.option] is an "Unbound type constructor" error). Declared
+       here it could never be matched by anyone, and until this round it was
+       counted against every [--errors-strict] run, which is what made strict
+       unsatisfiable by construction. *)
+    type_paths = ["option"];
     error_arg = None;
     lift = [];
     (* "" = identity — the error is the [None] constructor itself, not an
@@ -304,14 +315,21 @@ let of_toml (s : string) : (t, string) result =
       | Otoml.Duplicate_key msg -> Error msg)
 
 (* -------------------------------------------------------------------------- *)
-(* Merge — right wins per channel name / summary callee, builtin < profile <  *)
-(* user, order preserved (base first, then override's new entries)           *)
+(* Merge — builtin < profile < user, order preserved (base first, then the    *)
+(* override's new entries). A same-named CHANNEL is EXTENDED field by field;  *)
+(* a same-named SUMMARY is replaced.                                          *)
 (* -------------------------------------------------------------------------- *)
 
-let merge_named ~name_of (base : 'a list) (override : 'a list) : 'a list =
+let merge_named ~name_of ~combine (base : 'a list) (override : 'a list) : 'a list =
   let tbl = Hashtbl.create 16 in
   List.iter (fun x -> Hashtbl.replace tbl (name_of x) x) base ;
-  List.iter (fun x -> Hashtbl.replace tbl (name_of x) x) override ;
+  List.iter
+    (fun x ->
+      let n = name_of x in
+      match Hashtbl.find_opt tbl n with
+      | Some prev -> Hashtbl.replace tbl n (combine prev x)
+      | None -> Hashtbl.replace tbl n x)
+    override ;
   let seen = Hashtbl.create 16 in
   let order = ref [] in
   List.iter
@@ -323,15 +341,62 @@ let merge_named ~name_of (base : 'a list) (override : 'a list) : 'a list =
     (base @ override) ;
   List.rev !order |> List.map (fun n -> Hashtbl.find tbl n)
 
+let dedup l =
+  let seen = Hashtbl.create 16 in
+  List.filter
+    (fun x -> if Hashtbl.mem seen x then false else (Hashtbl.replace seen x () ; true))
+    l
+
+(* FIX (review round 2, HIGH). [merge] used to REPLACE a same-named channel
+   wholesale, which made "add one bind to a built-in" impossible without
+   restating everything the built-in already declared. The shipped Tezos
+   profile did exactly that: it copied six [Stdlib.Option.*] paths into
+   [profiles/tezos-errors.toml] purely to keep them, with a comment asking
+   the reader to keep two files in step — and, because a restated channel is
+   a channel the OPERATOR wrote, those inherited paths then counted against
+   [--errors-strict] and made it unsatisfiable.
+
+   Extending instead: every list-valued field is [base @ override], deduped,
+   base order first; the two scalars are overridden only when the override
+   actually sets them. A profile adds vocabulary by naming the channel and
+   listing only what is new. Nothing can be REMOVED from a built-in this way
+   — deliberate: a built-in's vocabulary is [Stdlib] paths that are true
+   wherever they occur, so subtraction has no use case, and allowing it would
+   reintroduce "silently drop a declaration by redeclaring the channel".
+
+   [summaries] keep replace semantics: a summary is a COMPLETE statement of
+   one callee's error set, so extending it could never narrow one. *)
+let merge_channel (base : channel) (over : channel) : channel =
+  {
+    name = base.name;
+    type_paths = dedup (base.type_paths @ over.type_paths);
+    error_arg = (match over.error_arg with Some _ as x -> x | None -> base.error_arg);
+    lift = dedup (base.lift @ over.lift);
+    error_type = (match over.error_type with Some _ as x -> x | None -> base.error_type);
+    unwrap = dedup (base.unwrap @ over.unwrap);
+    origins = dedup (base.origins @ over.origins);
+    binds = dedup (base.binds @ over.binds);
+    handlers = dedup (base.handlers @ over.handlers);
+    transforms = dedup (base.transforms @ over.transforms);
+    converters = dedup (base.converters @ over.converters);
+    sinks = dedup (base.sinks @ over.sinks);
+  }
+
 let merge (base : t) (override : t) : t =
   {
-    channels = merge_named ~name_of:(fun (c : channel) -> c.name) base.channels override.channels;
+    channels =
+      merge_named
+        ~name_of:(fun (c : channel) -> c.name)
+        ~combine:merge_channel
+        base.channels
+        override.channels;
     summaries =
-      merge_named ~name_of:(fun (s, _) -> s) base.summaries override.summaries;
+      merge_named ~name_of:(fun (s, _) -> s) ~combine:(fun _ over -> over) base.summaries
+        override.summaries;
   }
 
 (* -------------------------------------------------------------------------- *)
-(* Digest — canonical structural serialisation, MD5 hex                      *)
+(* Digest — canonical structural serialisation, SHA-256 hex                  *)
 (* -------------------------------------------------------------------------- *)
 
 let string_of_mode = function Add -> "add" | Replace -> "replace"
@@ -518,37 +583,51 @@ let check_reachable (t : t) : (unit, string) result =
         in
         (match verdict with
         | Some ((p, (earlier : channel)) :: _) ->
+            (* The remedy has to be one the operator can actually carry out.
+               FIX (review round 2, MEDIUM): this used to say "reorder the
+               channels", which is impossible when [earlier] is a BUILT-IN —
+               built-ins are always merged first, and no config file can move
+               them. The two remedies that do work in that case are naming the
+               built-in (so [merge] extends it) or giving the new channel a
+               distinguishing [error_type]. Reordering is offered only when
+               both channels come from files, where it is real. *)
+            let remedy =
+              if List.exists (fun (b : channel) -> b.name = earlier.name) builtin.channels then
+                Printf.sprintf
+                  "'%s' is a BUILT-IN channel and is always merged first, so it cannot be \
+                   reordered. Either declare your vocabulary under its own name ([channel.%s]) \
+                   — a same-named channel EXTENDS the built-in field by field rather than \
+                   replacing it, so nothing is lost and nothing need be restated — or, if %s is \
+                   genuinely a different channel over the same carrier, give it an 'error_type' \
+                   that '%s' does not accept, which keeps both selectable."
+                  earlier.name earlier.name c.name earlier.name
+              else
+                Printf.sprintf
+                  "Declare '%s' before '%s' so the more specific one is tried first, give %s an \
+                   'error_type' that '%s' does not accept, or merge the two declarations into \
+                   one."
+                  c.name earlier.name c.name earlier.name
+            in
             Error
               (Printf.sprintf
                  "arch-errors: channel %s: carrier type '%s' is already claimed by channel \
                   '%s', declared earlier — channel selection is first-match-wins, so %s could \
                   never own a carrier and every query on it would answer NOT_A_CARRIER(%s) \
-                  about code it never examined. Reorder the channels so the more specific one \
-                  comes first, or merge the two declarations into one."
-                 c.name p earlier.name c.name c.name)
+                  about code it never examined. %s"
+                 c.name p earlier.name c.name c.name remedy)
         | _ -> go (seen_before @ [c]) rest)
   in
   go [] t.channels
 
-(* A channel that came out of {!builtin} UNTOUCHED: same name, and every
-   declared list still structurally identical to the built-in's ([merge]
-   replaces a channel wholesale, so a profile or user file that redeclares
-   [\[channel.option\]] produces a channel that is no longer this).
+(** See .mli. *)
+let declared_paths (t : t) =
+  List.concat_map (fun c -> declared_value_paths c @ declared_type_paths c) t.channels
 
-   Used to decide whose declarations may fail a [--errors-strict] run. The
-   pre-existing [builtin_names] waiver on the FATAL carrier rule compares
-   names only, which is right there (a built-in carrier absent from a small
-   corpus is not a bug, whoever last edited the channel); for strict it is
-   not enough — a user who redeclares [option] IS responsible for the paths
-   they then wrote, and a name-only test would waive them. *)
-let is_untouched_builtin (c : channel) =
-  match List.find_opt (fun (b : channel) -> b.name = c.name) builtin.channels with
-  | Some b -> canon_channel b = canon_channel c
-  | None -> false
-
-let validate (t : t) (s : seen) ~strict ?(builtin_names = []) () : (unit, string) result =
-  (* (channel, message): the channel is carried so [--errors-strict] can tell
-     a declaration the operator wrote from one they merely inherited. *)
+let validate (t : t) (s : seen) ~strict ?(builtin_names = []) ?operator_paths () :
+    (unit, string) result =
+  (* (path, message): the path is carried so [--errors-strict] can tell a
+     declaration the operator WROTE from one they merely inherited from the
+     built-ins. *)
   let warnings = ref [] in
   let fatal = ref None in
   List.iter
@@ -570,7 +649,7 @@ let validate (t : t) (s : seen) ~strict ?(builtin_names = []) () : (unit, string
         match Hashtbl.find_opt tbl p with
         | Some flag when not !flag ->
             warnings :=
-              (c, Printf.sprintf "arch-errors: channel %s: '%s' matched nothing" c.name p)
+              (p, Printf.sprintf "arch-errors: channel %s: '%s' matched nothing" c.name p)
               :: !warnings
         | _ -> ()
       in
@@ -582,15 +661,25 @@ let validate (t : t) (s : seen) ~strict ?(builtin_names = []) () : (unit, string
   | None ->
       let warnings = List.rev !warnings in
       List.iter (fun (_, w) -> Printf.eprintf "%s\n%!" w) warnings ;
-      (* FIX (review round 1, HIGH, same root as the lift/unwrap one): only
-         declarations the OPERATOR is responsible for may fail a strict run.
-         Before this, an untouched built-in dragged its own Stdlib paths into
-         every strict verdict — and one of them, ['Stdlib.option'], is a
-         spelling the compiler NEVER prints (it prints the predefined type
-         as bare [option]), so [--errors-strict] was unsatisfiable by
-         construction for any corpus and any config, not merely awkward. *)
+      (* Only declarations the OPERATOR is responsible for may fail a strict
+         run. [operator_paths] is the set of paths the loaded config FILES
+         actually spell (see [declared_paths]); anything else in the merged
+         config came from {!builtin}, and holding an operator to a [Stdlib.*]
+         path their corpus happens not to use is not a bug report about their
+         config.
+
+         FIX (review round 2, HIGH): this used to be a per-CHANNEL test — a
+         channel structurally identical to the built-in was waived, anything
+         else was not. Now that [merge] EXTENDS a channel rather than
+         replacing it, that test would waive nothing the moment a profile adds
+         a single bind, dragging every inherited [Stdlib] path back into the
+         verdict; and the previous round it did exactly that to
+         [profiles/tezos-errors.toml]. Per-PATH provenance is what the rule
+         actually meant all along. *)
       let operator_warnings =
-        List.filter (fun ((c : channel), _) -> not (is_untouched_builtin c)) warnings
+        match operator_paths with
+        | None -> warnings
+        | Some ps -> List.filter (fun (p, _) -> List.mem p ps) warnings
       in
       if strict && operator_warnings <> [] then
         Error
@@ -649,7 +738,7 @@ let%test "of_toml: unknown top-level key is a naming error" =
 let%test "of_toml: a genuine TOML syntax error is passed through" =
   match of_toml "foo.bar.baz = " with Error _ -> true | Ok _ -> false
 
-let%test "merge: override replaces a same-named channel, keeps others, preserves order" =
+let%test "merge: override extends a same-named channel, keeps others, preserves order" =
   let base =
     {
       channels =
@@ -663,6 +752,41 @@ let%test "merge: override replaces a same-named channel, keeps others, preserves
   let m = merge base override in
   List.map (fun (c : channel) -> c.name) m.channels = ["a"; "b"]
   && (List.find (fun (c : channel) -> c.name = "b") m.channels).error_arg = Some 2
+
+(* Review round 2, HIGH: the point of extending. A profile that adds ONE bind
+   to a built-in must not have to restate the built-in's own vocabulary, and
+   must not lose it by omission. *)
+let%test "merge: extending a built-in keeps its vocabulary AND adds the new one" =
+  let over =
+    match of_toml "[channel.option]\ntype = \"option\"\nbinds = [\"Tz.Option_syntax.let*\"]\n" with
+    | Ok t -> t
+    | Error _ -> assert false
+  in
+  let m = merge builtin over in
+  match List.find_opt (fun (c : channel) -> c.name = "option") m.channels with
+  | None -> false
+  | Some c ->
+      (* The built-in's three [Stdlib.Option] binds survive, in order, and the
+         profile's is appended. Nothing was restated to achieve that. *)
+      c.binds
+      = ["Stdlib.Option.bind"; "Stdlib.Option.Syntax.let*"; "Stdlib.Option.Syntax.and*";
+         "Tz.Option_syntax.let*"]
+      (* [handlers] were not mentioned at all by the override, so they are the
+         built-in's — the field-by-field merge is what makes omission safe. *)
+      && List.map fst c.handlers
+         = ["Stdlib.Option.value"; "Stdlib.Option.get"; "Stdlib.Option.fold"]
+      (* [type = "option"] restates a path the base already has: deduped, not
+         doubled. *)
+      && c.type_paths = ["option"]
+      (* An unset scalar keeps the base's, so a profile need not repeat it. *)
+      && c.error_type = Some ""
+
+let%test "merge: a same-named SUMMARY is replaced, not extended" =
+  (* A summary is a complete statement of one callee's error set; extending it
+     could never narrow one. *)
+  let base = { channels = []; summaries = [("f", [("result", ["A"])])] } in
+  let over = { channels = []; summaries = [("f", [("result", ["B"])])] } in
+  (merge base over).summaries = [("f", [("result", ["B"])])]
 
 let%test "digest: stable across reformatting of the same declarations" =
   let a =
@@ -768,22 +892,41 @@ let%test "validate: an unmatched lift path does not make the channel fatal" =
   note_type_path s "result" ;
   match validate cfg s ~strict:false () with Ok () -> true | Error _ -> false
 
-let%test "validate: an UNTOUCHED built-in's miss does not fail --errors-strict" =
-  (* [Stdlib.option] is a spelling the compiler never prints, so a strict run
-     that counted built-in misses could never succeed anywhere. *)
+(* Review round 2, HIGH: whose declaration failed is a PER-PATH question. *)
+let%test "validate: a built-in's own path never fails --errors-strict" =
   let cfg = { channels = builtin.channels; summaries = [] } in
   let s = create cfg in
-  match validate cfg s ~strict:true ~builtin_names:["exception"; "result"; "option"] () with
+  match
+    validate cfg s ~strict:true
+      ~builtin_names:["exception"; "result"; "option"]
+      ~operator_paths:[] ()
+  with
   | Ok () -> true
   | Error _ -> false
 
-let%test "validate: REDECLARING a built-in puts it back under --errors-strict" =
-  let redeclared = { option_channel with sinks = ["Fx.never_there"] } in
-  let cfg = { channels = [redeclared]; summaries = [] } in
+let%test "validate: a path the OPERATOR wrote fails --errors-strict, inherited ones do not" =
+  (* Exactly the shipped profile's shape: extend a built-in with one new
+     bind. The built-in's [Stdlib.Option.*] paths come along and none of them
+     may fail the run; the operator's own path must. *)
+  let over =
+    match of_toml "[channel.option]\ntype = \"option\"\nbinds = [\"Fx.never_there\"]\n" with
+    | Ok t -> t
+    | Error _ -> assert false
+  in
+  let cfg = merge builtin over in
+  let operator_paths = declared_paths over in
   let s = create cfg in
-  match validate cfg s ~strict:true ~builtin_names:["option"] () with
-  | Error _ -> true
-  | Ok () -> false
+  note_type_path s "option" ;
+  (match validate cfg s ~strict:true ~builtin_names:["exception"; "result"; "option"]
+           ~operator_paths () with
+  | Error msg -> string_contains ~needle:"1 declaration(s)" msg
+  | Ok () -> false)
+  &&
+  (* …and once that one path IS seen, the run is clean, even though the
+     inherited Stdlib vocabulary is still unmatched. *)
+  (note_value_path s "Fx.never_there" ;
+   validate cfg s ~strict:true ~builtin_names:["exception"; "result"; "option"] ~operator_paths ()
+   = Ok ())
 
 let%test "validate: a matched carrier type is not fatal" =
   let cfg = { channels = [{ result_channel with name = "r" }]; summaries = [] } in
