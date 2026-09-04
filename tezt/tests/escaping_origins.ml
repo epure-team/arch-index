@@ -66,7 +66,7 @@ let anchor_files =
       "(library\n\
       \ (name eo_anchor_fixture)\n\
       \ (wrapped false)\n\
-      \ (modules eo_store eo_leafmod)\n\
+      \ (modules eo_store eo_leafmod eo_rec)\n\
       \ (flags (:standard -w -8-11-21-26-27-32-33-37-39)))\n" );
     (* Under sub/ ON PURPOSE: the caller's spec ("eo_store.ml:only_here") must
        then DIFFER from the resolved root ("sub/eo_store.ml:only_here"), which
@@ -85,12 +85,37 @@ let leaf n = n + 1
        compared node count to ROOT count, and under ':*' the root count is a
        MODULE count, always 1; so it could only fire on a single-function
        module, and only a multi-function leaf distinguishes the fix from it. *)
+    (* A RECURSIVE root: the edge resolves, and its callee is the root itself.
+       This is the second shape that defeats an "outgoing resolved edge" proxy
+       while never leaving the root set. *)
+    ( "sub/eo_rec.ml",
+      {|let rec loop n = if n <= 0 then assert false else loop (n - 1)
+|} );
     ( "sub/eo_leafmod.ml",
       {|let a n = assert (n > 0) ; n
 let b n = n / 0
 let c n = n + 1
 |} );
   ]
+
+(* Extract [(nodes_reached, edges_unresolved, top)] from the coverage line.
+
+   MEDIUM-B: nothing pinned these numbers, so mutants that set nodes_reached to
+   999, edges_unresolved to 0, or swapped two fields all survived — and the
+   edges_unresolved-to-0 mutant reproduces round 1's defect on every input. A
+   branch whose thesis is "the coverage line is not optional" needs a test that
+   would notice the line becoming a fiction. *)
+let coverage out =
+  String.split_on_char '\n' out
+  |> List.find_opt (fun l ->
+         String.length l > 9 && String.sub l 0 9 = "coverage:")
+  |> Option.map (fun l ->
+         let digits =
+           String.split_on_char ' ' l
+           |> List.filter_map (fun w -> int_of_string_opt (String.trim w))
+         in
+         match digits with n :: u :: t :: _ -> (n, u, t) | _ -> (-1, -1, -1))
+  |> Option.value ~default:(-1, -1, -1)
 
 let run ?(fmt = "list") db args =
   Arch_tezt.run_command
@@ -274,6 +299,17 @@ let register_nothing_traversed () =
      against that broken guard, which is precisely why the defect survived. This
      module has three functions and no outgoing edge. *)
   let _, out_star = run db ["--roots"; "eo_leafmod.ml:*"] in
+  (* eo_store.ml IS the discriminating fixture, restored. Its [only_here] calls
+     [helper], so it HAS a resolved outgoing edge — and that edge's callee is
+     already in the root set, so the closure never leaves it. A proxy on
+     "has an outgoing resolved edge" says LOWER BOUND here; the delivered
+     condition ("did the closure leave the root set") says NOTHING TRAVERSED.
+
+     I discarded this fixture once, asserting its premise was wrong when the
+     code was. Kept now precisely because it is the one that is hard to pass. *)
+  let _, out_selfcontained = run db ["--roots"; "eo_store.ml:*"] in
+  (* Same property through recursion rather than through a sibling call. *)
+  let _, out_rec = run db ["--roots"; "eo_rec.ml:*"] in
   Batch.run (fun b ->
       Batch.check b
         ~msg:("a root with no outgoing edge is reported as NOTHING TRAVERSED:\n" ^ out)
@@ -288,7 +324,30 @@ let register_nothing_traversed () =
         (Arch_tezt.contains ~needle:"NOTHING TRAVERSED" out_star) ;
       Batch.check b
         ~msg:("...and the ':*' form does not claim a lower bound either:\n" ^ out_star)
-        (not (Arch_tezt.contains ~needle:"LOWER BOUND" out_star))) ;
+        (not (Arch_tezt.contains ~needle:"LOWER BOUND" out_star)) ;
+      Batch.check b
+        ~msg:
+          ("a SELF-CONTAINED module (resolved edge, callee already a root) never left the \
+            root set:\n" ^ out_selfcontained)
+        (Arch_tezt.contains ~needle:"NOTHING TRAVERSED" out_selfcontained) ;
+      Batch.check b
+        ~msg:("a RECURSIVE root never left the root set:\n" ^ out_rec)
+        (Arch_tezt.contains ~needle:"NOTHING TRAVERSED" out_rec) ;
+      (* THE COVERAGE NUMBERS THEMSELVES, derived from the fixture rather than
+         copied from a run. [sub/eo_store.ml] defines exactly three functions,
+         so a ':*' root reaches three nodes; the single-function root [leaf]
+         reaches one. Pinning both kills a constant mutant, and pinning a case
+         where the three values DIFFER (3 / 2 / 0) kills a field swap. *)
+      let n_star, u_star, t_star = coverage out_selfcontained in
+      Batch.eq_int b ~msg:"':*' over a 3-function module reaches exactly 3 nodes" n_star 3 ;
+      Batch.eq_int b ~msg:"...and reports its 2 unresolved edges, not 0" u_star 2 ;
+      Batch.eq_int b ~msg:"...and 0 ⊤" t_star 0 ;
+      let n_one, _, _ = coverage out in
+      Batch.eq_int b ~msg:"a single-function root reaches exactly 1 node" n_one 1 ;
+      (* If the three fields were swapped, at least one of the above differs —
+         asserted explicitly so the intent survives a future edit. *)
+      Batch.check b ~msg:"the three coverage fields are distinguishable in this case"
+        (n_star <> u_star && u_star <> t_star)) ;
   Lwt.return_unit
 
 (* An index with no exception analysis at all must refuse BEFORE printing a
