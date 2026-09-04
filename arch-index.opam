@@ -25,6 +25,7 @@ depends: [
   "caqti-driver-sqlite3" {>= "3.0"}
   "ocaml-compiler-libs"
   "otoml"
+  "digestif"
   "ppx_inline_test" {>= "v0.16"}
   "ppx_assert" {>= "v0.16"}
   "alcotest" {>= "1.7" & with-test}

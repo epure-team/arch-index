@@ -16,7 +16,9 @@
   eio
   eio.unix
   yojson
-  otoml)
+  otoml
+  ; FR-024: the error-config digest is SHA-256 (Arch_errors_config.digest).
+  digestif)
  (private_modules arch_index_db arch_index_cmt arch_index_exn arch_index_errch arch_errors_config)
  (inline_tests)
  (preprocessor_deps
