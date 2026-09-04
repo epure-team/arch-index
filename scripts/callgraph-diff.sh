@@ -125,6 +125,17 @@ echo "== kind distribution =="
 echo "old:"; sqlite3 "$OLD_DB" "SELECT '  '||kind||': '||count(*) FROM calls GROUP BY kind;"
 echo "new:"; sqlite3 "$NEW_DB" "SELECT '  '||kind||': '||count(*) FROM calls GROUP BY kind;"
 echo "== kind movements (old-kind → new-kind, per shared site) =="
+# KNOWN DEFECT (pre-existing, not fixed here): this join is on `functions.name`
+# alone, not on the normalized/rooted caller identity used everywhere else in
+# this script (see norm()/sites() above). Any function name shared by more
+# than one distinct function (21 such names were observed on a clean
+# self-comparison, i.e. comparing a tree against itself) fans this join out
+# across all of them, reporting kind "movements" that never happened. Measured
+# symptom: a clean self-comparison (old == new binary) reported 33 phantom
+# MAY_ENUMERATED -> MUST movements below, despite zero actual kind changes.
+# Do not trust this section's counts without independently checking for
+# name-collision fan-out; the DROPPED-EDGES gate above is unaffected (it joins
+# through norm()'d site identity, not bare function name).
 sqlite3 "" <<SQL
 ATTACH '$OLD_DB' AS o; ATTACH '$NEW_DB' AS n;
 SELECT '  '||ok||' -> '||nk||': '||count(*) FROM (
@@ -138,7 +149,7 @@ SQL
 
 if [ -n "$dropped" ]; then
   echo "== DROPPED EDGES (HARD FAIL) =="
-  echo "$dropped" | head -40
+  head -40 <<<"$dropped"
   echo "callgraph-diff: FAIL ($(echo "$dropped" | wc -l) dropped edges)"
   exit 1
 fi
