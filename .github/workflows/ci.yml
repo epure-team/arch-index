@@ -170,6 +170,15 @@ jobs:
       #     So the two are split below on the refusal-class line the script
       #     prints, and the plausibility arm says what a human should do.
       #
+      #     Round 8: EVERY exit-2 cause now names itself on that line, not just
+      #     the implausible one. The class is per-METRIC while this branch is
+      #     per-RUN, so a run in which the golden refused as implausible and the
+      #     ceiling refused with an unreadable pin used to take the plausibility
+      #     arm on the strength of the one class line present -- telling a
+      #     developer to recalibrate BY HAND on a run whose gate was broken,
+      #     which is this step's stated purpose exactly inverted. The condition
+      #     below is now "every class line says implausible".
+      #
       #   exit 1 (STALE) is advisory here, and NOT because staleness is
       #     tolerable. It is already hard-gated: the "Self-index smoke test"
       #     step above diffs the golden and fails on a mismatch, and
@@ -200,9 +209,19 @@ jobs:
           # step builds two PRISTINE worktrees and indexes four corpora, so it
           # pays for two full `dune build`s that share nothing with the "Build"
           # step above -- ~2-3 minutes locally and materially more on a hosted
-          # runner. The two worktrees differ from this one only by checkout, so
-          # most of that compilation is genuinely shared and the cache is worth
-          # having.
+          # runner.
+          #
+          # ROUND 8 CORRECTION. What stood here was "the two worktrees differ
+          # from this one only by checkout, so most of that compilation is
+          # genuinely shared". That overstates it by a factor of about two. This
+          # env: block applies to THIS STEP ONLY: the "Build" step above runs
+          # with the cache at dune's default-off and populates nothing, and
+          # ~/.cache/dune does not persist across jobs on ubuntu-latest. So
+          # nothing is shared with the main build, and nothing is shared with
+          # the next run. What IS shared -- and it is real -- is base-worktree
+          # <-> new-worktree WITHIN this step: the two checkouts differ only by
+          # the branch's own diff, so the unchanged majority of the tree
+          # compiles once. Worth having; half of what was claimed.
           #
           # It is a cache of BUILD ARTEFACTS keyed on their inputs, not of the
           # measurement: each cell is still indexed from its own tree by the
@@ -226,7 +245,18 @@ jobs:
             1) echo "::warning::recalibrate --check reports a STALE pinned constant."
                echo "Run scripts/recalibrate.sh --explain to see the attribution," \
                     "then --write to install what is attributable to source change alone." ;;
-            *) if grep -q 'refusal-class=implausible' /tmp/recalibrate-check.log; then
+            *) # EVERY class line must say implausible, not merely one of them.
+               # The class is per-METRIC and this branch is per-RUN: a run whose
+               # golden refused as implausible and whose ceiling refused with an
+               # unreadable pin used to take the plausibility arm and tell the
+               # developer to recalibrate BY HAND, on a run whose gate was
+               # broken. So: at least one implausible class line, AND no class
+               # line that is not implausible. With no class line at all the
+               # first test fails and the else arm runs -- fail-closed, which is
+               # what a refusal that forgot to name itself deserves.
+               if grep -q 'refusal-class=implausible' /tmp/recalibrate-check.log \
+                  && ! grep -o 'refusal-class=[a-z-]*' /tmp/recalibrate-check.log \
+                     | grep -qv 'refusal-class=implausible'; then
                  echo "::error::recalibrate --check REFUSED (exit $rc): a measured component" \
                       "collapsed below half its pinned value. Unlike the other refusals, this" \
                       "one MAY be a property of your branch: a genuine >50% resolution gain is" \

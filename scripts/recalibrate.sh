@@ -197,8 +197,16 @@ is_int() {
 #     still not matched at all, so they still refuse.
 #   - is_int is NOT touched. It guards $(( )), where `1_000` is a syntax error,
 #     so it must go on rejecting the separator; it sees stripped digits here.
-#   - stripping happens AFTER the multi-match check, so "defined twice" still
-#     returns 2 rather than silently concatenating into one integer.
+#   - stripping happens after the multi-match check. ROUND 8 CORRECTION: the
+#     reason recorded here was "so 'defined twice' still returns 2 rather than
+#     silently concatenating", and that is not true. `${out//_/}` cannot remove
+#     a newline, and the count is over non-blank LINES, so moving the strip
+#     above the count changes no reachable outcome — mutant R9 does exactly
+#     that and is genuinely equivalent. The ordering is harmless and reads
+#     better; the justification was invented. It is corrected rather than
+#     deleted because a recorded reason that is wrong ages into authority
+#     (§10.3), and because "an equivalent mutant is not a defect" only holds
+#     while nobody is claiming the line is load-bearing.
 #   - `0_0` strips to `00`, which is_int still rejects as octal-looking, so the
 #     leading-zero refusal survives the widening.
 #
@@ -260,7 +268,13 @@ metric_well_formed() {
       # The regex is anchored and lower-case-only ON PURPOSE: CI compares
       # exactly the three lines `modules:`/`functions:`/`calls:` that
       # sqlite3 emits, so anything else is a measurement this tool must not
-      # install. Each of those properties has a self-test case below.
+      # install.
+      #
+      # Each of those properties has a self-test case below — which, until
+      # round 8, was FALSE for the right anchor: `g_unanchored` covered the
+      # left one and nothing covered the `$`. Mutant F4 (drop the `$`) survived
+      # the whole battery. It is now killed by g_trailing_text /
+      # g_trailing_junk / g_trailing_space, and the claim is true as written.
       local lines total
       lines="$(printf '%s\n' "$val" | grep -cE '^[a-z]+: *[0-9]+$')"
       total="$(printf '%s\n' "$val" | grep -c '[^[:space:]]')"
@@ -449,10 +463,25 @@ pinned_degraded() {  # kind pinned -> " PINNED" or ""
     #
     # Non-numeric lines are not judged here: metric_well_formed owns the
     # golden's SHAPE, this owns its ADEQUACY.
-    # [a-z_]+, wider than metric_well_formed's [a-z]+ on purpose: that one
-    # judges a measured CELL, this one judges the PIN, and nothing upstream
-    # constrains the pin's label vocabulary. A pin spelled `type_usages: 0`
-    # must not slip past the floor because of a character class.
+    # [a-z_]+, wider than metric_well_formed's [a-z]+ on purpose. The reason
+    # recorded here through round 7 was "nothing upstream constrains the pin's
+    # label vocabulary", and that is false: CI's self-index smoke test and this
+    # script's own currency check both diff the golden fixture BYTE-FOR-BYTE
+    # against sqlite3's three-line output, so a pin whose label is not one of
+    # modules/functions/calls is already a hard failure — a tighter constraint
+    # than either character class imposes.
+    #
+    # (metric_well_formed is not the constraint either, in either direction:
+    # it is applied to the four measured CELLS and never to PINNED. So the old
+    # sentence was wrong about the world and right about that function.)
+    #
+    # The widening is kept, and is the right default, for a different reason:
+    # this floor runs BEFORE any of those diffs, on a value that may have been
+    # hand-edited, and it must not be the thing that lets a zero through on a
+    # character class. `type_usages: 0` is refused here on its own merits
+    # rather than left to a downstream diff to catch — which matters the day
+    # the golden legitimately gains an underscored component and the arity gate
+    # is relaxed to admit it.
     if printf '%s\n' "$pinned" | grep -qE '^[a-z_]+: *0+$'; then
       printf ' PINNED'; return 0
     fi
@@ -496,11 +525,26 @@ ratchet_write_verdict() {  # D PINNED -> WRITE | REFUSE_LOOSEN | REFUSE_D | REFU
 # reads back. The caller installs it only on a match, so a refusal leaves the
 # tracked file untouched rather than merely "reported as wrong".
 #
-# BOTH sides of the sed are anchored. Unanchored on the right,
-# `let clean_measured = 1_000` became `let clean_measured = 340_000` — the
-# read-back then refused, so the tracked file survived, but the scratch file was
-# silently corrupt and the refusal named the wrong cause. Anchored, that line is
-# not matched at all and the read-back reports exactly that.
+# BOTH sides of the sed are anchored, and each side is load-bearing for a
+# DIFFERENT failure.
+#
+# RIGHT. Unanchored, `let clean_measured = 1_000` became
+# `let clean_measured = 340_000` — the read-back then refused, so the tracked
+# file survived, but the scratch file was silently corrupt and the refusal
+# named the wrong cause. Anchored, that line is not matched at all and the
+# read-back reports exactly that.
+#
+# LEFT. This is the worse of the two, because it does not refuse. An INDENTED
+# `let clean_measured = 999` inside a function body is a perfectly ordinary
+# thing for this file to grow, and unanchored the sed rewrites it too. The
+# read-back cannot notice: read_pinned_int is itself left-anchored, so it sees
+# only the top-level definition, matches once, and reports success — the
+# scratch file is installed with an unrelated binding silently changed. That is
+# the "scratch file silently corrupt while the refusal names the wrong cause"
+# shape one step further along, with no refusal at all.
+#
+# Both are killed by --self-test now (indented.ml, trailing.ml); the left one
+# was untested until round 8.
 ceiling_write_to() {  # src scratch value -> echoes the value the scratch reads back
   local src="$1" scratch="$2" val="$3"
   cp "$src" "$scratch" || return 2
@@ -534,6 +578,60 @@ bump_status() {
     2:*) ;;
     *:2) STATUS=2 ;;
     0:1) STATUS=1 ;;
+  esac
+}
+
+# MEDIUM-2, round 8 — the machine-readable refusal class, for ALL of them.
+#
+# Round 7 emitted exactly one class line, `refusal-class=implausible`, on the
+# reasoning that "no class line totally covers every other refusal". That
+# reasoning is false the moment two metrics refuse for DIFFERENT reasons,
+# because the class is per-METRIC and CI's branch is per-RUN. Measured on this
+# tree with the golden's queries dead (implausible) and the ceiling's pin
+# spelled `let clean_measured : int = 347` (unreadable):
+#
+#   ✗ REFUSED: implausible measurement in cell(s): A B C D
+#   recalibrate: refusal-class=implausible
+#   ✗ REFUSED: no well-formed ceiling measurement for: PINNED
+#   => a bare `grep -q refusal-class=implausible` takes the PLAUSIBILITY arm
+#
+# and CI then tells the developer that the refusal "MAY be a property of your
+# branch" and to "recalibrate BY HAND" — on a run whose ceiling pin cannot be
+# read and whose gate is broken. That inverts MEDIUM-4's whole purpose and
+# points a human at hand-editing the constant this tool exists to stop people
+# hand-editing. The build stays red either way, so it is a diagnostic defect,
+# not a soundness one.
+#
+# The fix is on both sides and neither half works alone: every exit-2 cause
+# names itself here, and ci.yml takes the plausibility arm only when EVERY
+# class line in the run says `implausible`. Absence of any class line still
+# means "gate broken", so the CI branch remains fail-closed if a future refusal
+# forgets to call this.
+#
+# A TABLE, not a `printf 'refusal-class=%s'`, for two reasons.
+#
+#   1. The emitted vocabulary is CLOSED. A caller cannot invent a class, and a
+#      typo'd call site does not quietly mint a new one that CI has never heard
+#      of — it lands on the catch-all as `unknown`, which CI reads as
+#      "gate broken". Fail-closed in the direction that matters.
+#   2. `refusal-class=implausible` exists as one literal string, in this file
+#      and in .github/workflows/ci.yml, and the two are pinned identical by
+#      tezt/tests/recalibrate_self_test.ml — the same script<->CI transcription
+#      check L5 installed for the golden SQL, which is what this is.
+#
+# The metric name IS interpolated, but it comes from this script's own
+# `for metric in` list, never from a measurement, so no injection reaches here.
+refusal_class() {  # class metric
+  local m="${2:-unknown}"
+  case "$1" in
+    implausible)       printf 'recalibrate: refusal-class=implausible metric=%s\n'       "$m" >&2 ;;
+    degraded)          printf 'recalibrate: refusal-class=degraded metric=%s\n'          "$m" >&2 ;;
+    query-failed)      printf 'recalibrate: refusal-class=query-failed metric=%s\n'      "$m" >&2 ;;
+    unreadable-floor)  printf 'recalibrate: refusal-class=unreadable-floor metric=%s\n'  "$m" >&2 ;;
+    inadequate-corpus) printf 'recalibrate: refusal-class=inadequate-corpus metric=%s\n' "$m" >&2 ;;
+    unreadable-band)   printf 'recalibrate: refusal-class=unreadable-band metric=%s\n'   "$m" >&2 ;;
+    install-failed)    printf 'recalibrate: refusal-class=install-failed metric=%s\n'    "$m" >&2 ;;
+    *)                 printf 'recalibrate: refusal-class=unknown metric=%s\n'           "$m" >&2 ;;
   esac
 }
 
@@ -674,6 +772,42 @@ extra:"
   if metric_well_formed golden "$g_trailing_label"; then
     echo "  FAIL well_formed ACCEPTED a trailing valueless label"; fails=$(( fails + 1 ))
   else echo "  ok   well_formed rej trailing valueless label"; fi
+  # HIGH-1, round 8 — the RIGHT anchor of `^[a-z]+: *[0-9]+$`, which was live
+  # and untested while its left sibling had g_unanchored. This is the third
+  # instance of the same anchored-read shape in the file; round 7 gave the
+  # other two their trailing-text fixtures (trailing.ml for read_pinned_int,
+  # pin_trailing for the golden pin lookup) and left this one short.
+  #
+  # Mutant F4 drops the `$`. On a clean triple nothing changes; on each of
+  # these three, SHIPPED rejects and F4 accepts, so CI would be handed a golden
+  # whose "modules" line is not the line sqlite3 emitted:
+  #
+  #   modules: 23 (* was 21 *)   an OCaml-style comment leaking into the pin
+  #   modules: 23abc             junk concatenated onto the count
+  #   'modules: 23 '             a trailing space, which `diff` also calls a
+  #                              mismatch — so accepting it here would install
+  #                              a fixture the smoke test then fails on
+  local g_trailing_text="modules: 23 (* was 21 *)
+functions: 804
+calls: 5170"
+  if metric_well_formed golden "$g_trailing_text"; then
+    echo "  FAIL well_formed ACCEPTED a golden value with trailing text"; fails=$(( fails + 1 ))
+  else echo "  ok   well_formed rej trailing text (right anchor)"; fi
+  local g_trailing_junk="modules: 23abc
+functions: 804
+calls: 5170"
+  if metric_well_formed golden "$g_trailing_junk"; then
+    echo "  FAIL well_formed ACCEPTED a golden value with junk appended"; fails=$(( fails + 1 ))
+  else echo "  ok   well_formed rej appended junk (right anchor)"; fi
+  # Built with printf, not a here-string: the significant character is a
+  # trailing SPACE, and an editor or a linter that trims trailing whitespace
+  # would silently turn this case into a duplicate of the clean triple. Spelled
+  # this way it cannot be trimmed away without the case visibly changing.
+  local g_trailing_space
+  g_trailing_space="$(printf 'modules: 23 \nfunctions: 804\ncalls: 5170')"
+  if metric_well_formed golden "$g_trailing_space"; then
+    echo "  FAIL well_formed ACCEPTED a golden line with a trailing space"; fails=$(( fails + 1 ))
+  else echo "  ok   well_formed rej trailing space (right anchor)"; fi
 
   # is_int guards the ratchet write. An empty or non-numeric value reaching the
   # comparison is what made that guard fail OPEN and emit an uncompilable file.
@@ -712,6 +846,13 @@ extra:"
   # are the two the widened capture must not swallow; `0_0` is the octal-looking
   # refusal surviving the strip.
   printf 'let a = 1_0x0\nlet b = _100\nlet c = 0x200\nlet clean_measured = 0_0\n' > "$FX/oddball.ml"
+  # MEDIUM-1, round 8 — the sed's LEFT anchor, which was live, untested, and
+  # the one that fails SILENTLY. Note the shape: the nested binding must end
+  # immediately after its number, with `in` on the FOLLOWING line, or the sed's
+  # right anchor refuses it on its own and the fixture proves nothing. (The
+  # obvious spelling, `let clean_measured = 999 in` on one line, does NOT
+  # discriminate — measured on this tree.)
+  printf 'let clean_measured = 340\n\nlet headroom = 25\n\nlet f x =\n  let clean_measured = 999\n  in x\n' > "$FX/indented.ml"
 
   # --- read_pinned_int: HIGH-1, and mutant M14 (the headroom gate) ----------
   chk 347 "$(read_pinned_int "$FX/ok.ml" clean_measured || echo REFUSED)" "read_pinned_int clean_measured"
@@ -768,6 +909,22 @@ extra:"
   chk REFUSED "$(ceiling_write_to "$FX/trailing.ml" "$FX/w4.ml" 340 || echo REFUSED)" "write-verify refuses a trailing-comment pin"
   chk "let clean_measured = 347 (* was 321 *)" "$(grep '^let clean_measured' "$FX/w4.ml")" "refused write left the copy intact"
   chk REFUSED "$(ceiling_write_to "$FX/annotated.ml" "$FX/w3.ml" 340 || echo REFUSED)" "write-verify refuses annotated pin"
+  # MEDIUM-1, the LEFT anchor on the write. The comment above ceiling_write_to
+  # claims BOTH sides are anchored and, until round 8, justified and tested
+  # only the right one. This is the half that corrupts SILENTLY:
+  #
+  #   SHIPPED     readback=341   the nested `let clean_measured = 999` survives
+  #   E2 (drop ^) readback=341   the nested binding is REWRITTEN to 341, and
+  #                              the read-back — which is itself left-anchored —
+  #                              sees only the top-level line and reports
+  #                              success on a file that has been silently
+  #                              changed somewhere the tool never looked.
+  #
+  # So the value assertion cannot catch it and the FILE assertion is the test.
+  chk 341 "$(ceiling_write_to "$FX/indented.ml" "$FX/w5.ml" 341 || echo REFUSED)" "write-verify reads back 341 (nested binding present)"
+  chk "let clean_measured = 341" "$(grep '^let clean_measured' "$FX/w5.ml")" "the top-level pin was rewritten"
+  chk "  let clean_measured = 999" "$(grep 'let clean_measured = 999' "$FX/w5.ml")" \
+      "a nested clean_measured is NOT rewritten (left anchor)"
   rm -rf "$FX"
 
   # --- band_verdict: mutant M14, and round 4's headroom regression ----------
@@ -808,6 +965,26 @@ extra:"
   # on a pin that can never fail and can never catch anything again.
   chk " PINNED" "$(pinned_degraded ratchet '0')"     "ratchet pin 0 is degraded"
   chk ""        "$(pinned_degraded ratchet '1')"     "ratchet pin 1 is the smallest real calibration"
+  # HIGH-2, round 8 — the `[ "$pinned" -ge 1 ]` floor added by MEDIUM-3 above
+  # made the four M13 cases INERT, and this is the input that restores them.
+  #
+  # M13 deletes `is_int "$pinned" || …`. Before the floor existed, that mutant
+  # was killed by ''/'abc'/'1_000'. It no longer is: with is_int gone, `[ 'abc'
+  # -ge 1 ]` returns non-zero — via a bash "integer expression expected" error
+  # on stderr, not via a decision — and the function reaches ' PINNED' by
+  # ACCIDENT. Same verdict, no coverage. Measured on this tree with the mutant
+  # applied: '' / 'abc' / '1_000' all still print ' PINNED'.
+  #
+  # A leading zero is where is_int is the only thing standing, because bash's
+  # `[` reads `08` as DECIMAL 8, so the floor evaluates cleanly and passes it:
+  #
+  #   pinned_degraded ratchet '08'    SHIPPED ' PINNED'   M13 ''
+  #
+  # and `08` is exactly the value is_int exists to stop, since $(( 08 + 25 ))
+  # aborts with "value too great for base" and skips every arm of the band.
+  chk " PINNED" "$(pinned_degraded ratchet '08')"    "ratchet pin 08 is degraded (octal-looking)"
+  chk " PINNED" "$(pinned_degraded ratchet '007')"   "ratchet pin 007 is degraded"
+  chk " PINNED" "$(pinned_degraded ratchet '0347')"  "ratchet pin 0347 is degraded"
   chk " PINNED" "$(pinned_degraded descriptive '')"  "golden pin empty is degraded"
   chk ""        "$(pinned_degraded descriptive 'modules: 23')" "golden pin non-empty is fine"
   # The golden's absolute floor, the same hole as the ratchet's. A golden pinned
@@ -823,6 +1000,13 @@ calls: 5170"
   chk " PINNED" "$(pinned_degraded descriptive "$part_zero_pin")" "one zero component degrades the whole golden pin"
   chk " PINNED" "$(pinned_degraded descriptive 'type_usages: 0')" "a zero component with an underscored label is degraded"
   chk ""        "$(pinned_degraded descriptive 'type_usages: 33')" "a healthy underscored component is fine"
+  # D6, round 8 — the `0+` quantifier in the floor's regex, which was the
+  # untested half of a regex added last round. metric_well_formed accepts
+  # `modules: 00` (its class is `[0-9]+`), so a pin can arrive spelled that
+  # way; with the quantifier narrowed to `0$` the floor stops seeing it and a
+  # zero component slips through as a real calibration.
+  chk " PINNED" "$(pinned_degraded descriptive 'modules: 00')"  "a zero pin spelled 00 is degraded"
+  chk " PINNED" "$(pinned_degraded descriptive 'modules: 000')" "a zero pin spelled 000 is degraded"
 
   # --- cells_degraded: mutant M17, the loop that marks nothing --------------
   chk ""      "$(cells_degraded ceiling 340 340 340 340)" "four good ceiling cells"
@@ -977,6 +1161,45 @@ calls: 5170"
   chk " A B C D" "$(cells_implausible ceiling 347 0 0 0 0)" "four degenerate ceiling cells"
   chk ""         "$(cells_implausible ceiling 347 340 340 345 345)" "four healthy ceiling cells"
   chk " D"       "$(cells_implausible ceiling 347 340 340 340 0)"   "only D degenerate"
+
+  # --- refusal_class: MEDIUM-2, the script<->CI contract --------------------
+  # Asserted on STDERR (2>&1 inside the substitution), because that is the
+  # stream ci.yml's `tee` captures and greps. Three properties, each with the
+  # mutation that breaks it:
+  #
+  #   the token          drop or misspell an arm's literal -> CI stops
+  #                      recognising that refusal; for `implausible` it would
+  #                      silently move a branch-property refusal into the
+  #                      "gate is broken" arm.
+  #   the metric suffix  delete it -> the per-metric attribution MEDIUM-2 is
+  #                      about disappears and the mixed-cause run is
+  #                      indistinguishable again.
+  #   the catch-all      delete it -> a typo'd call site emits NOTHING, and a
+  #                      refusal with no class line is exactly the shape whose
+  #                      absence CI reads as "gate broken"... which is right by
+  #                      luck, not by construction. Emitting `unknown` says so.
+  chk "recalibrate: refusal-class=implausible metric=ceiling" \
+      "$(refusal_class implausible ceiling 2>&1)" "refusal_class implausible"
+  chk "recalibrate: refusal-class=degraded metric=golden" \
+      "$(refusal_class degraded golden 2>&1)" "refusal_class degraded"
+  chk "recalibrate: refusal-class=query-failed metric=golden" \
+      "$(refusal_class query-failed golden 2>&1)" "refusal_class query-failed"
+  chk "recalibrate: refusal-class=unreadable-floor metric=ceiling" \
+      "$(refusal_class unreadable-floor ceiling 2>&1)" "refusal_class unreadable-floor"
+  chk "recalibrate: refusal-class=inadequate-corpus metric=ceiling" \
+      "$(refusal_class inadequate-corpus ceiling 2>&1)" "refusal_class inadequate-corpus"
+  chk "recalibrate: refusal-class=unreadable-band metric=ceiling" \
+      "$(refusal_class unreadable-band ceiling 2>&1)" "refusal_class unreadable-band"
+  chk "recalibrate: refusal-class=install-failed metric=golden" \
+      "$(refusal_class install-failed golden 2>&1)" "refusal_class install-failed"
+  chk "recalibrate: refusal-class=unknown metric=ceiling" \
+      "$(refusal_class not-a-class ceiling 2>&1)" "refusal_class closes its vocabulary"
+  chk "recalibrate: refusal-class=degraded metric=unknown" \
+      "$(refusal_class degraded 2>&1)" "refusal_class names the metric even when unset"
+  # Nothing on STDOUT: ci.yml merges the two streams, but --explain's stdout is
+  # a human-readable table and a class line belongs in neither of the places a
+  # reader looks for a measurement.
+  chk "" "$(refusal_class implausible ceiling 2>/dev/null)" "refusal_class writes nothing to stdout"
 
   # --- bump_status: mutant M10, the monotonic exit status -------------------
   local before after
@@ -1296,6 +1519,7 @@ for metric in ${METRICS}; do
       echo "── $metric (measured over $corpus_rel)"
       echo "   ✗ REFUSED: the raw golden query failed on $BB_DB" >&2
       tail -20 "$QERR" >&2
+      refusal_class query-failed "$metric"
       bump_status 2
       continue
     fi
@@ -1357,6 +1581,7 @@ for metric in ${METRICS}; do
           ;;
       esac
     fi
+    refusal_class degraded "$metric"
     bump_status 2
     continue
   fi
@@ -1395,6 +1620,7 @@ for metric in ${METRICS}; do
       echo "   ✗ REFUSED: no single 'let min_total_calls = <int>' could be read from" >&2
       echo "     $CEILING_FILE — the corpus adequacy floor is unavailable, and a" >&2
       echo "     measurement with no adequacy floor is not a measurement." >&2
+      refusal_class unreadable-floor "$metric"
       bump_status 2
       continue
     fi
@@ -1415,6 +1641,7 @@ for metric in ${METRICS}; do
         echo "     --- sqlite3 stderr ---" >&2
         tail -20 "$QERR" >&2
       fi
+      refusal_class inadequate-corpus "$metric"
       bump_status 2
       continue
     fi
@@ -1478,9 +1705,13 @@ for metric in ${METRICS}; do
     # working; this one is the only exit-2 that may be a property of the
     # BRANCH, and telling a developer who did something excellent that the
     # gate is broken is how a gate gets bypassed — this file's own words.
-    # Only this class is emitted, deliberately: CI branches on exactly one
-    # question, and "no class line" totally covers every other refusal.
-    echo "recalibrate: refusal-class=implausible" >&2
+    #
+    # ROUND 8. This used to be the ONLY class emitted, on the reasoning that
+    # "no class line totally covers every other refusal". It does not — see
+    # refusal_class() above for the mixed-cause run that disproves it. Every
+    # exit-2 cause names itself now, and CI takes this arm only when EVERY
+    # class line in the run is `implausible`.
+    refusal_class implausible "$metric"
     bump_status 2
     continue
   fi
@@ -1536,6 +1767,7 @@ for metric in ${METRICS}; do
         echo "     It is defined MORE THAN ONCE below; this tool will not choose." >&2
       echo "     Candidate lines:" >&2
       grep -n '^let headroom' "$CEILING_FILE" >&2 || echo "       (none)" >&2
+      refusal_class unreadable-band "$metric"
       bump_status 2
       continue
     fi
@@ -1555,6 +1787,7 @@ for metric in ${METRICS}; do
         ;;
       *)
         echo "   ✗ REFUSED: the band could not be computed (D='$D' pinned='$PINNED' headroom='$hr')" >&2
+        refusal_class unreadable-band "$metric"
         bump_status 2
         continue
         ;;
@@ -1630,10 +1863,12 @@ for metric in ${METRICS}; do
               # having written NOTHING.
               if ! mv "$WORK/golden.new" "$GOLDEN_FILE"; then
                 echo "   ✗ REFUSED: could not install test/fixtures/self-index-stats.txt" >&2
+                refusal_class install-failed "$metric"
                 bump_status 2
               elif ! diff -q "$GOLDEN_FILE" "$GOLDEN_RAW" >/dev/null 2>&1; then
                 echo "   ✗ INSTALLED file does not match a raw measurement:" >&2
                 diff "$GOLDEN_FILE" "$GOLDEN_RAW" >&2
+                refusal_class install-failed "$metric"
                 bump_status 2
               else
                 echo "   ✓ WROTE test/fixtures/self-index-stats.txt (installed file verified byte-identical)"
@@ -1661,6 +1896,7 @@ for metric in ${METRICS}; do
               # $WORK/ceiling.new.
               if ! mv "$WORK/ceiling.new" "$CEILING_FILE"; then
                 echo "   ✗ REFUSED: could not install tezt/tests/must_null_ceiling.ml" >&2
+                refusal_class install-failed "$metric"
                 bump_status 2
               else
                 installed="$(metric_pinned ceiling)"
@@ -1668,6 +1904,7 @@ for metric in ${METRICS}; do
                   echo "   ✓ TIGHTENED clean_measured $PINNED → $D (installed file re-read and confirmed)"
                 else
                   echo "   ✗ INSTALLED file reads '$installed', expected $D" >&2
+                  refusal_class install-failed "$metric"
                   bump_status 2
                 fi
               fi

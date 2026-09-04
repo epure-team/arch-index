@@ -45,9 +45,35 @@ let register () =
   let script = Filename.concat (repo_root ()) "scripts/recalibrate.sh" in
   if not (Sys.file_exists script) then
     Test.fail "%s does not exist — the recalibration gate has moved or been deleted" script ;
-  let code, output = run_command "bash" [script; "--self-test"] in
+  let code, output, stderr = run_command_split "bash" [script; "--self-test"] in
   if code <> 0 then
-    Test.fail "recalibrate.sh --self-test exited %d:\n%s" code output ;
+    Test.fail "recalibrate.sh --self-test exited %d:\nstdout:\n%s\nstderr:\n%s" code output
+      stderr ;
+  (* STDERR MUST BE EMPTY, and this is not tidiness.
+
+     The script's own oracle ([chk]) compares captured stdout and never looks at
+     stderr, so a decision reached by a bash ERROR rather than by a guard passes
+     every case and prints "all cases pass". That is not hypothetical: round 8's
+     HIGH-2 is exactly it. Deleting [is_int] from [pinned_degraded]'s ratchet arm
+     leaves `[ "$pinned" -ge 1 ]` to judge '' / 'abc' / '1_000'; `[` fails on all
+     three with "integer expression expected", the function returns the RIGHT
+     answer for the WRONG reason, and four assertions that were written to kill
+     that mutant go quietly inert. With the mutant applied the self-test emitted
+     191 bytes to stderr and still exited 0.
+
+     Asserting the stream closes that whole family at once, rather than one
+     leading-zero input at a time -- and it is why [run_command_split] is used
+     here instead of [run_command], which merges the two. *)
+  if String.trim stderr <> "" then
+    Test.fail
+      "recalibrate.sh --self-test wrote %d byte(s) to stderr while exiting 0. A self-test whose \
+       cases pass because bash ERRORED is not a passing self-test: the script's own oracle \
+       compares stdout only, so an assertion can go inert without any case turning red.\n\
+       stderr:\n\
+       %s\n\
+       stdout:\n\
+       %s"
+      (String.length stderr) stderr output ;
   (* Exit 0 alone is not enough. The script reports per-case results and returns
      1 on any failure, but a --self-test that silently stopped running cases
      would also exit 0 — the shape §10.6 calls "a check that looks like a
@@ -125,7 +151,27 @@ let register_golden_sql_transcription () =
   let fragments =
     [ "SELECT 'modules: ' || count(*) FROM modules;";
       "SELECT 'functions: ' || count(*) FROM functions;";
-      "SELECT 'calls: ' || count(*) FROM calls;" ]
+      "SELECT 'calls: ' || count(*) FROM calls;";
+      (* The refusal-class contract, which is the identical script<->CI shape
+         and was left out of this list when it was introduced. The script
+         prints this exact token on an implausibility refusal and ci.yml
+         branches on it; a divergence sends a refusal that MAY be a property of
+         the branch down the "the gate is broken, not your branch" arm, or the
+         reverse -- and, like the SQL above, nothing else re-reads either file.
+
+         Both greps in ci.yml spell the token in full, deliberately: this
+         assertion is what keeps them spelled the same as the script's.
+
+         BE HONEST ABOUT WHICH HALF IS LOAD-BEARING. [contains] over the whole
+         file cannot tell code from a comment, so the SCRIPT half of this check
+         would be satisfied by a comment mentioning the token even if
+         [refusal_class]'s [implausible)] arm were deleted. That half is
+         redundant here rather than false: --self-test asserts the emitted line
+         character-for-character (mutant RC1, which renames the arm so it falls
+         to the catch-all, turns it RED), so what this list adds on top is the
+         CI half -- that ci.yml still greps for the string the script proves it
+         prints. Same for the SQL above, and it was always so. *)
+      "refusal-class=implausible" ]
   in
   List.iter
     (fun frag ->
