@@ -382,3 +382,21 @@ the expected value by hand **before** running.
   enumerated-leaf convention, which is not this spec's subject.
 - `reaches` will not traverse an alias, by Decision 2. If that turns out to matter,
   the fix is to teach `reaches` about `edge_form`, not to promote the kind.
+
+## Consumer-visible changes, stated deliberately
+
+Closing the chain (FR-005c) is not verdict-neutral, and that is the point — a node that
+answered `BOUNDED: {}` because nobody asked its target now answers what its target
+answers. Two consequences worth naming before someone meets them as a surprise:
+
+- **A node rooted at an alias stops being empty.** `escaping-origins` rooted at an alias
+  binder previously returned an empty result with `0 edges unresolved · 0 ⊤`, because
+  that binder had no outgoing edge at all. It now returns its target's origins. The old
+  answer was not a smaller answer, it was a *false* one: "nothing escapes here" asserted
+  about a body that was never read.
+- **`fan-in`, `god-modules` and `callers-of` return smaller numbers and shorter lists**
+  than a database built before `edge_form` existed. That is what schema version `1.10`
+  is for (`docs/schema.md`): a consumer comparing two runs must be able to refuse
+  against the version rather than attribute the drop to the code under analysis. The
+  `Arch_db.has_col` gate in `arch_query.ml` keeps an older database answering; it is a
+  courtesy to old data, not a substitute for the version.
