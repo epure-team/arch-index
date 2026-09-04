@@ -94,6 +94,7 @@ let () =
   Nested_module_qualification.register () ;
   Qualified_library_scoping.register () ;
   Qualified_library_scoping.register_unwrapped_residual () ;
+  Qualified_library_scoping.register_reexport_facade () ;
   Must_null_ceiling.register () ;
   Query_limits.register () ;
   Exn_raise_sets.register () ;

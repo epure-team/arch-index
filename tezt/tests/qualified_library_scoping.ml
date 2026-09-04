@@ -305,3 +305,98 @@ let register_unwrapped_residual () =
                      kind (show callee))
                 (callee = None))) ;
   Lwt.return_unit
+
+(* ------------------------------------------------------------------ *)
+(* S7 — the cross-library RE-EXPORT FACADE                             *)
+(* ------------------------------------------------------------------ *)
+
+(* Scenario D — a reference that shares NO PREFIX with the unit it names.
+
+   Found on proto_alpha, not by review. Scenarios A–C all assume the reference
+   spells a prefix of the defining unit's dune name, so enumerating "__"-joins
+   of prefixes covers them. A re-export facade breaks that assumption outright:
+
+     reference:      Facade.Protocol.Script_int.of_zint
+     defining unit:  Rawlib__Script_int              (rawlib/script_int.ml)
+
+   [facade] re-exports the whole of [rawlib] through a nested module [Protocol],
+   exactly as [tezos_protocol_alpha] re-exports [tezos_raw_protocol_alpha]. The
+   two names have no common prefix, so no prefix reading can ever bridge them
+   and the reference falls through to "proven external leaf" — a NULL-free MUST
+   into a library that IS in the index. Measured cost of not bridging it, before
+   the second resolution tier existed: 2385 lost resolutions on proto_alpha,
+   including src/proto_alpha/lib_protocol/script_interpreter.ml.
+
+   This is the shape that makes the facade tier necessary, so it is pinned here
+   rather than left to the next corpus run to rediscover. Note what it must NOT
+   become: the old bare-segment lookup keyed one basename to ONE path
+   last-writer-wins, which is scenario A's defect. Here a bare segment maps to
+   every unit that could define it and the function table still arbitrates — so
+   scenario A stays green, and a genuine two-answer case still degrades to ⊤
+   (scenario C). *)
+let facade_raw_dune =
+  ("rawlib/dune", "(library\n (name rawlib)\n (modules script_int)\n (flags (:standard -w -a)))\n")
+
+let facade_raw_impl = ("rawlib/script_int.ml", "let of_zint (n : int) : int = n\n")
+
+(* The facade's main module re-exports the whole library under a nested name.
+   It defines no function of its own, so no reading rooted at [Facade] has a
+   row to resolve against. *)
+let facade_dune =
+  ( "facadelib/dune",
+    "(library\n (name facade)\n (libraries rawlib)\n (modules facade)\n (flags (:standard -w \
+     -a)))\n" )
+
+let facade_impl = ("facadelib/facade.ml", "module Protocol = Rawlib\n")
+
+let facade_caller_dune =
+  ( "facadecaller/dune",
+    "(library\n (name facadecaller)\n (libraries facade)\n (modules f)\n (flags (:standard -w \
+     -a)))\n" )
+
+let facade_caller_f =
+  ("facadecaller/f.ml", "let go () : int = Facade.Protocol.Script_int.of_zint 1\n")
+
+let scenario_d_files =
+  [
+    dune_project; facade_raw_dune; facade_raw_impl; facade_dune; facade_impl;
+    facade_caller_dune; facade_caller_f;
+  ]
+
+let register_reexport_facade () =
+  Test.register ~__FILE__
+    ~title:"cmt: a reference through a cross-library re-export facade resolves to the real unit"
+    ~tags:["cmt"; "qualified_name"; "library_scoping"; "facade"]
+  @@ fun () ->
+  Batch.run (fun b ->
+      with_fixture ~name:"qual-scope-d" ~files:scenario_d_files @@ fun fixture ->
+      let db = index fixture in
+      Db.with_db db (fun conn ->
+          let impl = fn_id conn ~mod_like:"%rawlib/script_int.ml" ~name:"of_zint" b ~label:"D" in
+          match impl with
+          | None -> Batch.note b "D: rawlib/script_int.ml of_zint is not indexed at all"
+          | Some impl ->
+              let callee, kind = single_call conn ~caller_fn:"go" ~label:"D" in
+              (* The resolution half. Leaving this unresolved is not caution:
+                 the callee is IN the index, so an unresolved MUST here is a
+                 proof-shaped edge into a body the graph does have. *)
+              Batch.check b
+                ~msg:
+                  (Printf.sprintf
+                     "D: go -> Facade.Protocol.Script_int.of_zint resolved to %s (kind=%s), \
+                      expected rawlib/script_int.ml of_zint (%s). The reference shares no prefix \
+                      with the unit Rawlib__Script_int, so prefix readings alone cannot reach \
+                      it — and the callee IS indexed, so failing to reach it emits a NULL MUST \
+                      into a library the graph contains"
+                     (show callee) kind impl)
+                (callee = Some impl) ;
+              Batch.check b
+                ~msg:
+                  (Printf.sprintf
+                     "D: go -> Facade.Protocol.Script_int.of_zint is kind=%s, expected MUST. \
+                      Exactly one indexed unit ends in Script_int and exactly one function in it \
+                      answers to of_zint, so there is nothing to be uncertain about here; ⊤ \
+                      belongs to the two-answer case (scenario C), not to this one"
+                     kind)
+                (kind = "MUST"))) ;
+  Lwt.return_unit
