@@ -578,10 +578,19 @@ type top_reason =
           two is what inflated the abandoned branch's repo-wide MAY_TOP from
           660 to 875.
 
-          Rare in practice: a census of this repository found exactly one
-          ambiguous unit name out of 93 ([Dune__exe], a wrapper alias that
-          owns no functions and therefore resolves to zero candidates, not
-          two). It is the corpora, not this repo, where this fires. *)
+          Rare in practice: measured (round-5 review) by iterating
+          {!known_unit_names} and {!paths_of_unit} over this repository's own
+          build — 88 unit names, ZERO with more than one registered path (see
+          the extended note on {!unit_paths} above, which this line used to
+          contradict: an earlier revision claimed "exactly one ambiguous unit
+          name out of 93 ([Dune__exe])", which does not reproduce and, per its
+          own commit's evidence trail, never did — corrected round-6 review).
+          [Dune__exe] itself collides only at the raw-[.cmt] level across
+          several executables' wrapper modules, never reaching {!record_unit}
+          with two different paths for the same name, because a dune-generated
+          empty wrapper alias is not stored as a [modules] row. It is the
+          corpora, not this repo, where a genuine two-path collision fires
+          (scenario C, `tezt/tests/qualified_library_scoping.ml`). *)
 
 let top_reason_to_string = function
   | Callback_param -> "callback_param"
