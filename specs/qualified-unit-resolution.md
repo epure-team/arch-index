@@ -7,6 +7,18 @@ see §11)
 **Intake:** `briefs/qualified-unit-resolution-intake.md`
 **Research:** `briefs/qualified-unit-resolution-research.md`
 
+**Relationship to `specs/sound-qualified-name-resolution.md`** (added round-5 review, to settle
+which document governs what after the two were found to contradict each other on the alias/facade
+case): THIS file is the descriptive account of what the resolver actually implements —
+`unit_readings`, `facade_readings`, the anchor gate, the 1 / 2+ / 0 arbitration rule, and the
+disclosed residuals (§10 below). `sound-qualified-name-resolution.md` is the adversarial GWT spec
+that states the property (P1/P2/P3) and the scenarios/falsifiers a change must satisfy; its S3 was
+amended by roadmap 1.6 to match the arbitration rule this file describes — see that file's S3
+status note for the amendment and why it is not a violation. When the two disagree on a POINT OF
+FACT about the code, this file wins (it is verified against source, per §2); when they disagree on
+what SHOULD be required, the other file's GWT scenarios and falsifiers win, and this file's §10
+residuals should be read as the current, disclosed gap against those requirements.
+
 ## 1. Problem
 
 A qualified call resolves by walking the dotted name and looking up each **bare segment** in a
