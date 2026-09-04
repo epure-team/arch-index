@@ -1,0 +1,13 @@
+{
+  "task": "origin-class-precision",
+  "mode": "full",
+  "current_phase": "question",
+  "events": [
+    {
+      "phase": "question",
+      "outcome": "COMPLETED",
+      "at": "2026-09-04T16:00:00Z",
+      "by": "roster-question"
+    }
+  ]
+}
