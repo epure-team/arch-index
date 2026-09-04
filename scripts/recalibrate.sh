@@ -56,7 +56,13 @@
 #
 # Exit: 0 ok / 1 stale or refused / 2 degraded (cannot measure)
 
+# pipefail is load-bearing, not hygiene. Without it `dune build … | tail` exits
+# with tail's status, which is always 0 — so every `|| { build failed; exit 2; }`
+# below was dead code, and a tree that FAILED to compile was measured using the
+# previous build's producer. That is exactly the stale-artifact trap this script
+# warns about, committed by the script. Found in review.
 set -u
+set -o pipefail
 
 MODE=""
 BASE_REF="origin/main"
@@ -64,10 +70,14 @@ ONLY=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    --check|--write|--explain|--self-test) MODE="${1#--}" ;;
+    --check|--write|--explain|--self-test)
+      if [ -n "$MODE" ] && [ "$MODE" != "${1#--}" ]; then
+        echo "recalibrate: --$MODE and $1 are mutually exclusive" >&2; exit 2
+      fi
+      MODE="${1#--}" ;;
     --base) shift; BASE_REF="${1:-}" ;;
     --only) shift; ONLY="${1:-}" ;;
-    -h|--help) sed -n '2,60p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,/^# Exit:/p' "$0" | sed 's/^# \?//'; exit 0 ;;
     *) echo "recalibrate: unknown argument: $1" >&2; exit 2 ;;
   esac
   shift
@@ -89,6 +99,9 @@ fi
 #   SOURCE_ONLY  both binaries agree on both corpora: only the code moved.
 #   BEHAVIOURAL  they disagree on the OLD corpus: the analysis itself changed.
 #   INTERACTION  they agree on the old corpus and disagree on the new one.
+# A measured or pinned value is only comparable as a number if it IS one.
+is_int() { case "${1:-}" in ''|*[!0-9]*) return 1 ;; *) return 0 ;; esac; }
+
 classify() {
   local a="$1" b="$2" c="$3" d="$4"
   if [ "$a" != "$b" ]; then echo BEHAVIOURAL
@@ -99,20 +112,33 @@ classify() {
 
 self_test() {
   local fails=0 got
-  # got=expected : A B C D
+  # Delimiter is '#', not ':'. A golden cell contains ": " ("modules: 23"), so an
+  # IFS=':' parser silently misparses any golden row a contributor adds — which
+  # is why the multi-line case below had to be hand-rolled instead of living in
+  # this table.
+  #
+  # SCOPE, stated because it was overstated once: this exercises classify() and
+  # is_int() only. Every defect this script has actually shipped — a pipe eating
+  # a build failure, an asymmetric corpus, a guard failing open on a non-integer,
+  # a trailing newline — lived in the parts NOT covered here, and review found
+  # them all. A self-test that certifies the one function that was already
+  # correct is not evidence the script is correct.
   local cases="
-SOURCE_ONLY:340:340:340:340
-SOURCE_ONLY:761:761:780:780
-BEHAVIOURAL:340:339:340:339
-BEHAVIOURAL:340:339:340:340
-INTERACTION:340:340:340:339
-INTERACTION:340:340:355:340
+SOURCE_ONLY#340#340#340#340
+SOURCE_ONLY#761#761#780#780
+BEHAVIOURAL#340#339#340#339
+BEHAVIOURAL#340#339#340#340
+INTERACTION#340#340#340#339
+INTERACTION#340#340#355#340
+BEHAVIOURAL#340##340#340
+INTERACTION#340#340##340
+SOURCE_ONLY####
 "
-  while IFS=: read -r want a b c d; do
+  while IFS='#' read -r want a b c d; do
     [ -z "${want:-}" ] && continue
     got="$(classify "$a" "$b" "$c" "$d")"
     if [ "$got" = "$want" ]; then
-      printf '  ok   %-12s A=%s B=%s C=%s D=%s\n' "$got" "$a" "$b" "$c" "$d"
+      printf '  ok   %-12s A=%-4s B=%-4s C=%-4s D=%-4s\n' "$got" "${a:-<empty>}" "${b:-<empty>}" "${c:-<empty>}" "${d:-<empty>}"
     else
       printf '  FAIL want %-12s got %-12s A=%s B=%s C=%s D=%s\n' "$want" "$got" "$a" "$b" "$c" "$d"
       fails=$(( fails + 1 ))
@@ -120,8 +146,8 @@ INTERACTION:340:340:355:340
   done <<EOF
 $cases
 EOF
-  # A multi-line golden must classify exactly like a scalar: the check is
-  # string inequality precisely so it does not need the values to be numbers.
+  # A multi-line golden must classify exactly like a scalar: the check is string
+  # inequality precisely so it does not need the values to be numbers.
   got="$(classify "m: 23
 f: 761" "m: 23
 f: 761" "m: 23
@@ -129,6 +155,19 @@ f: 780" "m: 23
 f: 780")"
   if [ "$got" = SOURCE_ONLY ]; then echo "  ok   SOURCE_ONLY  multi-line golden"
   else echo "  FAIL multi-line golden classified $got"; fails=$(( fails + 1 )); fi
+
+  # is_int guards the ratchet write. An empty or non-numeric value reaching the
+  # comparison is what made that guard fail OPEN and emit an uncompilable file.
+  local v
+  for v in 0 340 00; do
+    if is_int "$v"; then echo "  ok   is_int      '$v'"
+    else echo "  FAIL is_int rejected '$v'"; fails=$(( fails + 1 )); fi
+  done
+  for v in "" " " "34a" "-1" "3.4" "321 " "let clean_measured"; do
+    if is_int "$v"; then echo "  FAIL is_int ACCEPTED '$v' — this is the fail-open path"; fails=$(( fails + 1 ))
+    else echo "  ok   is_int rej  '$v'"; fi
+  done
+
   # 1, not "$fails": the count would collide with exit 2 (degraded input) at two
   # failures, and a caller reading the exit code cares whether it passed.
   if [ "$fails" = 0 ]; then echo "self-test: all cases pass"; return 0; fi
@@ -149,27 +188,86 @@ cd "$REPO_ROOT" || exit 2
 # (a shared /tmp, notably) silently hijacks a bare invocation and builds the
 # wrong tree. --root . is not optional here.
 DUNE="dune"
-build_tree() { ( cd "$1" && $DUNE build --root . 2>&1 | tail -20 ); }
+# Log to a file rather than through a pipe, and surface it on failure: the
+# diagnostic was previously discarded twice over — once by `| tail` eating the
+# status, once by `>/dev/null` at the call site.
+build_tree() {
+  local tree="$1" log="$2"
+  ( cd "$tree" && $DUNE build --root . ) >"$log" 2>&1
+}
+build_or_die() {
+  local tree="$1" log="$2" what="$3"
+  if ! build_tree "$tree" "$log"; then
+    echo "recalibrate: $what build FAILED — refusing to measure a stale binary" >&2
+    tail -30 "$log" >&2
+    exit 2
+  fi
+}
 
-BASE_SHA="$(git rev-parse --verify "${BASE_REF}^{commit}" 2>/dev/null)" || {
-  echo "recalibrate: cannot resolve base ref '$BASE_REF'" >&2; exit 2; }
+# The baseline is the MERGE BASE, not origin/main's tip. Using the tip puts every
+# commit that landed on main-but-not-here into the B and D cells and attributes
+# it to this branch, so a branch that is merely behind main earns a BEHAVIOURAL
+# refusal for changes it does not contain — and a gate that refuses wrongly is a
+# gate people learn to bypass. --base overrides.
+if [ "$BASE_REF" = "origin/main" ]; then
+  BASE_SHA="$(git merge-base HEAD origin/main 2>/dev/null)" || BASE_SHA=""
+  [ -n "$BASE_SHA" ] || {
+    echo "recalibrate: cannot compute merge-base with origin/main (fetch first?)" >&2; exit 2; }
+  BASE_DESC="merge-base(HEAD, origin/main)"
+else
+  BASE_SHA="$(git rev-parse --verify "${BASE_REF}^{commit}" 2>/dev/null)" || {
+    echo "recalibrate: cannot resolve base ref '$BASE_REF'" >&2; exit 2; }
+  BASE_DESC="$BASE_REF"
+fi
+
+HEAD_SHA="$(git rev-parse --verify HEAD 2>/dev/null)" || {
+  echo "recalibrate: cannot resolve HEAD" >&2; exit 2; }
+
+# Both sides must be the SAME KIND of tree, or the 2x2 compares two different
+# corpora and its verdict means nothing. The baseline was always a pristine
+# worktree; the "new" side used to be the developer's own incremental
+# _build/default, which accumulates whatever aliases they happened to build.
+# Measured cost of that asymmetry: a plain `dune build @check` moves the ceiling
+# metric 340 -> 759 while classify still says SOURCE_ONLY, because A=B and C=D
+# hold on two DIFFERENT corpus definitions. Found in review; it is the defect
+# that most directly defeats the tool's purpose.
+CONSTANT_FILES="test/fixtures/self-index-stats.txt tezt/tests/must_null_ceiling.ml"
+dirty="$(git status --porcelain -uno | awk '{print $2}')"
+unexpected=""
+for f in $dirty; do
+  case " $CONSTANT_FILES " in
+    *" $f "*) ;;
+    *) unexpected="$unexpected $f" ;;
+  esac
+done
+if [ -n "$unexpected" ]; then
+  echo "recalibrate: working tree has uncommitted changes, so HEAD is not what you are" >&2
+  echo "  measuring. Commit them first (the constant files themselves are exempt):" >&2
+  for f in $unexpected; do echo "    $f" >&2; done
+  exit 2
+fi
 
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/recalibrate.XXXXXX")" || exit 2
 BASE_TREE="$WORK/base"
+NEW_TREE="$WORK/new"
 cleanup() {
   git worktree remove --force "$BASE_TREE" >/dev/null 2>&1
+  git worktree remove --force "$NEW_TREE" >/dev/null 2>&1
   rm -rf "$WORK"
 }
 trap cleanup EXIT
 
-echo "recalibrate: baseline $BASE_REF = ${BASE_SHA:0:12}"
+echo "recalibrate: baseline $BASE_DESC = ${BASE_SHA:0:12}"
+echo "recalibrate: head              = ${HEAD_SHA:0:12}"
 git worktree add --detach "$BASE_TREE" "$BASE_SHA" >/dev/null 2>&1 || {
   echo "recalibrate: could not create baseline worktree" >&2; exit 2; }
+git worktree add --detach "$NEW_TREE" "$HEAD_SHA" >/dev/null 2>&1 || {
+  echo "recalibrate: could not create head worktree" >&2; exit 2; }
 
 echo "recalibrate: building baseline…"
-build_tree "$BASE_TREE" >/dev/null || { echo "recalibrate: baseline build failed" >&2; exit 2; }
-echo "recalibrate: building this tree…"
-build_tree "$REPO_ROOT" >/dev/null || { echo "recalibrate: build failed" >&2; exit 2; }
+build_or_die "$BASE_TREE" "$WORK/base.log" "baseline"
+echo "recalibrate: building head…"
+build_or_die "$NEW_TREE" "$WORK/new.log" "head"
 
 producer() { echo "$1/_build/default/bin/arch_callgraph_ocaml/arch_callgraph_ocaml.exe"; }
 
@@ -183,7 +281,7 @@ index_cell() {
   local exe; exe="$(producer "$bin_tree")"
   [ -x "$exe" ] || { echo "recalibrate: missing producer $exe" >&2; return 2; }
   "$exe" --build-dir="$corpus" --db-path="$out" \
-         --schema-path="$REPO_ROOT/architecture-schema.sql" >/dev/null 2>&1
+         --schema-path="$NEW_TREE/architecture-schema.sql" >/dev/null 2>&1
 }
 
 q() { sqlite3 "$1" "$2" 2>/dev/null; }
@@ -235,16 +333,21 @@ metric_kind() { case "$1" in golden) echo descriptive ;; ceiling) echo ratchet ;
 # ---------------------------------------------------------------------------
 STATUS=0
 METRICS="golden ceiling"
-[ -n "$ONLY" ] && METRICS="$ONLY"
+if [ -n "$ONLY" ]; then
+  case "$ONLY" in
+    golden|ceiling) METRICS="$ONLY" ;;
+    *) echo "recalibrate: --only takes 'golden' or 'ceiling', got '$ONLY'" >&2; exit 2 ;;
+  esac
+fi
 
-for metric in $METRICS; do
+for metric in ${METRICS}; do
   corpus_rel="$(metric_corpus "$metric")"
   [ -n "$corpus_rel" ] || { echo "recalibrate: unknown metric '$metric'" >&2; exit 2; }
 
-  index_cell "$BASE_TREE" "$BASE_TREE/$corpus_rel"  "$WORK/aa.db" || exit 2   # A
-  index_cell "$REPO_ROOT" "$BASE_TREE/$corpus_rel"  "$WORK/ba.db" || exit 2   # B
-  index_cell "$BASE_TREE" "$REPO_ROOT/$corpus_rel"  "$WORK/ab.db" || exit 2   # C
-  index_cell "$REPO_ROOT" "$REPO_ROOT/$corpus_rel"  "$WORK/bb.db" || exit 2   # D
+  index_cell "$BASE_TREE" "$BASE_TREE/$corpus_rel" "$WORK/aa.db" || exit 2   # A
+  index_cell "$NEW_TREE"  "$BASE_TREE/$corpus_rel" "$WORK/ba.db" || exit 2   # B
+  index_cell "$BASE_TREE" "$NEW_TREE/$corpus_rel"  "$WORK/ab.db" || exit 2   # C
+  index_cell "$NEW_TREE"  "$NEW_TREE/$corpus_rel"  "$WORK/bb.db" || exit 2   # D
 
   # The byte-exact artifact CI will diff against, kept alongside the captured
   # value: a variable cannot represent a trailing newline, so the check that the
@@ -319,7 +422,11 @@ for metric in $METRICS; do
   fi
 
   case "$MODE" in
-    explain) STATUS=1 ;;
+    explain)
+      # A read-only mode that exits non-zero with no output reads as a crash.
+      # Say what is stale; leave the exit status to --check.
+      echo "   ✗ STALE: pinned value is not what this tree measures (would become: $D)."
+      ;;
     check)
       echo "   ✗ STALE: pinned value is not what this tree measures."
       STATUS=1
@@ -328,7 +435,19 @@ for metric in $METRICS; do
       if [ "$BEHAVIOURAL" = 1 ]; then
         echo "   ✗ REFUSED: movement is not attributable to source change alone."
         STATUS=1
-      elif [ "$KIND" = ratchet ] && [ "$D" -gt "$PINNED" ] 2>/dev/null; then
+      elif [ "$KIND" = ratchet ] && ! is_int "$D"; then
+        # `[ "$D" -gt "$PINNED" ]` returns 2 on a non-integer operand, and the
+        # old code read any non-zero as "not a loosening" and fell THROUGH to
+        # the write. An empty $D is reachable — q() swallows sqlite3 errors —
+        # so the guard failed open and sed produced `let clean_measured = `,
+        # a file that does not compile. Found in review.
+        echo "   ✗ REFUSED: measured value is not an integer (got '$D')." >&2
+        STATUS=1
+      elif [ "$KIND" = ratchet ] && ! is_int "$PINNED"; then
+        echo "   ✗ REFUSED: pinned value is not an integer (got '$PINNED') —" >&2
+        echo "     the constant may have been reformatted out of the regex's reach." >&2
+        STATUS=1
+      elif [ "$KIND" = ratchet ] && [ "$D" -gt "$PINNED" ]; then
         # The asymmetry. Raising a bound to meet the code is precisely the
         # failure this repository already suffered; it stays a human act.
         echo "   ✗ REFUSED: a ratchet may be tightened automatically, never loosened."
@@ -359,7 +478,20 @@ for metric in $METRICS; do
           ceiling)
             sed -i "s/^let clean_measured = [0-9]\+/let clean_measured = $D/" \
               "$REPO_ROOT/tezt/tests/must_null_ceiling.ml"
-            echo "   ✓ TIGHTENED clean_measured $PINNED → $D"
+            # Read the constant back rather than trusting sed. A reformatting as
+            # small as `let clean_measured : int = 321` puts it out of BOTH
+            # regexes' reach: the write matches nothing and exits 0, and the
+            # read returns empty — so the tool used to print "✓ TIGHTENED" over
+            # a file it had not changed. The golden write has been verified
+            # byte-for-byte since 556ce04; this one was still trusted.
+            written="$(metric_pinned ceiling)"
+            if [ "$written" = "$D" ]; then
+              echo "   ✓ TIGHTENED clean_measured $PINNED → $D (read back and confirmed)"
+            else
+              echo "   ✗ WROTE nothing: clean_measured still reads '$written', expected $D." >&2
+              echo "     The constant is probably not spelled 'let clean_measured = <int>'." >&2
+              STATUS=1
+            fi
             ;;
         esac
       fi
