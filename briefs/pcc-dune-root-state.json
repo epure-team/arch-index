@@ -1,0 +1,64 @@
+{
+ "task": "pcc-dune-root",
+ "mode": "fast",
+ "current_phase": "implement",
+ "note": "Ledger opened retroactively at round 4. PR #61 ran as a fix PR outside the roster, so rounds 1-3 are recorded from the review history only: each returned NO-GO. No per-round finding detail is reconstructed here, and none should be inferred. Rounds 1-3 timestamps are unknown and recorded as null rather than guessed.",
+ "events": [
+  {
+   "phase": "review",
+   "outcome": "NO-GO",
+   "at": null,
+   "by": "roster-review",
+   "round": 1,
+   "recorded": "retroactive, no detail"
+  },
+  {
+   "phase": "review",
+   "outcome": "NO-GO",
+   "at": null,
+   "by": "roster-review",
+   "round": 2,
+   "recorded": "retroactive, no detail"
+  },
+  {
+   "phase": "review",
+   "outcome": "NO-GO",
+   "at": null,
+   "by": "roster-review",
+   "round": 3,
+   "recorded": "retroactive, no detail",
+   "blocking": ["MEDIUM-1 world-writable /tmp inputs", "LOW-1 callgraph_go.ml comment", "LOW-3 mutate-check.sh cwd"]
+  },
+  {
+   "phase": "review",
+   "outcome": "NO-GO",
+   "at": "2026-09-04T18:46:47+02:00",
+   "by": "roster-review",
+   "round": 4,
+   "head": "a159a47",
+   "rebased_head_measured": "f9e9942",
+   "blocking": [
+    "HIGH-1 empty-corpus guard tests -eq 0; hazard is a PARTIAL corpus. Demonstrated PASS/exit 0 over 1643/4834 sites = 34.0% with the guard silent. Section 10.6 shape.",
+    "MEDIUM-2 OLD_DB/NEW_DB mktemp and WT's parent sit outside the trap: +3 artifacts, ~3.7 MB per run. The commit claims the leak closed; it tripled it.",
+    "MEDIUM-3 header justifies pipefail by a '| tail -2' that no longer exists; pipefail is still load-bearing for the sqlite3|norm|sort pipelines.",
+    "LOW-1 callgraph_go.ml:94-117 -- round-3 defects all still present, now three overlapping statements of one claim; missing period; stray 5-space indent.",
+    "LOW-3 mutate-check.sh:43 cwd-sensitivity undocumented; from a subdir dune re-roots, creates a stray lib/_build, exits 1 on an unrelated error."
+   ],
+   "confirmed_fixed": ["MEDIUM-1 (re-attacked with symlinks; victim intact)", "LOW-2 SIGPIPE (herestring; every pipeline audited)"],
+   "gates_on_rebased_head": {
+    "tezt": "143 SUCCESS / 0 FAILURE, exit 0 (main bfbabf5 is 140/3, exit 1 -- this PR is what turns main green)",
+    "self_index_golden": "byte-identical, 23 modules / 804 functions / 5170 calls",
+    "arch_rules": "1 proved / 3 UNKNOWN / 0 violations -- UNCHANGED from main, not 'passing'",
+    "callgraph_diff": "PASS, old=4834 new=4834 added=0, 33/33 phantom baseline"
+   }
+  },
+  {
+   "phase": "implement",
+   "outcome": "DISPATCHED",
+   "at": "2026-09-04T22:20:00+02:00",
+   "by": "roster-implement",
+   "round": 5,
+   "note": "Author does not fix his own findings: dispatched to an independent implementer agent, which rebases onto bfbabf5 first. Round 5 is the convergence round cap (maxRounds=5) -- a further NO-GO escalates to the human rather than routing back automatically."
+  }
+ ]
+}
