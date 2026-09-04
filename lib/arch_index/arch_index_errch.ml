@@ -136,45 +136,71 @@ let rec pat_bound_idents (p : Typedtree.value Typedtree.general_pattern) =
     [caught = Some bare_ctor] whenever matched, never a catch-all "any". A
     bare variable / wildcard is a catch-all for the WHOLE channel (any
     error), independent of [bare_ctor]. *)
-(* What one match arm demonstrably catches on a value channel. Three cases,
-   not two: the old [string option] conflated "catches everything" with
-   "catches something this type cannot name", and the second silently closed
-   the channel. See the FIX note inside [classify_value_pat]. *)
-type caught_class =
-  | Catch_all  (** a wildcard or bare variable: closes the whole channel *)
-  | Caught of string  (** exactly this one canonical error identity *)
-  | Unrecognised  (** a real but unnameable subset: MUST NOT close anything *)
+(* What one match arm demonstrably catches on a value channel.
+
+   SET-valued, and deliberately the same shape the exception channel already
+   uses ([Arch_index_exn.pat_class], minus its [bound] field, which this
+   function returns alongside). An earlier [string option] had two cases and
+   read [None] as "catch-all", so any argument pattern that was not a single
+   literal constructor closed the ENTIRE channel; the three-case
+   [Catch_all | Caught of string | Unrecognised] that replaced it fixed the
+   unsoundness but could still name only ONE identity, so `Error (A | B)`
+   closed NEITHER. Everything downstream is already set-valued
+   ([add_scope ~caught:(string list)], one [exn_scope_catches] row per path),
+   so a set costs nothing and closes both. *)
+type pat_class = {caught : string list; catch_all : bool}
+
+let closes_nothing = {caught = []; catch_all = false}
+
+let union a b = {caught = a.caught @ b.caught; catch_all = a.catch_all || b.catch_all}
+
+(* Does a pattern that NAMES an identity also accept every value carrying it?
+   `Error (B 0)` names [B] but matches only when the argument is 0, so closing
+   [B] would drop `Error (B 1)`. [Arch_index_exn.pat_is_irrefutable] is the
+   single definition of "accepts every value of this shape" — both channels
+   must agree on it or they will drift apart. The polymorphic-variant case is
+   the same rule: `` `Msg "boom" `` catches a strict subset of `` `Msg ``. *)
+let names_whole_identity (p : Typedtree.value Typedtree.general_pattern) =
+  match p.pat_desc with
+  | Tpat_construct (_, _, args, _) -> List.for_all Arch_index_exn.pat_is_irrefutable args
+  | Tpat_variant (_, Some arg, _) -> Arch_index_exn.pat_is_irrefutable arg
+  | _ -> true
+
+(** Classify the sub-pattern sitting at the channel's error position (the
+    [arg_pos]th argument of its origin constructor). A wildcard or variable
+    there closes the whole channel; a literal constructor closes exactly its
+    own identity, and an or-pattern of literals closes ALL of them; anything
+    else — a constant, a record, a constrained constructor — matches a subset
+    we cannot name, so it closes nothing. *)
+let rec classify_error_arg ~canon_type ~canon_exn
+    (p : Typedtree.value Typedtree.general_pattern) =
+  match p.pat_desc with
+  | Tpat_any | Tpat_var _ -> {caught = []; catch_all = true}
+  | Tpat_alias (inner, _, _, _) -> classify_error_arg ~canon_type ~canon_exn inner
+  | Tpat_or (a, b, _) ->
+      union
+        (classify_error_arg ~canon_type ~canon_exn a)
+        (classify_error_arg ~canon_type ~canon_exn b)
+  | _ -> (
+      match literal_ctor_path_of_pat ~canon_type ~canon_exn p with
+      | Some pth when names_whole_identity p -> {caught = [pth]; catch_all = false}
+      | _ -> closes_nothing)
 
 let rec classify_value_pat ~canon_type ~canon_exn ~bare_ctor ~arg_pos
     (p : Typedtree.value Typedtree.general_pattern) =
   match p.pat_desc with
-  | Tpat_any -> Some (Catch_all, [])
-  | Tpat_var (id, _, _) -> Some (Catch_all, [Ident.unique_name id])
+  | Tpat_any -> Some ({caught = []; catch_all = true}, [])
+  | Tpat_var (id, _, _) -> Some ({caught = []; catch_all = true}, [Ident.unique_name id])
   | Tpat_alias (inner, id, _, _) -> (
       match classify_value_pat ~canon_type ~canon_exn ~bare_ctor ~arg_pos inner with
-      | Some (caught, bound) -> Some (caught, Ident.unique_name id :: bound)
+      | Some (c, bound) -> Some (c, Ident.unique_name id :: bound)
       | None -> None)
   | Tpat_or (a, b, _) -> (
       match
         ( classify_value_pat ~canon_type ~canon_exn ~bare_ctor ~arg_pos a,
           classify_value_pat ~canon_type ~canon_exn ~bare_ctor ~arg_pos b )
       with
-      | Some (ca, ba), Some (cb, bb) ->
-          (* FIX (review, CRITICAL): two literals that DIFFER used to collapse
-             to the catch-all case, so `Error (A | B) -> ...` closed the whole
-             channel and every other error the call could return vanished from
-             the answer. A disjunction is only a catch-all when one side really
-             is one; two different literals are a set this single-path type
-             cannot express, so the arm closes nothing instead. Losing that
-             precision costs an extra element in the report; getting it wrong
-             loses a real error silently. *)
-          let caught =
-            match (ca, cb) with
-            | Catch_all, _ | _, Catch_all -> Catch_all
-            | Unrecognised, _ | _, Unrecognised -> Unrecognised
-            | Caught x, Caught y -> if x = y then Caught x else Unrecognised
-          in
-          Some (caught, ba @ bb)
+      | Some (ca, ba), Some (cb, bb) -> Some (union ca cb, ba @ bb)
       | (Some _ as r), None | None, (Some _ as r) -> r
       | None, None -> None)
   | Tpat_construct (lid, cstr_desc, sub, _) when cstr_desc.cstr_name = bare_ctor -> (
@@ -185,40 +211,15 @@ let rec classify_value_pat ~canon_type ~canon_exn ~bare_ctor ~arg_pos
             | Some pth -> pth
             | None -> Longident.last lid.Asttypes.txt
           in
-          Some (Caught path, [])
+          Some ({caught = [path]; catch_all = false}, [])
       | n, _ when n > 0 -> (
           match List.nth_opt sub (n - 1) with
           | Some subpat ->
-              let caught =
-                (* FIX (review round 2, CRITICAL): the same rule the exception
-                   channel needs — `Error (B 0)` names identity [B] but only
-                   matches when the argument is 0, so closing [B] would drop
-                   `Error (B 1)`. [Arch_index_exn.pat_is_irrefutable] is the
-                   single definition of "accepts every value of this shape";
-                   both channels must agree or they will drift apart. *)
-                match literal_ctor_path_of_pat ~canon_type ~canon_exn subpat with
-                | Some _
-                  when not
-                         (match subpat.pat_desc with
-                         | Tpat_construct (_, _, args, _) ->
-                             List.for_all Arch_index_exn.pat_is_irrefutable args
-                         | _ -> true) ->
-                    Unrecognised
-                | Some pth -> Caught pth
-                | None -> (
-                    (* Only a wildcard or a bare variable under the constructor
-                       really catches everything it can carry. Any other shape
-                       (record, constant, lazy, an or-pattern already reduced
-                       above) matches a SUBSET we cannot name, so it must not
-                       be allowed to close the channel. *)
-                    match subpat.pat_desc with
-                    | Tpat_any | Tpat_var _ -> Catch_all
-                    | _ -> Unrecognised)
-              in
-              Some (caught, pat_bound_idents subpat)
+              Some
+                (classify_error_arg ~canon_type ~canon_exn subpat, pat_bound_idents subpat)
           (* Constructor applied with fewer arguments than [arg_pos] names:
-             we cannot see the error position at all. *)
-          | None -> Some (Unrecognised, []))
+             we cannot see the error position at all, so nothing is closed. *)
+          | None -> Some (closes_nothing, []))
       | _ -> None)
   | _ -> None
 
@@ -250,7 +251,7 @@ type origin = {
   o_path : string option;
   o_form : string;
       (* "raise" (a literal path), "unknown" (non-literal argument — ⊤
-         [unknown_error_value]), or "inferred_bind" ([o_path] then carries
+         [unknown_exn_value]), or "inferred_bind" ([o_path] then carries
          the call-site witness "file:line", not a canonical error path —
          specs/error-channels.md "Binds": an undeclared bind-shaped operator
          over a declared carrier). *)

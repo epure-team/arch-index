@@ -59,31 +59,37 @@ val literal_ctor_path_of_pat :
     origin — see [Implement] item 2/EC-1). *)
 val pat_bound_idents : Typedtree.value Typedtree.general_pattern -> string list
 
-(** What one match arm demonstrably catches on a value channel.
+(** What one match arm demonstrably catches on a value channel: a SET of
+    canonical error identities, plus whether the arm closes the channel
+    outright. Deliberately the same shape as the exception channel's
+    [Arch_index_exn.pat_class] (minus its [bound] field, returned separately
+    by {!classify_value_pat}) — the two classifiers answer the same question
+    and must not drift.
 
-    Three cases on purpose. An earlier [string option] had only two and read
-    [None] as "catch-all", so any argument pattern that was not a single
-    literal constructor — an or-pattern of two different literals, a record
-    pattern — closed the entire channel, and every other error the matched
-    call could return silently disappeared from the answer. Closing less than
-    reality costs precision; closing more loses a real error. *)
-type caught_class =
-  | Catch_all  (** a wildcard or bare variable: closes the whole channel *)
-  | Caught of string  (** exactly this one canonical error identity *)
-  | Unrecognised  (** a real but unnameable subset: MUST NOT close anything *)
+    Set-valued because closing exactly one identity is not enough: an earlier
+    [string option] read [None] as "catch-all" and so closed the entire
+    channel on any non-single-literal argument (unsound); the three-case
+    [Catch_all | Caught of string | Unrecognised] that replaced it was sound
+    but could name only ONE identity, so [Error (A | B)] closed NEITHER.
+    Everything downstream is already set-valued, so a set costs nothing. *)
+type pat_class = {
+  caught : string list;  (** canonical identities this arm fully catches *)
+  catch_all : bool;  (** it also catches every OTHER identity of the channel *)
+}
 
 (** One arm's classification against a channel's origin constructor
     ([bare_ctor], [arg_pos] — [0] = no-argument identity, e.g. [None]):
-    [Some (caught, bound_idents)] when the pattern matches that constructor,
+    [Some (class, bound_idents)] when the pattern matches that constructor,
     [None] when the pattern does not apply to it at all (e.g. an [Ok x] arm).
-    An [Unrecognised] arm must be treated as closing nothing. *)
+    [{caught = []; catch_all = false}] means the arm matches a real but
+    unnameable subset and must be treated as closing nothing. *)
 val classify_value_pat :
   canon_type:(Path.t -> string) ->
   canon_exn:(Path.t -> string) ->
   bare_ctor:string ->
   arg_pos:int ->
   Typedtree.value Typedtree.general_pattern ->
-  (caught_class * string list) option
+  (pat_class * string list) option
 
 (** Free occurrence of any of [idents] (by [Ident.unique_name]) in [e].
     Over-approximates on purpose (no shadowing awareness): the EC-3 closing

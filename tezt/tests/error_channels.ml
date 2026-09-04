@@ -307,13 +307,16 @@ let register_query () =
         "BOUNDED: {None}" ;
       Batch.contains b ~msg:"US-2.10 o2 propagates through Option.bind" ~haystack:(may_fail "option" "o2")
         "BOUNDED: {None}" ;
-      (* US-2.14 (review round 1, CRITICAL): the or-pattern arm names A and B
-         but not C, so it may close neither — closing more than an arm really
-         catches deletes a reachable error from the answer. *)
+      (* US-2.14 (review round 1, CRITICAL; strengthened in round 2): the
+         or-pattern arm names A and B but not C. It must close A and B —
+         [caught] is a SET, so both fit — and C must survive. Closing more
+         than an arm really catches deletes a reachable error from the answer;
+         closing less than it catches costs precision. Asserting the WHOLE
+         verdict, not just "C appears", pins both directions at once. *)
       Batch.contains b ~msg:"US-2.14 multi can fail with all three identities"
         ~haystack:(may_fail "myres" "multi") "BOUNDED: {Ec_a.A, Ec_a.B, Ec_a.C}" ;
-      Batch.contains b ~msg:"US-2.14 an or-pattern of two literals closes nothing, C survives"
-        ~haystack:(may_fail "myres" "or_arm") "Ec_a.C" ;
+      Batch.contains b ~msg:"US-2.14 an or-pattern of two literals closes BOTH, only C survives"
+        ~haystack:(may_fail "myres" "or_arm") "BOUNDED: {Ec_a.C}" ;
       (* Control: a real wildcard still closes the channel. *)
       Batch.contains b ~msg:"US-2.14 control: a wildcard arm still closes everything"
         ~haystack:(may_fail "myres" "wild_arm") "BOUNDED: {}" ;
