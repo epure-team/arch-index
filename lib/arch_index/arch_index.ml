@@ -988,14 +988,72 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
             in
             go [] 0 parts
           in
+          (* One reading's candidate ids. A reading whose unit name maps to
+             MORE THAN ONE PATH is AMBIGUOUS BY CONSTRUCTION, and a hit in
+             exactly one of those paths is not proof — it is the absence of
+             evidence in the others.
+
+             This was the fourth-round-running under-scoping of the residual
+             paragraph, and round 6 showed it was worse than a disclosure gap:
+             for two shapes the branch INTRODUCED a wrong-library MUST where
+             main emitted an honest unresolved leaf.
+
+               library napi   (wrapped, sole module napi.ml -> unit Napi)
+               library nother ((wrapped false), napi.ml = include Base_impl,
+                               so ALSO unit Napi)
+               caller links `nother` ONLY and writes Napi.run
+
+             main:   Napi.run  MUST -> <null>           (honest leaf)
+             before: Napi.run  MUST -> napi/napi.ml:run (wrong, UNLINKED)
+
+             `nother`'s Napi has no `run` row of its own (it arrives through
+             the include), `napi`'s does, so exactly one id came back and the
+             resolver called that resolution. The precondition previously
+             documented — "two (wrapped false) libraries" — was also too
+             narrow: a bare unit name is produced by a (wrapped false) module
+             OR by a wrapped library's MAIN MODULE, which is far more common.
+
+             So a multi-path unit name now yields NO ids from that reading.
+             The reference falls through to the facade tier and, failing that,
+             to ⊤ or an external leaf — never to whichever library happened to
+             own the row. Corpus cost: zero, because no unit name maps to more
+             than one path on any of the three corpora (arch-index 88 units,
+             octez-manager 353, proto_alpha 468 — 0 collisions each). This
+             closes a soundness hole at no measured precision cost, which is
+             why it is closed here rather than disclosed a fourth time. *)
+          (* Returns (ids, ambiguous). [ambiguous] is set when the unit name
+             maps to several paths AND at least one of them owns the row: the
+             reference names a unit this index holds more than one of, so it is
+             answerable-but-not-decidable — ⊤, not a leaf.
+
+             Returning [] for that case (the first attempt at this fix) was
+             wrong in the other direction: it made scenario C emit a MUST
+             external leaf, claiming a PROVEN LEAF for a callee that is in the
+             index, where it had previously degraded honestly to ⊤. One wrong
+             MUST traded for another. The hit / no-hit distinction is what
+             separates them:
+
+               several paths, >=1 owns the row  -> ⊤ (ambiguous_unit)
+               several paths, none owns the row -> no ids; a genuine external *)
+          let ids_of_reading (unit_name, residual) =
+            match Arch_index_cmt.paths_of_unit unit_name with
+            | [] -> ([], false)
+            | [path] -> (Option.to_list (Hashtbl.find_opt fn_lookup (path, residual)), false)
+            | paths ->
+                let ids =
+                  List.filter_map (fun p -> Hashtbl.find_opt fn_lookup (p, residual)) paths
+                in
+                (ids, ids <> [])
+          in
           let ids_of_readings readings =
-            List.concat_map
-              (fun (unit_name, residual) ->
-                List.filter_map
-                  (fun path -> Hashtbl.find_opt fn_lookup (path, residual))
-                  (Arch_index_cmt.paths_of_unit unit_name))
-              readings
-            |> List.sort_uniq compare
+            let ids, ambiguous =
+              List.fold_left
+                (fun (acc, amb) r ->
+                  let ids, a = ids_of_reading r in
+                  (ids @ acc, amb || a))
+                ([], false) readings
+            in
+            (List.sort_uniq compare ids, ambiguous)
           in
           (* When the facade tier may be consulted at all.
 
@@ -1186,14 +1244,20 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
                evidence, so it is consulted only where the strong evidence is
                silent — never allowed to outvote it or to add ambiguity to it. *)
             match ids_of_readings (unit_readings mod_name name) with
-            | [id] -> `Resolved id
-            | _ :: _ :: _ -> `Ambiguous
-            | [] -> (
+            (* [ambiguous] wins over a single id: one row among several
+               candidate paths is the ABSENCE of evidence in the others, not
+               proof. This is what closes the wrong-library MUST the sixth
+               review measured as an INTRODUCTION rather than a retention. *)
+            | _, true -> `Ambiguous
+            | [id], false -> `Resolved id
+            | (_ :: _ :: _), false -> `Ambiguous
+            | [], false -> (
                 let from_depth = anchor_depth mod_name name + 1 in
                 match ids_of_readings (facade_readings ~from_depth mod_name name) with
-                | [id] -> `Resolved id
-                | [] -> `Not_found
-                | _ -> `Ambiguous)
+                | _, true -> `Ambiguous
+                | [id], false -> `Resolved id
+                | [], false -> `Not_found
+                | _, false -> `Ambiguous)
           in
           (* "Not in [fn_lookup]" has two very different causes, and the
              resolver above cannot tell them apart: the callee is genuinely
