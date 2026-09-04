@@ -838,7 +838,10 @@ for metric in ${METRICS}; do
             # untouched, not merely "reported as wrong".
             cp "$REPO_ROOT/tezt/tests/must_null_ceiling.ml" "$WORK/ceiling.new"
             sed -i "s/^let clean_measured = [0-9]\+/let clean_measured = $D/" "$WORK/ceiling.new"
-            written="$(sed -n 's/^let clean_measured = \([0-9]\+\).*/\1/p' "$WORK/ceiling.new")"
+            # Anchored like metric_pinned: an unanchored read truncates a legal
+            # literal here too, and this is the read that decides whether the
+            # write is confirmed.
+            written="$(sed -n 's/^let clean_measured = \([0-9]\+\)[[:space:]]*$/\1/p' "$WORK/ceiling.new")"
             if [ "$written" = "$D" ]; then
               # Same as the golden: check the mv, then re-read the INSTALLED
               # file. "(read back and confirmed)" was literally false — the
