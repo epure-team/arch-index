@@ -380,7 +380,11 @@ let digest (t : t) : string =
   let chan_str = String.concat "#" (List.map canon_channel channels_sorted) in
   let summaries_sorted = List.sort (fun (a, _) (b, _) -> compare a b) t.summaries in
   let sum_str = String.concat "#" (List.map canon_summary summaries_sorted) in
-  Digest.to_hex (Digest.string (chan_str ^ "##" ^ sum_str))
+  (* FR-024 says SHA-256; this used to be [Digest] (= MD5). Nothing depends on
+     the stored value — a producer always recomputes it from the config it
+     just loaded, and it is only ever compared against another digest from the
+     same build — so the change needs no migration. *)
+  Digestif.SHA256.(to_hex (digest_string (chan_str ^ "##" ^ sum_str)))
 
 (* -------------------------------------------------------------------------- *)
 (* Validation — declared-set-with-found-flags                                *)
