@@ -70,13 +70,29 @@ let dropped_units : (string, unit) Hashtbl.t = Hashtbl.create 8
    respect to the [modules] table: no schema column, no migration, and no way for
    a stale row to survive into the next run.
 
-   A name maps to a LIST because unit names are not guaranteed unique (a census
-   of this repository found one such name in 93: [Dune__exe], the executable
-   wrapper alias). Multiplicity must mean "genuinely distinct source files bear
-   this unit name", never "the same file was reached twice", so insertion
-   de-duplicates on rel_path — without that, indexing a build dir containing more
-   than one dune context would register every module twice and read as ambiguity
-   everywhere. *)
+   A name maps to a LIST because unit names are not guaranteed unique in
+   general — scenario C (`tezt/tests/qualified_library_scoping.ml`) pins two
+   [(wrapped false)] libraries that both compile a unit named [Api]. The
+   qualitative claim stands; an earlier revision of this comment attached a
+   number to it — "a census of this repository found one such name in 93:
+   [Dune__exe]" — that does NOT reproduce and, per its own commit's evidence
+   trail, never did.
+
+   Measured (round-5 review), by iterating {!known_unit_names} and
+   {!paths_of_unit} from inside a run of [arch_callgraph_ocaml --build-dir
+   _build/default] over THIS repository's own build: 88 unit names, ZERO with
+   more than one registered path — including [Dune__exe] itself, whose bare,
+   suffix-less form is shared by several executables' wrapper modules at the
+   RAW-`.cmt` level (confirmed separately with `ocamlobjinfo` across every
+   `.cmt`/`.cmti` under `_build/default`) but never reaches {!record_unit} more
+   than once for the same name with two DIFFERENT paths, because
+   [insert_module] only registers units this indexer actually stores as
+   [modules] rows, and a dune-generated empty wrapper alias is not one. Same
+   zero on octez-manager (353 units) and proto_alpha (468 units). Multiplicity
+   must mean "genuinely distinct source files bear this unit name", never "the
+   same file was reached twice", so insertion de-duplicates on rel_path —
+   without that, indexing a build dir containing more than one dune context
+   would register every module twice and read as ambiguity everywhere. *)
 let unit_paths : (string, string list) Hashtbl.t = Hashtbl.create 128
 
 let record_unit ~unit_name ~rel_path =
