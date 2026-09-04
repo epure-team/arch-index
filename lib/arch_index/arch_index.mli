@@ -11,7 +11,26 @@
     database with modules, functions, types, call graph, module dependencies,
     and type usage information. *)
 
-(** Result of an indexing run. *)
+(** Result of an indexing run.
+
+    Every [n_*] count below is the number of rows the run left in the table it
+    names — a [COUNT] over that table, taken after the writing transaction
+    committed, not a tally of attempted inserts. That distinction is the whole
+    contract of this record: consumers compare these against their own COUNT
+    queries
+    (épure's [test_indexer_accuracy] does exactly that), and six of them used
+    to be kept by [incr] and so ran ahead of the tables by the number of
+    rejected rows. [tezt/tests/reported_counts_are_row_counts.ml] pins it.
+
+    The three [_resolved] fields count a subset of the rows their partner
+    counts — [calls.callee_id] / [module_deps.target_module] /
+    [type_usage.type_id] non-NULL — so [x_resolved <= x] holds by construction
+    rather than by care. It did not before: they were incremented where the
+    name RESOLVED, an event that precedes the write and happens even for a row
+    that is then refused.
+
+    None of these counts says the index is COMPLETE with respect to the
+    sources: [n_statement_failures] is how a caller learns rows were lost. *)
 type result = {
   n_modules : int;
   n_functions : int;
@@ -25,17 +44,25 @@ type result = {
   n_type_usages : int;
   n_type_usages_resolved : int;
   n_statement_failures : int;
-      (** Rejected rows per destination table, sorted by table name, empty when
-          nothing was rejected. The counts sum to [n_statement_failures]. *)
-  rejections_by_table : (string * int) list;
       (** Prepared-statement steps that did not return [DONE] during this run.
 
           [exec_stmt] prints such a failure and continues, so a run can reject
-          rows and still exit 0. When this is non-zero the other counts in this
-          record are ATTEMPTS, not stored rows, and a caller that owns an exit
-          status must fail. Measured before this field existed: indexing
-          épure's src/ rejected 238 type_usage inserts on a stale
-          [function_id] and reported them as written. *)
+          rows and still exit 0. When this is non-zero the database is
+          incomplete relative to the sources scanned — the counts above stay
+          accurate about the TABLES, and this is the only field that says they
+          are short of the code. A caller that owns an exit status must fail.
+          Measured before this field existed: indexing épure's src/ rejected
+          238 type_usage inserts on a stale [function_id] and reported them as
+          written.
+
+          FIX (review): this docstring and the one below were attached to each
+          other's fields. A doc comment following a record field documents THAT
+          field, so odoc rendered — and this repository's own comment parser
+          indexed — the breakdown's description onto the scalar and vice
+          versa. *)
+  rejections_by_table : (string * int) list;
+      (** Rejected rows per destination table, sorted by table name, empty when
+          nothing was rejected. The counts sum to [n_statement_failures]. *)
   db_path : string;
 }
 
@@ -62,6 +89,9 @@ type result = {
 
     {post}
     Returns a [result] record with counts of indexed modules, functions, types, calls, deps, and type usages.
+    Each of those counts is the number of rows left in the table it names, measured after the
+    writing transaction committed — never the number of inserts attempted, so a rejected row is
+    reported by [n_statement_failures] and not by an inflated count.
     [comment_db_meta] carries [error_contract], [error_config_digest],
     [error_config_source] and [error_config_unmatched]
     (specs/error-channels.md FR-024). A channel whose carrier type matched

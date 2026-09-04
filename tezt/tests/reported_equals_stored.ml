@@ -27,11 +27,21 @@
 
     Scope, stated because the title once overpromised: this test checks that no
     wildcard binding is recorded and that a real function still is. It does NOT
-    check reported-equals-stored — [Arch_tezt.index] discards the summary line,
-    so the reported counts are not reachable from here. That invariant is
-    enforced instead by [Arch_index_db.statement_failures], which the CMT CLI
-    now exits 1 on. Nor does this test catch the top-level-shadowing route to
-    the same loss; the statement-failure gate does. *)
+    check reported-equals-stored.
+
+    That was previously explained here as an impossibility — "[Arch_tezt.index]
+    discards the summary line, so the reported counts are not reachable from
+    here". True of [index], but not of the helpers beside it:
+    [Arch_tezt.index_raw] returns [(code, output, db)] and [index_raw_into]
+    returns [(code, output)], and [output] contains the producer's whole
+    summary block. The invariant WAS reachable, and the note saying otherwise
+    is what kept it unwritten while six counters drifted from their tables.
+    [tezt/tests/reported_counts_are_row_counts.ml] now checks it end to end,
+    against a corpus that has rows refused — without which the comparison holds
+    trivially and proves nothing.
+
+    This test does not catch the top-level-shadowing route to the same loss
+    either; the statement-failure gate does. *)
 
 open Arch_tezt
 
