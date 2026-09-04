@@ -246,6 +246,17 @@ for metric in $METRICS; do
   index_cell "$BASE_TREE" "$REPO_ROOT/$corpus_rel"  "$WORK/ab.db" || exit 2   # C
   index_cell "$REPO_ROOT" "$REPO_ROOT/$corpus_rel"  "$WORK/bb.db" || exit 2   # D
 
+  # The byte-exact artifact CI will diff against, kept alongside the captured
+  # value: a variable cannot represent a trailing newline, so the check that the
+  # written file is correct cannot be made from "$D" alone.
+  if [ "$metric" = golden ]; then
+    GOLDEN_RAW="$WORK/golden.raw"
+    sqlite3 "$WORK/bb.db" \
+      "SELECT 'modules: ' || count(*) FROM modules; \
+       SELECT 'functions: ' || count(*) FROM functions; \
+       SELECT 'calls: ' || count(*) FROM calls;" > "$GOLDEN_RAW"
+  fi
+
   A="$(metric_value "$metric" "$WORK/aa.db")"
   B="$(metric_value "$metric" "$WORK/ba.db")"
   C="$(metric_value "$metric" "$WORK/ab.db")"
@@ -290,7 +301,19 @@ for metric in $METRICS; do
     echo "   → attributable to source change only (B = A)."
   fi
 
-  if [ "$D" = "$PINNED" ]; then
+  # Currency is decided on the ARTIFACT, not on the captured value. For the
+  # golden that distinction is the whole ballgame: command substitution strips
+  # trailing newlines, so "$D" = "$PINNED" is true for two files that `diff`
+  # — and therefore CI — call different. Comparing the strings is measuring a
+  # projection of the thing the gate actually checks.
+  CURRENT=0
+  if [ "$metric" = golden ] && [ -n "${GOLDEN_RAW:-}" ]; then
+    diff -q "$REPO_ROOT/test/fixtures/self-index-stats.txt" "$GOLDEN_RAW" >/dev/null 2>&1 && CURRENT=1
+  else
+    [ "$D" = "$PINNED" ] && CURRENT=1
+  fi
+
+  if [ "$CURRENT" = 1 ]; then
     echo "   ✓ pinned value is current."
     continue
   fi
@@ -314,8 +337,24 @@ for metric in $METRICS; do
       else
         case "$metric" in
           golden)
-            printf '%s' "$D" > "$REPO_ROOT/test/fixtures/self-index-stats.txt"
-            echo "   ✓ WROTE test/fixtures/self-index-stats.txt"
+            # printf '%s\n', not '%s'. Command substitution strips trailing
+            # newlines, so writing "$D" back verbatim silently produces a file
+            # with no final newline — and CI compares it with `diff` against
+            # raw `sqlite3` output, which has one. The counts were right and
+            # the gate was red anyway, on one byte. Caught in review, not here,
+            # which is why the write is now verified rather than trusted.
+            printf '%s\n' "$D" > "$REPO_ROOT/test/fixtures/self-index-stats.txt"
+            if [ -n "${GOLDEN_RAW:-}" ] && [ -f "$GOLDEN_RAW" ]; then
+              if diff -q "$REPO_ROOT/test/fixtures/self-index-stats.txt" "$GOLDEN_RAW" >/dev/null
+              then echo "   ✓ WROTE test/fixtures/self-index-stats.txt (byte-identical to a raw measurement)"
+              else
+                echo "   ✗ WROTE a file that does NOT match a raw measurement byte-for-byte:" >&2
+                diff "$REPO_ROOT/test/fixtures/self-index-stats.txt" "$GOLDEN_RAW" >&2
+                STATUS=1
+              fi
+            else
+              echo "   ✓ WROTE test/fixtures/self-index-stats.txt"
+            fi
             ;;
           ceiling)
             sed -i "s/^let clean_measured = [0-9]\+/let clean_measured = $D/" \
