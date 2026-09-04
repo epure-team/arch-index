@@ -117,29 +117,45 @@ OLD_DB="$LOGDIR/old.db"; NEW_DB="$LOGDIR/new.db"
 # modules before its golden is refreshed; a corpus SMALLER than the golden's is
 # missing .cmt files, and that is the state that must refuse.
 #
+# All THREE magnitudes the golden records are floored, not `modules:` alone. A
+# module counts as present as soon as one of its .cmt is indexed, so an index can
+# hold every module and still be missing most of its edges: 23 modules / 804
+# functions / 517 calls clears a modules-only floor while 90% of the population
+# the gate compares is gone — exactly the "agreement about nothing" this floor
+# exists to refuse. functions and calls are the magnitudes that actually carry
+# the comparison, and the golden already commits both.
+#
 # The floor is a receipt, not the fix: the two `lib/arch_index` build targets
 # above are what make the corpus complete by construction. Both sides are
 # checked because they index the same BUILD_DIR — if one is short, so is the
 # other, and reporting whichever we notice first is enough.
 GOLDEN="$HERE/test/fixtures/self-index-stats.txt"
-want_modules="$(sed -n 's/^modules: *//p' "$GOLDEN")"
-[ -n "$want_modules" ] || { echo "callgraph-diff: no 'modules:' line in $GOLDEN — cannot establish a corpus floor" >&2; exit 2; }
+# Each floor is "<table>:<count>"; the table name is also the golden's line label.
+FLOORS=""
+for metric in modules functions calls; do
+  want="$(sed -n "s/^$metric: *//p" "$GOLDEN")"
+  [ -n "$want" ] || { echo "callgraph-diff: no '$metric:' line in $GOLDEN — cannot establish a corpus floor" >&2; exit 2; }
+  FLOORS="$FLOORS $metric:$want"
+done
 check_corpus() { # $1 = side label, $2 = db
-  local got
-  got="$(sqlite3 "$2" "SELECT count(*) FROM modules;")"
-  # `if`, not `[ ... ] && return 0`: under `set -e` a failing AND-list is not a
-  # tested condition, so the short-circuit would abort the script before the
-  # diagnostic below ever printed.
-  if [ "$got" -ge "$want_modules" ]; then return 0; fi
-  echo "callgraph-diff: REFUSING — the $1 index covers $got of the $want_modules modules" >&2
-  echo "  recorded by $GOLDEN, so the corpus under" >&2
-  echo "    $BUILD_DIR" >&2
-  echo "  is PARTIAL. Both sides then agree about the modules that are missing," >&2
-  echo "  and a dropped edge inside them cannot appear as a difference — the" >&2
-  echo "  comparison would pass while proving nothing. Run" >&2
-  echo "    dune build --root . lib/arch_index" >&2
-  echo "  and retry. (If modules were deliberately removed, refresh $GOLDEN.)" >&2
-  exit 2
+  local got floor table want
+  for floor in $FLOORS; do
+    table="${floor%%:*}"; want="${floor#*:}"
+    got="$(sqlite3 "$2" "SELECT count(*) FROM $table;")"
+    # `if`, not `[ ... ] && continue`: under `set -e` a failing AND-list is not a
+    # tested condition, so the short-circuit would abort the script before the
+    # diagnostic below ever printed.
+    if [ "$got" -ge "$want" ]; then continue; fi
+    echo "callgraph-diff: REFUSING — the $1 index covers $got of the $want $table" >&2
+    echo "  recorded by $GOLDEN, so the corpus under" >&2
+    echo "    $BUILD_DIR" >&2
+    echo "  is PARTIAL. Both sides then agree about what is missing, and a dropped" >&2
+    echo "  edge inside it cannot appear as a difference — the comparison would" >&2
+    echo "  pass while proving nothing. Run" >&2
+    echo "    dune build --root . lib/arch_index" >&2
+    echo "  and retry. (If the corpus shrank deliberately, refresh $GOLDEN.)" >&2
+    exit 2
+  done
 }
 check_corpus baseline "$OLD_DB"
 check_corpus "working tree" "$NEW_DB"
