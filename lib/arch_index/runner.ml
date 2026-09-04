@@ -49,7 +49,15 @@ CREATE TABLE IF NOT EXISTS calls (
   callee_name TEXT NOT NULL,
   callee_file TEXT,
   call_site TEXT,
-  kind TEXT
+  kind TEXT,
+  -- specs/point-free-aliases.md. Present on this schema too, even though this
+  -- schema is deliberately minimal, because the OCaml cmt branch of
+  -- Call_graph_extractor shares collect_calls_from_expr with the main indexer —
+  -- so alias edges arrive here whether or not the column exists. Without it,
+  -- `fan-in` over a flat index counts a point-free binding as a caller, which
+  -- is the exact over-count the column was added to prevent. The alternative
+  -- was a documented wrong number; four lines is cheaper than the note.
+  edge_form TEXT
 );
 |}
 
@@ -188,7 +196,7 @@ let write_calls db call_rows =
     Sqlite3.prepare
       db
       "INSERT INTO calls (caller_name, caller_file, callee_name, callee_file, \
-       call_site, kind) VALUES (?, ?, ?, ?, ?, ?)"
+       call_site, kind, edge_form) VALUES (?, ?, ?, ?, ?, ?, ?)"
   in
   List.iter
     (fun (row : Call_graph_extractor.call_row) ->
@@ -199,6 +207,7 @@ let write_calls db call_rows =
       bind_text stmt 4 row.callee_file ;
       ignore (Sqlite3.bind stmt 5 (Sqlite3.Data.TEXT row.call_site)) ;
       ignore (Sqlite3.bind stmt 6 (Sqlite3.Data.TEXT lsp_edge_kind)) ;
+      bind_text stmt 7 row.edge_form ;
       ignore (Sqlite3.step stmt))
     call_rows ;
   ignore (Sqlite3.finalize stmt)

@@ -361,15 +361,16 @@ let () =
                as one inflates exactly the measure this query exists to report,
                and does so silently.
 
-               Gated on the column, not assumed: the flat schema written by
-               [runner.ml] has no [edge_form], and an unconditional
-               [WHERE edge_form IS NULL] would make this query ERROR against a
-               flat database rather than merely over-count. Same shape as the
-               [functions.exported] gate below. *)
+               Gated on the column, not on the schema: BOTH schemas carry
+               [edge_form] now (the flat one because its OCaml cmt branch shares
+               [collect_calls_from_expr] with the main indexer, so alias edges
+               arrive there whether or not the column exists). The gate remains
+               because a database built by an EARLIER binary has neither column
+               nor rows, and an unconditional [WHERE edge_form IS NULL] would
+               make this query ERROR against one rather than merely over-count.
+               Same shape as the [functions.exported] gate below. *)
             let not_alias =
-              if (not flat) && Arch_db.has_col t "calls" "edge_form" then
-                "WHERE edge_form IS NULL "
-              else ""
+              if Arch_db.has_col t "calls" "edge_form" then "WHERE edge_form IS NULL " else ""
             in
             q ~h:[ "callee_name"; "callers" ] ~shape:Arch_db.Rows.s_i ~cells:Arch_db.Rows.csi ~pty:unit_ty
               (Printf.sprintf
