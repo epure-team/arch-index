@@ -33,10 +33,15 @@ let fixture_files =
       "(library\n\
       \ (name pfa_fixture)\n\
       \ (wrapped false)\n\
-      \ (modules pfa_a)\n\
+      \ (modules pfa_a pfa_b)\n\
       \ (flags (:standard -w -8-11-21-26-27-32-33-37-39)))\n" );
+    ( "pfa_b.ml",
+      {|let cross_helper n = if n > 0 then raise Not_found else n
+|} );
     ( "pfa_a.ml",
-      {|exception Boom
+      {|open Pfa_b
+
+exception Boom
 
 let raiser n = if n > 0 then raise Boom else n
 
@@ -61,6 +66,16 @@ let k = pi
    island REACHABLE. Pinned here so the next regression fails in the file that
    owns the rule. *)
 let make () = raiser
+
+(* THE QUALIFIED SLICE (S3): an explicitly qualified point-free alias. *)
+let qualified_alias = Pfa_b.cross_helper
+
+(* THE S2 QUESTION. [cross_helper] is brought into scope by [open Pfa_b] and is
+   therefore SYNTACTICALLY bare here — it looks exactly like [let alias = raiser].
+   Whether it is a distinct case depends on something no amount of reading the
+   source can settle: typedtree paths are POST-resolution, so the walker may see
+   [Path.Pdot (Pfa_b, cross_helper)] and never a [Pident] at all. *)
+let via_open = cross_helper
 
 (* EXCLUDED: the binder is a wildcard, so no [functions] row exists to hang an
    edge on. Nothing special guards this — a pending call whose caller is absent
@@ -104,8 +119,31 @@ let register_local_slice () =
         (Db.with_db db (fun c ->
              Db.int c "SELECT count(*) FROM functions WHERE name IN ('raiser','alias','caller')")
         = 3) ;
-      (match alias_rows db with
-      | [(caller, callee, kind, resolved)] ->
+      (* S2, SETTLED EMPIRICALLY (probe, 2026-09-04): [open Pfa_b] followed by a
+         bare [cross_helper] produces [Path.Pdot "Pfa_b.cross_helper"], NOT a
+         [Pident] — typedtree paths are post-resolution, so an [open]-mediated
+         alias is indistinguishable from an explicitly qualified one. It is
+         therefore NOT a distinct case: the qualified slice covers it by
+         construction. [via_open] appearing in this list, next to
+         [qualified_alias] and resolved the same way, is that finding pinned. *)
+      let rows = alias_rows db in
+      Batch.eq_int b
+        ~msg:
+          (Printf.sprintf
+             "three point-free aliases are recognised — local, qualified, open-mediated (got: %s)"
+             (String.concat ", " (List.map (fun (a, c, _, _) -> a ^ "->" ^ c) rows)))
+        (List.length rows) 3 ;
+      List.iter
+        (fun (caller, callee, kind, resolved) ->
+          Batch.check b
+            ~msg:(Printf.sprintf "%s: MAY_ENUMERATED, never MUST (got %s)" caller kind)
+            (kind = "MAY_ENUMERATED") ;
+          Batch.check b
+            ~msg:(Printf.sprintf "%s: resolved to a callee_id (-> %s)" caller callee)
+            resolved)
+        rows ;
+      (match List.find_opt (fun (c, _, _, _) -> c = "alias") rows with
+      | Some (caller, callee, kind, resolved) ->
           Batch.check b ~msg:"the alias edge is attributed to the BINDER, not the target"
             (caller = "alias") ;
           Batch.check b
@@ -118,16 +156,19 @@ let register_local_slice () =
           Batch.check b
             ~msg:(Printf.sprintf "the alias edge is MAY_ENUMERATED (got %s)" kind)
             (kind = "MAY_ENUMERATED") ;
-          Batch.check b ~msg:"the alias edge resolved to a callee_id" resolved
-      | rows ->
-          Batch.check b
-            ~msg:
-              (Printf.sprintf
-                 "expected exactly one value_alias row, got %d: %s"
-                 (List.length rows)
-                 (String.concat ", "
-                    (List.map (fun (a, b, _, _) -> a ^ "->" ^ b) rows)))
-            false) ;
+          Batch.check b ~msg:"the alias edge resolved to a callee_id" resolved ;
+          ignore kind
+      | None -> Batch.check b ~msg:"the local alias row is present" false) ;
+      (* Both cross-module forms must name the SAME callee — that is what says
+         [open] resolution and explicit qualification arrive at one target. *)
+      Batch.check b
+        ~msg:"via_open and qualified_alias resolve to the same callee"
+        (match
+           ( List.find_opt (fun (c, _, _, _) -> c = "via_open") rows,
+             List.find_opt (fun (c, _, _, _) -> c = "qualified_alias") rows )
+         with
+        | Some (_, c1, _, _), Some (_, c2, _, _) -> c1 = c2
+        | _ -> false) ;
       (* The marker discriminates. An ordinary application of the same callee
          must be unmarked, or the column carries no information. *)
       Batch.eq_int b ~msg:"an ordinary call to the same callee is NOT marked"
