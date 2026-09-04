@@ -46,6 +46,22 @@ originals and they are below unchanged.
 - **MEDIUM-5b** — `--forms --roots X` swallows the following flag as its value →
   `unknown origin form(s): --roots`, exit 2. A misleading message for a genuine
   caller error.
+- **MEDIUM-5c** — **`--channel` has the same two defects and was not registered**
+  (added 2026-09-05). They share `flag_val`, so the entry had to name both or a
+  reader fixing 5a from it would repair `--forms` and leave `--channel` broken —
+  which is how a register under-scoped by one option becomes a defect that
+  survives its own fix. Measured:
+
+  | invocation | exit | behaviour |
+  |---|---|---|
+  | `--forms` at end of line | 0 | silently uses the default forms |
+  | `--channel` at end of line | 0 | **silently reports `channel exception`** |
+  | `--channel --roots X` | 3 | swallows the next flag as its value |
+
+  Mitigated, genuinely: the `scope:` line prints the channel it used, so the
+  wrong answer denounces itself. That is why this is MEDIUM and not HIGH — and
+  it is also the argument for fixing all three flags in one place rather than
+  per-flag.
 - **LOW-1** — `ORDER BY o.form, m.path, o.line` is not a total order. Measured
   **40** colliding groups on the self-index (23 then 127 on other corpora —
   build-dependent). Row order is at the planner's mercy. Fix: add

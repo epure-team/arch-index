@@ -150,6 +150,36 @@ let entry n = ex_origin n + opt_get n
 |} );
   ]
 
+(* Two modules with the SAME basename in different directories, in two libraries
+   because dune requires module names unique per library.
+
+   MEDIUM-A: the whole-module ambiguity refusal had no test. The code was
+   demonstrated correct, which is precisely the shape HIGH-A had in round 5 — a
+   refusal that works, is announced to the user, and has nothing discriminating
+   it. The consequence of a regression here is not an empty table: it is several
+   protocol versions UNIONED into one root set, every member of which is then
+   MUST. On the Octez tree `lib_protocol/main.ml` names 32 modules. *)
+let dup_basename_files =
+  [
+    Fixture.dune_project;
+    ( "pa/dune",
+      "(library\n\
+      \ (name eo_dup_a)\n\
+      \ (wrapped false)\n\
+      \ (modules eo_dup)\n\
+      \ (flags (:standard -w -8-11-21-26-27-32-33-37-39)))\n" );
+    ("pa/eo_dup.ml", {|let f n = assert (n > 0) ; n
+|});
+    ( "pb/dune",
+      "(library\n\
+      \ (name eo_dup_b)\n\
+      \ (wrapped false)\n\
+      \ (modules eo_dup)\n\
+      \ (flags (:standard -w -8-11-21-26-27-32-33-37-39)))\n" );
+    ("pb/eo_dup.ml", {|let g n = assert (n < 0) ; n
+|});
+  ]
+
 let run ?(fmt = "list") db args =
   Arch_tezt.run_command
     ~env:[("ARCH_QUERY_FORMAT", fmt)]
@@ -527,11 +557,60 @@ let register_channel_filter () =
         ~msg:"an EMPTY origin table does not wave an arbitrary channel through" c_bogus 3 ;
       Batch.check b
         ~msg:("...and does not echo the bogus channel as authoritative:\n" ^ out_bogus)
-        (not (has "channel totally_bogus" out_bogus))) ;
+        (not (has "channel totally_bogus" out_bogus)) ;
+      (* The message must say the table is EMPTY. The round-5 bug rendered an
+         empty candidate list as blank — "Channels present:  (or 'all')" — which
+         reads as "channels exist, just not yours" on the one input where the
+         truth is "nothing was ever recorded". Both wordings exit 3, so only the
+         text distinguishes them. *)
+      Batch.check b
+        ~msg:("...and says the origin table is EMPTY rather than listing nothing:\n" ^ out_bogus)
+        (has "exn_origins is empty" out_bogus)) ;
+  Lwt.return_unit
+
+let register_module_ambiguity () =
+  Test.register ~__FILE__
+    ~title:"escaping-origins: an ambiguous WHOLE-MODULE root is refused, never unioned"
+    ~tags:["cmt"; "query"; "exn"; "origins"; "ambiguity"; "module"]
+  @@ fun () ->
+  with_fixture ~name:"eo_dup" ~files:dup_basename_files @@ fun fixture ->
+  let db = Arch_tezt.temp_db "eo_dup" in
+  let code, output = Arch_tezt.index_raw_into ~db fixture in
+  if code <> 0 then Test.fail "index failed (exit %d):\n%s" code output ;
+  let c_ambig, out_ambig = run db ["--roots"; "eo_dup.ml:*"] in
+  let c_ok, out_ok = run db ["--roots"; "pa/eo_dup.ml:*"] in
+  Batch.run (fun b ->
+      (* Premise: both modules really are indexed, or the refusal below could
+         fire for want of a second candidate rather than because of one. *)
+      Batch.check b
+        ~msg:"premise: both same-basename modules are in the index"
+        (Db.with_db db (fun c ->
+             Db.int c "SELECT count(*) FROM modules WHERE path LIKE '%/eo_dup.ml'")
+        = 2) ;
+      Batch.eq_int b ~msg:"an ambiguous ':*' root is REFUSED (exit 3)" c_ambig 3 ;
+      Batch.check b
+        ~msg:("...listing BOTH candidate modules, not one:\n" ^ out_ambig)
+        (Arch_tezt.contains ~needle:"pa/eo_dup.ml" out_ambig
+        && Arch_tezt.contains ~needle:"pb/eo_dup.ml" out_ambig) ;
+      (* The teeth: a union would ANSWER, and would answer about both. *)
+      Batch.check b
+        ~msg:("a union would have reported origins; nothing is reported:\n" ^ out_ambig)
+        (not (Arch_tezt.contains ~needle:"|assert|" out_ambig)) ;
+      Batch.eq_int b ~msg:"the qualified path is accepted" c_ok 0 ;
+      (* ...and answers about that module ALONE — the other library's origin
+         must not appear, which is what distinguishes "resolved one" from
+         "unioned both and happened to print one". *)
+      Batch.check b
+        ~msg:("the qualified root reports its own origin:\n" ^ out_ok)
+        (Arch_tezt.contains ~needle:"pa/eo_dup.ml" out_ok) ;
+      Batch.check b
+        ~msg:("...and NOT the same-basename module's:\n" ^ out_ok)
+        (not (Arch_tezt.contains ~needle:"pb/eo_dup.ml" out_ok))) ;
   Lwt.return_unit
 
 let register () =
   register_surface () ;
+  register_module_ambiguity () ;
   register_channel_filter () ;
   register_root_anchoring () ;
   register_nothing_traversed () ;
