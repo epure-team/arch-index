@@ -185,6 +185,14 @@ same basename, the first stamped `MUST`, i.e. asserted as proof:
 | `lib_protocol/clst_contract_storage.ml:93` | same (MUST) | same |
 | `lib_protocol/clst_contract_storage.ml:247` | same (MAY_ENUMERATED) | same |
 
+Edge accounting, classified rather than diffed — a set diff counts a re-target as one loss plus
+one gain, which reads as a regression it is not:
+
+| corpus | unchanged | NULL → resolved | resolved → NULL | re-targeted |
+|---|---|---|---|---|
+| octez-manager | 58 477 | 76 | **0** | 0 |
+| proto_alpha | 73 514 | 70 | **0** | 3 (the three rows above) |
+
 Same class, also corrected: `Tezos_dal_alpha.RPC_directory.directory`, attributed to
 `lib_sc_rollup_node/RPC_directory.ml` and now landing in `lib_dal/RPC_directory.ml`.
 
