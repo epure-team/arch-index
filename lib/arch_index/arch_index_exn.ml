@@ -281,45 +281,63 @@ let classify_arms ~canon (arms : arm list) =
     (false, [], [])
     arms
 
+(* ONE flattener over computation patterns, parameterised by what counts as a
+   leaf.
+
+   An arm written `A | B -> rhs` is, at the COMPUTATION pattern level, a
+   [Tpat_or] — not a [Tpat_value] and not a [Tpat_exception]. A walker that
+   matches only the leaf shape therefore drops the whole arm. That is what made
+   the value channel report `Error A | Error C` as closing nothing while
+   `Error (A | C)`, the same intent written inside the constructor, closed both.
+
+   The two callers below used to carry a private copy of this recursion each,
+   with "kept adjacent so they cannot drift" as the stated protection. Physical
+   proximity is not a protection — it is exactly what the code already had when
+   the two channels diverged in the first place. One function, two leaf
+   selectors, so a change to the traversal cannot reach one channel and miss
+   the other.
+
+   Sound in the closing direction: OCaml requires every alternative of an
+   or-pattern to bind the same variables, and the guard and right-hand side are
+   shared, so if the arm closes at all then each alternative's identity really
+   is caught. *)
+let flatten_or :
+    type a.
+    leaf:(Typedtree.computation Typedtree.general_pattern -> a option) ->
+    Typedtree.computation Typedtree.general_pattern ->
+    a list =
+ fun ~leaf p ->
+  let rec go (p : Typedtree.computation Typedtree.general_pattern) =
+    match leaf p with
+    | Some x -> [x]
+    | None -> ( match p.pat_desc with Tpat_or (a, b, _) -> go a @ go b | _ -> [])
+  in
+  go p
+
 (** The exception arms of a [match]: [Tpat_exception p] cases, flattening a
     computation-level or-pattern. Value arms are not handlers. *)
 let exception_arms (cases : Typedtree.computation Typedtree.case list) =
-  let rec pats (p : Typedtree.computation Typedtree.general_pattern) =
-    match p.pat_desc with
-    | Tpat_exception v -> [v]
-    | Tpat_or (a, b, _) -> pats a @ pats b
-    | _ -> []
+  let leaf (p : Typedtree.computation Typedtree.general_pattern) =
+    match p.pat_desc with Tpat_exception v -> Some v | _ -> None
   in
   List.concat_map
     (fun (c : Typedtree.computation Typedtree.case) ->
-      List.map (fun v -> {a_pat = v; a_guard = c.c_guard; a_rhs = c.c_rhs}) (pats c.c_lhs))
+      List.map
+        (fun v -> {a_pat = v; a_guard = c.c_guard; a_rhs = c.c_rhs})
+        (flatten_or ~leaf c.c_lhs))
     cases
 
-(* The value-side twin of [exception_arms], and it exists for the same reason.
-
-   A [match] arm written `Error A | Error C -> rhs` is, at the COMPUTATION
-   pattern level, a [Tpat_or] of two [Tpat_value]s — not a [Tpat_value]. A
-   walker that keeps only [Tpat_value] cases therefore drops the whole arm, and
-   the arm closes nothing: `Error A | Error C` reported both A and C as still
-   reachable, while the same intent written inside the constructor,
-   `Error (A | C)`, closed both. Worse, `Error A | _ -> ...` — an arm that
-   catches everything — also closed nothing.
-
-   Flattening is sound in the closing direction: OCaml requires every
-   alternative of an or-pattern to bind the same variables, and the guard and
-   right-hand side are shared, so if the arm is closing at all then each
-   alternative's identity really is caught. Kept beside [exception_arms] so the
-   two cannot drift: they are the same rule over two pattern universes. *)
+(* The value-side twin of [exception_arms] — the same rule over the other
+   pattern universe, now sharing the traversal rather than restating it. *)
 let value_pats_of_computation (cases : Typedtree.computation Typedtree.case list) =
-  let rec pats (p : Typedtree.computation Typedtree.general_pattern) =
+  let leaf (p : Typedtree.computation Typedtree.general_pattern) =
     match p.pat_desc with
-    | Tpat_value vp -> [(vp :> Typedtree.value Typedtree.general_pattern)]
-    | Tpat_or (a, b, _) -> pats a @ pats b
-    | _ -> []
+    | Tpat_value vp -> Some (vp :> Typedtree.value Typedtree.general_pattern)
+    | _ -> None
   in
   List.concat_map
     (fun (c : Typedtree.computation Typedtree.case) ->
-      List.map (fun vp -> (vp, c.c_guard, c.c_rhs)) (pats c.c_lhs))
+      List.map (fun vp -> (vp, c.c_guard, c.c_rhs)) (flatten_or ~leaf c.c_lhs))
     cases
 
 let value_arms (cases : Typedtree.value Typedtree.case list) =

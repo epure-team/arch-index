@@ -365,11 +365,11 @@ Honest limits, so nobody reads more into a verdict than it carries:
 
   Without `--errors-strict` the run exits 0 and those declarations are simply inert; the misses
   are listed in `comment_db_meta.error_config_unmatched`.
-- **An or-pattern spanning the whole arm closes nothing.** `Error (A | B) -> …` closes both (the
-  disjunction is inside the constructor), but `Error A | Error C -> …` — the same intent written
-  across the arm — closes neither, and `Error A | _ -> …` mints no scope at all. Sound in the
-  reporting direction, and a real precision gap; the exception channel already flattens arm-level
-  disjunctions and the value channels do not yet.
+- **Arm order is not considered.** A closing arm subtracts what it catches even when an *earlier*
+  arm re-returns the same identity — `match f () with Error A -> Error A | Error A | Error B -> Ok 0`
+  reports `{B, …}` where `A` is still reachable. This under-reports, which is the unsafe direction,
+  so it is worth knowing: reaching it needs a redundant match (OCaml's `Warning 11` fires on every
+  shape that triggers it), and the non-redundant guarded variant is handled correctly.
 - **A profile's rule cannot be removed, only added to.** Declaring an existing channel *extends*
   it field by field, which is what lets a profile add vocabulary to a built-in without restating
   it — but it also means a user cannot drop a rule a profile got wrong; they can only add. No
