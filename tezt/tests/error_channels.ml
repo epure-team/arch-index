@@ -155,6 +155,25 @@ let or_binding_repropagates n =
 let or_mixed n =
   match multi n with Error A | exception Not_found -> Ok 0 | r -> r
 
+(* US-2.17c: the exception half of the SAME property, with a scrutinee that can
+   actually raise.
+
+   [or_mixed] above asserts `BOUNDED: {}` on the exception channel, and that
+   assertion is VACUOUS: its scrutinee [multi] cannot raise, so the exception set
+   is empty before any subtraction and the assertion holds whether the arm closes
+   or not. Demonstrated by removing arm-level or-flattening from the exception
+   channel entirely — the suite stayed 130/130.
+
+   This scrutinee raises, so the subtraction is observable: with flattening the
+   arm closes [Not_found] and the answer is `{}`; without it the arm is dropped
+   and [Not_found] escapes. It also closes a PRE-EXISTING hole — arm-level
+   or-pattern flattening on the exception channel, the precedent this whole
+   change rests on, had no coverage at all, and deleting it was a silent no-op. *)
+let raiser_nf n : int myres = if n = 0 then raise Not_found else Error A
+
+let or_mixed_raises n =
+  match raiser_nf n with Error A | exception Not_found -> Ok 0 | r -> r
+
 (* PINNED LIMITATION, not a passing test looking for a bug.
 
    Arm order is not considered: a closing arm subtracts what it catches even
@@ -475,12 +494,25 @@ let register_query () =
       Batch.contains b
         ~msg:"US-2.17b a GUARDED arm-level or-pattern closes nothing (the arm may not run)"
         ~haystack:(may_fail "myres" "or_guarded") "BOUNDED: {Ec_a.A, Ec_a.B, Ec_a.C}" ;
-      (* Nothing may be subtracted, and for ONE reason, not two: the
-         right-hand side RE-RETURNS [Error (B x)], so the arm is not closing at
-         all. That is what protects both identities. An earlier version of this
-         comment said [Wrap] survives because [B x] "constrains" the argument —
-         wrong: [B x] BINDS, it does not constrain, and an irrefutable binder
-         is exactly what does NOT narrow a constructor pattern. *)
+      (* Nothing may be subtracted, and for TWO INDEPENDENT reasons — one per
+         identity. This comment has been wrong in both directions; the version
+         below is the one isolated by probe, each alternative tested alone with
+         a NON-re-returning right-hand side:
+
+           Error (B x)        -> Ok 0   gives {Wrap}      — B IS closed
+           Error (Wrap (B x)) -> Ok 0   gives {B, Wrap}   — Wrap is NOT closed
+
+         So: [B] is protected only by the RE-RETURN (its argument [x] is an
+         irrefutable binder, so the arm would otherwise close it). [Wrap] is
+         protected by its own payload pattern, re-return or not: [Wrap] carries
+         any [err], and the pattern only matches [Wrap (B _)], so the arm never
+         covered the identity.
+
+         The nuance that made the earlier corrections wrong is POSITIONAL. The
+         same syntax [B x] is an irrefutable binder as the payload of [Error]
+         (it names identity B and covers it wholly) and a refutable constraint
+         as the payload of [Wrap]. Neither "it binds" nor "it constrains" is
+         true as a general rule — it depends which identity's argument it is. *)
       Batch.contains b
         ~msg:"US-2.17b an or-arm whose rhs re-returns what it matched does not subtract it"
         ~haystack:(may_fail "myres" "or_binding_repropagates") "BOUNDED: {Ec_a.B, Ec_a.Wrap}" ;
@@ -491,9 +523,17 @@ let register_query () =
          nothing asserted: the exception alternative closes on the exception
          channel. Stating a property in both directions and testing one of them
          is how a half-true claim survives review. *)
+      (* US-2.17c: the same property with a scrutinee that CAN raise, so the
+         subtraction is observable. The [or_mixed] variant is kept as the
+         value-channel case but is deliberately NOT asserted on the exception
+         channel: its scrutinee cannot raise, so that assertion would be
+         vacuously true. *)
       Batch.contains b
-        ~msg:"US-2.17b …and its exception alternative closes on the exception channel"
-        ~haystack:(may_fail "exception" "or_mixed") "BOUNDED: {}" ;
+        ~msg:"US-2.17c a mixed or-arm closes its exception alternative (observable)"
+        ~haystack:(may_fail "exception" "or_mixed_raises") "BOUNDED: {}" ;
+      Batch.contains b
+        ~msg:"US-2.17c …and the raising scrutinee really can raise, so the check is not vacuous"
+        ~haystack:(may_fail "exception" "raiser_nf") "Not_found" ;
       (* PINNED LIMITATION: arm order is not considered. {B} is what the tool
          answers; {Ec_a.A, Ec_a.B} is the truth. See rr_guarded_passthrough. *)
       Batch.contains b
