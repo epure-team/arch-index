@@ -56,7 +56,15 @@ open Arch_tezt
 (* [b.ml] owns the definitions, [cg.ml] uses them across a module boundary so
    the calls and type usages under test are the RESOLVED kind — a rejected row
    that resolved is what separates the two failure modes, and a fixture whose
-   rows all resolve to nothing would only exercise the milder one. *)
+   rows all resolve to nothing would only exercise the milder one.
+
+   [cg.ml] also names things this corpus does NOT contain — [String.length] and
+   [module Alias_absent = Buffer] — so that each of the three [resolved] counts
+   is STRICTLY below its total. Without them the fixture stored 1 call of 1 and
+   0 deps of 0, and on such a corpus "COUNT(*) WHERE <fk> IS NOT NULL" and
+   "COUNT(*)" are the same number: dropping the WHERE clause from either
+   resolved query left this test green. The gap is asserted below, not assumed,
+   for the same reason the rejection tally is. *)
 let fixture_files =
   [
     Fixture.dune_project;
@@ -71,8 +79,12 @@ let kept_target (x : int) : int = x
     ( "cg.ml",
       {|open B
 
+module Alias_kept = B
+module Alias_absent = Buffer
+
 let uses_refused (v : B.refused_ty) : int = B.refused_target v.ra
 let uses_kept (v : B.kept_ty) : int = B.kept_target v.ka
+let uses_absent (s : string) : int = String.length s
 let _ = ignore
 |} );
   ]
@@ -260,6 +272,36 @@ let register () =
           ("calls", "calls: 1 row(s) rejected");
           ("type_usage", "type_usage: 1 row(s) rejected");
           ("module_deps", "module_deps: 1 row(s) rejected");
+        ] ;
+      (* The second control. Each [resolved] count must be STRICTLY below its
+         total, or "rows whose foreign key resolved" and "rows" are the same
+         number on this corpus and the equalities below stop distinguishing
+         them: a producer that dropped the WHERE clause would agree with the
+         table it names. Asserted against the STORED numbers, so it constrains
+         the fixture rather than the producer — a fixture edit that removes the
+         unresolvable call or the out-of-corpus alias fails here, loudly, and
+         does not silently hollow out the assertions that follow. *)
+      List.iter
+        (fun (label, resolved_sql, total_sql) ->
+          let resolved = stored resolved_sql and total = stored total_sql in
+          Batch.check
+            b
+            ~msg:
+              (Printf.sprintf
+                 "the fixture must store at least one UNRESOLVED %s row, or \
+                  the resolved query and the unfiltered query are the same \
+                  number here and this test cannot tell them apart; stored %d \
+                  resolved of %d total"
+                 label
+                 resolved
+                 total)
+            (resolved < total))
+        [
+          ("calls", "calls WHERE callee_id IS NOT NULL", "calls");
+          ( "module_deps",
+            "module_deps WHERE target_module IS NOT NULL",
+            "module_deps" );
+          ("type_usage", "type_usage WHERE type_id IS NOT NULL", "type_usage");
         ] ;
       (* The invariant. Every reported number against the table it names. *)
       List.iter
