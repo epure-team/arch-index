@@ -92,6 +92,7 @@ let () =
   Dropped_node_dependents.register_dropped_module () ;
   Dropped_node_dependents.register_dropped_type () ;
   Nested_module_qualification.register () ;
+  Qualified_library_scoping.register () ;
   Must_null_ceiling.register () ;
   Query_limits.register () ;
   Exn_raise_sets.register () ;
