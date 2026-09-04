@@ -15,6 +15,15 @@
   in CI. Before this it was invoked by nothing at all: no CI step, no dune rule, no Makefile
   target.
 
+  The CI step separates the two non-zero exits. A **refusal** (exit 2 — a degraded cell, a corpus
+  below the adequacy floor, a component collapsed below half its pin, an unreadable or
+  doubly-defined constant) fails the build: none of those is a property of the branch, each says
+  the gate itself is not working, and a gate that cannot measure must not report success. A
+  **stale** constant (exit 1) is a warning here only because it is already hard-gated twice over —
+  the self-index smoke test diffs the golden, and `must_null_ceiling` fails the suite on a breach.
+  So the step adds no new way for an ordinary PR to fail, and one new way for a broken measurement
+  to be caught.
+
 ### Fixed
 - **The recalibration gate would write a degenerate measurement over a pinned constant.** A query
   that succeeds but matches nothing returns `0`, not an error: sqlite3 writes nothing to stderr,
