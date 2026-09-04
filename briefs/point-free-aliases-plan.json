@@ -1,0 +1,57 @@
+{
+  "task": "point-free-aliases",
+  "mode": "full",
+  "schema_version": "1.0",
+  "steps": [
+    {
+      "id": "step-1",
+      "skill": "roster-implement",
+      "inputs": [
+        "briefs/point-free-aliases-implementer.md",
+        "specs/point-free-aliases.md"
+      ],
+      "outputs": [
+        "briefs/point-free-aliases-impl.md"
+      ],
+      "hook": false
+    },
+    {
+      "id": "step-2",
+      "skill": "roster-review",
+      "inputs": [
+        "briefs/point-free-aliases-reviewer.md"
+      ],
+      "outputs": [
+        "briefs/point-free-aliases-review.json"
+      ],
+      "hook": false
+    },
+    {
+      "id": "step-3",
+      "skill": "roster-qa",
+      "inputs": [
+        "briefs/point-free-aliases-qa-scope.md"
+      ],
+      "outputs": [
+        "briefs/point-free-aliases-qa.md"
+      ],
+      "hook": false
+    },
+    {
+      "id": "step-4",
+      "skill": "roster-ship",
+      "inputs": [
+        "briefs/point-free-aliases-qa.md"
+      ],
+      "outputs": [
+        "briefs/point-free-aliases-ship.md"
+      ],
+      "hook": false
+    }
+  ],
+  "quality_gates": {
+    "build": "dune build",
+    "test": "dune runtest --force",
+    "lint": ""
+  }
+}

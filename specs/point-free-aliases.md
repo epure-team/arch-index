@@ -86,10 +86,27 @@ answer by itself.
 - Nearest internal precedent: lambda **occurrence** edges are `MAY_ENUMERATED`
   whenever the occurrence is not a saturated head invocation
   (`docs/edge-kind-contract.md:78-82`).
-- And the existing matrix already decides it: kind is demoted when
-  `call.cond || call.partial` (`arch_index.ml:832`), and an alias is by construction
-  under-saturated relative to its target's arity — `partial` in the documented sense.
-  Choosing `MUST` would mean **special-casing around** the matrix, not using it.
+- The matrix does **not** decide it for us, and an earlier revision of this spec said it
+  did. Correction, verified: `demoted = call.cond || call.partial`
+  (`arch_index.ml:832`), and `partial` means *"under-saturated / returns-a-function →
+  body deferred"* (`arch_index_cmt.ml:535`) — a property of an **application**. A
+  point-free alias is not an application at all, and it is not conditional, so a naively
+  synthesised pending call has `demoted = false` and `Head_local`/`Head_qualified` would
+  emit **`MUST`** (`arch_index.ml:859`, `:874`). Setting `partial = true` on something
+  that is not an application would be a lie in the data to obtain the right answer by
+  accident.
+
+  The honest mechanism is **`Head_enumerated`**, which forces `MAY_ENUMERATED`
+  unconditionally (`arch_index.ml:843`) and whose meaning already fits: a bounded
+  candidate set, here of exactly one. That is the repository's own precedent —
+  `specs/cfg-postdom-dominance.md:25`: *"Demotion target for a conditional call with
+  uniquely-resolved callee? MAY_ENUMERATED (candidate set of one)… MAY_TOP is reserved
+  for truly unknowable targets."*
+
+  Consequence for the plan, which the intake brief did not carry: the **local** case gets
+  the right kind with **zero** change to the classify match, while the **qualified** case
+  needs an explicit override, because `Head_qualified`'s arm would otherwise default to
+  `MUST`. This is a correctness trap, not a detail.
 
 **What this costs, named rather than glossed.** `Arch_exn` — which powers
 `may-fail`/`raises` — does **not** distinguish `MUST` from `MAY_ENUMERATED`; it
@@ -242,8 +259,13 @@ and report the two counts beside the 248/87 source-syntax counts.
   arrow type.
 - **FR-004** [US-2]: The row MUST carry `edge_form = 'value_alias'`; every other
   `calls` row MUST carry `edge_form IS NULL`.
-- **FR-005** [US-2]: `kind` MUST be assigned by the existing matrix, unmodified —
-  no alias-specific kind path.
+- **FR-005** [US-2]: The alias edge MUST be classified `Head_enumerated`, so
+  `MAY_ENUMERATED` follows from the existing unconditional arm rather than from a
+  synthesised `partial` flag. The producer MUST NOT set `call.partial` on a binding that
+  is not an application.
+- **FR-005b** [US-2]: A qualified alias MUST NOT reach `Head_qualified`'s default arm,
+  which emits `MUST` when not demoted. A test MUST assert that no row with
+  `edge_form='value_alias'` carries `kind='MUST'`.
 - **FR-006** [US-2]: `fan-in` and `god-modules` MUST exclude
   `edge_form = 'value_alias'`.
 - **FR-007** [US-2]: The producer MUST NOT add a `functions` row whose name contains
