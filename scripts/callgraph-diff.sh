@@ -25,18 +25,23 @@ HERE="$(cd "$(dirname "$0")/.." && pwd)"
 REF="${1:-main}"
 eval "$(cd "$HERE" && opam env 2>/dev/null)" || true
 
+LOGDIR="$(mktemp -d)"
+# Build logs go in a private mktemp dir, not fixed /tmp names: two concurrent
+# runs would clobber each other's diagnostics, and a fixed name in a
+# world-writable directory is symlink-preemptable. mktemp was already used two
+# lines below for the databases.
 WT="$(mktemp -d)/baseline"
-trap 'git -C "$HERE" worktree remove --force "$WT" 2>/dev/null || true' EXIT
+trap 'git -C "$HERE" worktree remove --force "$WT" 2>/dev/null || true; rm -rf "$LOGDIR"' EXIT
 git -C "$HERE" worktree add --detach "$WT" "$REF" >/dev/null
 
 echo "== building baseline ($REF) =="
 # The baseline worktree is freshly created, so a failed build leaves no .exe and
 # the -x guard catches it. Keep the guard anyway: it is what turns a build
 # failure into a clear message instead of a confusing missing-file error.
-if ! ( cd "$WT" && eval "$(opam env 2>/dev/null)" && dune build --root . bin/arch_callgraph_ocaml ) >/tmp/cgdiff-base-build.log 2>&1
+if ! ( cd "$WT" && eval "$(opam env 2>/dev/null)" && dune build --root . bin/arch_callgraph_ocaml ) >$LOGDIR/base-build.log 2>&1
 then
   echo "callgraph-diff: baseline ($REF) build FAILED — refusing to compare" >&2
-  tail -20 /tmp/cgdiff-base-build.log >&2
+  tail -20 $LOGDIR/base-build.log >&2
   exit 2
 fi
 OLD_BIN="$WT/_build/default/bin/arch_callgraph_ocaml/arch_callgraph_ocaml.exe"
@@ -46,10 +51,10 @@ echo "== building working tree =="
 # This is the dangerous one: unlike the baseline, $HERE usually HAS a binary
 # from an earlier build, so a swallowed failure produces a wrong answer rather
 # than a missing file.
-if ! ( cd "$HERE" && dune build --root . bin/arch_callgraph_ocaml ) >/tmp/cgdiff-new-build.log 2>&1
+if ! ( cd "$HERE" && dune build --root . bin/arch_callgraph_ocaml ) >$LOGDIR/new-build.log 2>&1
 then
   echo "callgraph-diff: working-tree build FAILED — refusing to compare against a stale binary" >&2
-  tail -20 /tmp/cgdiff-new-build.log >&2
+  tail -20 $LOGDIR/new-build.log >&2
   exit 2
 fi
 NEW_BIN="$HERE/_build/default/bin/arch_callgraph_ocaml/arch_callgraph_ocaml.exe"
@@ -125,17 +130,44 @@ echo "== kind distribution =="
 echo "old:"; sqlite3 "$OLD_DB" "SELECT '  '||kind||': '||count(*) FROM calls GROUP BY kind;"
 echo "new:"; sqlite3 "$NEW_DB" "SELECT '  '||kind||': '||count(*) FROM calls GROUP BY kind;"
 echo "== kind movements (old-kind → new-kind, per shared site) =="
-# KNOWN DEFECT (pre-existing, not fixed here): this join is on `functions.name`
-# alone, not on the normalized/rooted caller identity used everywhere else in
-# this script (see norm()/sites() above). Any function name shared by more
-# than one distinct function (21 such names were observed on a clean
-# self-comparison, i.e. comparing a tree against itself) fans this join out
-# across all of them, reporting kind "movements" that never happened. Measured
-# symptom: a clean self-comparison (old == new binary) reported 33 phantom
-# MAY_ENUMERATED -> MUST movements below, despite zero actual kind changes.
-# Do not trust this section's counts without independently checking for
-# name-collision fan-out; the DROPPED-EDGES gate above is unaffected (it joins
-# through norm()'d site identity, not bare function name).
+# KNOWN DEFECT (pre-existing, not fixed here). A clean self-comparison — the
+# SAME binary run twice into two fresh databases — reports 33 phantom
+# MAY_ENUMERATED -> MUST movements AND 33 in the reverse direction, despite the
+# two kind histograms being identical, i.e. despite zero real movements.
+#
+# THE MECHANISM, verified rather than inferred. `(caller_id, callee_name,
+# call_site)` is NOT a unique key: `call_site` is file:line with no COLUMN (see
+# architecture-schema.sql's note on top_anchor), so several distinct calls to
+# the same callee on one source line collapse onto one triple — and a
+# short-circuit operator makes some of them conditional and others not:
+#
+#   claims -> Stdlib.=  @arch_errors_config.ml:553   kinds = MUST, MAY_ENUMERATED, MAY_ENUMERATED
+#
+# 33 triples carry more than one distinct kind within a SINGLE database. The
+# self-join below then cross-matches a caller's own duplicate rows, and 44
+# ordered raw pairs collapse to exactly the 33 triples reported.
+#
+# So this is NOT an indexer defect: those rows are genuinely different calls,
+# correctly kinded. The defect is entirely in this report, which joins on a
+# key that does not identify a call.
+#
+# An earlier version of this comment blamed a `functions.name` fan-out and a
+# missing norm(). That was wrong and it actively misdirected — a reader who
+# checked for name collisions would have found none and concluded the counts
+# were sound. Three controls disprove it: of the 66 phantom rows, ZERO have a
+# caller name shared by more than one function; re-joining on `fn.id = fo.id`
+# (perfect identity, no fan-out possible) still yields 33/33; and excluding
+# every collided name still yields 33/33. There ARE 21 names shared by
+# multiple `functions` rows on this corpus, but they are a separate latent
+# hazard that does not bite here, and none of them contains `<fun:` so norm()
+# would change nothing for them.
+#
+# Real remedy: give the join a key that identifies a call — de-duplicate
+# (caller, callee, site) to its DISTINCT kind set per side before joining, or
+# add a column to call_site. NOT a norm() over caller identity.
+#
+# The DROPPED-EDGES gate above is unaffected: it compares norm()'d site
+# populations as SETS, so duplicate rows on one line collapse harmlessly.
 sqlite3 "" <<SQL
 ATTACH '$OLD_DB' AS o; ATTACH '$NEW_DB' AS n;
 SELECT '  '||ok||' -> '||nk||': '||count(*) FROM (
