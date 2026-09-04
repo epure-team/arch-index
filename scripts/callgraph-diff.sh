@@ -26,10 +26,21 @@ REF="${1:-main}"
 eval "$(cd "$HERE" && opam env 2>/dev/null)" || true
 
 LOGDIR="$(mktemp -d)"
-# Build logs go in a private mktemp dir, not fixed /tmp names: two concurrent
-# runs would clobber each other's diagnostics, and a fixed name in a
-# world-writable directory is symlink-preemptable. mktemp was already used two
-# lines below for the databases.
+# Everything this script writes goes in a private mktemp dir — the build logs
+# AND the six population files the gate then reads back. A fixed name in a
+# world-writable directory is symlink-preemptable, and review demonstrated it
+# rather than arguing it: symlinking $LOGDIR/old-sites.txt at a victim file and
+# running the gate destroyed the victim's contents through the link, exit 0.
+# Two concurrent runs also clobbered each other's -old-sites/-new-sites, after
+# which `comm` compared one run's baseline against the other's working tree —
+# an arbitrary PASS or FAIL from the gate itself.
+#
+# The first version of this comment hardened only the two build LOGS while
+# stating the principle in general terms. That was the class handled in one
+# place out of seven, with a comment claiming otherwise — so the wording now
+# says what is actually covered, and the trap removes the directory on exit
+# (the old fixed names also leaked ~1.1 MB per run into a /tmp this project
+# has already had fill to 100%).
 WT="$(mktemp -d)/baseline"
 trap 'git -C "$HERE" worktree remove --force "$WT" 2>/dev/null || true; rm -rf "$LOGDIR"' EXIT
 git -C "$HERE" worktree add --detach "$WT" "$REF" >/dev/null
@@ -98,14 +109,32 @@ lam_edge_caller_sites() { # (root_caller, site) pairs with a lambda-node CALLEE
                 WHERE c.callee_name LIKE '%<fun:%';" | norm | LC_ALL=C sort -u
 }
 
-dump "$OLD_DB" > /tmp/cgdiff-old.txt
-dump "$NEW_DB" > /tmp/cgdiff-new.txt
-sites "$OLD_DB" > /tmp/cgdiff-old-sites.txt
-sites "$NEW_DB" > /tmp/cgdiff-new-sites.txt
-lam_edge_sites "$NEW_DB" > /tmp/cgdiff-new-lamsites.txt
-lam_edge_caller_sites "$NEW_DB" > /tmp/cgdiff-new-lamcallersites.txt
+dump "$OLD_DB" > $LOGDIR/old.txt
+dump "$NEW_DB" > $LOGDIR/new.txt
+sites "$OLD_DB" > $LOGDIR/old-sites.txt
+sites "$NEW_DB" > $LOGDIR/new-sites.txt
+lam_edge_sites "$NEW_DB" > $LOGDIR/new-lamsites.txt
+lam_edge_caller_sites "$NEW_DB" > $LOGDIR/new-lamcallersites.txt
 
-raw_dropped=$(LC_ALL=C comm -23 /tmp/cgdiff-old-sites.txt /tmp/cgdiff-new-sites.txt)
+# A population gate must not pass with no population. `dune build` above
+# builds only bin/arch_callgraph_ocaml, while BUILD_DIR is lib/arch_index —
+# so on a FRESH worktree the corpus is whatever a previous, unrelated build
+# happened to leave, which review measured as
+#   == populations: old=0 new=0 added=0 ==
+#   callgraph-diff: PASS (zero dropped edges)   exit 0
+# i.e. the gate's own receipt was meaningful only by accident. This is the
+# same "the command ran, but not over what you think" class the --root .
+# change in this commit exists to fix, so it is closed here rather than
+# left as a footnote.
+if [ "$(wc -l < "$LOGDIR/old-sites.txt")" -eq 0 ]; then
+  echo "callgraph-diff: REFUSING — the baseline indexed ZERO call sites from" >&2
+  echo "  $BUILD_DIR" >&2
+  echo "  A population comparison over an empty population proves nothing. Run" >&2
+  echo "  'dune build --root .' so $BUILD_DIR holds .cmt files, then retry." >&2
+  exit 2
+fi
+
+raw_dropped=$(LC_ALL=C comm -23 $LOGDIR/old-sites.txt $LOGDIR/new-sites.txt)
 # Filter the sanctioned replacements:
 #   (a) an old '*TOP*' row whose root caller now carries a lambda edge
 #       (literal argument's escape marker replaced by the enumerated edge);
@@ -121,11 +150,11 @@ dropped=$(echo "$raw_dropped" | awk -F'|' '
   # a qualified or *TOP* callee dropped at a lambda-edge site is a REAL drop.
   $2 != "*TOP*" && index($2, ".") == 0 && (($1"`"$3) in lamsite) { next }
   NF { print }
-' /tmp/cgdiff-new-lamcallersites.txt /tmp/cgdiff-new-lamsites.txt -)
-added=$(LC_ALL=C comm -13 /tmp/cgdiff-old-sites.txt /tmp/cgdiff-new-sites.txt | wc -l)
+' $LOGDIR/new-lamcallersites.txt $LOGDIR/new-lamsites.txt -)
+added=$(LC_ALL=C comm -13 $LOGDIR/old-sites.txt $LOGDIR/new-sites.txt | wc -l)
 replaced=$(( $(echo "$raw_dropped" | grep -c . || true) - $(echo "$dropped" | grep -c . || true) ))
 echo "== sanctioned *TOP*→lambda replacements: $replaced =="
-echo "== populations: old=$(wc -l < /tmp/cgdiff-old-sites.txt) new=$(wc -l < /tmp/cgdiff-new-sites.txt) added=$added =="
+echo "== populations: old=$(wc -l < $LOGDIR/old-sites.txt) new=$(wc -l < $LOGDIR/new-sites.txt) added=$added =="
 echo "== kind distribution =="
 echo "old:"; sqlite3 "$OLD_DB" "SELECT '  '||kind||': '||count(*) FROM calls GROUP BY kind;"
 echo "new:"; sqlite3 "$NEW_DB" "SELECT '  '||kind||': '||count(*) FROM calls GROUP BY kind;"
