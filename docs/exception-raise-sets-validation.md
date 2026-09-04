@@ -108,3 +108,85 @@ compounding causes: the `<project root>/profiles` candidate is rooted at the **a
 shipped profile was therefore unreachable in exactly the situation it exists for: analysing an
 external corpus. Discovery now walks the executable's ancestors looking for `profiles/`, which
 also survives an installed layout. The resolved path is printed on every run.
+
+---
+
+## Re-validated after qualified-unit resolution (roadmap 1.6, 2026-09-04)
+
+Gate G-2 of `specs/qualified-unit-resolution.md` §8: any movement in the numbers above is
+attributed here; the expected values themselves are never edited. Both corpora were re-measured
+with the pre-change binary FIRST, and both reproduced the table above to the digit before any
+delta was read — octez-manager 12 317 nodes / 58 553 calls / 353 modules, proto_alpha 468 modules /
+14 452 functions / 73 588 calls, bounded 3 436 (23.8 %), tzresult 585/2 137 (27.4 %).
+
+**Nothing in the table above moves.** The exception channel's own inputs are bit-identical on both
+corpora — octez-manager 491 scopes / 2 245 links / 18 758 origins / 31 identities / 1 158
+`exn_edges`, proto_alpha 19 scopes / 35 links / 11 exception identities / 377 tzresult identities /
+6 `exn_rebinds` **content-identical, not merely equal in count**. That is the expected result:
+identities come from `Arch_index_exn.canonical_path ~unit_declared ~cmt_modname`, computed in the
+cmt pass, which never consults the resolver this change touches.
+
+What moves is **which functions a `fails-with` query returns**, because raise sets propagate along
+`calls` edges and this change moves where some calls resolve to.
+
+| corpus | identities moved | removed | added |
+|---|---|---|---|
+| octez-manager | 1 of 31 (`Invalid_argument` 2 439 → 2 520) | **0** | 81 |
+| proto_alpha | 3 of 11 (`Assert_failure` +31, `Division_by_zero` +35, `Invalid_argument` +35) | **0** | 101 |
+
+**Zero removals on either corpus.** No function stopped being reported as possibly raising
+anything. Every movement is a false negative corrected.
+
+### Why, read against the source
+
+`octez-manager` has two `snapshots.ml` — `src/snapshots.ml` (library `octez_manager_lib`) and
+`src/ui/pages/snapshots.ml`. Resolution keyed the capitalised basename in a last-writer-wins table,
+so `Octez_manager_lib.Snapshots.slug_of_network` resolved to **nothing** and was emitted as an
+external leaf:
+
+```
+before  network_short: UNBOUNDED (⊤): {}
+        reason: external Octez_manager_lib.Snapshots.slug_of_network
+after   network_short: UNBOUNDED (⊤): {Invalid_argument}
+        Invalid_argument | slug_of_network | transitive
+        reason: external Stdlib.String.sub, …
+```
+
+`src/snapshots.ml:64 slug_of_network` → `strip_date_suffix` → `String.sub` ⇒ `Invalid_argument`,
+confirmed at source. The callee was in the index the whole time and was reported as outside it.
+
+### The one place precision is lost, and its exact cost
+
+`proto_alpha` bounded goes **3 436 → 3 433** on the exception channel. Three nodes, all in
+`lib_protocol/test/helpers/script_big_map.ml`, whose line 8 is
+
+```ocaml
+let update k v m ctxt = Protocol.Script_big_map.update ctxt k v m
+```
+
+Both the protocol's `Script_big_map` and the helper's own answer to that segment and both define
+`update`, so the reference is genuinely ambiguous and degrades to `MAY_TOP` /
+`top_reason='ambiguous_unit'` rather than being guessed. The previous behaviour "resolved" it to
+the helper itself — a self-recursive call that does not exist in the source.
+
+The three are identified by two independent measurements agreeing: the transitive caller closure of
+the newly-⊤ node is exactly `{update, of_list, of_list.<fun:12:5>}`, and the bounded count fell by
+exactly 3. **No node with a non-empty bounded set lost boundedness** — that is what the zero
+removals above mean — so nothing that named an exception stopped naming it.
+
+### What the same change corrected in the other direction
+
+Three `proto_alpha` call sites were resolving **production protocol code to a test helper** of the
+same basename, the first stamped `MUST`, i.e. asserted as proof:
+
+| call site | was | now |
+|---|---|---|
+| `lib_protocol/script_interpreter.ml:842` | `test/helpers/script_big_map.ml:8` (MUST) | `lib_protocol/script_big_map.ml:90` |
+| `lib_protocol/clst_contract_storage.ml:93` | same (MUST) | same |
+| `lib_protocol/clst_contract_storage.ml:247` | same (MAY_ENUMERATED) | same |
+
+Same class, also corrected: `Tezos_dal_alpha.RPC_directory.directory`, attributed to
+`lib_sc_rollup_node/RPC_directory.ml` and now landing in `lib_dal/RPC_directory.ml`.
+
+A `MUST` edge from the Michelson interpreter into test scaffolding is the defect this roadmap item
+exists to remove, and it was present on the protocol corpus, not only on a fixture.
