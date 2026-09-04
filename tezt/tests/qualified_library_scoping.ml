@@ -227,3 +227,81 @@ let register () =
                      kind (show callee) impl)
                 (kind = "MUST" && callee = Some impl))) ;
   Lwt.return_unit
+
+(* ------------------------------------------------------------------ *)
+(* FR-007 — the shapes v1 of the spec omitted                          *)
+(* ------------------------------------------------------------------ *)
+
+(* Scenario C — (wrapped false), the DISCLOSED RESIDUAL.
+
+   For an unwrapped library dune's compiled unit name IS the capitalised
+   basename, so there is no library prefix to recover and unit-keying
+   disambiguates nothing. FR-001's defect therefore PERSISTS here, and this test
+   pins that boundary deliberately rather than leaving it to be discovered as
+   "the fix sometimes doesn't work".
+
+   Both libraries are (wrapped false) and both own an [Api] module, so both
+   compile to a unit literally named [Api]. The registry maps that one name to
+   two distinct paths; two distinct functions answer to it; and FR-003 therefore
+   degrades to ⊤ rather than guessing. That is the honest outcome — the wrong
+   MUST is gone — but it is NOT resolution, and calling it one would overstate
+   what this change achieves. *)
+let unwrapped_a_dune =
+  ("uwa/dune", "(library\n (name uwa)\n (wrapped false)\n (modules api)\n (flags (:standard -w -a)))\n")
+
+let unwrapped_a_api = ("uwa/api.ml", "let run () : int = 1\n")
+
+let unwrapped_b_dune =
+  ("uwb/dune", "(library\n (name uwb)\n (wrapped false)\n (modules api)\n (flags (:standard -w -a)))\n")
+
+let unwrapped_b_api = ("uwb/api.ml", "let run () : int = 2\n")
+
+let unwrapped_caller_dune =
+  ( "uwcaller/dune",
+    "(library\n (name uwcaller)\n (libraries uwa uwb)\n (modules e)\n (flags (:standard -w -a)))\n"
+  )
+
+let unwrapped_caller_e = ("uwcaller/e.ml", "let go () : int = Api.run ()\n")
+
+let scenario_c_files =
+  [
+    dune_project; unwrapped_a_dune; unwrapped_a_api; unwrapped_b_dune; unwrapped_b_api;
+    unwrapped_caller_dune; unwrapped_caller_e;
+  ]
+
+let register_unwrapped_residual () =
+  Test.register ~__FILE__
+    ~title:"cmt: two (wrapped false) libraries sharing a module name degrade to ⊤, never a guess"
+    ~tags:["cmt"; "qualified_name"; "library_scoping"; "residual"]
+  @@ fun () ->
+  Batch.run (fun b ->
+      with_fixture ~name:"qual-scope-c" ~files:scenario_c_files @@ fun fixture ->
+      let db = index fixture in
+      Db.with_db db (fun conn ->
+          let a = fn_id conn ~mod_like:"%uwa/api.ml" ~name:"run" b ~label:"C" in
+          let bb = fn_id conn ~mod_like:"%uwb/api.ml" ~name:"run" b ~label:"C" in
+          match (a, bb) with
+          | None, _ | _, None ->
+              Batch.note b "C: one of the two unwrapped Api.run functions is not indexed"
+          | Some _, Some _ ->
+              let callee, kind = single_call conn ~caller_fn:"go" ~label:"C" in
+              (* The boundary this pins: unit-keying cannot separate these,
+                 because for (wrapped false) the unit name IS "Api" for both.
+                 What it MUST NOT do is pick one and call it MUST. *)
+              Batch.check b
+                ~msg:
+                  (Printf.sprintf
+                     "C: go -> Api.run is kind=%s callee_id=%s. Two (wrapped false) libraries \
+                      both compile a unit literally named Api, so nothing distinguishes them — \
+                      a MUST here would be a coin flip presented as a proof"
+                     kind (show callee))
+                (kind <> "MUST") ;
+              Batch.check b
+                ~msg:
+                  (Printf.sprintf
+                     "C: go -> Api.run degraded to kind=%s but callee_id=%s is set. An \
+                      unresolvable reference must carry no callee, or downstream reads it as \
+                      resolved"
+                     kind (show callee))
+                (callee = None))) ;
+  Lwt.return_unit
