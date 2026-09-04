@@ -1,15 +1,18 @@
 # Intake Brief — point-free-aliases
 
 **Date:** 2026-09-04
-**Status: DRAFT — pending validation**
-**HELD 2026-09-04 by human decision — do not advance to /roster-spec.**
-Reason: too many branches in flight over the same ground. Resume only once
-#62, #63, #65 and the peer's roadmap-1.6 resolver (`feat/qualified-unit-resolution`)
-have merged. Three of those recalibrate `test/fixtures/self-index-stats.txt` from the
-same base, and alias target resolution is built on the 1.6 resolver, so speccing now
-would measure against a baseline that is about to move under it. The ledger is
-deliberately left at `research COMPLETED` — no `intake` event is appended, because
-`intake`'s only legal outcome is VALIDATED and this brief is not.
+**Status: VALIDATED**
+**Hold lifted 2026-09-04 by the human ("reprends").**
+Held earlier the same day because four branches were in flight over the same files.
+#62 and #63 have since merged; #65 is pushed, green and awaiting re-review, and it is
+the only remaining branch that touches a calibrated file. The spec phase writes no code
+and the 1.6 resolver is an IMPLEMENTATION dependency, not a spec one — so speccing now
+is the parallelism the peer recommended, not a risk.
+
+What still does NOT change: implementation waits for the roadmap-1.6 resolver to merge.
+Alias target resolution goes through it, and today's `resolve_qualified` keys
+`mod_name_to_path` on the capitalised basename with `Hashtbl.replace` — last-writer-wins
+— so building on it would inherit that bug.
 **Type:** feature
 **Trust boundary:** no  ← keyword heuristic on `task.md`: no hit
 
