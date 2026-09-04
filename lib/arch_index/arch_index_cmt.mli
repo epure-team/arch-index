@@ -370,14 +370,26 @@ val binding_name : (string, string) Hashtbl.t -> prefix:string -> Ident.t -> str
 val build_local_fn_stamps :
   Typedtree.structure -> (string, string * int) Hashtbl.t
 
+(** [build_local_alias_stamps structure] maps each same-unit top-level binding
+    whose RHS is a bare arrow-typed identifier ([let t2 = t1]) to the definition
+    path it is indexed under. Deliberately DISJOINT in meaning from
+    {!build_local_fn_stamps}: an alias binder has no function body and no
+    syntactic arity, so putting it in that table would promote every ordinary
+    application of it to MUST and defeat the under-saturation check. Read only
+    by the point-free alias emission, to close a chain of alias hops
+    (specs/point-free-aliases.md). *)
+val build_local_alias_stamps : Typedtree.structure -> (string, string) Hashtbl.t
+
 (** [collect_calls_from_expr ~src_path ~caller_module ~caller_name
     ~local_fn_stamps expr] lowers [expr] onto per-node CFGs and returns the
     collected call edges plus the promoted lambda nodes. [local_fn_stamps] maps
     same-module top-level function-binder stamps ([Ident.unique_name]) to their
-    syntactic arity. *)
+    syntactic arity. [local_alias_stamps] (default: empty — no alias-chain
+    closure) is {!build_local_alias_stamps}'s table for the same structure. *)
 val collect_calls_from_expr :
   ?canon_exn:(Path.t -> string) ->
   ?value_channels:Arch_errors_config.channel list ->
+  ?local_alias_stamps:(string, string) Hashtbl.t ->
   src_path:string ->
   caller_module:string ->
   caller_name:string ->

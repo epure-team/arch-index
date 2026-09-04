@@ -35,11 +35,23 @@ thing that actually decides the resolution mechanism.
    is most of the work.
 
 3. **`Pident_other` is a third class the plan did not name.** 38 on proto_alpha, 10 on
-   octez-manager: a bare identifier that is not a same-module top-level function. It is
-   either a parameter (not an alias at all — must be excluded) or an `open`-mediated
-   reference (an alias needing qualified resolution). US-3's second acceptance scenario
-   covers the `open` case; nothing covers the parameter case. **S1 must exclude this
-   class explicitly rather than let it fall into either slice.**
+   octez-manager: a bare identifier that is not a same-module top-level function.
+
+   **CORRECTED IN REVIEW — this enumeration was incomplete, and the missing member was
+   the feature's own construct.** The class has *three* members, not two:
+
+   - an **alias binder** (`let t2 = t1`, where `t1` is itself `let t1 = target`). `t1`
+     has no function *body*, so it is not in `local_fn_stamps` and `t2` fell into this
+     class and was dropped. That is the original defect one hop along: `t1` reads
+     `BOUNDED: {Boom}` and `t2` reads `BOUNDED: {}`. **Now handled** — see FR-005c.
+   - a **parameter** or local closure (not an alias at all — correctly excluded, and
+     there is no top-level row to point an edge at even if one wanted to).
+   - an **`open`-mediated reference** — **not actually a member.** Settled empirically:
+     typedtree paths are post-resolution, so `open M` followed by a bare `g` yields
+     `Path.Pdot (M, g)`, never a `Pident`. The qualified slice covers it by construction.
+
+   US-3's second acceptance scenario covers the `open` case; nothing covered the
+   parameter case, and nothing named the alias-binder case at all.
 
 4. **The non-arrow population is large and real** — 390 on proto_alpha, 376 on
    octez-manager. FR-003's exclusion is not a corner case; it is roughly half of all

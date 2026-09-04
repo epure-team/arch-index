@@ -96,17 +96,30 @@ answer by itself.
   that is not an application would be a lie in the data to obtain the right answer by
   accident.
 
-  The honest mechanism is **`Head_enumerated`**, which forces `MAY_ENUMERATED`
-  unconditionally (`arch_index.ml:843`) and whose meaning already fits: a bounded
+  The candidate mechanism was **`Head_enumerated`**, which forces `MAY_ENUMERATED`
+  unconditionally (`arch_index.ml:843`) and whose meaning fits: a bounded
   candidate set, here of exactly one. That is the repository's own precedent —
   `specs/cfg-postdom-dominance.md:25`: *"Demotion target for a conditional call with
   uniquely-resolved callee? MAY_ENUMERATED (candidate set of one)… MAY_TOP is reserved
   for truly unknowable targets."*
 
-  Consequence for the plan, which the intake brief did not carry: the **local** case gets
-  the right kind with **zero** change to the classify match, while the **qualified** case
-  needs an explicit override, because `Head_qualified`'s arm would otherwise default to
-  `MUST`. This is a correctness trap, not a detail.
+  **Superseded during implementation, and this paragraph is corrected rather than
+  left to contradict the code.** `Head_enumerated` resolves **same-module only**, via
+  `resolve_local`. A cross-module alias routed through it would never acquire a
+  `callee_id` at all — and 153 of proto_alpha's 351 alias edges are cross-module. The
+  mechanism that forces the right *kind* would have destroyed the *identity*, which is
+  the thing the edge exists to carry: without a `callee_id` there is nothing for the
+  raise-set fixpoint to follow, and US-1 — the entire point — fails.
+
+  The shipped design instead routes an alias through `add_path_call`'s **ordinary**
+  heads (`Head_local` / `Head_qualified`), so identity resolution is exactly what it is
+  for any other edge, and demotes in the **kind matrix** on `edge_form`
+  (`arch_index.ml:1377`: `demoted = call.cond || call.partial || call.edge_form = Some
+  "value_alias"`). This is the better separation and not merely the expedient one:
+  *"which function is this"* and *"may I treat this as a definite call"* are different
+  questions, the head answers the first and the matrix answers the second, and choosing
+  a head constructor for its kind side-effect would have answered the second by lying
+  about the first.
 
 **What this costs, named rather than glossed.** `Arch_exn` — which powers
 `may-fail`/`raises` — does **not** distinguish `MUST` from `MAY_ENUMERATED`; it
@@ -259,15 +272,42 @@ and report the two counts beside the 248/87 source-syntax counts.
   arrow type.
 - **FR-004** [US-2]: The row MUST carry `edge_form = 'value_alias'`; every other
   `calls` row MUST carry `edge_form IS NULL`.
-- **FR-005** [US-2]: The alias edge MUST be classified `Head_enumerated`, so
-  `MAY_ENUMERATED` follows from the existing unconditional arm rather than from a
-  synthesised `partial` flag. The producer MUST NOT set `call.partial` on a binding that
-  is not an application.
+- **FR-005** [US-2]: The alias edge MUST be `MAY_ENUMERATED`, and that MUST follow
+  from the **kind matrix keyed on `edge_form`** (`arch_index.ml:1377`), not from a
+  synthesised `partial` flag and not from a head constructor chosen for its kind
+  side-effect. The head MUST be the ordinary one `add_path_call` would pick
+  (`Head_local` for a same-module target, `Head_qualified` for a cross-module one), so
+  the edge resolves to a `callee_id` by the same rules as every other edge. The
+  producer MUST NOT set `call.partial` on a binding that is not an application.
+
+  *Amended in review.* This requirement previously mandated `Head_enumerated`.
+  That is wrong and would have defeated US-1: `Head_enumerated` resolves same-module
+  only, so every cross-module alias — 153 of proto_alpha's 351 — would carry no
+  `callee_id` and propagate nothing. See Decision 2.
+- **FR-005c** [US-1]: An alias binder whose RHS is **itself an alias binder**
+  (`let t2 = t1`) MUST emit its own edge, to its **immediate** predecessor. One hop per
+  binder, no transitive shortcut: the chain closes because consumers traverse the
+  resulting edges. Emitting nothing here is the original defect one hop along — `t1`
+  reads `BOUNDED: {Boom}` and `t2`, meaning the identical function, reads `BOUNDED: {}`.
+  The binders MUST NOT be admitted to `local_fn_stamps` to achieve this (see Residuals).
 - **FR-005b** [US-2]: A qualified alias MUST NOT reach `Head_qualified`'s default arm,
   which emits `MUST` when not demoted. A test MUST assert that no row with
   `edge_form='value_alias'` carries `kind='MUST'`.
-- **FR-006** [US-2]: `fan-in` and `god-modules` MUST exclude
+- **FR-006** [US-2]: `fan-in`, `god-modules` and `callers-of` MUST exclude
   `edge_form = 'value_alias'`.
+
+  *Amended in review.* `callers-of` was omitted from the original list and answered
+  `t1|src/top.ml` for `callers-of target`, where `t1` is `let t1 = target` and calls
+  nothing. The rationale for the other two — *"a point-free alias is not a CALLER of
+  `M.g`; nobody invokes anything at that site"* — applies verbatim, and most sharply, to
+  the one command whose whole purpose is naming callers: an inflated count is a number a
+  reader may discount, a name is a file a reader goes and opens.
+
+  The exclusion is **directional**, and `reachable-from` / `callees-of` are deliberately
+  NOT gated. Those ask *"what could running this reach"*, and an alias genuinely does
+  forward a body — the raise-set propagation this feature exists for depends on
+  traversal continuing through the edge. `fan-in` / `god-modules` / `callers-of` ask
+  *"who invokes this"*, and the answer at an alias site is nobody.
 - **FR-007** [US-2]: The producer MUST NOT add a `functions` row whose name contains
   a dot in the aliasing module.
 - **FR-008** [US-3]: The classification MUST be by typedtree path, never by source

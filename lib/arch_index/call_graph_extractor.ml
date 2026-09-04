@@ -270,6 +270,17 @@ let extract_calls_from_cmts ~project_dir fn_rows =
                     let local_fn_stamps =
                       Arch_index_cmt.build_local_fn_stamps structure
                     in
+                    (* Same-module top-level ALIAS binders ([let t2 = t1]).
+                       Kept out of [local_fn_stamps] on purpose — see
+                       [build_local_alias_stamps]. Threaded here too so an
+                       alias chain closes on the flat path as well: this
+                       producer shares [collect_calls_from_expr], so omitting
+                       it would leave the flat schema with [t1]'s edge and not
+                       [t2]'s — the same half-answer on one of the two
+                       producers. *)
+                    let local_alias_stamps =
+                      Arch_index_cmt.build_local_alias_stamps structure
+                    in
                     (* Issue #41's row-collapse (INSERT OR REPLACE on
                        UNIQUE(module_id, name)) never applies on this path:
                        this schema's `functions` rows come from LSP document
@@ -297,6 +308,7 @@ let extract_calls_from_cmts ~project_dir fn_rows =
                                         ~caller_module:rel_src
                                         ~caller_name
                                         ~local_fn_stamps
+                                        ~local_alias_stamps
                                         vb.vb_expr
                                     in
                                     (* Flat path: lambda-attributed calls flow

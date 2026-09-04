@@ -219,20 +219,50 @@ let () =
            raw sqlite error and exit 1 — including `callers-of`, which the README advertises
            as the variant-analysis entry point. Each now has a main-schema form. *)
         | "callers-of" ->
+            (* specs/point-free-aliases.md FR-006, extended in review: the SAME
+               exclusion as [fan-in]/[god-modules], and this is the command it
+               matters most on. A point-free alias ([let t1 = target]) is not a
+               CALLER of [target] — nobody invokes anything at that site — and
+               this is the one command whose entire purpose is to name callers.
+               Before the exclusion `callers-of target` answered `t1|src/top.ml`,
+               a binding that calls nothing. That is not a smaller distortion
+               than fan-in's inflated count; it is the same claim, spelled as a
+               name a human then goes and reads.
+
+               [reachable-from]/[callees-of] are deliberately NOT gated: those
+               ask "what could running this get to", and an alias genuinely
+               forwards a body — the raise-set propagation this feature exists
+               for depends on traversal continuing through the edge. The
+               distinction is direction and question, not table.
+
+               Gated on the column, not the schema, exactly as the two sibling
+               queries: a database built by an EARLIER binary has neither the
+               column nor the rows, and an unconditional predicate would ERROR
+               against it rather than merely over-count. *)
+            let not_alias_and =
+              if Arch_db.has_col t "calls" "edge_form" then "AND edge_form IS NULL " else ""
+            in
             if flat then
               q
                 ~h:[ "caller_name"; "caller_file" ] ~shape:Arch_db.Rows.t2' ~cells:Arch_db.Rows.c2 ~pty:str1
-                "SELECT DISTINCT caller_name, caller_file FROM calls WHERE callee_name=? ORDER BY 1"
+                (Printf.sprintf
+                   "SELECT DISTINCT caller_name, caller_file FROM calls WHERE callee_name=? \
+                    %sORDER BY 1"
+                   not_alias_and)
                 a
             else
               (* On the main schema a callee is EITHER a resolved id or a qualified name
                  string, and both mean "calls a", so both must be matched or the answer is a
-                 silent under-count. *)
+                 silent under-count. The OR is PARENTHESISED: without the parens the
+                 [edge_form] conjunct would bind to the right-hand disjunct only, and an
+                 alias matched by [callee_name] would still be reported. *)
               q ~h:[ "caller_name"; "caller_file" ] ~shape:Arch_db.Rows.t2' ~cells:Arch_db.Rows.c2 ~pty:str2
-                "SELECT DISTINCT cf.name AS caller_name, COALESCE(m.path,'') AS caller_file FROM \
-                 calls c JOIN functions cf ON c.caller_id=cf.id LEFT JOIN modules m ON \
-                 cf.module_id=m.id WHERE c.callee_name=? OR c.callee_id IN (SELECT id FROM \
-                 functions WHERE name=?) ORDER BY 1"
+                (Printf.sprintf
+                   "SELECT DISTINCT cf.name AS caller_name, COALESCE(m.path,'') AS caller_file \
+                    FROM calls c JOIN functions cf ON c.caller_id=cf.id LEFT JOIN modules m ON \
+                    cf.module_id=m.id WHERE (c.callee_name=? OR c.callee_id IN (SELECT id FROM \
+                    functions WHERE name=?)) %sORDER BY 1"
+                   not_alias_and)
                 (a, a)
         | "callees-of" ->
             if flat then

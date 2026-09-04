@@ -848,6 +848,15 @@ let extract_types_from_signature ty =
   walk ty 0 ;
   List.rev !types
 
+(** [true] iff [ty] is SYNTACTICALLY a function type. No alias expansion:
+    .cmt-restored environments do not carry manifest type declarations, so
+    [type unary = int -> int] cannot be expanded here. Shared by the alias
+    pre-pass below and by [collect_calls_from_expr]'s own [is_arrow], so the
+    binder admitted by the first and the RHS accepted by the second are judged
+    against ONE definition of "arrow-typed" — two would let a binding enter the
+    table and then be refused at emission, or the reverse. *)
+let is_arrow_ty ty = match Types.get_desc ty with Tarrow _ -> true | _ -> false
+
 (** [true] iff the binding RHS is a syntactic function body — the only shape we
     can treat as a statically-callable node. A function-TYPED value with a
     non-function RHS (e.g. [let f = if c then g else h], or a plain alias
@@ -968,6 +977,53 @@ let build_local_fn_stamps (structure : Typedtree.structure) =
       | _ -> ()) ;
   local_fn_stamps
 
+(** Companion to {!build_local_fn_stamps} for the one construct that table
+    cannot hold: a top-level binding whose RHS is itself a bare arrow-typed
+    identifier — [let t2 = t1], where [t1] is another such binder. Maps the
+    binder's [Ident.unique_name] to the definition path it is indexed under,
+    exactly as {!build_local_fn_stamps} does, so an edge naming it resolves to
+    the row that actually exists.
+
+    Why a SEPARATE table rather than widening [local_fn_stamps]: that table's
+    meaning is "a same-module top-level function BODY", and two things read it
+    for that meaning — [ident_is_local_fn], which promotes an applied
+    identifier to a MUST candidate, and [local_fn_arity], the syntactic arity
+    that detects under-saturated applications. An alias binder has no body and
+    no syntactic arity ([fn_arity] returns 0 for it), so admitting it there
+    would promote every ordinary application of an alias to MUST and hand the
+    arity check a 0 that makes every application of it look saturated. Neither
+    is this feature's subject. This table is therefore read at exactly ONE site
+    — the point-free alias emission in [walk_function_root] — and answers only
+    "is this bare identifier a same-module top-level alias binder I can name?".
+
+    No fixpoint and no transitive closure here, and none is needed: each binder
+    emits ONE edge to its immediate RHS, so a chain [t3 -> t2 -> t1 -> target]
+    is three ordinary edges that every consumer's existing graph traversal
+    follows. The chain is bounded by the call graph — and by the cycle handling
+    the exception fixpoint already has for [let rec] — not by anything here. *)
+let build_local_alias_stamps (structure : Typedtree.structure) =
+  let binding_names = build_binding_names structure in
+  let local_alias_stamps = Hashtbl.create 16 in
+  iter_structure_items structure ~f:(fun ~prefix (it : Typedtree.structure_item) ->
+      match it.str_desc with
+      | Tstr_value (_, vbs) ->
+          List.iter
+            (fun (vb : Typedtree.value_binding) ->
+              match (vb.vb_pat.pat_desc, vb.vb_expr.exp_desc) with
+              (* The same two conditions the emission site applies — a bare
+                 identifier RHS ([root == e0]: nothing was peeled, so this is
+                 point-free) of arrow type. A wildcard binder is [Tpat_any],
+                 not [Tpat_var], so [let _ = g] is excluded structurally. *)
+              | Tpat_var (id, _, _), Texp_ident _ when is_arrow_ty vb.vb_expr.exp_type ->
+                  Hashtbl.replace
+                    local_alias_stamps
+                    (Ident.unique_name id)
+                    (binding_name binding_names ~prefix id)
+              | _ -> ())
+            vbs
+      | _ -> ()) ;
+  local_alias_stamps
+
 (** Walk a value binding expression to collect all function calls.
     [local_fn_stamps] is the set of [Ident.stamp]s of same-module top-level
     function-body bindings; an applied unqualified identifier counts as a
@@ -975,7 +1031,8 @@ let build_local_fn_stamps (structure : Typedtree.structure) =
     otherwise it is a parameter / local binding / closure and is MAY_TOP.
     Returns a list of pending calls. *)
 let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels = [])
-    ~src_path ~caller_module ~caller_name ~local_fn_stamps (expr : Typedtree.expression) =
+    ?(local_alias_stamps = Hashtbl.create 0) ~src_path ~caller_module ~caller_name
+    ~local_fn_stamps (expr : Typedtree.expression) =
   (* Per-node CFG: every function — the top-level binding AND each nested
      lambda node — gets its own lowering context with its own graph, current
      block, and try-dispatch stack. Calls record their (context, block); after
@@ -1160,6 +1217,12 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels
     | Some (name, _) -> name
     | None -> Ident.name id
   in
+  (* The definition path of a same-module top-level ALIAS binder (see
+     {!build_local_alias_stamps}), or [None] when this identifier is not one.
+     Deliberately NOT folded into [ident_is_local_fn]/[local_fn_name]: those
+     answer "is this a function body I may treat as a MUST candidate", and an
+     alias binder is not. Read at one site only. *)
+  let local_alias_name id = Hashtbl.find_opt local_alias_stamps (Ident.unique_name id) in
   (* True iff [ty] is SYNTACTICALLY a function type. No alias expansion:
      .cmt-restored environments do not carry manifest type declarations, so
      [type unary = int -> int] cannot be expanded here. Same-module partial
@@ -1167,9 +1230,7 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels
      (local_fn_stamps / local_lam_stamps); the residual is a CROSS-module
      partial application whose result arrow hides behind an alias in the
      callee's interface — its head stays MUST (documented residual). *)
-  let is_arrow ty =
-    match Types.get_desc ty with Tarrow _ -> true | _ -> false
-  in
+  let is_arrow ty = is_arrow_ty ty in
   (* Number of leading arrows in a function type = its (maximal) arity. Uses
      the raw type — no env-based expansion, which is unreliable on .cmt-restored
      environments (they do not carry manifest type declarations, so an alias
@@ -2330,18 +2391,32 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels
     (match root.exp_desc with
     | Texp_ident (path, _, _) when root == e0 && is_arrow root.exp_type -> (
         match path with
-        | Path.Pident id when not (ident_is_local_fn id) ->
+        | Path.Pident id when not (ident_is_local_fn id) -> (
             (* The third class: a bare identifier that is not a same-module
-               top-level function — a parameter, or a local closure. Excluded
-               rather than emitted, per FR-003's scope.
+               top-level function BODY. It splits in two, and only the second
+               half is outside this feature.
 
-               NOTE, and it is a real gap rather than a tidy boundary: dropping
-               the edge is the ORIGINAL bug in miniature — the node inherits
-               nothing and reads BOUNDED: {}. The honest answer for "I cannot
-               tell what this aliases" is ⊤, not silence. Left as specified
-               because turning 38+10 silent drops into ⊤ edges moves the
-               ceiling ratchets and deserves its own measured slice. *)
-            ()
+               (i) An ALIAS BINDER — [let t2 = t1] where [t1] is itself
+               [let t1 = target]. This is the feature's OWN construct one hop
+               along, and dropping it was the original bug in miniature: [t1]
+               read BOUNDED: {Boom} while [t2], meaning exactly the same thing,
+               read BOUNDED: {} — a stated certainty about a body nobody read,
+               sitting beside the correct answer. [local_alias_stamps] names
+               these (it is the reason that table exists) and the edge is
+               emitted like any other alias edge. One hop per binder; the chain
+               closes because the consumers traverse the resulting edges.
+
+               (ii) A function PARAMETER or a local closure. No top-level row
+               names it, so there is nothing to point an edge at. Still a
+               silent drop, and still a residual — named in
+               specs/point-free-aliases.md and pinned by a test rather than
+               left to be rediscovered. It is NOT the alias case: nothing here
+               transfers a same-module body. *)
+            match local_alias_name id with
+            | Some name ->
+                note_seen_value_path (Ident.name id) ;
+                add_call ~edge_form:"value_alias" (Head_local name) root.exp_loc
+            | None -> ())
         | _ -> add_path_call ~edge_form:"value_alias" path root.exp_loc)
     | _ -> ()) ;
     (match root.exp_desc with
@@ -2534,6 +2609,7 @@ let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
                   let pending_deps = ref [] in
                   let pending_type_usages = ref [] in
                   let local_fn_stamps = build_local_fn_stamps structure in
+                  let local_alias_stamps = build_local_alias_stamps structure in
                   let binding_names = build_binding_names structure in
                   (* Exception identity (specs/exn-raise-sets.md): the idents a
                      structure item of THIS unit declares — exceptions,
@@ -2927,6 +3003,7 @@ let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
                                           ~caller_module:rel_path
                                           ~caller_name:name
                                           ~local_fn_stamps
+                                          ~local_alias_stamps
                                           vb.vb_expr
                                       in
                                       (* Insert a synthetic functions row per nested
