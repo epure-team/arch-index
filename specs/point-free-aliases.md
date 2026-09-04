@@ -108,7 +108,7 @@ answer by itself.
   **Superseded during implementation, and this paragraph is corrected rather than
   left to contradict the code.** `Head_enumerated` resolves **same-module only**, via
   `resolve_local`. A cross-module alias routed through it would never acquire a
-  `callee_id` at all — and 153 of proto_alpha's 351 alias edges are cross-module. The
+  `callee_id` at all — and 86 of proto_alpha's 351 alias edges are cross-module. The
   mechanism that forces the right *kind* would have destroyed the *identity*, which is
   the thing the edge exists to carry: without a `callee_id` there is nothing for the
   raise-set fixpoint to follow, and US-1 — the entire point — fails.
@@ -292,7 +292,7 @@ and report the two counts beside the 248/87 source-syntax counts.
 
   *Amended in review.* This requirement previously mandated `Head_enumerated`.
   That is wrong and would have defeated US-1: `Head_enumerated` resolves same-module
-  only, so every cross-module alias — 153 of proto_alpha's 351 — would carry no
+  only, so every cross-module alias — 86 of proto_alpha's 351 — would carry no
   `callee_id` and propagate nothing. See Decision 2.
 - **FR-005c** [US-1]: An alias binder whose RHS is **itself an alias binder**
   (`let t2 = t1`) MUST emit its own edge, to its **immediate** predecessor. One hop per
@@ -396,15 +396,24 @@ the expected value by hand **before** running.
 
   The two corpora **invert**, which is why one number is not enough. On octez-manager the
   feature adds 45 alias leaves and the ordinary-call population is untouched. On
-  proto_alpha (measured independently by the spec's author, on the full protocol tree
-  that is not present in this worktree) the ordinary-call leaves move 20309 → 20278 while
-  the alias leaves number **115** (268 `MAY_ENUMERATED` alias edges minus 153 resolved) —
+  proto_alpha (measured by the spec's author on a corpus that is not in this
+  worktree: `/home/mathias/dev/tezos/tezos/_build/default/src/proto_alpha/lib_protocol`,
+  octez at `1727d7e192f`, **500 `.cmt`** — stated so the figure can be reproduced or
+  refuted rather than only believed; the octez-manager block below carries its own
+  command and this one had none) the ordinary-call leaves move 20309 → 20278 while
+  the alias leaves number **115** — 268 `MAY_ENUMERATED` alias edges minus the 153
+  alias edges that resolved to a `callee_id`. (Those two are different populations
+  from the 86 cross-module figure above: 153 counts RESOLVED edges of any kind,
+  and splits 86 cross-module / 67 same-module. An earlier draft asserted 153 of
+  BOTH, which was the resolved count copied onto the cross-module claim.) —
   where octez-manager has 0 movement in the ordinary population. So "the feature adds
   enumerated leaves" is true of one corpus and not the other, and neither corpus alone
   characterises it.
 
   Reproducing command (schema `1.10` database; §10.3 — the numbers above are what it
-  printed on octez-manager at `61e2572`, `480 .cmt`, `12317` functions, `59101` calls):
+  printed on octez-manager at `fd0b4e1`, `480 .cmt`, `12317` functions, `59101` calls
+  — the anchor was `61e2572`, which this branch's own rebase rewrote, so a command
+  anchored on it could not be checked out in its own terms):
 
   ```sh
   arch-callgraph-ocaml -b <corpus>/_build/default -d /tmp/c.db -s architecture-schema.sql
