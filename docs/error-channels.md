@@ -168,7 +168,7 @@ Read the ⊤ breakdown, not just the bounded share. Here 38 of 46 unbounded node
 `unknown_exn_value` — error values the analysis could not name — which tells you precisely where
 precision would come from, and that it is not the call graph's fault.
 
-Those numbers are for this repository's whole `_build/default` (85 modules, 2131 function nodes);
+Those numbers are for this repository's whole `_build/default` (86 modules, 2179 function nodes);
 a different build-dir scope gives different totals, so quote the scope whenever you quote a
 percentage.
 
@@ -310,7 +310,7 @@ schema, add your table to `Arch_index_support.schema_tables_to_drop` in the same
 Honest limits, so nobody reads more into a verdict than it carries:
 
 - **⊤ is common on real code, and that is the honest answer.** Measured, not estimated: over this
-  repository's whole `_build/default` (2131 function nodes, 60 of them `result` carriers) the
+  repository's whole `_build/default` (2179 function nodes, 60 of them `result` carriers) the
   `result` channel bounds **14 of 60, 23.3 %** — the `error-stats` block in §3 is that
   measurement. Over
   `tezos/_build/default/src/proto_alpha/lib_protocol` (14 452 nodes, 2137 `tzresult` carriers)
@@ -365,6 +365,17 @@ Honest limits, so nobody reads more into a verdict than it carries:
 
   Without `--errors-strict` the run exits 0 and those declarations are simply inert; the misses
   are listed in `comment_db_meta.error_config_unmatched`.
+- **An or-pattern spanning the whole arm closes nothing.** `Error (A | B) -> …` closes both (the
+  disjunction is inside the constructor), but `Error A | Error C -> …` — the same intent written
+  across the arm — closes neither, and `Error A | _ -> …` mints no scope at all. Sound in the
+  reporting direction, and a real precision gap; the exception channel already flattens arm-level
+  disjunctions and the value channels do not yet.
+- **A profile's rule cannot be removed, only added to.** Declaring an existing channel *extends*
+  it field by field, which is what lets a profile add vocabulary to a built-in without restating
+  it — but it also means a user cannot drop a rule a profile got wrong; they can only add. No
+  released version ever behaved otherwise, so nothing regressed, but if a shipped profile declares
+  a path you do not want, the answer today is to stop using the profile and declare the channel
+  yourself.
 - **Point-free re-exports (`let f = M.g`) record no call edge**, so they carry no error set. This
   is a pre-existing call-graph limitation, not specific to error channels, and it affects
   `Main.apply_operation` / `finalize_application` in `proto_alpha`.
