@@ -217,6 +217,19 @@ CREATE TABLE IF NOT EXISTS calls (
         -- bounded-candidate edge is not unknowable, so no reason applies).
         CHECK(top_reason IS NULL OR kind = 'MAY_TOP'),
     top_anchor TEXT,
+    -- specs/point-free-aliases.md: the SHAPE of the edge, orthogonal to [kind].
+    -- NULL = an ordinary call, i.e. a syntactic application. 'value_alias' = a
+    -- point-free binding ([let f = M.g]), which transfers a body without ever
+    -- applying it.
+    --
+    -- Why a separate column rather than a new [kind] value: [kind] is the
+    -- edge-kind CONTRACT (what a prover may assume about the target set) and a
+    -- test asserts its vocabulary is closed. An alias says nothing new about
+    -- the target set — it is MAY_ENUMERATED like any other bounded candidate —
+    -- it says something about how the edge came to exist, which is what a
+    -- caller-count consumer needs to know. And the bare word 'alias' is taken:
+    -- module_deps.dep_kind='alias' already means a MODULE alias.
+    edge_form TEXT CHECK(edge_form IS NULL OR edge_form = 'value_alias'),
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 

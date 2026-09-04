@@ -472,6 +472,7 @@ val insert_call :
   ?top_reason:string option ->
   ?top_anchor:string option ->
   ?producer_run_id:int option ->
+  ?edge_form:string option ->
   unit ->
   unit
 
@@ -549,6 +550,7 @@ val insert_call_rowid :
   ?top_reason:string option ->
   ?top_anchor:string option ->
   ?producer_run_id:int option ->
+  ?edge_form:string option ->
   unit ->
   int option
 

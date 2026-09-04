@@ -536,7 +536,8 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
     Sqlite3.prepare
       db
       "INSERT INTO calls (caller_id, callee_id, callee_name, call_site, kind, \
-       producer_run_id, top_reason, top_anchor) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+       producer_run_id, top_reason, top_anchor, edge_form) VALUES (?, ?, ?, \
+       ?, ?, ?, ?, ?, ?)"
   in
   let stmt_dep =
     Sqlite3.prepare
@@ -1482,6 +1483,7 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
                   could get wrong independently. *)
                ~top_anchor:(if kind = "MAY_TOP" then Some call.call_site else None)
                ~producer_run_id
+               ~edge_form:call.edge_form
                ()
            with
           | Some call_id -> (

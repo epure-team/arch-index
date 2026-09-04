@@ -355,14 +355,31 @@ let () =
                  reach_res) AND (c.kind IS NULL OR c.kind NOT IN ('MUST','MAY_ENUMERATED')) ORDER BY 1"
                 a
         | "fan-in" ->
+            (* specs/point-free-aliases.md FR-006: a point-free alias
+               ([let f = M.g]) is not a CALLER of [M.g] — nobody invokes
+               anything at that site; the binding transfers a body. Counting it
+               as one inflates exactly the measure this query exists to report,
+               and does so silently.
+
+               Gated on the column, not assumed: the flat schema written by
+               [runner.ml] has no [edge_form], and an unconditional
+               [WHERE edge_form IS NULL] would make this query ERROR against a
+               flat database rather than merely over-count. Same shape as the
+               [functions.exported] gate below. *)
+            let not_alias =
+              if (not flat) && Arch_db.has_col t "calls" "edge_form" then
+                "WHERE edge_form IS NULL "
+              else ""
+            in
             q ~h:[ "callee_name"; "callers" ] ~shape:Arch_db.Rows.s_i ~cells:Arch_db.Rows.csi ~pty:unit_ty
               (Printf.sprintf
                  (if flat then
-                    "SELECT callee_name, count(DISTINCT caller_name) AS callers FROM calls GROUP \
+                    "SELECT callee_name, count(DISTINCT caller_name) AS callers FROM calls %sGROUP \
                      BY callee_name ORDER BY callers DESC LIMIT %d"
                   else
-                    "SELECT callee_name, count(DISTINCT caller_id) AS callers FROM calls GROUP BY \
+                    "SELECT callee_name, count(DISTINCT caller_id) AS callers FROM calls %sGROUP BY \
                      callee_name ORDER BY callers DESC LIMIT %d")
+                 not_alias
                  (limit_of a 25))
               ()
         | "exported" ->
@@ -564,12 +581,19 @@ let () =
             preamble ~h:[ "note" ]
               ~cells:[ "measure only — aggregate fan-in per module, no gate/threshold" ]
               ~text:"measure only — aggregate fan-in per module, no gate/threshold" ;
+            (* Same exclusion as [fan-in], for the same reason and by the same
+               gate — this query states it REUSES that measure, so the two must
+               agree or the claim in the comment above becomes false. *)
+            let not_alias =
+              if Arch_db.has_col t "calls" "edge_form" then "AND edge_form IS NULL " else ""
+            in
             q ~h:[ "path"; "fan_in" ] ~shape:Arch_db.Rows.s_i ~cells:Arch_db.Rows.csi ~pty:unit_ty
               (Printf.sprintf
                  "SELECT m.path, SUM(fi.callers) AS fan_in FROM (SELECT callee_id, \
                   count(DISTINCT caller_id) AS callers FROM calls WHERE callee_id IS NOT NULL \
-                  GROUP BY callee_id) fi JOIN functions f ON f.id=fi.callee_id JOIN modules m ON \
+                  %sGROUP BY callee_id) fi JOIN functions f ON f.id=fi.callee_id JOIN modules m ON \
                   m.id=f.module_id GROUP BY m.id ORDER BY fan_in DESC LIMIT %d"
+                 not_alias
                  (measure_limit_of a 25))
               ()
         (* ---- B2: read the curation ledgers written by arch-coverage-load / arch-curate. ---- *)
