@@ -316,33 +316,60 @@ let emits_error_channels = function
   | Some lang -> List.mem lang error_channel_producers
   | None -> false
 
+(* What the target database tells us about the error-channel analysis.
+
+   Three cases, because two would conflate the situation the fallback exists
+   for with the one it must not cover. [No_database] is a file that was never
+   indexed — the matrix may then answer from CAPABILITY, since this run is
+   about to create it. [Indexed_without_contract] is a database that HAS been
+   indexed and still carries no contract: an older producer, or a run that did
+   not reach the point where the contract is written. Answering from capability
+   there would report an analysis that demonstrably did not happen. *)
+type contract_evidence =
+  | No_database
+  | Indexed_without_contract
+  | Contract of string
+
 (* Reads the contract from a target database if there is one to read. Any
    failure — no file, no table, no key, an unreadable value — is [None], i.e.
    "no evidence", never an exception: the matrix must still produce a verdict
    for a database that does not exist yet. *)
 let read_error_contract ~db_path =
+  let scalar db sql =
+    let out = ref None in
+    (try
+       let stmt = Sqlite3.prepare db sql in
+       Fun.protect
+         ~finally:(fun () -> ignore (Sqlite3.finalize stmt))
+         (fun () ->
+           match Sqlite3.step stmt with
+           | Sqlite3.Rc.ROW -> (
+               match Sqlite3.column stmt 0 with
+               | Sqlite3.Data.TEXT v -> out := Some v
+               | Sqlite3.Data.INT i -> out := Some (Int64.to_string i)
+               | _ -> ())
+           | _ -> ())
+     with _ -> ()) ;
+    !out
+  in
   match db_path with
-  | None -> None
-  | Some path when not (Sys.file_exists path) -> None
+  | None -> No_database
+  | Some path when not (Sys.file_exists path) -> No_database
   | Some path -> (
       match Sqlite3.db_open ~mode:`READONLY path with
-      | exception _ -> None
+      | exception _ -> No_database
       | db ->
-          let found = ref None in
-          (try
-             let stmt =
-               Sqlite3.prepare db "SELECT value FROM comment_db_meta WHERE key = 'error_contract'"
-             in
-             (match Sqlite3.step stmt with
-             | Sqlite3.Rc.ROW -> (
-                 match Sqlite3.column stmt 0 with
-                 | Sqlite3.Data.TEXT v -> found := Some v
-                 | _ -> ())
-             | _ -> ()) ;
-             ignore (Sqlite3.finalize stmt)
-           with _ -> ()) ;
+          let contract = scalar db "SELECT value FROM comment_db_meta WHERE key = 'error_contract'" in
+          let indexed =
+            match scalar db "SELECT count(*) FROM functions" with
+            | Some n -> (try int_of_string n > 0 with _ -> false)
+            | None -> false
+          in
           ignore (Sqlite3.db_close db) ;
-          !found)
+          match (contract, indexed) with
+          | Some c, _ -> Contract c
+          | None, true -> Indexed_without_contract
+          | None, false -> No_database)
 
 (* "v1:exception,result,option" -> ["exception"; "result"; "option"] *)
 (* "v1:exception,result,option" -> Some ["exception"; "result"; "option"].
@@ -365,59 +392,71 @@ let channels_of_contract contract =
                  let s = String.trim s in
                  if s = "" then None else Some s))
 
-let error_channels_row ~contract ~from:callgraph_row =
+(* Detail text goes to stdout as one matrix row, so a value read out of a
+   database must not be able to break that line or flood it. Contract values
+   come from a file on disk, not from a trusted caller. *)
+let sanitise_detail s =
+  let s = String.map (function '\n' | '\r' | '\t' -> ' ' | c -> c) s in
+  if String.length s <= 120 then s else String.sub s 0 117 ^ "..."
+
+let error_channels_row ?(producers = error_channel_producers) ~contract ~from:callgraph_row () =
   let language = callgraph_row.language in
+  let capable = match language with Some l -> List.mem l producers | None -> false in
   let row status detail = {language; analysis = "error_channels"; status; detail} in
-  (* The contract describes ONE producer's output, and only a producer with the
-     capability can write it, so it informs that producer's row and no other.
-     Caught by running it: applying an OCaml-written contract to every detected
-     language reported `rust error_channels: covered` on a database no Rust
-     producer had touched. *)
-  match (if emits_error_channels language then contract else None) with
-  | Some c -> (
+  (* The contract describes ONE producer's output, and only a capable producer
+     writes it, so it informs that producer's row and no other. Caught by
+     running it: applying an OCaml-written contract to every detected language
+     reported `rust error_channels: covered` on a database no Rust producer had
+     ever touched. *)
+  match (if capable then contract else No_database) with
+  | Contract c -> (
       match channels_of_contract c with
       | None ->
           row Not_analysed
-            (Some (Printf.sprintf "unrecognised error_contract format, not read: %S" c))
+            (Some (Printf.sprintf "unrecognised error_contract format, not read: %S" (sanitise_detail c)))
       | Some [] ->
-          row Not_analysed (Some (Printf.sprintf "error_contract lists no channel: %S" c))
+          row Not_analysed
+            (Some (Printf.sprintf "error_contract lists no channel: %S" (sanitise_detail c)))
       | Some chans ->
-          (* COVERED, not partial-when-shorter.
-
-             FIX (review, HIGH): this compared the contract against the built-in
-             channel list and called anything shorter [Partial], which counted
-             toward the ratchet. But specs/error-channels.md is explicit that a
-             built-in channel whose carrier type does not occur in the corpus is
-             deliberately OMITTED from the contract — "the honest outcome". So a
-             three-line library using neither `result` nor `option` legitimately
-             produces `v1:exception`, and the matrix answered `partial` and exit
-             1 on a correctly analysed project, with nothing the user could do
-             about it. That is the always-firing gate this module's own has_gap
-             comment rejects, and it is worse than no gate: it teaches people to
-             pass --allow-partial reflexively, which switches off the real
-             signal too.
-
-             Fewer channels does not mean less analysis, so it is not a status
-             question. The status answers "did the analysis run"; WHICH channels
-             it covered lives in the detail, where it is exact and where nothing
-             is flattened — an `exception`-only database still reads differently
-             from one carrying all three. *)
+          (* COVERED, not partial-when-shorter. specs/error-channels.md is
+             explicit that a built-in channel whose carrier type does not occur
+             in the corpus is deliberately OMITTED — "the honest outcome". So a
+             library using neither `result` nor `option` legitimately produces
+             `v1:exception`, and calling that a gap made the ratchet fire on a
+             correctly analysed project with nothing the user could do about it.
+             Fewer channels does not mean less analysis: the status answers "did
+             it run", the detail says on what. *)
           let missing = List.filter (fun b -> not (List.mem b chans)) builtin_channels in
+          (* Only a built-in absent from a contract that DOES carry the frozen
+             [exception] channel is evidence of "no such carrier here"; a
+             contract missing [exception] is not something a capable producer
+             emits, so do not narrate it as a corpus fact. *)
+          let well_formed = List.mem "exception" chans in
           row Covered
             (Some
-               (match missing with
-               | [] -> String.concat "," chans
-               | _ ->
-                   Printf.sprintf
-                     "%s (no %s carrier in this corpus)"
-                     (String.concat "," chans)
-                     (String.concat "/" missing))))
-  | None when emits_error_channels language ->
-      (* No evidence yet — the target database may not have been written. Fall
-         back to capability: this producer always emits the built-in channels,
-         so its error-channel coverage is exactly its callgraph coverage. *)
+               (sanitise_detail
+                  (match (missing, well_formed) with
+                  | [], _ -> String.concat "," chans
+                  | _, true ->
+                      Printf.sprintf
+                        "%s (no %s carrier in this corpus)"
+                        (String.concat "," chans)
+                        (String.concat "/" missing)
+                  | _, false -> String.concat "," chans))))
+  | Indexed_without_contract ->
+      (* FIX (review round 2, HIGH): this used to fall through to the
+         capability probe, which reports what a producer COULD emit. On an
+         already-indexed database with no contract that is a claim about an
+         analysis which demonstrably did not record itself. *)
+      row Not_analysed
+        (Some
+           "this database was indexed, but carries no error_contract — an older producer, or a \
+            run that did not complete; re-index to record one")
+  | No_database when capable ->
+      (* Nothing indexed yet: the matrix legitimately answers from capability,
+         since this run is about to create the database. *)
       derived_rows ~from:callgraph_row "error_channels"
-  | None ->
+  | No_database ->
       row Not_analysed
         (Some
            "no producer for this language emits error-channel rows yet — the NDJSON record types \
@@ -464,7 +503,7 @@ let compute ~project_dir ~repo_root ?lcov ?db_path () =
      database is written by one producer run. *)
   let contract = read_error_contract ~db_path in
   let error_channels_rows =
-    List.map (fun r -> error_channels_row ~contract ~from:r) callgraph_rows
+    List.map (fun r -> error_channels_row ~contract ~from:r ()) callgraph_rows
   in
   List.concat
     [
@@ -568,83 +607,86 @@ let%test "channels_of_contract: a v1 contract with no channels is an empty list"
   channels_of_contract "v1:" = Some []
 
 let%test "channels_of_contract: an UNKNOWN version is not guessed at" =
-  (* Reading a v2 contract with v1 rules would silently misreport it. *)
-  channels_of_contract "v2:exception,result" = None
+  channels_of_contract "v2:exception,result" = None && channels_of_contract "v10:x" = None
 
 let%test "channels_of_contract: no version prefix is not a contract" =
-  channels_of_contract "exception,result" = None
+  channels_of_contract "exception,result" = None && channels_of_contract ":x" = None
 
 let cg lang = {language = Some lang; analysis = "callgraph"; status = Covered; detail = None}
 
 let%test "a complete contract is covered, detail listing the channels" =
-  match error_channels_row ~contract:(Some "v1:exception,result,option") ~from:(cg "ocaml") with
+  match error_channels_row ~contract:(Contract "v1:exception,result,option") ~from:(cg "ocaml") () with
   | {status = Covered; detail = Some d; _} -> d = "exception,result,option"
   | _ -> false
 
 let%test "a SHORTER contract is still covered, and says why it is shorter" =
-  (* The regression this replaced: calling it Partial made the ratchet fire on
-     a correctly-analysed project that simply uses neither result nor option.
-     Which channels ran is a detail question, not a status one — but it must
-     still be visible, so exception-only never reads the same as all three. *)
-  match error_channels_row ~contract:(Some "v1:exception") ~from:(cg "ocaml") with
+  match error_channels_row ~contract:(Contract "v1:exception") ~from:(cg "ocaml") () with
   | {status = Covered; detail = Some d; _} ->
       d = "exception (no result/option carrier in this corpus)"
   | _ -> false
 
 let%test "a shorter contract does NOT fire the ratchet" =
-  let rows = [cg "ocaml"; error_channels_row ~contract:(Some "v1:exception") ~from:(cg "ocaml")] in
+  let rows = [cg "ocaml"; error_channels_row ~contract:(Contract "v1:exception") ~from:(cg "ocaml") ()] in
   has_gap rows = false
 
+let%test "a contract without the frozen exception channel narrates no corpus fact" =
+  (* `v1:bogus` is not something a capable producer emits; reporting "no
+     exception carrier in this corpus" would state an impossibility as fact. *)
+  match error_channels_row ~contract:(Contract "v1:bogus") ~from:(cg "ocaml") () with
+  | {status = Covered; detail = Some d; _} -> d = "bogus"
+  | _ -> false
+
 let%test "an unrecognised contract format is not_analysed, never guessed" =
-  match error_channels_row ~contract:(Some "v2:exception") ~from:(cg "ocaml") with
+  match error_channels_row ~contract:(Contract "v2:exception") ~from:(cg "ocaml") () with
   | {status = Not_analysed; _} -> true
+  | _ -> false
+
+let%test "a detail read from a database cannot break or flood the output line" =
+  match
+    error_channels_row ~contract:(Contract ("v9:" ^ String.make 4000 'x' ^ "\nrogue")) ~from:(cg "ocaml") ()
+  with
+  | {status = Not_analysed; detail = Some d; _} ->
+      (* The 4000-char value must not reach stdout; the exact bound allows for
+         the message prefix and %S's quoting on top of the 120-char truncation. *)
+      String.length d <= 200 && not (String.contains d '\n')
+  | _ -> false
+
+let%test "an INDEXED database with no contract is not_analysed, not capability" =
+  (* The inverse risk of making a shorter contract Covered: a producer that
+     died before recording the contract must not be reported from what it
+     COULD have done. *)
+  match error_channels_row ~contract:Indexed_without_contract ~from:(cg "ocaml") () with
+  | {status = Not_analysed; detail = Some d; _} ->
+      d <> "" && has_gap [cg "ocaml"; error_channels_row ~contract:Indexed_without_contract ~from:(cg "ocaml") ()]
   | _ -> false
 
 let%test "the contract never speaks for a producer that did not write it" =
-  match error_channels_row ~contract:(Some "v1:exception,result,option") ~from:(cg "rust") with
+  match error_channels_row ~contract:(Contract "v1:exception,result,option") ~from:(cg "rust") () with
   | {status = Not_analysed; _} -> true
   | _ -> false
 
-let%test "no contract ⇒ a capable producer falls back to the callgraph probe" =
-  match error_channels_row ~contract:None ~from:(cg "ocaml") with
+let%test "an un-indexed database ⇒ a capable producer falls back to the probe" =
+  match error_channels_row ~contract:No_database ~from:(cg "ocaml") () with
   | {status = Covered; _} -> true
   | _ -> false
 
 let%test "a non-capable producer's error_channels gap does NOT fire the ratchet" =
-  let rows =
+  has_gap
     [cg "ocaml"; {language = Some "go"; analysis = "error_channels"; status = Not_analysed; detail = None}]
-  in
-  has_gap rows = false
+  = false
 
 let%test "a capable producer's error_channels gap DOES fire the ratchet" =
-  let rows =
+  has_gap
     [cg "ocaml"; {language = Some "ocaml"; analysis = "error_channels"; status = Not_analysed; detail = None}]
-  in
-  has_gap rows = true
+  = true
 
-let%test "error_channels_capability_is_pinned" =
-  (* Both the row derivation and the ratchet predicate consult
-     [error_channel_producers], so adding a producer is a one-line change that
-     takes effect in both places at once.
-
-     HONEST LIMIT: this asserts the BEHAVIOUR both sites have, not that they
-     obtained it from the list. While the list holds exactly one language, a
-     hard-coded [= Some "ocaml"] is indistinguishable from consulting it — I
-     checked, by reverting one site to the literal, and this test still passed.
-     So it is a documentation anchor and a behavioural floor, not a detector of
-     that particular regression. What actually prevents the drift is that there
-     is one list and one predicate; what this test prevents is the behaviour
-     silently inverting. It becomes a real detector the moment a second
-     producer is added — which is exactly when it would matter. *)
-  let l = Some "ocaml" and other = Some "go" in
-  emits_error_channels l
-  && (not (emits_error_channels other))
-  && (* the row derivation consults it *)
-  (match error_channels_row ~contract:(Some "v1:exception") ~from:{(cg "go") with language = other} with
-   | {status = Not_analysed; _} -> true
+let%test "capability is read from the list, not hard-coded" =
+  (* A REAL detector now, not the documentation anchor this used to be: the
+     producer set is injected, so a hard-coded language comparison ignores it
+     and fails here. Reviewer's suggestion — worth the five lines. *)
+  (match error_channels_row ~producers:["go"] ~contract:No_database ~from:(cg "go") () with
+   | {status = Covered; _} -> true
    | _ -> false)
-  && (* and so does the ratchet *)
-  fixable_by_this_run {language = l; analysis = "error_channels"; status = Not_analysed; detail = None}
-  && not
-       (fixable_by_this_run
-          {language = other; analysis = "error_channels"; status = Not_analysed; detail = None})
+  && (match error_channels_row ~producers:["go"] ~contract:(Contract "v1:exception") ~from:(cg "ocaml") () with
+     | {status = Not_analysed; _} -> true
+     | _ -> false)

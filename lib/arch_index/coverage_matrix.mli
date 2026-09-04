@@ -160,14 +160,27 @@ val find_repo_root : from_dir:string -> string option
     {violates}
     (none) *)
 (** [db_path] is the database this run will WRITE its rows into. It is read
-    first, read-only and best-effort, for
-    [comment_db_meta.error_contract] — the record of which error channels a
-    producer actually emitted. Present and complete ⇒ the [error_channels] row
-    is [Covered]; present but listing fewer than the built-in channels ⇒
-    [Partial], because a database carrying only [exception] is not the same as
-    one carrying all three; absent ⇒ fall back to the build probe. Any read
-    failure is treated as "no evidence", never an error: the target database
-    legitimately may not exist yet. *)
+    first, read-only and best-effort, for [comment_db_meta.error_contract] —
+    the record of which error channels a producer actually emitted, written
+    only after the transaction carrying those rows commits, so its presence is
+    a completion marker rather than a statement of intent.
+
+    The [error_channels] row is then:
+    - [Covered] when the contract parses and names at least one channel. A
+      SHORTER contract is still covered: a built-in channel whose carrier type
+      does not occur in the corpus is deliberately omitted by the producer, so
+      fewer channels means less to analyse, not less analysis. WHICH channels
+      ran is stated in the detail, where an [exception]-only database still
+      reads differently from one carrying all three.
+    - [Not_analysed] when the contract is unparseable or names nothing, or when
+      the database HAS been indexed and carries no contract at all — an older
+      producer, or a run that did not complete. Answering from capability there
+      would report an analysis that demonstrably did not record itself.
+    - derived from the callgraph probe when there is no database yet, which is
+      the one case where capability is the honest answer: this run is about to
+      create it.
+
+    Any read failure is treated as "no evidence", never an error. *)
 val compute :
   project_dir:string -> repo_root:string -> ?lcov:string -> ?db_path:string -> unit -> row list
 
