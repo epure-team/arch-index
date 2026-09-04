@@ -298,10 +298,17 @@ let decisions_row =
    the target database carries no contract (it may be a fresh file this run is
    about to create).
 
-   [Partial] is load-bearing rather than decorative: a database carrying only
-   the [exception] channel is not the same as one carrying all three, and
-   collapsing that into [Covered] would overstate what was analysed while
-   [Not_analysed] would deny work that really happened. *)
+   The [error_channels] row never reports [Partial]. An earlier version of this
+   comment claimed the opposite — that a database carrying only [exception] is
+   not one carrying all three, so collapsing them into [Covered] would overstate
+   the analysis. That reasoning was inverted by review and the code follows the
+   correction (see [error_channels_row]): a corpus that uses neither [result]
+   nor [option] legitimately produces a SHORTER contract, so fewer channels
+   means less to analyse, not less analysis, and calling it a gap made the
+   ratchet fire on correctly analysed projects. WHICH channels ran stays visible
+   in the row's detail, which is where that distinction belongs. This list is
+   therefore the vocabulary the detail is rendered from, not a completeness
+   target. *)
 let builtin_channels = ["exception"; "result"; "option"]
 
 (* The producers that can emit error-channel rows at all. ONE list, consulted

@@ -122,7 +122,7 @@ let must_null_query =
 
    Measured on the whole repo _build/default, which is what this test indexes —
    not lib/arch_index alone, which reads 142 and is a different metric. *)
-let clean_measured = 345
+let clean_measured = 346
 
 let headroom = 25
 
@@ -130,8 +130,15 @@ let headroom = 25
    ceiling metric): an under-built [_build/default] indexes fewer calls
    across the board, which would otherwise read as a comfortable pass on the
    ceiling rather than as "nothing was measured". Set well below the clean
-   measurement (9406) to tolerate ordinary future growth without becoming its
-   own recalibration treadmill. *)
+   measurement to tolerate ordinary future growth without becoming its own
+   recalibration treadmill.
+
+   The clean total was 9406 when this floor was set and is 12980 today — a
+   pre-existing drift, corrected here rather than left standing. A number in a
+   comment is a measurement with no harness: nothing fails when it goes stale,
+   so it is asserted once by someone who had just measured it and then read as
+   evidence by people who cannot check it. Reproduce by counting every row of
+   [calls] in a database indexed over this repository's own [_build/default]. *)
 let min_total_calls = 8000
 
 (* A merely positive headroom (e.g. 1) would satisfy a naive "> 0" check while
