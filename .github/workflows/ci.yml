@@ -41,6 +41,11 @@ jobs:
       # and both report "not exercised" without them
       # and cover precisely nothing, which is what they did here until now.
       #
+      # The OCaml server is NOT installed here: `ocamllsp` is an opam package, so
+      # it is declared as a :with-test dependency in dune-project and comes in
+      # with `opam install --deps-only --with-test` below. It is probed by
+      # running it, in its own step, for the same reason these three are.
+      #
       # Versions are pinned so that a regression on the server side arrives as a
       # deliberate bump rather than as a mystery failure on an unrelated PR, and
       # each one is PROBED BY RUNNING IT: `rustup component add` writes a shim
@@ -58,6 +63,15 @@ jobs:
           rust-analyzer --version
       - name: Install deps
         run: opam install --deps-only --with-test --yes .
+      # The OCaml language server, probed the same way as the other three and for
+      # the same reason. Without it Arch_tezt.index_project spawns nothing, the
+      # flat producer writes a database with zero call rows, and
+      # tezt/tests/point_free_aliases.ml (S5) fails on its own premise assertion
+      # -- which is how this absence was found. A separate step so that a future
+      # disappearance is named "the OCaml language server is missing" rather than
+      # diagnosed from an empty result set.
+      - name: Verify the OCaml language server
+        run: opam exec -- ocamllsp --version
       # sqlite3 is a direct dependency of the self-index smoke test further down (it shells out
       # to the CLI directly) — but no step installed it explicitly before this one; ubuntu-latest
       # ships it, but relying on that implicitly is the same "green without data" shape this
