@@ -721,13 +721,43 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
     |> String.capitalize_ascii
   in
   let mod_name_to_path = Hashtbl.create 128 in
+  let stored_module_paths = ref [] in
   ignore
     (Sqlite3.exec_not_null
        db
        ~cb:(fun row _h ->
          let path = row.(0) in
+         stored_module_paths := path :: !stored_module_paths ;
          Hashtbl.replace mod_name_to_path (module_name_of_path path) path)
        "SELECT path FROM modules") ;
+  (* Roadmap 1.6 (R3 detector). The unit-name registry is populated at the only
+     [insert_module] call site, so it should be COMPLETE with respect to the
+     stored [modules] rows. If it ever is not, every qualified reference into the
+     missing unit stops resolving and — because an unresolved qualified head
+     falls through to the external-leaf arm — is emitted as kind=MUST with a NULL
+     callee: a resolver miss dressed as a proven external leaf, which is exactly
+     the shape the abandoned branch shipped 582 of.
+
+     That failure is silent by nature, so it gets a loud counter rather than
+     trust. Reported, not raised: a diagnostic that aborts indexing would turn a
+     precision bug into an outage, and the number is actionable on its own. *)
+  let registry_gaps =
+    List.filter
+      (fun path ->
+        not
+          (List.exists
+             (fun unit_name ->
+               List.mem path (Arch_index_cmt.paths_of_unit unit_name))
+             (Arch_index_cmt.known_unit_names ())))
+      !stored_module_paths
+  in
+  if registry_gaps <> [] then
+    Arch_io.eprintf
+      "WARNING: %d stored module(s) have no compilation-unit-name entry, so \
+       every qualified reference into them will fail to resolve and be emitted \
+       as a MUST external leaf: %s\n"
+      (List.length registry_gaps)
+      (String.concat ", " registry_gaps) ;
   (* Compilation units whose [modules] row was rejected have no path in
      [mod_name_to_path] — the table is built from STORED rows — so they must be
      recognised by name. Derived through the same function as the stored names
