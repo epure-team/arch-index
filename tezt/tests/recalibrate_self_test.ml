@@ -7,7 +7,7 @@
 
 (** Runs [scripts/recalibrate.sh --self-test] as part of the suite.
 
-    The script is an 875-line gate over two pinned constants — the self-index
+    The script is a gate over two pinned constants — the self-index
     golden and [must_null_ceiling]'s [clean_measured] — and until this test it
     was wired to NOTHING: no CI step invoked it, no dune rule ran it, and
     `grep -rn recalibrate --include=*.yml --include=dune --include=Makefile`
@@ -23,10 +23,18 @@
     runs, which belongs in CI's [--check] step, not here.
 
     Why this is a real check and not decoration: every one of the script's pure
-    decisions is mutation-tested. Fourteen mutants — including all seven that
-    survived review round 6 — were applied to the script and each was observed
-    to turn this test RED. A green here is therefore evidence about the script,
-    not about the harness. *)
+    decisions is mutation-tested. Mutants are applied to the script and each is
+    observed to turn this test RED — including, in round 7, the five that had
+    survived round 6's battery (F9, R5, R6, F8, F10) and the anchor mutants on
+    both halves of the pin reader. A green here is therefore evidence about the
+    script, not about the harness.
+
+    A COUNT IS NOT A HARNESS. An earlier version of this comment said "104
+    cases at the time of writing" when the script reported 108, and nothing
+    re-ran the claim — §10.3's shape exactly, in the test that exists to
+    enforce §10.6. Numbers that decay are kept out of this comment now: the
+    only case count that appears anywhere here is the FLOOR asserted below,
+    which is machine-checked on every run. *)
 
 open Arch_tezt
 
@@ -55,13 +63,84 @@ let register () =
            String.length l > 6 && String.sub l 0 7 = "  ok   ")
     |> List.length
   in
-  (* 104 cases at the time of writing. The floor is deliberately well below it,
-     so ordinary additions do not demand an edit here, while a self-test that
-     collapses to a handful of cases still fails. *)
-  if cases < 80 then
+  (* The floor is deliberately well below the number of cases the script
+     actually reports, so ordinary additions do not demand an edit here, while
+     a self-test that collapses to a handful of cases still fails. It is the
+     one number in this file that is enforced rather than asserted in prose,
+     which is why no "N cases at the time of writing" appears beside it. *)
+  if cases < 100 then
     Test.fail
-      "recalibrate.sh --self-test reported only %d passing cases (floor 80) — it looks like it \
+      "recalibrate.sh --self-test reported only %d passing cases (floor 100) — it looks like it \
        stopped running most of them rather than passing them:\n\
        %s"
       cases output ;
+  Lwt.return_unit
+
+(* L5 — keep [GOLDEN_RAW] a check against CI, not a check against history.
+
+   The script measures the golden twice on purpose, and review confirmed the
+   differential is real rather than two spellings of one query: [metric_value]
+   builds three lines from three separate [q()] calls and a printf, while
+   [GOLDEN_RAW] is a single [sqlite3] invocation with three concatenating
+   SELECTs — character-for-character the one in ci.yml's "Self-index smoke
+   test" step. Folding them together would turn the comparison into [diff x x].
+
+   But that differential is only worth anything while the transcription is
+   FAITHFUL. Nothing re-read ci.yml, so the day someone edits the smoke test's
+   SQL the script goes on comparing against the old spelling and silently
+   decays from "a check against what CI does" into "a check against what CI
+   used to do" — a detector that still passes and no longer detects. This
+   pins it. *)
+
+let read_file path =
+  let ic = open_in_bin path in
+  let n = in_channel_length ic in
+  let s = really_input_string ic n in
+  close_in ic ; s
+
+(* Collapse whitespace and shell line-continuations so the two files' identical
+   SQL compares equal despite living at different indentation. *)
+let normalise s =
+  let b = Buffer.create (String.length s) in
+  let sp = ref false in
+  String.iter
+    (fun c ->
+      match c with
+      | ' ' | '\t' | '\n' | '\r' | '\\' -> sp := true
+      | c ->
+          if !sp && Buffer.length b > 0 then Buffer.add_char b ' ' ;
+          sp := false ;
+          Buffer.add_char b c)
+    s ;
+  Buffer.contents b
+
+let register_golden_sql_transcription () =
+  Test.register ~__FILE__
+    ~title:"recalibrate.sh's raw golden query matches the one CI runs"
+    ~tags:["scripts"; "recalibrate"; "golden"; "ci"]
+  @@ fun () ->
+  let root = repo_root () in
+  let script = normalise (read_file (Filename.concat root "scripts/recalibrate.sh")) in
+  let ci = normalise (read_file (Filename.concat root ".github/workflows/ci.yml")) in
+  let fragments =
+    [ "SELECT 'modules: ' || count(*) FROM modules;";
+      "SELECT 'functions: ' || count(*) FROM functions;";
+      "SELECT 'calls: ' || count(*) FROM calls;" ]
+  in
+  List.iter
+    (fun frag ->
+      if not (contains ~needle:frag ci) then
+        Test.fail
+          "The self-index smoke test in .github/workflows/ci.yml no longer contains %S.\n\
+           scripts/recalibrate.sh transcribes CI's golden query so that --check compares the\n\
+           artifact CI compares. If CI's SQL changed, change the script's to match — otherwise\n\
+           the script silently keeps checking against the OLD query."
+          frag ;
+      if not (contains ~needle:frag script) then
+        Test.fail
+          "scripts/recalibrate.sh no longer contains %S, which .github/workflows/ci.yml still\n\
+           runs. GOLDEN_RAW exists to reproduce CI's query exactly; a divergence here makes the\n\
+           script's golden comparison a check against history rather than against CI."
+          frag)
+    fragments ;
   Lwt.return_unit

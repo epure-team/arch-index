@@ -183,11 +183,36 @@ is_int() {
 # not hold. It is not deleted but made LIVE, because "defined twice" and
 # "unreadable" are different defects with different fixes and the caller says so
 # in its diagnostic; --self-test pins both status codes.
+#
+# UNDERSCORES, round 7. `let min_total_calls = 8_000` is legal OCaml meaning
+# 8000, and `_` separators are idiomatic at exactly the magnitudes these three
+# constants live at. Refusing that spelling meant the SAME value exited 0 as
+# `8000` and HARD-FAILED CI as `8_000` — a cosmetic reformat reddening the
+# build with a message saying the gate is broken. `headroom` was never the
+# likely trigger; `min_total_calls = 8000` and a `clean_measured` growing past
+# a thousand are. So the separator is stripped, and only here:
+#
+#   - the CAPTURE widens to \([0-9][0-9_]*\); the two anchors do not move.
+#     `1_0x0`, `_100`, `0x200`, `let c : int = 1` and a trailing comment are
+#     still not matched at all, so they still refuse.
+#   - is_int is NOT touched. It guards $(( )), where `1_000` is a syntax error,
+#     so it must go on rejecting the separator; it sees stripped digits here.
+#   - stripping happens AFTER the multi-match check, so "defined twice" still
+#     returns 2 rather than silently concatenating into one integer.
+#   - `0_0` strips to `00`, which is_int still rejects as octal-looking, so the
+#     leading-zero refusal survives the widening.
+#
+# ceiling_write_to's sed is widened to match, or a `_`-spelled pin would make
+# the write a silent no-op; it re-emits a plain integer, so a tightened pin
+# comes back normalised. NOTE that this moved the right anchor's only test:
+# `1_000` used to be what pinned it, and now reads 1000 under an unanchored
+# regex too. The trailing-comment fixture in --self-test is what covers it now.
 read_pinned_int() {
   local file="$1" name="$2" out n
-  out="$(sed -n "s/^let $name = \([0-9]\+\)[[:space:]]*\$/\1/p" "$file" 2>/dev/null)"
+  out="$(sed -n "s/^let $name = \([0-9][0-9_]*\)[[:space:]]*\$/\1/p" "$file" 2>/dev/null)"
   n="$(printf '%s\n' "$out" | grep -c '[^[:space:]]')"
   [ "$n" -le 1 ] || return 2
+  out="${out//_/}"
   is_int "$out" || return 1
   printf '%s\n' "$out"
 }
@@ -388,8 +413,49 @@ pinned_degraded() {  # kind pinned -> " PINNED" or ""
   local kind="$1" pinned="$2"
   if [ "$kind" = ratchet ]; then
     is_int "$pinned" || { printf ' PINNED'; return 0; }
+    # MEDIUM-3, round 7 — the plausibility floor is SELF-REFERENTIAL, and at a
+    # pin of 0 it evaluates to nothing at all: gate 3 asks whether the
+    # measurement is at least 1/PLAUSIBILITY_DEN of the PIN, and `0 * 2 >= 0`
+    # is true, so every measurement — 0 included — is "plausible".
+    #
+    # Round 5's CRITICAL-1 closed the door by which a 0 gets WRITTEN. This
+    # closes the door by which a 0 that is ALREADY THERE is never noticed: a
+    # human edit, a bad merge, a --write from before that fix. Measured on the
+    # tree before this line existed:
+    #
+    #   pinned_degraded ratchet 0            -> ''            (accepted)
+    #   cells_implausible ceiling 0 0 0 0 0  -> ''            (plausible)
+    #   classify 0 0 0 0                     -> SOURCE_ONLY
+    #   band_verdict 0 0 25                  -> CURRENT
+    #   ratchet_write_verdict 0 0            -> WRITE
+    #   => "✓ pinned value is current", exit 0, and the ratchet never catches
+    #      anything again. The end state this file's own comments name, entered
+    #      through a different door.
+    #
+    # Gate 2 does not cover it. Its absolute floor counts rows in [calls],
+    # which stays healthy at 8000+ when the CEILING PREDICATE is what broke.
+    # A ceiling of 0 is not a calibration, so it is reported as what it is: a
+    # pin this tool will not measure against.
+    [ "$pinned" -ge 1 ] || { printf ' PINNED'; return 0; }
   else
     [ -n "$pinned" ] || { printf ' PINNED'; return 0; }
+    # The same hole on the descriptive side, and it needs no invented constant
+    # either: a golden pinned at `modules: 0` calls BOTH `modules: 0` and the
+    # real `modules: 23` plausible, for the same self-referential reason. So
+    # every numeric component of the pin must be at least 1. This is the
+    # golden's absolute floor, and unlike gate 2's it is not a magnitude
+    # anybody had to calibrate — it is the statement that a component counted
+    # to zero was not counted.
+    #
+    # Non-numeric lines are not judged here: metric_well_formed owns the
+    # golden's SHAPE, this owns its ADEQUACY.
+    # [a-z_]+, wider than metric_well_formed's [a-z]+ on purpose: that one
+    # judges a measured CELL, this one judges the PIN, and nothing upstream
+    # constrains the pin's label vocabulary. A pin spelled `type_usages: 0`
+    # must not slip past the floor because of a character class.
+    if printf '%s\n' "$pinned" | grep -qE '^[a-z_]+: *0+$'; then
+      printf ' PINNED'; return 0
+    fi
   fi
   printf ''
 }
@@ -438,7 +504,11 @@ ratchet_write_verdict() {  # D PINNED -> WRITE | REFUSE_LOOSEN | REFUSE_D | REFU
 ceiling_write_to() {  # src scratch value -> echoes the value the scratch reads back
   local src="$1" scratch="$2" val="$3"
   cp "$src" "$scratch" || return 2
-  sed -i "s/^let clean_measured = [0-9]\+[[:space:]]*\$/let clean_measured = $val/" "$scratch" || return 2
+  # The character class matches read_pinned_int's capture, underscores
+  # included: an unwidened sed leaves `let clean_measured = 1_000` untouched,
+  # and the read-back then reports a confident 1000 for a write that never
+  # happened. Widened, the line is rewritten as a plain integer.
+  sed -i "s/^let clean_measured = [0-9][0-9_]*[[:space:]]*\$/let clean_measured = $val/" "$scratch" || return 2
   read_pinned_int "$scratch" clean_measured
 }
 
@@ -455,6 +525,12 @@ STATUS=0
 # deleting the `*:2` arm survived round 6 because nothing did.
 bump_status() {
   case "$STATUS:$1" in
+    # Round 7: this arm is provably redundant — verified by fallthrough, since
+    # `2:2` reaches `*:2` and re-assigns the 2 it already holds, and `2:1`
+    # matches nothing and keeps it. It is kept, unmutated and untested, because
+    # it states the monotonicity directly and no test can distinguish its
+    # presence; an equivalent mutant is not a defect, and a test for a line
+    # that cannot affect the outcome would be the decoration §10.6 warns about.
     2:*) ;;
     *:2) STATUS=2 ;;
     0:1) STATUS=1 ;;
@@ -626,15 +702,36 @@ extra:"
   printf 'let clean_measured = 1_000\n\nlet headroom = 1_000\n' > "$FX/underscore.ml"
   printf 'let clean_measured = 347\nlet clean_measured = 340\n' > "$FX/duplicate.ml"
   printf 'let clean_measured : int = 347\n' > "$FX/annotated.ml"
+  # The RIGHT anchor's coverage, round 7. It used to be `1_000` that pinned it;
+  # now that read_pinned_int strips separators, `1_000` reads 1000 under an
+  # unanchored regex too, so that assertion no longer discriminates. A trailing
+  # comment does: anchored it is not matched at all, unanchored it reads a
+  # confident 347. Same for the write half — see the M12 case below.
+  printf 'let clean_measured = 347 (* was 321 *)\n' > "$FX/trailing.ml"
+  # The spellings that must STILL refuse after the widening. `1_0x0` and `_100`
+  # are the two the widened capture must not swallow; `0_0` is the octal-looking
+  # refusal surviving the strip.
+  printf 'let a = 1_0x0\nlet b = _100\nlet c = 0x200\nlet clean_measured = 0_0\n' > "$FX/oddball.ml"
 
   # --- read_pinned_int: HIGH-1, and mutant M14 (the headroom gate) ----------
   chk 347 "$(read_pinned_int "$FX/ok.ml" clean_measured || echo REFUSED)" "read_pinned_int clean_measured"
   chk 25  "$(read_pinned_int "$FX/ok.ml" headroom       || echo REFUSED)" "read_pinned_int headroom"
   chk 8000 "$(read_pinned_int "$FX/ok.ml" min_total_calls || echo REFUSED)" "read_pinned_int min_total_calls"
-  # The whole of HIGH-1 in one assertion: unanchored, this returns 1 and the
-  # band silently becomes +/-1. It must REFUSE, not truncate.
-  chk REFUSED "$(read_pinned_int "$FX/underscore.ml" headroom       || echo REFUSED)" "headroom 1_000 refused"
-  chk REFUSED "$(read_pinned_int "$FX/underscore.ml" clean_measured || echo REFUSED)" "clean_measured 1_000 refused"
+  # `1_000` is legal OCaml meaning 1000 and is now READ as 1000, not refused:
+  # the identical value must not exit 0 spelled one way and hard-fail CI
+  # spelled the other. HIGH-1's property is unchanged — what it was really
+  # about is that the band must never silently narrow from +/-1000 to +/-1 —
+  # and the assertion for it is now `1000`, not `REFUSED`. The anchors that
+  # HIGH-1 installed are still there and still tested, by trailing.ml below.
+  chk 1000 "$(read_pinned_int "$FX/underscore.ml" headroom       || echo REFUSED)" "headroom 1_000 reads 1000"
+  chk 1000 "$(read_pinned_int "$FX/underscore.ml" clean_measured || echo REFUSED)" "clean_measured 1_000 reads 1000"
+  # The right anchor, which is what `1_000` used to cover.
+  chk REFUSED "$(read_pinned_int "$FX/trailing.ml" clean_measured || echo REFUSED)" "trailing-comment pin refused (right anchor)"
+  # The widening must not have widened anything else.
+  chk REFUSED "$(read_pinned_int "$FX/oddball.ml" a || echo REFUSED)" "1_0x0 refused"
+  chk REFUSED "$(read_pinned_int "$FX/oddball.ml" b || echo REFUSED)" "_100 refused (capture must start with a digit)"
+  chk REFUSED "$(read_pinned_int "$FX/oddball.ml" c || echo REFUSED)" "0x200 refused"
+  chk REFUSED "$(read_pinned_int "$FX/oddball.ml" clean_measured || echo REFUSED)" "0_0 refused (octal-looking after the strip)"
   # A read that matches twice is a defect, not a first-match. `| head -1` used
   # to pick one of two contradictory definitions silently.
   chk REFUSED "$(read_pinned_int "$FX/duplicate.ml" clean_measured || echo REFUSED)" "duplicate definition refused"
@@ -650,17 +747,26 @@ extra:"
   read_pinned_int "$FX/annotated.ml"  clean_measured >/dev/null 2>&1; rc=$?
   chk 1 "$rc" "status: unreadable pin"
   read_pinned_int "$FX/underscore.ml" headroom       >/dev/null 2>&1; rc=$?
-  chk 1 "$rc" "status: 1_000 headroom unreadable"
+  chk 0 "$rc" "status: 1_000 headroom is readable"
+  read_pinned_int "$FX/trailing.ml"   clean_measured >/dev/null 2>&1; rc=$?
+  chk 1 "$rc" "status: trailing-comment pin unreadable"
   read_pinned_int "$FX/duplicate.ml"  clean_measured >/dev/null 2>&1; rc=$?
   chk 2 "$rc" "status: defined more than once"
 
   # --- ceiling_write_to: mutant M12, the subject of the last commit ---------
   chk 340 "$(ceiling_write_to "$FX/ok.ml" "$FX/w1.ml" 340 || echo REFUSED)" "write-verify reads back 340"
   chk "let clean_measured = 340" "$(grep '^let clean_measured' "$FX/w1.ml")" "write-verify installed line"
-  # Re-unanchor the read (M12) and this pair goes red: the sed leaves
-  # `340_000` and an unanchored read reports a confident `340`.
-  chk REFUSED "$(ceiling_write_to "$FX/underscore.ml" "$FX/w2.ml" 340 || echo REFUSED)" "write-verify refuses 1_000 pin"
-  chk "let clean_measured = 1_000" "$(grep '^let clean_measured' "$FX/w2.ml")" "refused write left the copy intact"
+  # A `_`-spelled pin is now WRITTEN, and written as a plain integer. If the
+  # sed's class were not widened to match read_pinned_int's, this line would be
+  # left untouched and the read-back would report a confident 1000 for a write
+  # that never happened — so this pair is what keeps the two regexes together.
+  chk 340 "$(ceiling_write_to "$FX/underscore.ml" "$FX/w2.ml" 340 || echo REFUSED)" "write-verify rewrites a 1_000 pin"
+  chk "let clean_measured = 340" "$(grep '^let clean_measured' "$FX/w2.ml")" "the _ separator is gone from the installed line"
+  # M12, the right anchor on the WRITE. Re-unanchor the sed and this pair goes
+  # red: it would match `347 (* was 321 *)`, rewrite the whole line, and read
+  # back a confident 340 for a pin this tool must not touch.
+  chk REFUSED "$(ceiling_write_to "$FX/trailing.ml" "$FX/w4.ml" 340 || echo REFUSED)" "write-verify refuses a trailing-comment pin"
+  chk "let clean_measured = 347 (* was 321 *)" "$(grep '^let clean_measured' "$FX/w4.ml")" "refused write left the copy intact"
   chk REFUSED "$(ceiling_write_to "$FX/annotated.ml" "$FX/w3.ml" 340 || echo REFUSED)" "write-verify refuses annotated pin"
   rm -rf "$FX"
 
@@ -696,8 +802,27 @@ extra:"
   chk " PINNED" "$(pinned_degraded ratchet 'abc')"   "ratchet pin non-numeric is degraded"
   chk " PINNED" "$(pinned_degraded ratchet '1_000')" "ratchet pin 1_000 is degraded"
   chk ""        "$(pinned_degraded ratchet '347')"   "ratchet pin 347 is fine"
+  # MEDIUM-3. A ceiling of 0 is not a calibration. Before this, `pinned_degraded
+  # ratchet 0` returned '' and the whole chain below it — cells_implausible,
+  # classify, band_verdict, ratchet_write_verdict — reported a healthy CURRENT
+  # on a pin that can never fail and can never catch anything again.
+  chk " PINNED" "$(pinned_degraded ratchet '0')"     "ratchet pin 0 is degraded"
+  chk ""        "$(pinned_degraded ratchet '1')"     "ratchet pin 1 is the smallest real calibration"
   chk " PINNED" "$(pinned_degraded descriptive '')"  "golden pin empty is degraded"
   chk ""        "$(pinned_degraded descriptive 'modules: 23')" "golden pin non-empty is fine"
+  # The golden's absolute floor, the same hole as the ratchet's. A golden pinned
+  # at 0/0/0 calls BOTH 0/0/0 and the real 23/804/5170 plausible.
+  chk " PINNED" "$(pinned_degraded descriptive 'modules: 0')" "golden pin component 0 is degraded"
+  local zero_pin="modules: 0
+functions: 0
+calls: 0"
+  chk " PINNED" "$(pinned_degraded descriptive "$zero_pin")" "golden pinned at 0/0/0 is degraded"
+  local part_zero_pin="modules: 23
+functions: 0
+calls: 5170"
+  chk " PINNED" "$(pinned_degraded descriptive "$part_zero_pin")" "one zero component degrades the whole golden pin"
+  chk " PINNED" "$(pinned_degraded descriptive 'type_usages: 0')" "a zero component with an underscored label is degraded"
+  chk ""        "$(pinned_degraded descriptive 'type_usages: 33')" "a healthy underscored component is fine"
 
   # --- cells_degraded: mutant M17, the loop that marks nothing --------------
   chk ""      "$(cells_degraded ceiling 340 340 340 340)" "four good ceiling cells"
@@ -746,11 +871,109 @@ calls: 5170"
   [ "$(printf '%s\n' "$pf" | grep -c .)" -eq 1 ] \
     && echo "  ok   golden one degenerate component caught" \
     || { echo "  FAIL golden partial degeneracy not caught"; fails=$(( fails + 1 )); }
+  # ------------------------------------------------------------------------
+  # MEDIUM-2, round 7 — an assertion that could not go red, in the file that
+  # codifies §10.6.
+  #
+  # What stood here was `chk "" "$pf"` on a REORDERED golden whose three
+  # components all EQUAL their pins, labelled "golden matched by label, not by
+  # order". Review ran a label-pairing-broken stand-in against that exact input
+  # and got the same empty answer: the expected value was what the BROKEN
+  # implementation also produces. Mutant F9 (`label="${line%%:*}"` ->
+  # `label=modules`) survived it, and so does positional pairing, because when
+  # every component is current no pairing can fail.
+  #
+  # The reordered-and-current case is kept — it is a real guard against
+  # SPURIOUS failures on a reorder — but retitled to say only what it proves.
+  # The discriminating case is the one after it.
   local reordered="calls: 5170
 modules: 23
 functions: 804"
   pf="$(plausibility_failures golden "$reordered" "$pinned_golden")"
-  chk "" "$pf" "golden matched by label, not by order"
+  chk "" "$pf" "golden reordered, every component current, is plausible"
+
+  # The input is chosen so the three candidate implementations DISAGREE on the
+  # COUNT, which is what makes the assertion capable of failing:
+  #
+  #   pinned      modules: 23    functions: 804   calls: 5170
+  #   measured    calls: 5170    modules: 23      functions: 100
+  #
+  #   label pairing (correct)  calls 5170 vs 5170 ok; modules 23 vs 23 ok;
+  #                            functions 100 vs 804 -> 200 < 804, ONE failure,
+  #                            named "functions".
+  #   F9 (label pinned to      every component measured against modules' pin of
+  #   "modules")               23; 5170, 23 and 100 all clear it -> ZERO.
+  #   positional pairing       5170 vs 23 ok; 23 vs 804 fails; 100 vs 5170
+  #                            fails -> TWO.
+  #
+  # The count alone separates all three. The LABEL is asserted as well, because
+  # the one line F9 could ever emit would name "modules".
+  local reorder_degenerate="calls: 5170
+modules: 23
+functions: 100"
+  pf="$(plausibility_failures golden "$reorder_degenerate" "$pinned_golden")"
+  chk 1 "$(printf '%s\n' "$pf" | grep -c .)" \
+      "golden reordered + one degenerate: exactly one failure"
+  chk functions "$(printf '%s\n' "$pf" | sed -n '1s/:.*//p')" \
+      "golden failure is attributed by label, not by position"
+
+  # ------------------------------------------------------------------------
+  # MEDIUM-1, round 7 — the fifth numeric read, which had no coverage at all.
+  #
+  # The `pin="$(... sed -n "s/^$label: *\([0-9]\+\)...")"` inside
+  # plausibility_failures is a fourth textual read of a pinned numeric and it
+  # does NOT go through read_pinned_int — it reads a LABELLED component out of
+  # a string, not a `let name = <int>` out of a file, so it cannot. Mutants R5
+  # (drop the right anchor), R6 (drop the left anchor) and F8 (drop the
+  # unreadable-component arm) all survived. Review probed it: with the right
+  # anchor dropped, a pin spelled `modules: 1_000` reads as `1`, is_int accepts
+  # it, and THAT COMPONENT'S FLOOR GOES INERT — 23 clears a floor of 1 forever.
+  # The real code fails closed, so the anchor is load-bearing and was untested.
+  # This is the recurring shape exactly: review named two anchors, both got
+  # tests; the third got the anchor and no test.
+  #
+  # Underscores are deliberately NOT accepted here, unlike read_pinned_int.
+  # This string is the golden fixture, which CI diffs byte-for-byte against
+  # sqlite3's own output — `1_000` in it is already a smoke-test failure — and
+  # there is no write path that would normalise it.
+  local pin_underscore="modules: 1_000
+functions: 804
+calls: 5170"
+  pf="$(plausibility_failures golden "$reordered" "$pin_underscore")"
+  chk 1 "$(printf '%s\n' "$pf" | grep -c .)" "golden pin '1_000' is one unreadable component"
+  chk "modules: unreadable (measured='23' pinned='')" "$(printf '%s\n' "$pf" | head -1)" \
+      "golden pin '1_000' refuses rather than reading 1"
+  # Trailing text after the number: the right anchor again, without underscores.
+  local pin_trailing="modules: 23 # was 21
+functions: 804
+calls: 5170"
+  pf="$(plausibility_failures golden "$reordered" "$pin_trailing")"
+  chk 1 "$(printf '%s\n' "$pf" | grep -c .)" "golden pin with trailing text is unreadable"
+  # An absent component. Without the unreadable arm the empty pin reaches
+  # $(( )) and the comparison aborts, emitting nothing at all.
+  local pin_absent="functions: 804
+calls: 5170"
+  pf="$(plausibility_failures golden "$reordered" "$pin_absent")"
+  chk 1 "$(printf '%s\n' "$pf" | grep -c .)" "golden pin missing a component is unreadable"
+  chk "modules: unreadable (measured='23' pinned='')" "$(printf '%s\n' "$pf" | head -1)" \
+      "an absent golden pin names the component it could not read"
+  # The LEFT anchor. A golden that gains a `total_calls:` line must not let the
+  # `calls` lookup match it. Unanchored, `calls: *\([0-9]\+\)$` matches BOTH
+  # `total_calls: 9` and `calls: 5170`; sed prints two lines, the pin becomes a
+  # two-line string, and is_int rejects it — so dropping the left anchor turns
+  # a perfectly plausible measurement into an unreadable one.
+  local pin_confusable="modules: 23
+functions: 804
+total_calls: 9
+calls: 5170"
+  pf="$(plausibility_failures golden "$reordered" "$pin_confusable")"
+  chk "" "$pf" "golden pin lookup is anchored to the start of the line"
+
+  # L2. plausibility_failures' unknown-metric catch-all was untested while its
+  # sibling in metric_well_formed was tested. A catch-all that echoes nothing
+  # reports "plausible" for a metric this tool has never heard of.
+  chk "unknown metric 'bogus'" "$(plausibility_failures bogus 1 1)" \
+      "plausibility_failures rejects an unknown metric"
   chk " A B C D" "$(cells_implausible ceiling 347 0 0 0 0)" "four degenerate ceiling cells"
   chk ""         "$(cells_implausible ceiling 347 340 340 345 345)" "four healthy ceiling cells"
   chk " D"       "$(cells_implausible ceiling 347 340 340 340 0)"   "only D degenerate"
@@ -1221,8 +1444,43 @@ for metric in ${METRICS}; do
     echo "     them apart. That is also why 'a ratchet may always be TIGHTENED'" >&2
     echo "     is not enough on its own: every silent breakage moves the number" >&2
     echo "     DOWN, into the direction that axiom calls always-safe." >&2
-    echo "     If the movement is REAL, recalibrate by hand and record why — one" >&2
-    echo "     commit message, the same contract the BEHAVIOURAL arm has." >&2
+    echo "     If the movement is REAL — this repository has recorded a MAY_TOP" >&2
+    echo "     move of 79% -> 3.9%, so a >50% gain is not hypothetical — then it" >&2
+    echo "     must be recalibrated BY HAND and the commit message must say why:" >&2
+    echo "     the same contract the BEHAVIOURAL arm has always had." >&2
+    # MEDIUM-5. This was the least actionable refusal in the file: it named
+    # neither the file, nor the line, nor the value a human would install,
+    # while the headroom refusal two gates down prints all three. Say the same
+    # things it says.
+    echo "     What a human would install:" >&2
+    case "$metric" in
+      ceiling)
+        echo "       file:     $CEILING_FILE" >&2
+        cm_lines="$(grep -n '^let clean_measured' "$CEILING_FILE" 2>/dev/null)"
+        if [ -n "$cm_lines" ]; then
+          printf '%s\n' "$cm_lines" | sed 's/^/       line:     /' >&2
+        else
+          echo "       line:     (no 'let clean_measured = <int>' line found)" >&2
+        fi
+        echo "       measured: $D   (pinned $PINNED)" >&2
+        ;;
+      golden)
+        echo "       file:     $GOLDEN_FILE" >&2
+        echo "       measured:" >&2
+        printf '%s\n' "$D" | sed 's/^/         /' >&2
+        echo "       pinned:" >&2
+        printf '%s\n' "$PINNED" | sed 's/^/         /' >&2
+        ;;
+    esac
+    echo "     scripts/recalibrate.sh --explain prints the full 2x2 behind this." >&2
+    # MEDIUM-4. A machine-readable class, so CI can tell this refusal apart
+    # from the other three exit-2 causes. Those three each say the GATE is not
+    # working; this one is the only exit-2 that may be a property of the
+    # BRANCH, and telling a developer who did something excellent that the
+    # gate is broken is how a gate gets bypassed — this file's own words.
+    # Only this class is emitted, deliberately: CI branches on exactly one
+    # question, and "no class line" totally covers every other refusal.
+    echo "recalibrate: refusal-class=implausible" >&2
     bump_status 2
     continue
   fi

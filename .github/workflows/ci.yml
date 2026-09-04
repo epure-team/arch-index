@@ -140,15 +140,35 @@ jobs:
       # shallow clone. The explicit fetch covers the push-event case, where the
       # remote-tracking ref for main may not have been created.
       #
+      # On that push event the 2x2 is a TAUTOLOGY and it is worth knowing why
+      # the step still runs. `push: branches: [main]` means HEAD == origin/main,
+      # so the merge-base IS HEAD, base and new are the same commit, and
+      # A = B = C = D always -- the attribution half can only ever report
+      # SOURCE_ONLY and proves nothing. What still has value there is the
+      # CURRENCY half: it re-measures main's own tree and catches a pin that
+      # has drifted from what main actually measures, which is the drift this
+      # tool was written for. The attribution half earns its keep on
+      # pull_request, where the two refs really differ.
+      #
       # The two non-zero exits are treated DIFFERENTLY, and that is the whole
       # design of this step:
       #
       #   exit 2 (REFUSED) is hard. It means the tool could not measure, or
       #     measured something it will not believe: a degraded cell, a corpus
       #     below the adequacy floor, a component collapsed below half its pin,
-      #     an unreadable or doubly-defined constant. None of those is a
-      #     property of the branch -- each one says the gate itself is not
-      #     working, and a gate that cannot measure must not report success.
+      #     an unreadable or doubly-defined constant.
+      #
+      #     THREE of those four say the GATE is not working. The fourth --
+      #     implausible -- is the one case where the refusal may be a property
+      #     of the BRANCH: a genuine >50% resolution gain has exactly the same
+      #     shape as a query that stopped matching, and that is not
+      #     hypothetical here, this repository has recorded a MAY_TOP move of
+      #     79% -> 3.9%. Telling the author of such a branch that "this is a
+      #     failure of the gate, not of the branch" is both wrong and
+      #     unactionable, and the script's own comment says where that ends up:
+      #     "a gate that refuses wrongly is a gate people learn to bypass".
+      #     So the two are split below on the refusal-class line the script
+      #     prints, and the plausibility arm says what a human should do.
       #
       #   exit 1 (STALE) is advisory here, and NOT because staleness is
       #     tolerable. It is already hard-gated: the "Self-index smoke test"
@@ -161,22 +181,65 @@ jobs:
       #
       # So this step adds no new way for an ordinary PR to fail, and one new
       # way for a broken measurement to be caught.
+      #
+      # RECORD THE COST OF THAT CHOICE, rather than letting a future reader
+      # infer that exit 1 is "covered". A `::warning::` is in practice unread:
+      # it does not fail the job, it does not block a merge, and nobody opens
+      # a green run to look for it. The staleness signal survives only because
+      # it is hard-gated twice elsewhere (the golden diff, and
+      # must_null_ceiling's own assertion) -- but the GAIN half of exit 1, a
+      # branch that improves the ratchet by more than the headroom, is gated
+      # NOWHERE ELSE, so wiring it to a warning discards it. That is a
+      # deliberate, temporary trade to keep this PR from changing what makes
+      # CI red, NOT a judgement that a warning is sufficient. Turning the GAIN
+      # signal into something enforced is a tracked follow-up and needs to
+      # land as its own change, with the recalibration workflow it implies.
       - name: Recalibration gate (self)
+        env:
+          # L7, accepted knowingly rather than left at dune's default-off. This
+          # step builds two PRISTINE worktrees and indexes four corpora, so it
+          # pays for two full `dune build`s that share nothing with the "Build"
+          # step above -- ~2-3 minutes locally and materially more on a hosted
+          # runner. The two worktrees differ from this one only by checkout, so
+          # most of that compilation is genuinely shared and the cache is worth
+          # having.
+          #
+          # It is a cache of BUILD ARTEFACTS keyed on their inputs, not of the
+          # measurement: each cell is still indexed from its own tree by the
+          # binary built for that tree, so a cache hit cannot make a stale
+          # producer measure a new corpus -- the exact trap this script's
+          # header warns about, and the reason to say so here.
+          DUNE_CACHE: enabled
+          DUNE_CACHE_STORAGE_MODE: copy
         run: |
           eval "$(opam env)"
           git fetch --no-tags origin main
           set +e
-          ./scripts/recalibrate.sh --check
-          rc=$?
+          # Captured as well as shown, so the refusal ARM below can tell the
+          # four exit-2 causes apart. PIPESTATUS, not $?, or this would read
+          # tee's status -- the same pipefail trap the script itself documents.
+          ./scripts/recalibrate.sh --check 2>&1 | tee /tmp/recalibrate-check.log
+          rc=${PIPESTATUS[0]}
           set -e
           case "$rc" in
             0) echo "recalibrate: every pinned constant is current" ;;
             1) echo "::warning::recalibrate --check reports a STALE pinned constant."
                echo "Run scripts/recalibrate.sh --explain to see the attribution," \
                     "then --write to install what is attributable to source change alone." ;;
-            *) echo "::error::recalibrate --check REFUSED (exit $rc): the measurement is" \
-                    "degraded, implausible, or a pinned constant could not be read." \
-                    "This is a failure of the gate, not of the branch -- see the output above."
+            *) if grep -q 'refusal-class=implausible' /tmp/recalibrate-check.log; then
+                 echo "::error::recalibrate --check REFUSED (exit $rc): a measured component" \
+                      "collapsed below half its pinned value. Unlike the other refusals, this" \
+                      "one MAY be a property of your branch: a genuine >50% resolution gain is" \
+                      "indistinguishable in shape from a query that stopped matching, and this" \
+                      "repository has recorded a MAY_TOP move of 79% -> 3.9%. If the movement" \
+                      "is REAL, recalibrate BY HAND and record why in the commit message --" \
+                      "the output above names the file, the line, and the measured value." \
+                      "--write will not do it for you; it refuses on this input by design."
+               else
+                 echo "::error::recalibrate --check REFUSED (exit $rc): the measurement is" \
+                      "degraded, or a pinned constant could not be read. This is a failure of" \
+                      "the gate, not of the branch -- see the output above."
+               fi
                exit "$rc" ;;
           esac
 
