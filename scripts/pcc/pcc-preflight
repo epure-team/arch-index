@@ -21,14 +21,21 @@ build_log="$(mktemp)"
 test_log="$(mktemp)"
 trap 'rm -f "$build_log" "$test_log"' EXIT
 
-if ! dune build >"$build_log" 2>&1; then
+# `--root .`, not a bare `dune build`: dune searches UPWARD for its project root, so a bare
+# invocation here builds whatever ancestor directory happens to contain a dune-project — not the
+# repo we were pointed at. That is not hypothetical: it silently builds and reports on the WRONG
+# project whenever the target is nested under another dune workspace (a vendored subrepo, a
+# monorepo subdirectory, or a scratch checkout under a directory that happens to have one).
+# It also made this tool's own test fail in any environment with a stray dune-project above /tmp,
+# which read as flakiness for a long time. Rooting explicitly is the whole fix.
+if ! dune build --root . >"$build_log" 2>&1; then
   cat "$build_log" >&2
   echo "pcc-preflight: dune build failed" >&2
   printf '{"ok": false, "tests": 0}\n'
   exit 1
 fi
 
-dune test >"$test_log" 2>&1
+dune test --root . >"$test_log" 2>&1
 rc=$?
 cat "$test_log" >&2
 

@@ -225,7 +225,7 @@ let register_go () =
   else
     with_project ~name:"effects_go" ~files:go_files (fun project ->
         let build_go ~dir ~out =
-          let code, output = run_command ~cwd:dir "go" ["build"; "-o"; out; "."] in
+          let code, output = run_command ~cwd:dir "go" ["build"; "-buildvcs=false"; "-o"; out; "."] in
           if code <> 0 then Test.fail "building %s failed (exit %d):\n%s" dir code output ;
           out
         in
