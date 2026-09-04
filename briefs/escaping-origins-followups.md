@@ -29,16 +29,56 @@ with the round that named it.
   edge with a `callee_id` (there are none today) would be traversed as if
   resolved. Stated because the invariant is currently accidental.
 
-## Recorded by reference — I could not restate these precisely
+## Copied verbatim from the round 4 and 5 review reports
 
-Rounds 3–5 accepted further items (numbered MEDIUM-3, MEDIUM-5, LOW-1/2/4/5/6
-and LOW-a/c/d in the review reports). **I do not have their text and will not
-paraphrase them from memory** — inventing a plausible restatement is worse than
-an honest pointer, because it would read as a record while being a guess.
+Transcribed, not restated. The earlier version of this section said I could not
+reproduce these and refused to paraphrase them; the reviewer supplied the
+originals and they are below unchanged.
 
-They live in the review reports for PR #71 rounds 3, 4 and 5. Whoever picks this
-up should copy the originals in here; until then this section is a marker that
-the list is incomplete, not that it is empty.
+- **MEDIUM-3** — the in-comment figures (241/1287 nodes, 37-versus-38 origins,
+  30526 rows, the 21-versus-37 discrepancy) now carry granularity, corpus and
+  producer, **but still no reproduction command**, so nobody can re-derive them.
+  §10.3 asks for the scope *and* the command, or no number.
+- **MEDIUM-5a** — `--forms` with no value silently falls back to the default
+  set: `--roots X --forms` → a full answer with the four default forms,
+  **exit 0, no diagnostic**. `flag_val`'s `x :: y :: tl` cannot see a flag at
+  end-of-line and falls through to `_ :: tl`.
+- **MEDIUM-5b** — `--forms --roots X` swallows the following flag as its value →
+  `unknown origin form(s): --roots`, exit 2. A misleading message for a genuine
+  caller error.
+- **LOW-1** — `ORDER BY o.form, m.path, o.line` is not a total order. Measured
+  **40** colliding groups on the self-index (23 then 127 on other corpora —
+  build-dependent). Row order is at the planner's mercy. Fix: add
+  `, f.name, o.id`.
+- **LOW-2** — exit codes 0/2/3 are documented nowhere in the usage, and **an
+  ambiguous root and a non-existent root both exit 3**, so a script cannot tell
+  "qualify your root" from "your root does not exist".
+- **LOW-4** — ⊤ is a **strict subset** of unresolved, rendered as though the two
+  were disjoint. Measured: `MAY_TOP = 1130`, of which **0** have a resolved
+  callee; `callee_id IS NULL = 8313`. "`N edges unresolved · M ⊤`" invites
+  adding them. Fix: "… · **of which** M ⊤".
+- **LOW-a** — the duplicate-flag refusal works (`--roots A --roots B` → exit 2,
+  good message) but **M-DUP survives**: nothing tests it.
+- **LOW-c** — `known_forms` omits `inferred_bind`, which
+  `architecture-schema.sql:421` permits. `--forms inferred_bind` → exit 2
+  "unknown origin form(s)".
+- **LOW-d** — the JSON preamble does not carry the verdict **word**; it carries
+  `nodes_beyond_root` (`0` for NOTHING TRAVERSED, `1` for LOWER BOUND), so a
+  machine consumer can derive it, but the readable sentence is list-format only.
+- **LOW-5** — the `:*` sigil collides with a function literally named `*`: the
+  `root` CTE tests `? = '*'` against the caller's string, so `mymath.ml:*` on a
+  module defining `let ( * )` silently means "whole module". No such name in
+  this corpus; the root echo makes it legible.
+- **LOW-6** — the dead `| _ ->` arm builds a 3-field text while `preamble ~h`
+  still passes the full column-name list against a short `~cells`, and
+  `preamble` (`arch_query.ml:150-153`) **does not check arity**. The comment
+  keeps the arm for "a future edit to the column list" — but as written, that
+  edit would produce a silently misaligned JSON preamble.
+- **LOW-e** — `resolved_out_edges` is not "out": it reads 8 for a root whose
+  banner says NOTHING TRAVERSED and whose `nodes_beyond_root` is 0, because it
+  counts every resolved edge from a `reach` node, intra-root included. The name
+  promises the very proxy round 3 blocked on. Rename to
+  `resolved_edges_from_closure`.
 
 ## Not a follow-up — decided
 
