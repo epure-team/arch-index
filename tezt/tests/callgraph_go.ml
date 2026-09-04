@@ -92,16 +92,22 @@ let build_producer () =
   let bin = Filename.concat (Temp.dir "cggo_bin") "arch-callgraph-go" in
   let code, output =
     (* [-buildvcs=false]: Go stamps VCS metadata into a binary by default, and to do that it
-     walks up from the module directory looking for a repository root. It looks for a
-     [.git] DIRECTORY — but a git WORKTREE has a [.git] FILE pointing elsewhere, so the
-     walk sails past it and keeps going, then runs [git status] from whatever ancestor it
-     stopped at (in practice [/tmp]), which is not a repository at all: "error obtaining
-     VCS status: exit status 128", and the build fails.
+     looks for a [.git] DIRECTORY to identify the repository root. A git WORKTREE has a
+     [.git] FILE (pointing at the real gitdir elsewhere), not a directory, so Go does not
+     recognise the worktree root as a repository at all.
 
-     Nothing about this test needs a version stamp in a throwaway binary, and the failure
-     is invisible on a normal checkout — it only bites when the tree is a worktree, which
-     is exactly how CI-adjacent and agent workflows check code out. Disabling the stamp is
-     the fix; the alternative is a test that passes or fails on how you cloned. *)
+     Verified (go1.26.4): this does NOT reproduce as a build failure under any worktree
+     construction tried (under /tmp with no ancestor .git, under ~/.cache, nested in an
+     unrelated repo, a [.git] file pointing at a missing gitdir) — every case exits 0
+     with or without this flag. What IS confirmed is quieter: [go version -m] on a binary
+     built from a normal clone shows [build vcs=git] and [vcs.revision] lines; built from a
+     worktree, those lines are simply absent — Go declines to stamp rather than erroring.
+     Do not assume the "error obtaining VCS status: exit status 128" failure some earlier
+     report claimed; it was not reproduced.
+
+     The flag is kept anyway: it costs nothing, makes the no-stamp behavior explicit rather
+     than incidental, and guards other toolchains/configurations where the VCS lookup IS
+     fatal — e.g. a [safe.directory] refusal, which also exits 128. *)
      run_command ~cwd:(callgraph_go_src ()) "go" ["build"; "-buildvcs=false"; "-o"; bin; "."]
   in
   if code <> 0 then Test.fail "building arch-callgraph-go failed (exit %d):\n%s" code output ;

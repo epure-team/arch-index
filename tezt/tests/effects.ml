@@ -225,6 +225,12 @@ let register_go () =
   else
     with_project ~name:"effects_go" ~files:go_files (fun project ->
         let build_go ~dir ~out =
+          (* [-buildvcs=false]: see the detailed comment on the equivalent build in
+             callgraph_go.ml — Go silently omits VCS stamping in a git worktree (no
+             [vcs] lines in [go version -m]) rather than erroring; verified on
+             go1.26.4, no build failure reproduced in a worktree with or without this
+             flag. Kept anyway: costs nothing, and guards toolchains/configurations
+             where the VCS lookup IS fatal (e.g. a [safe.directory] refusal). *)
           let code, output = run_command ~cwd:dir "go" ["build"; "-buildvcs=false"; "-o"; out; "."] in
           if code <> 0 then Test.fail "building %s failed (exit %d):\n%s" dir code output ;
           out

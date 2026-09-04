@@ -22,8 +22,10 @@
 # Usage:
 #   scripts/mutate-check.sh <file> <expected-anchor-count> <anchor> <replacement> [test-cmd]
 #
-# Defaults to `dune runtest` (`dune test` is an alias for it, so this is correct
-# in both this repo and arch-index). Override per call or via MUTATE_TEST_CMD.
+# Defaults to `dune runtest --root .` (`dune test` is an alias for `runtest`, so
+# this is correct in both this repo and arch-index). `--root .` guards against a
+# stray ancestor dune-project hijacking a bare invocation (dune roots itself by
+# searching upward). Override per call or via MUTATE_TEST_CMD.
 #
 # Exit codes: 0 = mutant KILLED (the test earned its keep)
 #             1 = mutant SURVIVED (the test does not detect the defect)
@@ -38,7 +40,7 @@ FILE=$1
 EXPECTED=$2
 ANCHOR=$3
 REPLACEMENT=$4
-TEST_CMD=${5:-${MUTATE_TEST_CMD:-dune runtest}}
+TEST_CMD=${5:-${MUTATE_TEST_CMD:-dune runtest --root .}}
 
 [ -f "$FILE" ] || die "no such file: $FILE"
 case $EXPECTED in ''|*[!0-9]*) die "expected-count must be a non-negative integer, got '$EXPECTED'" ;; esac

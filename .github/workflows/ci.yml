@@ -66,7 +66,7 @@ jobs:
       - name: Install sqlite3
         run: sudo apt-get update -qq && sudo apt-get install -y -qq sqlite3
       - name: Build
-        run: opam exec -- dune build
+        run: opam exec -- dune build --root .
       # `dune test` also runs the Tezt suite under tezt/, which covers the CMT
       # indexer's module-language shapes — including the two soundness ratchets in
       # tezt/tests/nested_module_qualification.ml and tezt/tests/must_null_ceiling.ml, migrated
@@ -79,7 +79,7 @@ jobs:
           # tests build throwaway repos), so they need to be resolvable via bare
           # PATH in this shell, not only inside opam exec's child.
           eval "$(opam env)"
-          dune test
+          dune test --root .
       - name: Self-index smoke test
         run: |
           BIN="./_build/default/bin/arch_callgraph_ocaml/arch_callgraph_ocaml.exe"
@@ -157,7 +157,7 @@ jobs:
         env:
           ARCH_MCP: 'yes'
         run: |
-          opam exec -- dune build bin/arch_mcp/arch_mcp.exe bin/arch_load bin/arch_query
+          opam exec -- dune build --root . bin/arch_mcp/arch_mcp.exe bin/arch_load bin/arch_query
           # A false enabled_if makes `dune build <target>` exit 0 while producing nothing, so a
           # green dune is not evidence. Assert the binary.
           test -x _build/default/bin/arch_mcp/arch_mcp.exe \
@@ -200,7 +200,7 @@ jobs:
       - name: Install deps and build
         run: |
           opam install --deps-only --with-test --yes .
-          opam exec -- dune build --profile=${{ matrix.profile }}
+          opam exec -- dune build --root . --profile=${{ matrix.profile }}
       - name: Package binaries
         run: |
           mkdir -p dist
