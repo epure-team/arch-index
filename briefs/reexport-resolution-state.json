@@ -1,7 +1,7 @@
 {
   "task": "reexport-resolution",
   "mode": "full",
-  "current_phase": "spec",
+  "current_phase": "plan",
   "events": [
     {
       "phase": "question",
@@ -26,6 +26,12 @@
       "outcome": "VALIDATED",
       "at": "2026-09-04T18:15:00Z",
       "by": "roster-spec"
+    },
+    {
+      "phase": "plan",
+      "outcome": "COMPLETED",
+      "at": "2026-09-04T19:10:00Z",
+      "by": "roster-plan"
     }
   ]
 }

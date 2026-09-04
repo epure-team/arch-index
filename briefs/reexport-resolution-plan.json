@@ -1,0 +1,41 @@
+{
+  "task": "reexport-resolution",
+  "mode": "full",
+  "schema_version": "1.0",
+  "blocked_on": "merge of feat/qualified-unit-resolution (roadmap 1.6) into main",
+  "steps": [
+    {
+      "id": "step-1",
+      "skill": "roster-implement",
+      "inputs": ["briefs/reexport-resolution-implementer.md", "specs/reexport-resolution.md"],
+      "outputs": ["lib/arch_index/arch_index.ml", "tezt/tests/"],
+      "hook": false
+    },
+    {
+      "id": "step-2",
+      "skill": "roster-review",
+      "inputs": ["briefs/reexport-resolution-reviewer.md"],
+      "outputs": ["briefs/reexport-resolution-review.json"],
+      "hook": false
+    },
+    {
+      "id": "step-3",
+      "skill": "roster-qa",
+      "inputs": ["briefs/reexport-resolution-qa-scope.md"],
+      "outputs": ["briefs/reexport-resolution-qa.md"],
+      "hook": false
+    },
+    {
+      "id": "step-4",
+      "skill": "roster-ship",
+      "inputs": ["briefs/reexport-resolution-qa.md"],
+      "outputs": ["briefs/reexport-resolution-ship.md"],
+      "hook": false
+    }
+  ],
+  "quality_gates": {
+    "build": "dune build",
+    "test": "dune runtest --force",
+    "lint": ""
+  }
+}
