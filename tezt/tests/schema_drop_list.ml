@@ -43,10 +43,17 @@ let self_managed =
        immediately before repopulating it, so it is already idempotent \
        across re-indexes" );
     ( "comment_db_meta",
-      "key/value metadata keyed by a TEXT PRIMARY KEY and written only with \
-       INSERT OR REPLACE, so a re-index overwrites each key rather than \
-       accumulating; and it holds state written by tools OTHER than the \
-       indexer, which dropping it would destroy" );
+      "holds state written by tools OTHER than the indexer, which dropping it \
+       would destroy. NOT because INSERT OR REPLACE makes it self-managing: \
+       that was the stated reason here, and it is exactly the reasoning that \
+       hid a CRITICAL. INSERT OR REPLACE keeps a key CURRENT at the end of a \
+       run that REACHES the write; it says nothing about a run that dies \
+       first, which leaves the PREVIOUS run's value answering for work that \
+       never happened. The keys where that distinction is load-bearing are \
+       Arch_index_support.completion_marker_keys, and Arch_index.run deletes \
+       them explicitly — twice, before the schema is demolished and after it \
+       is rebuilt. Any new key whose PRESENCE means something must go in that \
+       list; this table being un-dropped does not cover it" );
   ]
 
 let read_file path =

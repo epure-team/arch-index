@@ -1022,7 +1022,16 @@ let use () = my_bind (src ()) (fun x -> Some x)
    run 1 — and before the fix, that is exactly what they held: run 1's
    markers, standing over run 2's empty tables. A timing-based SIGKILL test
    reproduces the same defect but cannot be made deterministic in CI; this
-   can, and it fails for the same reason. *)
+   can, and it fails for the same reason.
+
+   WHAT THIS DOES NOT COVER: [error_contract] itself. Run 2 rewrites it
+   unconditionally after the commit, whereas [callgraph_contract]/[exn_contract]
+   are gated on a non-empty universe — so it cannot be a detector in this
+   scenario, and this test does not pretend otherwise. The DELETE covers all
+   three; the assertion covers two. [tezt/tests/completion_markers.ml] pins the
+   classification of every marker key, and a SIGKILL sweep (21/60 torn states
+   without the pre-demolition delete, 0/60 with it) covers the timing case no
+   deterministic test can reach. *)
 let register_stale_completion_markers () =
   Test.register ~__FILE__
     ~title:"error-channels: a re-index never inherits the previous run's completion markers"

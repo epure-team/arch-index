@@ -2,6 +2,26 @@
 
 ## [Unreleased]
 
+### Fixed
+- **A completion marker can no longer outlive its evidence.** `comment_db_meta`'s
+  `error_contract` / `exn_contract` / `callgraph_contract` keys claim that an analysis RAN; they
+  are now cleared twice — once before the schema is demolished, once after it is rebuilt — so a
+  producer killed mid-analysis cannot leave the previous run's marker answering for work that
+  never happened. Previously `INSERT OR REPLACE` was relied on to keep them current, which is
+  true only of a run that REACHES the write.
+
+  **Observable contract change for consumers:** a re-index over a tree that is temporarily
+  un-built now leaves a database with no markers, so `arch-query`'s exception/error-channel
+  entry points and `arch-coverage-matrix` REFUSE (`NOT_ANALYSED`, exit 3 / `not_analysed`,
+  exit 1) where they previously answered. That is the intended direction — the old answer was
+  produced from a marker with no rows behind it — but it is a behaviour change, not a silent
+  internal fix. Re-index to restore the markers.
+
+  Measured: a SIGKILL sweep across the demolition window found 21 torn states in 60 attempts
+  before the fix and 0 in 60 after. The marker list is now one exported value
+  (`Arch_index_support.completion_marker_keys`), and `tezt/tests/completion_markers.ml` fails if
+  a new `comment_db_meta` key is neither a declared marker nor declared non-load-bearing.
+
 ### Added
 - Configurable **error channels** (roadmap 3.4-bis), generalising the exception analysis to
   error-carrying values. A channel is one way of failing; `exception`, `result` and `option` are

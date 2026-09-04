@@ -13,6 +13,24 @@ type intent_backup = {
   type_intents : (string * string * string) list; (* path, name -> intent *)
 }
 
+(* The keys whose PRESENCE is a claim that an analysis RAN to completion.
+
+   They are listed here, beside the drop lists, because they belong to the same
+   contract: a re-index must leave a database in a state where nothing asserts
+   more than the current run actually produced. [comment_db_meta] is
+   deliberately NOT dropped (see the [self_managed] allowlist in
+   tezt/tests/schema_drop_list.ml), so these keys survive a re-index unless
+   something removes them explicitly — which is what [Arch_index.run] does,
+   twice: once before the schema is demolished, once after it is recreated.
+
+   ONE list, consulted by the deletion, because the failure mode is silent. A
+   fourth marker spelled only at its producer site would survive a killed
+   re-index and answer for a run that produced nothing, and no existing test
+   would fail. [tezt/tests/completion_markers.ml] pins that mechanically: every
+   comment_db_meta key a producer writes is either in this list or explicitly
+   declared non-load-bearing. *)
+let completion_marker_keys = ["error_contract"; "exn_contract"; "callgraph_contract"]
+
 let schema_views_to_drop =
   [
     "v_large_files";

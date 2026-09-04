@@ -24,6 +24,35 @@ type intent_backup = {
 
     {violates}
     (none) *)
+(** The [comment_db_meta] keys whose PRESENCE claims an analysis RAN to
+    completion.
+
+    Listed beside the drop lists because they share their contract: after a
+    re-index, nothing in the database may assert more than the current run
+    actually produced. [comment_db_meta] is deliberately not dropped (the
+    [self_managed] allowlist in {!module:Schema_drop_list}), so these keys
+    outlive a re-index unless something removes them — which {!Arch_index.run}
+    does twice, once before the schema is demolished and once after it is
+    rebuilt.
+
+    ONE list, because the failure is silent: a fourth marker spelled only at
+    its producer site would survive a killed re-index and answer for a run that
+    produced nothing, and no existing test would fail.
+
+    {pre}
+    (none)
+
+    {post}
+    Every key returned is written by this producer and is load-bearing for a
+    consumer's "was this analysed?" decision.
+
+    {violators}
+    (none)
+
+    {violates}
+    (none) *)
+val completion_marker_keys : string list
+
 val schema_views_to_drop : string list
 
 (** Tables dropped in dependency-safe order before schema recreation.

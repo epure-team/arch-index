@@ -126,6 +126,18 @@ let discover_profile ~project_root ~name =
   in
   List.find_opt Sys.file_exists candidates
 
+(* The DELETE, built from [Arch_index_support.completion_marker_keys] rather
+   than respelled. Two call sites use it (before the schema is demolished and
+   after it is recreated), and a marker added to that list is covered by both
+   without touching either. *)
+let delete_completion_markers_sql () =
+  Printf.sprintf
+    "DELETE FROM comment_db_meta WHERE key IN (%s)"
+    (String.concat ", "
+       (List.map
+          (fun k -> "'" ^ k ^ "'")
+          Arch_index_support.completion_marker_keys))
+
 let read_file path =
   let ic = open_in path in
   Fun.protect
@@ -312,6 +324,30 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
      drop-then-recreate cycle; architecture-schema.sql's own `PRAGMA
      foreign_keys = ON` turns it back on immediately after, so every insert
      below still enforces the FK. *)
+  (* FIX (review round 3, H1): clear the completion markers BEFORE the schema
+     is demolished, not only after it is rebuilt.
+
+     Deleting them after the recreate (below) leaves a ~10ms window in which
+     the evidence tables are already gone and the markers are still present —
+     the same lie as the original bug, in a narrower slice. Reproduced on the
+     FIXED binary: 12 hits in 60 SIGKILL attempts uniformly in [0.018, 0.032]s
+     left no [functions] table and all three markers, and on that captured
+     state `arch-coverage-matrix` — the consumer this exists to protect —
+     answered `ocaml callgraph: covered`.
+
+     [comment_db_meta] may not exist yet on a fresh database, and this runs
+     before the schema is created, so the delete cannot use [exec_exn]: it is
+     gated on the table actually being there. The post-recreate delete is kept
+     as well — belt and braces, and it is the one that runs when this branch is
+     skipped. *)
+  (* [Sqlite3.exec], not [exec_exn]: on a fresh database [comment_db_meta] does
+     not exist yet and the statement legitimately fails. There is nothing to
+     clear in that case, which is exactly the state we want. The post-recreate
+     call below DOES use [exec_exn], so a genuine failure against a table that
+     exists is still fatal — this call is the early half of a belt-and-braces
+     pair, not the only one. *)
+  ignore (Sqlite3.exec db (delete_completion_markers_sql ())) ;
+
   exec_exn db "PRAGMA foreign_keys = OFF" ;
   (* Drop views first (they reference the tables), then tables. *)
   List.iter
@@ -378,10 +414,7 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
      They are cleared here, in the same autocommitted step as the schema
      drop/recreate above and before the first BEGIN TRANSACTION, so the window
      in which a marker can outlive its evidence does not exist. *)
-  exec_exn
-    db
-    "DELETE FROM comment_db_meta WHERE key IN ('error_contract', \
-     'exn_contract', 'callgraph_contract')" ;
+  exec_exn db (delete_completion_markers_sql ()) ;
 
   (* Roadmap 1.2 (ADR 002): one producer_runs row for this whole invocation.
      'sound_with_top' is a deliberate, explicit claim, not the module's
