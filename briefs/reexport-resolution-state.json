@@ -1,7 +1,7 @@
 {
   "task": "reexport-resolution",
   "mode": "full",
-  "current_phase": "plan",
+  "current_phase": "spec",
   "events": [
     {
       "phase": "question",
@@ -32,6 +32,25 @@
       "outcome": "COMPLETED",
       "at": "2026-09-04T19:10:00Z",
       "by": "roster-plan"
+    },
+    {
+      "phase": "implement",
+      "outcome": "PARTIAL",
+      "at": "2026-09-05T00:30:00Z",
+      "by": "roster-implement",
+      "reason": "Scope blocker, measured: the specified splice point (Head_qualified/Not_found) observes 0 of the 3203 in-scope calls \u2014 all are MAY_TOP/module_param and never reach that arm. Moving it breaks D2 and needs a shadowing decision the spec does not make. See briefs/reexport-resolution-s1-finding.md. The alias index is built and correct."
+    },
+    {
+      "phase": "spec",
+      "outcome": "BOUNCED",
+      "at": "2026-09-05T01:00:00Z",
+      "by": "roster-spec"
+    },
+    {
+      "phase": "spec",
+      "outcome": "VALIDATED",
+      "at": "2026-09-05T01:40:00Z",
+      "by": "roster-spec"
     }
   ]
 }
