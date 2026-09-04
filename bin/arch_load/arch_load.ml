@@ -63,7 +63,7 @@ let kinds = [ "MUST"; "MAY_ENUMERATED"; "MAY_TOP" ]
 let top_reasons =
   [
     "callback_param"; "module_param"; "dropped_node"; "reflection"; "ffi";
-    "dynamic_load"; "dispatch_unbounded"; "trait_object"; "fn_pointer"; "extern";
+    "dynamic_load"; "dispatch_unbounded"; "trait_object"; "fn_pointer"; "extern"; "ambiguous_unit";
   ]
 
 (** The contract, field by field. Anything outside these sets aborts the load unless it is an

@@ -204,7 +204,13 @@ CREATE TABLE IF NOT EXISTS calls (
         CHECK(top_reason IS NULL OR top_reason IN (
             'callback_param', 'module_param', 'dropped_node',
             'reflection', 'ffi', 'dynamic_load', 'dispatch_unbounded',
-            'trait_object', 'fn_pointer', 'extern'
+            'trait_object', 'fn_pointer', 'extern',
+            -- roadmap 1.6: the reference names an indexed unit, but more than
+            -- one distinct function answers to it and this index cannot say
+            -- which. NOT the same as 'external' (no indexed unit at all) —
+            -- that stays a resolved leaf. Guessing here would produce a MUST
+            -- that is consumed downstream as proof.
+            'ambiguous_unit'
         ))
         -- FIX (review, MEDIUM): the vocabulary CHECK alone let a non-MAY_TOP
         -- row carry a top_reason, which is meaningless (a resolved or
