@@ -466,3 +466,45 @@ rule "ui must not declare a dep on db"
       Batch.exit_code b ~msg:"--on-not-computed warn must downgrade it" ~expected:0
         (rules [db; nf; "--on-not-computed"; "warn"])) ;
   Lwt.return_unit
+
+let register_summary_line () =
+  Test.register ~__FILE__
+    ~title:"rules: the text summary must not report a three-state verdict as one number"
+    ~tags:["rules"; "summary"]
+  @@ fun () ->
+  let db = Fixture.flat ~name:"rules_summary" layered_stream in
+  Batch.run (fun b ->
+      (* The channel a human reads was the dishonest one. Every other test in
+         this file asserts against --format json, which has always carried
+         `unknown`; the default text summary omitted it, so "N rule(s), 0
+         failing" over a run that proved nothing read as a pass. That is
+         specs/qualified-unit-resolution.md §10.5 — a three-state verdict
+         reported as one number — and it was misread in practice, twice. *)
+      let uf =
+        rule_file "summary_unknown"
+          "rule \"u\"\n  forbid reach from file:src/job/** to file:lib/db/**\n"
+      in
+      let code, out = rules [db; uf] in
+      (* UNKNOWN is fail-open, so this run genuinely exits 0. The exit code is
+         not the defect; the summary claiming it as a result is. *)
+      Batch.eq_int b ~msg:"an UNKNOWN-only run still exits 0 (fail-open)" code 0 ;
+      Batch.contains b ~msg:"the summary must state how many rules were UNKNOWN"
+        ~haystack:out "1 UNKNOWN" ;
+      Batch.contains b
+        ~msg:"the summary must state how many rules were actually PROVED, not only how many failed"
+        ~haystack:out "0 proved" ;
+      (* The line must not be readable as a pass. Before this test the whole
+         summary for this input was "1 rule(s), 0 failing". *)
+      Batch.check b
+        ~msg:"a run that proved nothing must not summarise as only a failing count"
+        (String.trim out <> "1 rule(s), 0 failing") ;
+
+      (* All four verdicts at once: VIOLATION + POSSIBLE fail, UNKNOWN is
+         fail-open, PASS is the only proof. Each count must appear separately,
+         so no two states can be collapsed into one another. *)
+      let rf = rule_file "summary_four" four_rules in
+      let _, out4 = rules [db; rf] in
+      Batch.contains b ~msg:"four-rule summary names the proved count" ~haystack:out4 "1 proved" ;
+      Batch.contains b ~msg:"four-rule summary names the failing count" ~haystack:out4 "2 failing" ;
+      Batch.contains b ~msg:"four-rule summary names the UNKNOWN count" ~haystack:out4 "1 UNKNOWN") ;
+  Lwt.return_unit

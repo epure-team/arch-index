@@ -509,9 +509,23 @@ let () =
        List.length (List.filter (fun r -> r.verdict = "NO_SOURCE" || r.verdict = "NO_TARGET") results)
      in
      let nnc = List.length (List.filter (fun r -> r.verdict = "NOT_COMPUTED") results) in
+     (* UNKNOWN belongs in this line for the same reason VACUOUS and NOT_COMPUTED already do:
+        it is fail-OPEN, so it does not reach `nf`, and a summary of "N rule(s), 0 failing" is
+        then read as "N rules proved" when nothing was proved at all. That is not a hypothetical
+        misreading — this line reporting 4/0 over 1 proved / 3 UNKNOWN is the misreading that
+        actually happened, twice, and it is the defect
+        specs/qualified-unit-resolution.md §10.5 names: a three-state verdict reported as one
+        number. The JSON has always carried `unknown`; only the channel humans read omitted it. *)
      print_endline "" ;
      print_endline
-       (Printf.sprintf "%d rule(s), %d failing%s%s" (List.length results) nf
+       (Printf.sprintf "%d rule(s), %d proved, %d failing%s%s%s" (List.length results)
+          (List.length (List.filter (fun r -> r.verdict = "PASS") results))
+          nf
+          (if unknown > 0 then
+             Printf.sprintf
+               ", %d UNKNOWN (the cone escapes through a ⊤ edge — not proved, and fail-open \
+                by default)" unknown
+           else "")
           (if nv > 0 then
              Printf.sprintf ", %d VACUOUS (matched no code — a green result there means nothing)" nv
            else "")
