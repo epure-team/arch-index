@@ -50,6 +50,7 @@ Subcommands:
   exn-stats    [--assume-externals-pure]
                                bounded/unbounded share of every node, ⊤ reasons, origin counts
   escaping-origins --roots <module-path>:<fn>|<module-path>:* [--forms <f1,f2,...>]
+                   [--channel <name>]   (default: exception — see NOTE below)
                                fatal origins (assert/division/index/partial_match by default)
                                in the forward closure of the root. Prints root/scope/coverage
                                first: the closure stops at every unresolved edge, so the list is
@@ -60,6 +61,12 @@ Subcommands:
                                (definite call path) or MAY. An ambiguous root is REFUSED with
                                its candidates listed; a root whose path does not align on a '/'
                                boundary is REFUSED as unmatched (there is nothing to list).
+                               CHANNEL: origins are recorded per error channel and this command
+                               reports ONE of them (default 'exception'), like fails-with and
+                               may-fail. That is a large restriction, not a detail: on proto_alpha
+                               only 1219 of 30526 origins are on 'exception', and of the 29218
+                               rows whose form is 'raise' just 20 are. A channel with no origin in
+                               the index is REFUSED rather than answered with an empty table.
                                NOTE: rows are also filtered on escapes=1, which is currently
                                NON-DISCRIMINATING — every origin recorded by the producers
                                shipped today has escapes=1, so it selects nothing. It is a guard
@@ -503,6 +510,41 @@ let () =
                             (String.concat ", " bad) (String.concat ", " known_forms)))
             in
             if forms = [] then die 2 "arch-query: --forms needs at least one form" ;
+            (* THE CHANNEL RESTRICTION WAS HARD-CODED AND UNNAMED, and that is
+               this branch's own thesis turned against it.
+
+               [exn_origins] carries a [channel] column — 'exception', 'option',
+               'tzresult', 'result' — and this command filtered on 'exception'
+               with the filter stated nowhere: not in the usage, not in the
+               scope line, not in the banner. On proto_alpha only 1219 of 30526
+               origins are on that channel (4%), and of the 29218 rows whose
+               form is 'raise', exactly 20 are — so `--forms raise` answered
+               about 0.07% of them and printed an empty table for the rest.
+
+               An empty table under a plausible header reads as "no origin of
+               that form in the closure". The honest reading was "182 of them,
+               on a channel I am not looking at". That is round 1's defect
+               arriving through a door nobody was watching.
+
+               Every sibling command already does this properly: fails-with,
+               may-fail and error-stats all take and document --channel. This
+               was the only one that chose silently. *)
+            let channel =
+              match flag_val "--channel" with Some c -> c | None -> "exception"
+            in
+            let channels_present =
+              Arch_db.rows t ~params_ty:Arch_db.Ty.unit ~shape:Arch_db.Rows.t1
+                ~to_cells:(fun a -> [ Arch_db.text_cell a ])
+                "SELECT DISTINCT channel FROM exn_origins ORDER BY 1" ()
+              |> List.filter_map (function c :: _ -> Some (Arch_db.string_of_cell c) | [] -> None)
+            in
+            if channels_present <> [] && not (List.mem channel channels_present) then
+              die 3
+                (Printf.sprintf
+                   "arch-query: REFUSED — no origin in this index is on channel '%s'. \
+                    Channels present: %s. Answering with an empty table would read as \
+                    'nothing found' when the truth is 'nothing looked at'."
+                   channel (String.concat ", " channels_present)) ;
             (* [escapes=1] is kept and is CURRENTLY VACUOUS: every one of the
                30526 exn_origins rows on proto_alpha has escapes=1, so it
                selects nothing today. It stays because it states the intended
@@ -752,10 +794,11 @@ let () =
                   let traversed = (try int_of_string beyond with _ -> 1) > 0 in
                   Printf.sprintf
                     "root: %s\n\
-                     scope: %s modules · %s functions indexed · schema %s · contract %s\n\
+                     scope: %s modules · %s functions indexed · schema %s · contract %s · \
+                     channel %s (origins on other channels are NOT reported)\n\
                      coverage: %s nodes reached · %s edges unresolved · %s ⊤ — %s"
                     root_label m f
-                    (ident "schema_version") (ident "callgraph_contract")
+                    (ident "schema_version") (ident "callgraph_contract") channel
                     n u top
                     (if traversed then "LOWER BOUND (the closure stops at every unresolved edge)"
                      else
@@ -781,10 +824,10 @@ let () =
             preamble
               ~h:[ "root"; "nodes_reached"; "edges_unresolved"; "top_edges"; "modules_indexed";
                    "functions_indexed"; "resolved_out_edges"; "nodes_beyond_root";
-                   "schema_version"; "callgraph_contract" ]
+                   "schema_version"; "callgraph_contract"; "channel" ]
               ~cells:
                 ((root_label :: cov_cells)
-                @ [ ident "schema_version"; ident "callgraph_contract" ])
+                @ [ ident "schema_version"; ident "callgraph_contract"; channel ])
               ~text:cov_text ;
             q ~h:[ "function"; "site"; "form"; "exn"; "reach" ]
               ~shape:Arch_db.Rows.t5' ~cells:Arch_db.Rows.c5
@@ -797,8 +840,9 @@ let () =
                    FROM exn_origins o JOIN functions f ON o.function_id=f.id\n\
                    JOIN modules m ON f.module_id=m.id\n\
                    WHERE o.function_id IN (SELECT id FROM reach)\n\
-                  \  AND o.escapes=1 AND o.channel='exception' AND o.form IN (%s)\n\
+                  \  AND o.escapes=1 AND o.channel=%s AND o.form IN (%s)\n\
                    ORDER BY o.form, m.path, o.line"
+                  ("'" ^ String.concat "" (String.split_on_char '\'' channel) ^ "'")
                   forms_sql)
               (path_pat, root_name, root_name)
         | "fan-in" ->
