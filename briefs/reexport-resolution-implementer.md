@@ -2,20 +2,29 @@
 
 **Status: VALIDATED**
 
-## ⛔ Entry gate — read this first
+## Entry gate — SATISFIED 2026-09-04
 
-**Do not start until `feat/qualified-unit-resolution` (roadmap 1.6) is merged into `main`.**
-Verify: `git log --oneline origin/main | grep -i qualified-unit` returns the merge.
+`feat/qualified-unit-resolution` (roadmap 1.6) is **merged**; `main` is at `bfbabf5`.
+`paths_of_unit` is exposed at `lib/arch_index/arch_index_cmt.mli:114`, `known_unit_names`
+at `:131`. Rebase onto `main` before starting.
 
-Reason: that branch rewrites the exact region you are splicing into (596 insertions / 40
-deletions on `lib/arch_index/arch_index.ml`, hunk `@@ -773,23 +886,439 @@` covering
-`resolve_qualified` and the `Head_qualified` match), **and** it supplies the multimap that
-S2 requires (`unit_paths : (string, string list) Hashtbl.t`, exposed as `paths_of_unit`).
-Starting earlier means rebasing onto a rewritten base and building a duplicate registry the
-spec's C-14 already ruled out.
+**Two things the 1.6 author handed over, both binding on this work:**
 
-**Every line number below is a landmark, not an address.** Re-locate by symbol after the
-merge. The sibling's ahead-count moved 15 → 29 → 30 within one afternoon.
+- **`paths_of_unit` rule:** a unit key mapping to several paths is not a choice to make,
+  it is an absence of proof. Finding a function row in exactly one candidate path is NOT a
+  resolution — 1.6 shipped that briefly and it produced a MUST into a library the caller
+  does not link. S2 declines instead. Do not re-derive this at corpus scale; it is settled.
+- **`module_deps` keeps the basename erasure** (ADR 003, residual 4). `target_module` (the
+  FK) is resolved by the old last-writer-wins scheme and may point at the wrong file;
+  `target_path` (the raw parsed string) is the trustworthy column. **Read `target_path`.**
+  This is an accepted permanent property of the table, not a transient defect waiting on
+  someone else's branch.
+
+**Every line number below is a landmark, not an address.** Re-locate by symbol on the merged
+tree — the pre-merge numbers in this brief describe a file that no longer exists in that
+shape. The branch's ahead-count moved 15 → 29 → 30 within one afternoon before merging,
+which is the general lesson: a number describing a transient state should never be quoted
+downstream, only the command that re-measures it.
 
 ## Goal
 
