@@ -123,6 +123,38 @@ let arm_level_or n = match multi n with Error A | Error C -> Ok 0 | r -> r
 (* Worse case of the same bug: an arm that catches EVERYTHING closed nothing. *)
 let arm_level_or_wild n = match multi n with Error A | _ -> Ok 0
 
+(* US-2.17b (review round 2 of #65): the SOUNDNESS directions of arm-level
+   or-patterns. US-2.17 above pins the two CLOSING outcomes — if those regress
+   the analysis loses precision, which is safe. These three pin the outcomes
+   where a regression would DELETE a reachable error, which is a wrong answer.
+   All three behave correctly today; none of them was covered.
+
+   [or_guarded]: a guard means the arm may not run, so it must close NOTHING.
+   Closing on a guarded arm would remove errors that really do escape. *)
+let or_guarded n = match multi n with (Error A | Error C) when n > 5 -> Ok 0 | r -> r
+
+(* [or_binding_repropagates]: the arm binds, and its right-hand side RETURNS one
+   of the identities it matched. The identity is therefore still reachable
+   THROUGH the arm and must not be subtracted.
+
+   This is the load-bearing case for the flattening's soundness argument. It
+   works because OCaml alpha-renames both alternatives' binders to a single
+   [Ident], so the shared right-hand side refers to one variable — which is
+   also why every alternative must bind the same names. If that ever stopped
+   holding, the analysis would start deleting reachable errors with nothing
+   failing. *)
+let multi_c n : int myres = if n = 0 then Error (B 0) else Error (Wrap (B 1))
+
+let or_binding_repropagates n =
+  match multi_c n with Error (B x) | Error (Wrap (B x)) -> Error (B x) | r -> r
+
+(* [or_mixed]: one arm carrying a value alternative and an exception
+   alternative. The value side is a handler for the value channel, the
+   exception side for the exception channel, and neither may claim the other's
+   alternative. *)
+let or_mixed n =
+  match multi n with Error A | exception Not_found -> Ok 0 | r -> r
+
 exception Boom of int
 
 let boom_raiser n = if n = 0 then raise (Boom 0) else raise (Boom 1)
@@ -412,6 +444,21 @@ let register_query () =
         ~haystack:(may_fail "myres" "arm_level_or") "BOUNDED: {Ec_a.B}" ;
       Batch.contains b ~msg:"US-2.17 an arm with a wildcard alternative closes everything"
         ~haystack:(may_fail "myres" "arm_level_or_wild") "BOUNDED: {}" ;
+      (* US-2.17b: the directions where a regression is a WRONG ANSWER, not a
+         precision loss. Each expects the FULL set — nothing subtracted. *)
+      Batch.contains b
+        ~msg:"US-2.17b a GUARDED arm-level or-pattern closes nothing (the arm may not run)"
+        ~haystack:(may_fail "myres" "or_guarded") "BOUNDED: {Ec_a.A, Ec_a.B, Ec_a.C}" ;
+      (* [B] is matched by the first alternative but RE-RETURNED by the
+         right-hand side, so it is still reachable through the arm; [Wrap] is
+         matched only when its argument is [B x], a constrained argument, so it
+         is not closed either. Nothing may be subtracted. *)
+      Batch.contains b
+        ~msg:"US-2.17b an or-arm whose rhs re-returns what it matched does not subtract it"
+        ~haystack:(may_fail "myres" "or_binding_repropagates") "BOUNDED: {Ec_a.B, Ec_a.Wrap}" ;
+      Batch.contains b
+        ~msg:"US-2.17b a mixed value/exception or-arm closes only its value alternative"
+        ~haystack:(may_fail "myres" "or_mixed") "BOUNDED: {Ec_a.B, Ec_a.C}" ;
       Batch.contains b ~msg:"US-2.14 multi can fail with all three identities"
         ~haystack:(may_fail "myres" "multi") "BOUNDED: {Ec_a.A, Ec_a.B, Ec_a.C}" ;
       Batch.contains b ~msg:"US-2.14 an or-pattern of two literals closes BOTH, only C survives"
