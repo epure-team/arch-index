@@ -140,19 +140,45 @@ jobs:
       # shallow clone. The explicit fetch covers the push-event case, where the
       # remote-tracking ref for main may not have been created.
       #
-      # continue-on-error is deliberate FOR THIS FIRST LANDING and is meant to
-      # be removed. The gate is new, it refuses on conditions no PR has yet
-      # exercised in anger, and a brand-new check that reddens unrelated PRs is
-      # one people learn to ignore -- which is the failure mode this whole tool
-      # exists to argue against. The step still shows red in the UI, so a
-      # refusal is visible rather than silent. Flipping it to a hard gate is a
-      # one-line follow-up once it has a track record.
+      # The two non-zero exits are treated DIFFERENTLY, and that is the whole
+      # design of this step:
+      #
+      #   exit 2 (REFUSED) is hard. It means the tool could not measure, or
+      #     measured something it will not believe: a degraded cell, a corpus
+      #     below the adequacy floor, a component collapsed below half its pin,
+      #     an unreadable or doubly-defined constant. None of those is a
+      #     property of the branch -- each one says the gate itself is not
+      #     working, and a gate that cannot measure must not report success.
+      #
+      #   exit 1 (STALE) is advisory here, and NOT because staleness is
+      #     tolerable. It is already hard-gated: the "Self-index smoke test"
+      #     step above diffs the golden and fails on a mismatch, and
+      #     must_null_ceiling.ml fails the Tezt suite on a breach. Making it
+      #     hard a second time would add exactly one new obligation -- a branch
+      #     that IMPROVES resolution by more than the headroom would redden CI
+      #     until it recalibrated -- and that deserves to land as its own
+      #     deliberate change, not as a side effect of wiring the tool up.
+      #
+      # So this step adds no new way for an ordinary PR to fail, and one new
+      # way for a broken measurement to be caught.
       - name: Recalibration gate (self)
-        continue-on-error: true
         run: |
           eval "$(opam env)"
           git fetch --no-tags origin main
+          set +e
           ./scripts/recalibrate.sh --check
+          rc=$?
+          set -e
+          case "$rc" in
+            0) echo "recalibrate: every pinned constant is current" ;;
+            1) echo "::warning::recalibrate --check reports a STALE pinned constant."
+               echo "Run scripts/recalibrate.sh --explain to see the attribution," \
+                    "then --write to install what is attributable to source change alone." ;;
+            *) echo "::error::recalibrate --check REFUSED (exit $rc): the measurement is" \
+                    "degraded, implausible, or a pinned constant could not be read." \
+                    "This is a failure of the gate, not of the branch -- see the output above."
+               exit "$rc" ;;
+          esac
 
       - name: Architecture rules (self)
         run: |
