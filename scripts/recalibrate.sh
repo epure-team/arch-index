@@ -88,7 +88,11 @@ while [ $# -gt 0 ]; do
         echo "recalibrate: --$MODE and $1 are mutually exclusive" >&2; exit 2
       fi
       MODE="${1#--}" ;;
-    --base) shift; BASE_REF="${1:-}"; BASE_EXPLICIT=1 ;;
+    --base)
+      shift
+      # --only's sibling hole was closed in round 5; this one was not.
+      [ $# -gt 0 ] || { echo "recalibrate: --base requires a ref" >&2; exit 2; }
+      BASE_REF="$1"; BASE_EXPLICIT=1 ;;
     --only)
       shift
       # A missing value yielded "" and was accepted by the both-metrics arm,
@@ -141,21 +145,31 @@ fi
 # currency comparison, in every mode: a degraded cell must never reach either.
 metric_well_formed() {
   local metric="$1" val="$2"
-  [ -n "$val" ] || return 1
+  # No separate non-empty guard: it is dead. `is_int ""` already returns 1, an
+  # empty golden yields 0 matching lines against a required 3, and an unknown
+  # metric falls to the catch-all. Round 5 found it as a surviving mutant —
+  # removing it changed nothing — and a surviving mutant on a line that cannot
+  # affect the outcome means the line, not the test, is the defect. Same call
+  # as round 4's trailing-label conjunct, one line up.
   case "$metric" in
     ceiling) is_int "$val" ;;
     golden)
-      # Arity, not just shape. Round 4 found --self-test RED on the head: its
-      # own reject-case "modules: 23" — a 1-of-3-line golden — was ACCEPTED,
-      # because this guard only checked non-emptiness and that no line ends in
-      # a bare label. The commit that added 13 cases to close a zero-coverage
-      # finding shipped one failing, so the arity hole and the red assertion
-      # were the same defect. The golden CI compares is exactly three
-      # `label: value` lines (modules/functions/calls), and a truncated
-      # measurement is precisely what a half-failed query produces.
-      local lines
+      # Arity is the whole check. Round 5 found five surviving mutants here,
+      # including that round 4's own trailing-label conjunct was DEAD: the
+      # count already rejects an empty value (it yields 2 lines, not 3), so
+      # all three golden reject-cases were discriminated by the count alone.
+      # A guard cited in specs/qualified-unit-resolution.md §10.6 as an
+      # instance of "a check that looks like a check" is the last place a
+      # dead conjunct belongs, so it is gone rather than kept for comfort.
+      #
+      # The regex is anchored and lower-case-only ON PURPOSE: CI compares
+      # exactly the three lines `modules:`/`functions:`/`calls:` that
+      # sqlite3 emits, so anything else is a measurement this tool must not
+      # install. Each of those properties has a self-test case below.
+      local lines total
       lines="$(printf '%s\n' "$val" | grep -cE '^[a-z]+: *[0-9]+$')"
-      [ "$lines" -eq 3 ] && ! printf '%s\n' "$val" | grep -qE ': *$'
+      total="$(printf '%s\n' "$val" | grep -c '[^[:space:]]')"
+      [ "$lines" -eq 3 ] && [ "$total" -eq 3 ]
       ;;
     *) return 1 ;;
   esac
@@ -252,6 +266,41 @@ calls: 5068" "modules: 23"; do
       echo "  FAIL well_formed ACCEPTED a degraded golden"; fails=$(( fails + 1 ))
     else echo "  ok   well_formed rej golden (degraded)"; fi
   done
+
+  # These five cases exist because round 5 mutation-tested metric_well_formed
+  # and five mutants SURVIVED: dropping the non-empty guard, accepting an
+  # unknown metric, widening [a-z] to [a-zA-Z], dropping the ^…$ anchors, and
+  # deleting round 4's trailing-label conjunct (which was dead). §10.6 names
+  # this function as an instance; an unkilled mutant in it is the finding.
+  if metric_well_formed bogus "340"; then
+    echo "  FAIL well_formed ACCEPTED an unknown metric"; fails=$(( fails + 1 ))
+  else echo "  ok   well_formed rej unknown metric"; fi
+  local g_upper="Modules: 23
+functions: 781
+calls: 5068"
+  if metric_well_formed golden "$g_upper"; then
+    echo "  FAIL well_formed ACCEPTED a capitalised golden label"; fails=$(( fails + 1 ))
+  else echo "  ok   well_formed rej capitalised label"; fi
+  local g_unanchored=" modules: 23
+functions: 781
+calls: 5068"
+  if metric_well_formed golden "$g_unanchored"; then
+    echo "  FAIL well_formed ACCEPTED a leading-space golden line"; fails=$(( fails + 1 ))
+  else echo "  ok   well_formed rej unanchored line"; fi
+  local g_extra="modules: 23
+functions: 781
+calls: 5068
+types: 9"
+  if metric_well_formed golden "$g_extra"; then
+    echo "  FAIL well_formed ACCEPTED a FOURTH golden line"; fails=$(( fails + 1 ))
+  else echo "  ok   well_formed rej extra line"; fi
+  local g_junk="modules: 23
+functions: 781
+calls: 5068
+oops"
+  if metric_well_formed golden "$g_junk"; then
+    echo "  FAIL well_formed ACCEPTED trailing junk"; fails=$(( fails + 1 ))
+  else echo "  ok   well_formed rej trailing junk"; fi
 
   # is_int guards the ratchet write. An empty or non-numeric value reaching the
   # comparison is what made that guard fail OPEN and emit an uncompilable file.
@@ -455,7 +504,13 @@ index_cell() {
   fi
 }
 
-q() { sqlite3 "$1" "$2" 2>/dev/null; }
+# The degraded arm's evidence. sqlite3's stderr used to go to /dev/null, so the
+# one arm guarding "a query failed silently" had nothing of the query in it —
+# round 5 measured it tailing the producer's SUCCESS output instead, ~120 lines
+# of "Done! Indexed:" per cell, pointing the reader away from the cause. The
+# arm is only reachable when index_cell returned 0, so the producer log cannot
+# be the evidence by construction.
+q() { sqlite3 "$1" "$2" 2>>"${QERR:-/dev/null}"; }
 
 # ---------------------------------------------------------------------------
 # metric definitions
@@ -492,7 +547,12 @@ metric_value() {
 metric_pinned() {
   case "$1" in
     golden)  cat "$REPO_ROOT/test/fixtures/self-index-stats.txt" 2>/dev/null ;;
-    ceiling) sed -n 's/^let clean_measured = \([0-9]\+\).*/\1/p' \
+    # Anchored, refusing forms it cannot read rather than truncating them.
+    # Round 5: `1_000` yielded 1 and `0x200` yielded 0 — a WRONG number where
+    # the correct answer is a refusal, the same class as CRITICAL-1. An
+    # unreadable pin now produces no value, which the degradedness gate
+    # reports as degraded (exit 2).
+    ceiling) sed -n 's/^let clean_measured = \([0-9]\+\)[[:space:]]*$/\1/p' \
                "$REPO_ROOT/tezt/tests/must_null_ceiling.ml" 2>/dev/null ;;
   esac
 }
@@ -524,6 +584,7 @@ METRICS="${ONLY:-golden ceiling}"
 
 for metric in ${METRICS}; do
   corpus_rel="$(metric_corpus "$metric")"
+  QERR="$WORK/$metric-query.err"; : > "$QERR"
   [ -n "$corpus_rel" ] || { echo "recalibrate: unknown metric '$metric'" >&2; exit 2; }
 
   index_cell "$BASE_TREE" "$BASE_TREE/$corpus_rel" "$WORK/aa.db" \
@@ -566,21 +627,38 @@ for metric in ${METRICS}; do
     label="${pair%%:*}"; val="${pair#*:}"
     metric_well_formed "$metric" "$val" || degraded="$degraded $label"
   done
+  # PINNED too, and for a ratchet it must be an INTEGER, because the headroom
+  # band does arithmetic on it. Round 4 added `is_int "$hr"` for the value it
+  # introduced and not for the value it started computing with two lines later
+  # — and bash coerces an empty operand to 0 inside $(( )), so `--check`
+  # printed "✓ pinned value is current" and exited 0 having read no pinned
+  # value. Before round 4 this path did not exist: PINNED was only
+  # string-compared. Fifth round running in which a fix moved a value into a
+  # new comparison without moving its integrity check with it.
+  if [ "$KIND" = ratchet ]; then
+    is_int "$PINNED" || degraded="$degraded PINNED"
+  else
+    [ -n "$PINNED" ] || degraded="$degraded PINNED"
+  fi
   if [ -n "$degraded" ]; then
     echo
     echo "── $metric ($KIND, measured over $corpus_rel)"
     echo "   ✗ REFUSED: cell(s)$degraded did not produce a well-formed $metric measurement" >&2
-    echo "     (empty, or a non-numeric ceiling — a query likely failed silently;" >&2
+    echo "     (empty, or a non-numeric value). For a CELL that means a query likely
+         failed silently; for PINNED it means the constant could not be read
+         from the source in a form this tool accepts." >&2
     # The path this used to name is removed by the EXIT trap before the shell
     # prompt returns, so the ONE arm guarding the silent-query-failure class
     # had a dangling path as its sole evidence. Tail inline, as build_or_die
     # and index_cell already do.
-    for _c in A B C D; do
-      _l="$WORK/$metric-$_c.log"
-      [ -s "$_l" ] || continue
-      echo "     --- cell $_c ---" >&2
-      tail -15 "$_l" >&2
-    done
+    if [ -s "${QERR:-/dev/null}" ]; then
+      echo "     --- sqlite3 stderr ---" >&2
+      tail -20 "$QERR" >&2
+    else
+      echo "     sqlite3 reported no error, so the query returned an empty" >&2
+      echo "     result rather than failing — check the column names against" >&2
+      echo "     the current schema." >&2
+    fi
     bump_status 2
     continue
   fi
@@ -645,7 +723,6 @@ for metric in ${METRICS}; do
     #   D > PINNED + headroom  -> breach; must be argued, never auto-written
     #   D < PINNED - headroom  -> a real gain; auto-tighten
     #   otherwise              -> inside the band; advisory, exit 0
-    local hr
     hr="$(sed -n 's/^let headroom = \([0-9]\+\).*/\1/p' \
           "$REPO_ROOT/tezt/tests/must_null_ceiling.ml" | head -1)"
     if ! is_int "$hr"; then
