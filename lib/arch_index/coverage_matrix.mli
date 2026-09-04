@@ -227,8 +227,10 @@ val write_coverage : Sqlite3.db -> row list -> unit
       [coverage] needs an LCOV file this tool cannot produce; [decisions]'
       linter is outside the main dune build graph. Counting them would make
       every invocation exit 1 forever.
-    - [error_channels] on a language whose producer cannot emit it
-      ([emits_error_channels] is false — today, anything but OCaml). Counting
+    - [error_channels] on a language whose producer cannot emit it (today,
+      anything but OCaml; the producer list is internal to the implementation
+      and deliberately not exported, so this interface states the rule rather
+      than naming the value that decides it). Counting
       it would make this tool exit 1 on every polyglot repository until that
       producer ships.
 

@@ -329,9 +329,6 @@ let register_error_channels_from_contract () =
     (code = 0) int
       ~error_msg:(Printf.sprintf "--allow-partial should exit 0, got %%L:\n%s" output)) ;
   Db.with_db db (fun conn ->
-      (* PARTIAL, not covered: a database carrying only the exception channel
-         is not one carrying all three, and flattening that would overstate
-         what was analysed. *)
       (* COVERED, not partial: a corpus using neither result nor option
          legitimately produces a shorter contract, and calling that a gap made
          the ratchet fire on a correctly analysed project. Which channels ran
