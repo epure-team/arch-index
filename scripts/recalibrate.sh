@@ -49,7 +49,10 @@
 #                                           against this tree (CI mode; exit 1
 #                                           on stale, exit 2 on unusable input)
 #   scripts/recalibrate.sh --write          attribute, then write what is safe
-#   scripts/recalibrate.sh --explain        print the 2x2 and change nothing
+#   scripts/recalibrate.sh --explain        print the 2x2 and change nothing.
+#                                           Exits 0 even when STALE, but 2 on a
+#                                           DEGRADED cell: a measurement that did
+#                                           not happen is not a verdict, in any mode.
 #                                           (always exits 0, even when STALE —
 #                                           it is a report, not a gate; use
 #                                           --check for the enforced exit code)
@@ -87,12 +90,17 @@ while [ $# -gt 0 ]; do
       MODE="${1#--}" ;;
     --base) shift; BASE_REF="${1:-}"; BASE_EXPLICIT=1 ;;
     --only)
-      shift; ONLY="${1:-}"
+      shift
+      # A missing value yielded "" and was accepted by the both-metrics arm,
+      # so `--check --only` silently ran everything. `--only bogus` fails
+      # fast; a missing value must too.
+      [ $# -gt 0 ] || { echo "recalibrate: --only requires a value (golden|ceiling)" >&2; exit 2; }
+      ONLY="$1"
       # Validated here, not after the two pristine builds below: a typo costs
       # nothing at the top of the arg loop and minutes once past it. Found in
       # review — `--only bogus` used to run to completion before rejecting.
       case "$ONLY" in
-        golden|ceiling|"") ;;
+        golden|ceiling) ;;
         *) echo "recalibrate: --only takes 'golden' or 'ceiling', got '$ONLY'" >&2; exit 2 ;;
       esac
       ;;
@@ -563,7 +571,16 @@ for metric in ${METRICS}; do
     echo "── $metric ($KIND, measured over $corpus_rel)"
     echo "   ✗ REFUSED: cell(s)$degraded did not produce a well-formed $metric measurement" >&2
     echo "     (empty, or a non-numeric ceiling — a query likely failed silently;" >&2
-    echo "     see $WORK/$metric-{A,B,C,D}.log)." >&2
+    # The path this used to name is removed by the EXIT trap before the shell
+    # prompt returns, so the ONE arm guarding the silent-query-failure class
+    # had a dangling path as its sole evidence. Tail inline, as build_or_die
+    # and index_cell already do.
+    for _c in A B C D; do
+      _l="$WORK/$metric-$_c.log"
+      [ -s "$_l" ] || continue
+      echo "     --- cell $_c ---" >&2
+      tail -15 "$_l" >&2
+    done
     bump_status 2
     continue
   fi
