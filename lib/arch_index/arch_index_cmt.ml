@@ -1528,7 +1528,7 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels
                               Arch_index_errch.classify_value_pat ~canon_type:canon_exn ~canon_exn
                                 ~bare_ctor:bare ~arg_pos:pos pat
                             with
-                            | Some (caught, bound) -> Some ((guard, rhs), caught, bound)
+                            | Some (cls, bound) -> Some ((guard, rhs), cls, bound)
                             | None -> None)
                           value_arms
                       in
@@ -1539,19 +1539,17 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels
                           matched ;
                         let catch_all = ref false and caught = ref [] in
                         List.iter
-                          (fun ((guard, rhs), caught_opt, bound) ->
+                          (fun ((guard, rhs), (cls : Arch_index_errch.pat_class), bound) ->
                             let closing =
                               guard = None && not (Arch_index_errch.idents_occur ~idents:bound rhs)
                             in
+                            (* An empty [caught] with [catch_all = false]
+                               closes nothing: the arm matches a real subset we
+                               cannot name, so subtracting anything here would
+                               drop an error the call can still return. *)
                             if closing then (
-                              match caught_opt with
-                              | Arch_index_errch.Catch_all -> catch_all := true
-                              | Arch_index_errch.Caught p -> caught := p :: !caught
-                              (* Closes nothing: the arm matches a real subset
-                                 we cannot name, so subtracting anything here
-                                 would drop an error the call can still
-                                 return. *)
-                              | Arch_index_errch.Unrecognised -> ()))
+                              if cls.catch_all then catch_all := true ;
+                              caught := cls.caught @ !caught))
                           matched ;
                         match resolve_head_call scrut with
                         | Some ord ->
