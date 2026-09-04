@@ -91,7 +91,18 @@ func main() { cgoBranch(true) }
 let build_producer () =
   let bin = Filename.concat (Temp.dir "cggo_bin") "arch-callgraph-go" in
   let code, output =
-    run_command ~cwd:(callgraph_go_src ()) "go" ["build"; "-o"; bin; "."]
+    (* [-buildvcs=false]: Go stamps VCS metadata into a binary by default, and to do that it
+     walks up from the module directory looking for a repository root. It looks for a
+     [.git] DIRECTORY — but a git WORKTREE has a [.git] FILE pointing elsewhere, so the
+     walk sails past it and keeps going, then runs [git status] from whatever ancestor it
+     stopped at (in practice [/tmp]), which is not a repository at all: "error obtaining
+     VCS status: exit status 128", and the build fails.
+
+     Nothing about this test needs a version stamp in a throwaway binary, and the failure
+     is invisible on a normal checkout — it only bites when the tree is a worktree, which
+     is exactly how CI-adjacent and agent workflows check code out. Disabling the stamp is
+     the fix; the alternative is a test that passes or fails on how you cloned. *)
+     run_command ~cwd:(callgraph_go_src ()) "go" ["build"; "-buildvcs=false"; "-o"; bin; "."]
   in
   if code <> 0 then Test.fail "building arch-callgraph-go failed (exit %d):\n%s" code output ;
   bin

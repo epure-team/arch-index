@@ -19,12 +19,12 @@ trap 'git -C "$HERE" worktree remove --force "$WT" 2>/dev/null || true' EXIT
 git -C "$HERE" worktree add --detach "$WT" "$REF" >/dev/null
 
 echo "== building baseline ($REF) =="
-( cd "$WT" && eval "$(opam env 2>/dev/null)" && dune build bin/arch_callgraph_ocaml 2>&1 | tail -2 ) || true
+( cd "$WT" && eval "$(opam env 2>/dev/null)" && dune build --root . bin/arch_callgraph_ocaml 2>&1 | tail -2 ) || true
 OLD_BIN="$WT/_build/default/bin/arch_callgraph_ocaml/arch_callgraph_ocaml.exe"
 [ -x "$OLD_BIN" ] || { echo "callgraph-diff: baseline build failed" >&2; exit 2; }
 
 echo "== building working tree =="
-( cd "$HERE" && dune build bin/arch_callgraph_ocaml 2>&1 | tail -2 )
+( cd "$HERE" && dune build --root . bin/arch_callgraph_ocaml 2>&1 | tail -2 )
 NEW_BIN="$HERE/_build/default/bin/arch_callgraph_ocaml/arch_callgraph_ocaml.exe"
 
 # Index the WORKING TREE's build dir with both binaries (same input universe).
