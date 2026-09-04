@@ -886,7 +886,9 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
                      external leaves.
 
                      WITH THE FACADE TIER ON, that difference is currently
-                     ZERO: 5293 resolved either way, because the facade tier
+                     ZERO: 5306 resolved either way (a clean
+                     [dune build --root .] of this tree; the 5293 an earlier
+                     revision cited came from a partially-built _build), because the facade tier
                      reaches the same references from the bare segment. So this
                      special case is not load-bearing as shipped, and an earlier
                      version of this comment claimed a cost (86) that is
@@ -1022,6 +1024,18 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
              segment, no deeper segment exists, and the tier contributes
              nothing — [Liba.Api.run] with an indexed [Liba__Api] can no longer
              reach [libb].
+
+             THE OTHER TWO RESOLUTION SITES ARE NOT TOUCHED BY THIS. Spec S4
+             names three: calls (here), module dependencies, and type usages.
+             The latter two still key on the capitalised file BASENAME in a
+             last-writer-wins table, so the owning library is erased there
+             exactly as it was here before this change — and arch-rules builds
+             its [forbid dep] verdict straight from module_deps, so a real
+             violation can report pass and a nonexistent one FAIL. Retained
+             from origin/main, not introduced, and pinned by
+             {!Qualified_library_scoping.register_sibling_sites_residual}
+             rather than left for a reader to infer from nine green scoping
+             tests that the spec's three sites are all fixed.
 
              WHAT THIS STILL DOES NOT CLOSE, stated wider than it first was.
              BELOW the anchor nothing constrains which library a bare segment
@@ -1220,7 +1234,20 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
                            candidate set of ONE, which is exactly what is not
                            true here. Degrading to a bounded candidate would
                            understate the frontier. *)
-                        (None, display_name, "MAY_TOP", Some "ambiguous_unit")
+                        ( None,
+                          display_name,
+                          "MAY_TOP",
+                          (* Through [top_reason_to_string], like every other member.
+                             This was a bare "ambiguous_unit" literal, which made the
+                             typed vocabulary and the stored string two independent
+                             sources of truth the compiler could not reconcile —
+                             renaming the constructor in the function the .mli
+                             documents as THE storage contract would not have changed
+                             a single stored row. It was also the only member never
+                             constructed anywhere. *)
+                          Some
+                            (Arch_index_cmt.top_reason_to_string
+                               Arch_index_cmt.Ambiguous_unit) )
                     | `Not_found ->
                         (* Unresolved. A genuine external is a leaf either way —
                            MUST leaf when unconditional, enumerated leaf when
