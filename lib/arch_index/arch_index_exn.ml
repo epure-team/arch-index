@@ -234,7 +234,15 @@ let rec pat_is_irrefutable (p : Typedtree.value Typedtree.general_pattern) =
   | Tpat_tuple ps -> List.for_all pat_is_irrefutable ps
   | Tpat_record (fields, _) -> List.for_all (fun (_, _, fp) -> pat_is_irrefutable fp) fields
   | Tpat_lazy inner -> pat_is_irrefutable inner
-  | Tpat_or (a, b, _) -> pat_is_irrefutable a && pat_is_irrefutable b
+  (* FIX (#60 review): [||], not [&&]. `p1 | p2` accepts a value as soon as
+     EITHER alternative does, so one irrefutable side makes the whole pattern
+     irrefutable — `Error (A | _)` really does catch every `Error`. Requiring
+     both was strictly stronger than irrefutability and made such an arm close
+     nothing. Still only a sufficient condition, not a necessary one: `true |
+     false` is irrefutable for [bool] while neither side is, and that stays
+     conservative on purpose — under-closing loses precision, over-closing
+     loses a reachable failure. *)
+  | Tpat_or (a, b, _) -> pat_is_irrefutable a || pat_is_irrefutable b
   | _ -> false
 
 type pat_class = {caught : string list; catch_all : bool; bound : string list}
