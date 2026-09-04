@@ -1169,14 +1169,14 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels
     match fn_expr.exp_desc with
     | Texp_ident (Path.Pident id, _, _) when ident_is_local_fn id ->
         Some (Head_local (local_fn_name id))
-    | Texp_ident (Path.Pident id, _, _) -> Some (Head_unknown (Ident.name id))
+    | Texp_ident (Path.Pident id, _, _) -> Some (Head_unknown (Ident.name id, Callback_param))
     | Texp_ident (path, _, _) ->
         let callee_module, callee_name = path_to_module_name path in
         if qualified_is_dynamic path then
           let disp =
             match callee_module with Some m -> m ^ "." ^ callee_name | None -> callee_name
           in
-          Some (Head_unknown disp)
+          Some (Head_unknown (disp, Module_param))
         else Some (Head_qualified (callee_module, callee_name))
     | _ -> None
   in
@@ -1764,6 +1764,8 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels
                         (* Parameter / local / shadowing binding → unknowable. *)
                         add_call
                           ~partial
+                          ~is_head_of:expr.exp_loc
+                          ?callee_ty:!callee_ty_for_channel
                           (Head_unknown (Ident.name id, Callback_param))
                           expr.exp_loc)
                 | Texp_ident (path, _, _) ->
@@ -1775,7 +1777,8 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels
                         | Some m -> m ^ "." ^ callee_name
                         | None -> callee_name
                       in
-                      add_call ?callee_ty:!callee_ty_for_channel ~callee_ty:fn_expr.exp_type ~is_head_of:expr.exp_loc ~partial (Head_unknown (disp, Module_param)) expr.exp_loc
+                      add_call ~partial ~is_head_of:expr.exp_loc ?callee_ty:!callee_ty_for_channel
+                        (Head_unknown (disp, Module_param)) expr.exp_loc
                     else
                       add_call
                         ~partial
@@ -1789,14 +1792,15 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels
                        target, never ⊤ (MUST when always-exec + saturated). *)
                     match Hashtbl.find_opt lam_names fn_expr.exp_loc with
                     | Some node_name ->
-                        add_call ~partial (Head_local node_name) expr.exp_loc
                         add_call ~partial ~is_head_of:expr.exp_loc ?callee_ty:!callee_ty_for_channel
                           (Head_local node_name) expr.exp_loc
                     | None ->
-                        add_call ?callee_ty:!callee_ty_for_channel ~callee_ty:fn_expr.exp_type ~is_head_of:expr.exp_loc ~partial (Head_unknown ("*TOP*", Callback_param)) expr.exp_loc)
+                        add_call ~partial ~is_head_of:expr.exp_loc ?callee_ty:!callee_ty_for_channel
+                          (Head_unknown ("*TOP*", Callback_param)) expr.exp_loc)
                 | _ ->
                     (* Computed function head → unresolvable. *)
-                    add_call ?callee_ty:!callee_ty_for_channel ~callee_ty:fn_expr.exp_type ~is_head_of:expr.exp_loc ~partial (Head_unknown ("*TOP*", Callback_param)) expr.exp_loc) ;
+                    add_call ~partial ~is_head_of:expr.exp_loc ?callee_ty:!callee_ty_for_channel
+                      (Head_unknown ("*TOP*", Callback_param)) expr.exp_loc) ;
                 (* Over-application [f a b c] where [f] has arity 2: the head
                    call is saturated (handled above), but the extra args are
                    applied to the (unknown) returned function value — a residual
@@ -2294,8 +2298,7 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels
 let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
     ~exposed_tbl ~doc_tbl ~module_quint_tbl ~stmt_mod ~stmt_fn ~stmt_ty
     ~stmt_fld ~stmt_ctor ~stmt_scope ~stmt_catch ~stmt_origin ~stmt_rebind
-    ?(producer_run_id = None) path =
-    ?(value_channels = []) ?stmt_carrier path =
+    ?(value_channels = []) ?stmt_carrier ?(producer_run_id = None) path =
   match Cmt_format.read path with
   | _, None -> ([], [], [])
   | _, Some info -> (

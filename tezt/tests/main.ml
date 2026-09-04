@@ -94,8 +94,8 @@ let () =
   Must_null_ceiling.register () ;
   Query_limits.register () ;
   Exn_raise_sets.register () ;
+  Error_channels.register () ;
   Provenance.register () ;
   Coverage_matrix.register () ;
   Top_anchor_taxonomy.register () ;
-  Error_channels.register () ;
   Tezt.Test.run ()
