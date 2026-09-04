@@ -286,7 +286,124 @@ let decisions_row =
     detail = Some "poc/decision-lint is a proof-of-concept, not yet integrated into the main dune build";
   }
 
-let compute ~project_dir ~repo_root ?lcov () =
+(* Roadmap 3.4-bis. Whether the error-channel analysis ran is a fact about a
+   PRODUCER, so the row is per-language like [callgraph], not a single global
+   row: "OCaml analysed three channels" and "the Go producer cannot analyse
+   any" are different answers and must not be flattened into one.
+
+   Two sources, in order of strength. [comment_db_meta.error_contract] is
+   EVIDENCE — what a producer actually emitted into this database, spelled
+   "v1:exception,result,option". The build probe is only CAPABILITY — what a
+   producer could emit if run. Prefer evidence; fall back to capability when
+   the target database carries no contract (it may be a fresh file this run is
+   about to create).
+
+   [Partial] is load-bearing rather than decorative: a database carrying only
+   the [exception] channel is not the same as one carrying all three, and
+   collapsing that into [Covered] would overstate what was analysed while
+   [Not_analysed] would deny work that really happened. *)
+let builtin_channels = ["exception"; "result"; "option"]
+
+(* Reads the contract from a target database if there is one to read. Any
+   failure — no file, no table, no key, an unreadable value — is [None], i.e.
+   "no evidence", never an exception: the matrix must still produce a verdict
+   for a database that does not exist yet. *)
+let read_error_contract ~db_path =
+  match db_path with
+  | None -> None
+  | Some path when not (Sys.file_exists path) -> None
+  | Some path -> (
+      match Sqlite3.db_open ~mode:`READONLY path with
+      | exception _ -> None
+      | db ->
+          let found = ref None in
+          (try
+             let stmt =
+               Sqlite3.prepare db "SELECT value FROM comment_db_meta WHERE key = 'error_contract'"
+             in
+             (match Sqlite3.step stmt with
+             | Sqlite3.Rc.ROW -> (
+                 match Sqlite3.column stmt 0 with
+                 | Sqlite3.Data.TEXT v -> found := Some v
+                 | _ -> ())
+             | _ -> ()) ;
+             ignore (Sqlite3.finalize stmt)
+           with _ -> ()) ;
+          ignore (Sqlite3.db_close db) ;
+          !found)
+
+(* "v1:exception,result,option" -> ["exception"; "result"; "option"] *)
+let channels_of_contract contract =
+  match String.index_opt contract ':' with
+  | None -> []
+  | Some i ->
+      String.sub contract (i + 1) (String.length contract - i - 1)
+      |> String.split_on_char ','
+      |> List.filter_map (fun s ->
+             let s = String.trim s in
+             if s = "" then None else Some s)
+
+let error_channels_row ~contract ~from:callgraph_row =
+  let language = callgraph_row.language in
+  let is_ocaml = language = Some "ocaml" in
+  (* The contract describes ONE producer's output, and only the OCaml producer
+     can write it — no other backend emits error-channel rows at all. So it
+     informs the OCaml row and nothing else.
+
+     Caught by running this rather than reasoning about it: applying the
+     contract to every detected language reported `rust error_channels:
+     covered` on a database no Rust producer had ever touched. Claiming an
+     analysis ran when it did not is precisely the failure this table exists
+     to prevent, so the scoping is not a detail. *)
+  match (if is_ocaml then contract else None) with
+  | Some c -> (
+      let chans = channels_of_contract c in
+      let missing = List.filter (fun b -> not (List.mem b chans)) builtin_channels in
+      match chans with
+      | [] ->
+          {
+            language;
+            analysis = "error_channels";
+            status = Not_analysed;
+            detail = Some (Printf.sprintf "error_contract present but lists no channel: %S" c);
+          }
+      | _ when missing = [] ->
+          {
+            language;
+            analysis = "error_channels";
+            status = Covered;
+            detail = Some (String.concat "," chans);
+          }
+      | _ ->
+          {
+            language;
+            analysis = "error_channels";
+            status = Partial;
+            detail =
+              Some
+                (Printf.sprintf
+                   "analysed %s; NOT analysed %s"
+                   (String.concat "," chans)
+                   (String.concat "," missing));
+          })
+  | None when is_ocaml ->
+      (* No evidence yet. Fall back to capability: the OCaml producer always
+         emits the built-in channels, so its error-channel coverage is exactly
+         its callgraph coverage. *)
+      derived_rows ~from:callgraph_row "error_channels"
+  | None ->
+      {
+        language;
+        analysis = "error_channels";
+        status = Not_analysed;
+        detail =
+          Some
+            "no non-OCaml producer emits error-channel rows yet — the NDJSON record types do not \
+             exist (see docs/error-channels-porting.md); a Flat-schema database answers \
+             NOT_ANALYSED, which is the correct answer, not a bug to work around";
+      }
+
+let compute ~project_dir ~repo_root ?lcov ?db_path () =
   let registry = Language_registry.default () in
   let languages = Language_registry.detect_language_roots ~project_dir in
   let callgraph_rows =
@@ -322,9 +439,15 @@ let compute ~project_dir ~repo_root ?lcov () =
   in
   let cfg_rows = List.map (fun r -> derived_rows ~from:r "cfg") callgraph_rows in
   let types_rows = List.map (fun r -> derived_rows ~from:r "types") callgraph_rows in
+  (* Read once, not per language: the contract describes the database, and one
+     database is written by one producer run. *)
+  let contract = read_error_contract ~db_path in
+  let error_channels_rows =
+    List.map (fun r -> error_channels_row ~contract ~from:r) callgraph_rows
+  in
   List.concat
     [
-      callgraph_rows; effects_rows; cfg_rows; types_rows;
+      callgraph_rows; effects_rows; cfg_rows; types_rows; error_channels_rows;
       [coverage_row ~repo_root ~lcov; decisions_row];
     ]
 
@@ -391,9 +514,87 @@ let write_coverage db rows =
    counts too (review, MEDIUM): _build/default present but empty is the
    OCaml producer about to silently index nothing — exactly issue #23, not a
    pass. *)
+(* The rule the comment above states, written down once instead of inferred
+   from [language <> None] at each call site.
+
+   [error_channels] forced the issue. It is genuinely per-language — whether
+   error channels were analysed is a fact about a producer — so it carries a
+   [language], which under the old predicate would have counted toward the
+   gap. But NO non-OCaml producer can emit error-channel rows yet (the NDJSON
+   record types do not exist), so such a row is [Not_analysed] permanently, and
+   counting it would make this tool exit 1 on every polyglot repository until
+   that feature ships: exactly the always-firing gate the comment above rejects
+   for [decisions] and [coverage]. The row is still EMITTED — silence is the
+   failure this table exists to prevent — it simply does not pretend the run
+   could have fixed it. *)
+let fixable_by_this_run r =
+  r.language <> None
+  && not (r.analysis = "error_channels" && r.language <> Some "ocaml")
+
 let has_gap rows =
   List.exists
     (fun r ->
-      r.language <> None
+      fixable_by_this_run r
       && match r.status with Not_analysed | Failed | Partial -> true | Covered -> false)
     rows
+
+(* ---- error-channel rows: the two rules worth pinning ------------------- *)
+
+let%test "channels_of_contract: parses the v1 spelling" =
+  channels_of_contract "v1:exception,result,option" = ["exception"; "result"; "option"]
+
+let%test "channels_of_contract: a contract with no channels is empty, not a crash" =
+  channels_of_contract "v1:" = []
+
+let%test "channels_of_contract: no version prefix ⇒ nothing claimed" =
+  channels_of_contract "exception,result" = []
+
+let cg lang = {language = Some lang; analysis = "callgraph"; status = Covered; detail = None}
+
+let%test "a complete contract makes the OCaml row covered" =
+  match error_channels_row ~contract:(Some "v1:exception,result,option") ~from:(cg "ocaml") with
+  | {status = Covered; detail = Some d; _} -> d = "exception,result,option"
+  | _ -> false
+
+let%test "a contract missing the value channels is PARTIAL, not covered" =
+  (* The distinction that must not be flattened: a database carrying only the
+     exception channel is not one carrying all three. *)
+  match error_channels_row ~contract:(Some "v1:exception") ~from:(cg "ocaml") with
+  | {status = Partial; detail = Some d; _} ->
+      d = "analysed exception; NOT analysed result,option"
+  | _ -> false
+
+let%test "the contract never speaks for a producer that did not write it" =
+  (* Regression: applying an OCaml-written contract to every detected language
+     reported `rust error_channels: covered` on a database no Rust producer had
+     touched — claiming an analysis ran when it did not. *)
+  match error_channels_row ~contract:(Some "v1:exception,result,option") ~from:(cg "rust") with
+  | {status = Not_analysed; _} -> true
+  | _ -> false
+
+let%test "no contract ⇒ the OCaml row falls back to the callgraph probe" =
+  match error_channels_row ~contract:None ~from:(cg "ocaml") with
+  | {status = Covered; _} -> true
+  | _ -> false
+
+let%test "a non-OCaml error_channels gap does NOT fire the ratchet" =
+  (* No non-OCaml producer can emit these rows yet, so counting them would make
+     the tool exit 1 on every polyglot repository forever — the always-firing
+     gate has_gap's own comment rejects. The row is still emitted. *)
+  let rows =
+    [
+      cg "ocaml";
+      {language = Some "go"; analysis = "error_channels"; status = Not_analysed; detail = None};
+    ]
+  in
+  has_gap rows = false
+
+let%test "an OCaml error_channels gap DOES fire the ratchet" =
+  (* Fixable by this run: re-index, or supply a config that declares more. *)
+  let rows =
+    [
+      cg "ocaml";
+      {language = Some "ocaml"; analysis = "error_channels"; status = Partial; detail = None};
+    ]
+  in
+  has_gap rows = true
