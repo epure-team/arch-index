@@ -1,0 +1,42 @@
+{
+  "task": "qualified-unit-resolution",
+  "mode": "full",
+  "current_phase": "implement",
+  "events": [
+    {
+      "phase": "research",
+      "outcome": "COMPLETED",
+      "at": "2026-09-04",
+      "by": "roster-research",
+      "reason": "Empirically reproduced the motivating defect on current main (Liba.Api.run mis-attributed to libb/api.ml, stamped MUST). Confirmed .cmt files carry imported-unit names with interface digests. DISPROVED the prior branch's approved round-3 design: in the both-readings-live case the caller imports ALL candidate units (Foo, Foo__, Foo__Bar), so digests cannot disambiguate it. Discovered a better disambiguator using data already collected: evaluate both readings against the function table with the name each implies - a module alias contributes no function row, so exactly one reading hits. Flagged a real residual (module-dep/type-usage sites have no value name to check) and an environmental root cause (dune must be invoked with --root . or it roots itself at /tmp)."
+    },
+    {
+      "phase": "intake",
+      "outcome": "VALIDATED",
+      "at": "2026-09-04",
+      "by": "roster-intake",
+      "reason": "Scoped to the CALL resolution site only (evidence: the homonym fixture produces 0 module_deps rows, and the other fixture's single dep resolves correctly). functions.qualified_name as a stored column split out as a separate follow-up - research showed resolver correctness is separable and independently shippable. Peer coupling escalated to a hard gate after arch-index-0e reported that exception identities ARE canonical qualified paths, matched on by fails-with, so this fix can change user-visible identity strings, not just module attribution."
+    },
+    {
+      "phase": "spec",
+      "outcome": "VALIDATED",
+      "at": "2026-09-04",
+      "by": "roster-spec",
+      "reason": "6 FRs. Key insight recorded: main's resolver ALREADY checks fn_lookup at each prefix step, which is what makes it handle module aliases correctly - that behaviour must be PRESERVED (FR-002 is a regression guard, green today, broken by the abandoned branch). The actual fix is narrow: re-key mod_name_to_path from bare basename (last-writer-wins, erases the owning library) to the real dune unit name. FR-003 degrades genuine homonyms to TOP rather than guessing; FR-004 keeps external leaves distinct from in-index ambiguity (the over-generalisation that inflated the abandoned branch's MAY_TOP 660->875). 4 runnable checks, all required to be CI-wired - the abandoned branch's checks were wired nowhere, which is why it shipped green-and-wrong twice."
+    },
+    {
+      "phase": "plan",
+      "outcome": "COMPLETED",
+      "at": "2026-09-04",
+      "by": "roster-plan",
+      "reason": "Dual-voice adversarial review found FOUR factual errors in spec v1, all verified against source before any implementation: (1) spec was scoped against resolve_module_root, which does NOT exist on main - symbol carried over from the abandoned branch; (2) the central claim was backwards - resolve_qualified walks SUFFIXES looking up BARE segments, so the alias case (FR-002) passes today VIA the basename erasure being removed, making the change materially riskier than the 'narrow re-key' described; (3) the three resolution sites share a hashtable not a function, and only two of them - type_usage has its own independent table and its own unmeasured defect; (4) spec directed tests into checks/*.js, reversing a migration already made on main (ci.yml:70-73 records those checks being moved OFF that runtime INTO tezt). Plus: the peer-coupling gate measured identity SPELLINGS, which canonical_path ~cmt_modname proves cannot change - the real exposure is fails-with ANSWER SETS shifting via raise-set propagation over re-attributed calls edges. Spec rewritten as v2 with an errors section recording all of it. Gates migrated into tezt (180b724), verified by execution: scenario A red, B green."
+    },
+    {
+      "phase": "implement",
+      "outcome": "COMPLETED",
+      "at": "2026-09-04",
+      "by": "roster-implement",
+      "reason": "S2-S7 landed. S7's corpus run found a real defect in my own S4 design that no in-repo gate could have caught: prefix readings assume the reference spells a prefix of the defining unit's dune name, which a CROSS-LIBRARY RE-EXPORT FACADE breaks outright (Tezos_protocol_alpha.Protocol.Script_int.of_zint vs unit Tezos_raw_protocol_alpha__Script_int - no common prefix). Cost measured before fixing: 2385 lost resolutions on proto_alpha. Fixed with a SECOND resolution tier (bare segment -> every unit whose name ends in it, function table still arbitrating by the same 1/2+/0 rule), deliberately NOT a restoration of the old bare-segment walk, which keyed one basename to one path last-writer-wins. Tier order is semantic: prefix readings name the unit exactly as dune spells it, so the weaker inference is consulted only where the strong evidence is silent. Final: octez-manager 76 edges NULL->resolved 1:1, 0 lost, kind histogram identical, ambiguous_unit 0; proto_alpha/lib_protocol 73 gained 4 changed, of which THREE are main resolving production protocol code (script_interpreter.ml, clst_contract_storage.ml) to a TEST HELPER of the same basename, one stamped MUST. Fourth is an honest ambiguous_unit \u22a4 where main claimed a self-recursive call that does not exist. Answer sets: 0 removals on both corpora (+81 octez-manager, +101 proto_alpha). All \u00a78.1 tripwires exactly on baseline including exn_rebinds 6=6 content-identical. Scenario D pins the facade shape, verified red-then-green. 129/129 tezt, exit 0. Two measurement-scope errors made and caught in-phase (proto_alpha indexed at src/proto_alpha instead of lib_protocol; in-repo attribution indexed each worktree's own _build, i.e. two different corpora) - both caught by a cross-scope disagreement, not by care."
+    }
+  ]
+}

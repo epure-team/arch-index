@@ -174,6 +174,30 @@ let single_call_reason conn ~caller_fn ~label =
       Test.fail "expected exactly one call row for `%s` in %s, got %d" caller_fn label
         (List.length rows)
 
+(* The DIRECTORY of the module holding the single call's callee, or None when
+   unresolved. Assertions about "which library did this land in" must be written
+   against this and not against one function id: excluding a single id passes as
+   soon as the fixture grows a second candidate in the same wrong library, which
+   is exactly how scenario G stayed green while crossing the library boundary as
+   a MUST. Found by review. *)
+let single_call_callee_dir conn ~caller_fn ~label =
+  let rows =
+    Db.rows conn
+      (Printf.sprintf
+         "SELECT ifnull((SELECT m.path FROM functions f2 JOIN modules m ON m.id = f2.module_id \
+          WHERE f2.id = c.callee_id), '<none>') FROM calls c JOIN functions f ON f.id = \
+          c.caller_id WHERE f.name = '%s'"
+         caller_fn)
+  in
+  match rows with
+  | [[p]] -> (
+      match Db.to_string ~sql:"callee dir" p with
+      | "<none>" -> None
+      | path -> Some (Filename.dirname path))
+  | _ ->
+      Test.fail "expected exactly one call row for `%s` in %s, got %d" caller_fn label
+        (List.length rows)
+
 let show = Option.value ~default:"<none>"
 
 let register () =
@@ -517,7 +541,18 @@ let register_include_homonym () =
                       guarantee only — see scenario G for deeper references, and the residuals F \
                       and J for what is still open.)"
                      (show callee) kind wrong)
-                (callee <> Some wrong))) ;
+                (callee <> Some wrong) ;
+              (* The library, not one row. See [single_call_callee_dir]. *)
+              let dir = single_call_callee_dir conn ~caller_fn:"from_a" ~label:"E" in
+              Batch.check b
+                ~msg:
+                  (Printf.sprintf
+                     "E: from_a -> Inca.Api.run landed in library directory %s; it must be \
+                      unresolved or inside inca/. Excluding a single function id is not enough — \
+                      the fixture could grow a second candidate in incb/ and the old assertion \
+                      would still pass"
+                     (Option.value ~default:"<none>" dir))
+                (dir = None || dir = Some "inca"))) ;
   Lwt.return_unit
 
 (* Scenario F — DISCLOSED RESIDUAL, pinned and NOT endorsed.
@@ -650,7 +685,8 @@ let scenario_g_files =
 
 let register_nested_include_homonym () =
   Test.register ~__FILE__
-    ~title:"cmt: a DEEPER include-defined homonym never resolves into the other library"
+    ~title:
+      "cmt: a deeper include-defined homonym is not re-interpreted at the ANCHOR's own segment"
     ~tags:["cmt"; "qualified_name"; "library_scoping"; "facade"]
   @@ fun () ->
   Batch.run (fun b ->
@@ -671,7 +707,18 @@ let register_nested_include_homonym () =
                       must not re-interpret it. Gating on the deepest reading alone let this \
                       through, because [Ginca__Api__Inner] names nothing"
                      (show callee) kind wrong)
-                (callee <> Some wrong))) ;
+                (callee <> Some wrong) ;
+              let dir = single_call_callee_dir conn ~caller_fn:"from_a" ~label:"G" in
+              Batch.check b
+                ~msg:
+                  (Printf.sprintf
+                     "G: from_a -> Ginca.Api.Inner.run landed in library directory %s; it must be \
+                      unresolved or inside ginca/. What this pins is narrow and the title says so: \
+                      the facade tier must not re-interpret segment [Api], which the prefix tier \
+                      has already identified as [Ginca__Api]. It does NOT pin the general \
+                      property — see scenario L for the shape that still leaks"
+                     (Option.value ~default:"<none>" dir))
+                (dir = None || dir = Some "ginca"))) ;
   Lwt.return_unit
 
 (* Scenario H — [include_subdirs qualified], a shape no test covered and which
@@ -725,7 +772,15 @@ let register_include_subdirs () =
                       own a sub/api.ml, so the compiled units are Isa__Sub__Api and Isb__Sub__Api \
                       — distinct, and the reference names one of them"
                      (show callee) kind a_fn)
-                (callee = Some a_fn))) ;
+                (callee = Some a_fn) ;
+              let dir = single_call_callee_dir conn ~caller_fn:"from_a" ~label:"H" in
+              Batch.check b
+                ~msg:
+                  (Printf.sprintf
+                     "H: from_a -> Isa.Sub.Api.run landed in library directory %s, expected \
+                      isa/sub"
+                     (Option.value ~default:"<none>" dir))
+                (dir = Some "isa/sub"))) ;
   Lwt.return_unit
 
 (* Scenario I — DISCLOSED RESIDUAL, the precision cost of the 1/2+/0 rule.
@@ -953,9 +1008,11 @@ let register_sibling_sites_residual () =
                       reproduces on origin/main. If it now targets kliba/api.ml the residual is \
                       closed — good news, delete this half deliberately and update the spec"
                      p)
-                (String.length p >= 11
-                && String.sub p (String.length p - 11) 11 = "klibb/api.ml"
-                   || Filename.dirname p = "klibb")
+                (* Was a two-way check whose first half could never fire:
+                   "klibb/api.ml" is 12 characters and String.sub took 11, so
+                   only the dirname test ever ran. Half an assertion that never
+                   executed. Found by review. *)
+                (Filename.dirname p = "klibb")
           | _ -> Batch.note b "K: expected exactly one module_deps row for Kliba.Api, got %d"
                    (List.length dep_targets)) ;
           let usage_targets =
@@ -976,4 +1033,102 @@ let register_sibling_sites_residual () =
           | _ ->
               Batch.note b "K: expected exactly one resolved type_usage row for t, got %d"
                 (List.length usage_targets))) ;
+  Lwt.return_unit
+
+(* Scenario L — DISCLOSED RESIDUAL: the shape scenario G's title used to claim
+   was closed, and the one the residual paragraph used to exclude.
+
+   Scenario G with ONE file added — [gincb/inner.ml], so that a compilation unit
+   actually ends in [Inner]:
+
+     ginca/api.ml = "include Base_impl"        (no [Inner.run] row of its own)
+     ginca/base_impl.ml = "module Inner = struct let run = … end"   (the truth)
+     gincb/inner.ml -> unit Gincb__Inner       (a homonym, in a LINKED library)
+     caller links BOTH and writes Ginca.Api.Inner.run
+
+   Measured on this branch: [Ginca.Api.Inner.run] -> [gincb/inner.ml:run], kind
+   MUST, while the correct answer [ginca/base_impl.ml:Inner.run] IS indexed.
+   FR-001's defect one qualification level deeper than scenario A.
+
+   Why the anchor gate does not stop it: the anchor is [Ginca__Api] at depth 1,
+   the facade tier is confined to segments strictly deeper, and [Inner] at depth
+   2 matches exactly one indexed unit ending in [__Inner] — so it wins outright.
+   Confining the tier below the anchor removed the case where it re-interpreted
+   the ANCHOR's own segment (scenario G). It did not, and cannot, decide which
+   LIBRARY a segment below the anchor may reach.
+
+   Two things this test exists to prevent, both of which happened:
+
+   1. Scenario G was titled "never resolves into the other library" while
+      asserting `callee <> Some wrong` — a single function id. Adding
+      [gincb/inner.ml] to G's own fixture left G GREEN while the library
+      boundary was crossed as a MUST.
+   2. The resolver's residual paragraph scoped the leak to "a library the caller
+      does NOT link". This caller links both. That exclusion made the more
+      common shape invisible.
+
+   Identical on [origin/main] — retained, not introduced. Structurally identical
+   to scenario D, the LEGITIMATE cross-library facade the tier exists to serve:
+   indexed root, deeper segment naming a unit in another library. D must
+   resolve, L must not, and nothing in the index separates them. The fix is the
+   caller's [.cmt] import list — see briefs/linkage-evidence-followup.md, shape
+   (b). Closing it flips this test; that is the point.
+
+   Credit: adversarial review, fourth round, from a probe built by adding one
+   file to a fixture the suite already had. *)
+let l_a_dune =
+  ("linca/dune", "(library\n (name linca)\n (modules api base_impl)\n (flags (:standard -w -a)))\n")
+
+let l_a_base = ("linca/base_impl.ml", "module Inner = struct let run () : int = 1 end\n")
+
+let l_a_api = ("linca/api.ml", "include Base_impl\n")
+
+(* [inner.ml] is what makes a UNIT end in [Inner]; scenario G's fixture has the
+   same module nested inside api.ml, where it is no unit at all. That one file
+   is the whole difference between G's green and L's leak. *)
+let l_b_dune =
+  ("lincb/dune", "(library\n (name lincb)\n (modules api inner)\n (flags (:standard -w -a)))\n")
+
+let l_b_api = ("lincb/api.ml", "module Inner = struct let run () : int = 2 end\n")
+
+let l_b_inner = ("lincb/inner.ml", "let run () : int = 3\n")
+
+let l_caller_dune =
+  ( "lcaller/dune",
+    "(library\n (name lcaller)\n (libraries linca lincb)\n (modules l)\n (flags (:standard -w \
+     -a)))\n" )
+
+let l_caller_l = ("lcaller/l.ml", "let from_a () : int = Linca.Api.Inner.run ()\n")
+
+let scenario_l_files =
+  [dune_project; l_a_dune; l_a_base; l_a_api; l_b_dune; l_b_api; l_b_inner; l_caller_dune;
+   l_caller_l]
+
+let register_linked_homonym_residual () =
+  Test.register ~__FILE__
+    ~title:
+      "cmt: a homonym unit below the anchor still binds a LINKED wrong library — pinned, not \
+       endorsed"
+    ~tags:["cmt"; "qualified_name"; "library_scoping"; "residual"]
+  @@ fun () ->
+  Batch.run (fun b ->
+      with_fixture ~name:"qual-scope-l" ~files:scenario_l_files @@ fun fixture ->
+      let db = index fixture in
+      Db.with_db db (fun conn ->
+          let correct = fn_id conn ~mod_like:"%linca/base_impl.ml" ~name:"Inner.run" b ~label:"L" in
+          let dir = single_call_callee_dir conn ~caller_fn:"from_a" ~label:"L" in
+          let _, kind = single_call conn ~caller_fn:"from_a" ~label:"L" in
+          (* Asserting the DEFECT, like F, J and K. The day this reads "linca"
+             the residual is closed: verify it points at base_impl.ml, then
+             delete this scenario together with shape (b) of the resolver's
+             residual paragraph and of the follow-up brief. *)
+          Batch.check b
+            ~msg:
+              (Printf.sprintf
+                 "L: from_a -> Linca.Api.Inner.run landed in library directory %s (kind=%s), \
+                  expected the WRONG library lincb. This pins a KNOWN DEFECT that also reproduces \
+                  on origin/main: the correct answer is linca/base_impl.ml Inner.run (%s), and the \
+                  caller LINKS both libraries. A change here is good news and must be deliberate"
+                 (Option.value ~default:"<none>" dir) kind (show correct))
+            (dir = Some "lincb"))) ;
   Lwt.return_unit
