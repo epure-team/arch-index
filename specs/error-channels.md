@@ -166,6 +166,11 @@ As an engineer, I want per-channel answers and honest refusals.
 - CHECK-5 [AC-15..18]: `dune test --root . --force` (tezt `error_channels.ml`, `exn_raise_sets.ml`) — red before, green after.
 - CHECK-6 [AC-17, AC-20]: CHECK-2 of `specs/exn-raise-sets.md` (self-index, rules, golden) + `git diff origin/main -- lib/arch_index/runner.ml` empty + FR-034's version check (base+1, unique history row).
 - CHECK-7 [AC-19]: `$BIN --build-dir=…/lib_protocol --errors-profile tezos --db-path=/mnt/ssd-external-2to/arch-index-runs/proto-alpha-errors.db` exit 0; `arch-query <db> error-stats --channel tzresult`; oracle table in `briefs/error-channels-qa-scope.md` matched line by line.
+- CHECK-8 [AC-21]: A match arm closes only identities it demonstrably matches — an or-pattern of different literals is not a catch-all, and a constructor whose ARGUMENT constrains the value does not close its identity. Both channels, one shared rule (`Arch_index_exn.pat_is_irrefutable`). tezt `error_channels.ml` US-2.14/US-2.15; red-verified by restoring each old behaviour.
+- CHECK-9 [AC-21]: Re-indexing an existing database is idempotent: every producer-written table holds its single-run counts after three consecutive runs, exit 0. tezt `error_channels.ml` re-index idempotence + `schema_drop_list.ml`, which DERIVES the producer-written set from `architecture-schema.sql` ∩ `INSERT INTO` rather than restating it.
+- CHECK-10 [AC-21]: `--errors-strict` is satisfiable: it counts only paths the operator's own config files spell, `merge` extends a same-named channel rather than replacing it, and no built-in declares an unmatchable path. tezt `error_channels.ml` strict cases.
+- CHECK-11 [AC-21]: A call site keeps one scope per channel — `call_exn_scopes` is keyed `(call_id, scope_id)` and the solver's joins filter the joined side by channel, so no edge is duplicated and no channel receives another's caught set. tezt US-2.16.
+- CHECK-12 [AC-21]: Every console block in `docs/error-channels.md` reproduces from the command it prints, and the porting guide's row/column claims match `architecture-schema.sql` and the single `insert_exn_edge` call site. Manual, re-run each review round.
 
 ## Entities
 
@@ -177,3 +182,8 @@ As an engineer, I want per-channel answers and honest refusals.
 - `converter`: a role that closes channel `from` on its argument and opens an origin on channel `to`.
 - `error contract`: `comment_db_meta.error_contract = "v1:<channels>"`; its absence for a channel = NOT_ANALYSED.
 - (from `specs/exn-raise-sets.md`) `exception origin`, `handler scope`, `raise-set`, `verdict`, `canonical exception path` — unchanged.
+
+
+### Acceptance criteria added by review (round 3)
+
+- AC-21 [US-1..US-3, review rounds 1-3]: every invariant a HIGH+ review finding revealed stays enforced — CHECK-8..CHECK-12 above. These were promoted from the review ledger on GO so a later change cannot quietly re-open a defect that took three rounds to find: two of them (CHECK-8, CHECK-9) pin silent-drop bugs that produced a confidently wrong `BOUNDED` answer rather than an honest ⊤.
