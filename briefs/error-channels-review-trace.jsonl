@@ -1,0 +1,13 @@
+{"schema_version": "1.0", "ts": "2026-09-03T21:50:33.620Z", "task": "error-channels", "round": 1, "cycle": 1, "event": "scope-gate", "actor": "check-scope-diff.sh", "outcome": "skipped", "detail": "no-manifest"}
+{"schema_version": "1.0", "ts": "2026-09-03T22:08:22.513Z", "task": "error-channels", "round": 1, "cycle": 1, "event": "normalizer", "actor": "review-normalize.js", "outcome": "ran"}
+{"schema_version": "1.0", "ts": "2026-09-03T22:09:12.172Z", "task": "error-channels", "round": 1, "cycle": 1, "event": "specialist", "actor": "reviewer", "outcome": "ran"}
+{"schema_version": "1.0", "ts": "2026-09-03T22:09:12.193Z", "task": "error-channels", "round": 1, "cycle": 1, "event": "specialist", "actor": "architect", "outcome": "ran"}
+{"schema_version": "1.0", "ts": "2026-09-03T22:09:12.215Z", "task": "error-channels", "round": 1, "cycle": 1, "event": "specialist", "actor": "spec-compliance", "outcome": "ran"}
+{"schema_version": "1.0", "ts": "2026-09-03T22:09:12.239Z", "task": "error-channels", "round": 1, "cycle": 1, "event": "specialist", "actor": "codex-xruntime", "outcome": "ran", "detail": "degraded:non-conforming-output"}
+{"schema_version": "1.0", "ts": "2026-09-03T22:09:12.262Z", "task": "error-channels", "round": 1, "cycle": 1, "event": "normalizer", "actor": "review-normalize.js", "outcome": "ran"}
+{"schema_version":"1.0","ts":"2026-09-04T00:12:49.797Z","task":"error-channels","round":2,"cycle":1,"event":"specialist","actor":"reviewer","outcome":"ran"}
+{"schema_version":"1.0","ts":"2026-09-04T00:12:49.816Z","task":"error-channels","round":2,"cycle":1,"event":"specialist","actor":"architect","outcome":"ran"}
+{"schema_version":"1.0","ts":"2026-09-04T00:12:49.835Z","task":"error-channels","round":2,"cycle":1,"event":"specialist","actor":"spec-compliance","outcome":"ran"}
+{"schema_version":"1.0","ts":"2026-09-04T00:12:49.865Z","task":"error-channels","round":2,"cycle":1,"event":"normalizer","actor":"review-normalize.js","outcome":"ran"}
+{"schema_version":"1.0","ts":"2026-09-04T00:13:09.851Z","task":"error-channels","round":2,"cycle":1,"event":"normalizer","actor":"review-normalize.js","outcome":"ran"}
+{"schema_version":"1.0","ts":"2026-09-04T00:13:42.336Z","task":"error-channels","round":2,"cycle":1,"event":"scope-gate","actor":"check-scope-diff.sh","outcome":"skipped","detail":"no-manifest"}
