@@ -58,6 +58,95 @@ Answers **C-17**: the list is complete before resolution begins, so the chase is
 independent of walk order. This must be asserted, not assumed — a fixture where the
 hub file is walked *before* its target proves it.
 
+### D1-bis — the index is keyed on BINDER IDENTITY, not on the binder's name
+
+**Amends D1 (2026-09-05). D1's scoping was right and is measured; its key's
+granularity was wrong, and the error only became unsafe once D2 was amended.**
+
+The key is `(source_module, Ident.unique_name binder)`, not
+`(source_module, alias_name)`. `alias_name` stays in the row as the display
+spelling; it stops being the join.
+
+**Why a name key is unsafe here, and was not before.** Two attacks survive a
+*perfectly correct* alias/parameter classification, because they defeat the
+JOIN rather than the classification:
+
+```ocaml
+(* SA-1 — nested binder, correct classification, wrong target *)
+module S = Saturation_repr                (* toplevel: a row exists *)
+module Internal_for_tests = struct
+  module S = Test_saturation_stub         (* nested: no row of its own *)
+  let cost_add x y = S.add x y
+end
+```
+The inner binder IS a `Tstr_module`/`Tmod_ident` alias, so any origin mark
+answers *alias* truthfully. A name key then finds the only row under `"S"` — the
+toplevel one — and records a production call to a test stub as a call into
+protocol code. This is the mirror of the defect ADR 003 documents, and it cannot
+be closed by rejecting nested contexts, because **US-3 scenario 2 requires** a
+toplevel alias used from a nested submodule to resolve. The two shapes are
+identical from the resolver's side and separable only by binder identity.
+
+```ocaml
+(* SA-2 — toplevel rebinding *)
+module C = Compare.Int
+let sort_ids l = List.sort C.compare l
+module C = Compare.String
+let sort_names l = List.sort C.compare l
+```
+First-insert-wins returns `Compare.Int` for both. US-3 scenario 1 pinned that as
+a known limitation, which was defensible while resolution only filled in a
+target on an edge whose kind was already decided. Under D2-bis the same
+limitation would manufacture a resolved edge from a sound ⊤, on an
+int-versus-string comparator.
+
+**And the contract already promised this.** `docs/edge-kind-contract.md` states
+for the OCaml backend that *resolution is `Ident`-stamp-based, so shadows never
+forge a MUST*. A name key here would be the first producer path to break that
+guarantee, from a fallback tier.
+
+**What does not change.** Per-file scoping stands and is now measured: 460 edges
+on proto_alpha and 67 on octez-manager have a head that is an alias in a
+*different* file, so a global match would have resolved **527 edges wrongly**.
+The defect was the key's granularity, never the decision to scope per file.
+Reading from the in-memory `all_pending_deps` rather than `module_deps` also
+stands, for the reason D1 gave: `target_module` carries the basename erasure
+ADR 003 accepts as permanent, and `target_path` does not.
+
+**Consequence for ambiguity.** With a stamp key, two binders of one name are two
+keys. The alias side stops having candidates to choose between, so
+first-insert-wins is not a tie-break any more — it is dead. That matters because
+the "0 ambiguous in 8318 chases" figure was taken *downstream* of it and could
+not see the alias side at all; under this key there is no alias side left to
+measure.
+
+### D1-ter — the splice point is `Head_unknown (_, Module_param)`
+
+**New (2026-09-05). Replaces the `Head_qualified`/`Not_found` splice, which was
+measured to observe ZERO of its own cases.**
+
+Implemented as originally specified and instrumented, the tier reported
+`0 resolved, 0 ambiguous, 0 no candidate` while 35 705 chases ran — none from a
+file declaring an alias. Every one of the **3 203** unresolved calls whose head
+is an alias declared in the same file is `MAY_TOP`/`module_param`: a path rooted
+at a local module binder is judged dynamic by `qualified_is_dynamic` and sent
+straight to ⊤ without ever reaching `Head_qualified`.
+
+Two obligations follow, because the new arm does not inherit what the old one
+had:
+
+- **FR-005's ordering must be re-established, not inherited.** `dropped_qualified`
+  is defined and used only inside the `Head_qualified` branch. At the new arm
+  there is no existing check to run after, so the dropped-node test must be
+  performed there explicitly or FR-005 silently degrades to "there was no check".
+- **`Head_unknown` carries a rendered display string, not a `(module, name)`
+  pair.** Re-splitting it is not merely inelegant: OCaml value names legally
+  contain dots (`+.`, `*.`, `.%()`), so a last-dot split of `"F.( *. )"` yields an
+  empty callee name; and `"*TOP*"` and `"<apply>"` are legal display values that
+  are not paths at all. The producer MUST carry the split. Recovering structure
+  by parsing your own rendered output is how the `top_reason` string/constructor
+  divergence happened.
+
 ### D2 — resolution sets `callee_id` and MUST NOT change `kind`
 
 A re-exported name is still called at a real `Texp_apply`. What passed through the
@@ -73,6 +162,64 @@ spelled through a hub. **No amendment to `docs/edge-kind-contract.md` is needed.
 before. If the chase reaches a function row dropped this run, the dropped-node path
 wins (`MAY_TOP` + `dropped_node`) — setting `callee_id` to a row that does not exist
 would contradict D2's own claim that resolution only fills in a target.
+
+### D2-bis — the landing kind is MAY_ENUMERATED, and the reason is what it proves
+
+**Amends D2 (2026-09-05). D2 as written forbade the only useful outcome.**
+
+D2 said "set `callee_id`, never change `kind`", justified by *what passed
+through the re-export is the name, not the call*. That holds when the original
+kind was MUST or MAY_ENUMERATED — resolution only fills in a target. It does not
+hold at the new splice point, where the edge is ⊤ **because the module was
+unknowable**. Learning what it is and staying ⊤ is not honesty, it is discarding
+what was learned. So the landing kind must be decided.
+
+**Decision: `MAY_ENUMERATED`. Never MUST.**
+
+**The reason, and it is not the one I first offered.** I argued MAY_ENUMERATED
+"by the same argument as point-free value aliases". That argument does not
+transport: there, no call happens at the site — the edge is not an application.
+Here there is a real `Texp_apply`. The correct reason is narrower and stronger:
+
+> **The chase discharges the NAMING conjunct of MUST, and only that one.**
+
+`docs/edge-kind-contract.md` makes MUST the conjunction of post-dominance,
+unique resolution, and saturation. Resolving an alias proves which module the
+head denotes. It leaves the other two standing on evidence this population makes
+weakest:
+
+- **Uniqueness** — the target is re-resolved through `mod_name_to_path`, the
+  basename/last-writer-wins map ADR 003 residual 4 accepts as **permanent**.
+  Two `impl.ml` in different libraries still collide, and this task routes
+  around the collision on the alias-name side only.
+- **Saturation** — `head_arity` falls back to `arrow_arity` on the callee's
+  interface type, and the walker's own comment records that a cross-module
+  arrow hidden behind an alias in that interface is not expanded from a
+  `.cmt`-restored environment. Alias- and signature-mediated heads are exactly
+  where that residual is densest.
+
+MAY_ENUMERATED states precisely what is proved: **the target set is bounded by
+this candidate, and no claim is made that the call is definite.** That is the
+sentence `docs/edge-kind-contract.md` now carries for MAY_ENUMERATED, so no
+amendment to the contract is required.
+
+**Consequences this spec must own rather than discover.** Three existing
+requirements were written for a world where `kind` never moved:
+
+- **FR-004 / CHECK-3 / US-1 scenario 2** require `kind`, `top_reason` and
+  `top_anchor` unchanged, and CHECK-3 asserts a byte-identical kind histogram.
+  All three are now requirements the feature is defined to violate; they are
+  replaced by CHECK-3-bis below.
+- **US-4's ratchet arithmetic** assumed MUST+NULL → MUST+id. The real transition
+  is MAY_TOP+NULL → MAY_ENUMERATED+id, so `must_null_ceiling` does not move on
+  this feature at all and is not its ratchet.
+- **The ⊤ frontier shrinks by construction.** Every resolved chase deletes a ⊤
+  edge, and a ⊤ edge is what makes `arch_exn` report an unknown raise and
+  `arch-query` refuse `pure`. So this feature **removes raise-set members and
+  promotes nodes toward `pure`** — a narrowing of an over-approximation, which
+  is the unsafe direction for a may-analysis unless each removal is justified by
+  a resolution. The acceptance bar is therefore not "zero removals" but
+  **"every removal is attributable to a resolved chase"**, checked per edge.
 
 ### D3 — ambiguity declines to resolve, and that is a no-op
 
@@ -212,7 +359,20 @@ each file's `S.f` resolves to its own target and neither resolves to the other's
 - **FR-005** [D2/C-15]: The chase MUST run after the existing `dropped_qualified` check;
   a target dropped this run MUST keep the dropped-node verdict.
 - **FR-006** [US-2]: Two or more distinct resolved ids MUST leave the edge unresolved.
-- **FR-007** [US-2]: The chase MUST stop at 4 hops inclusive and MUST detect cycles on
+- **FR-007** [US-2] **(RETIRED 2026-09-05 — contradicted the frozen design)**: this
+  required 4 hops with cycle detection while D4 freezes the chase at 1 hop, so
+  US-2 scenarios 2 and 3 (a 5-hop chain, an `A = B`/`B = A` cycle) name
+  behaviour no fixture can exercise. A spec that mandates what its own frozen
+  decision forbids is not a contract. **Replaced by FR-007-bis: the chase MUST
+  perform exactly one hop, and MUST NOT carry depth or cycle machinery.** The
+  cut is justified on EDGES, not on aliases: a second hop reaches 21 edges on
+  proto_alpha and 29 on octez-manager, 50 against 8318 chases. (My published
+  justification — "6 of 2811 aliases" — was wrong: it compared the whole
+  `target_path` against `alias_name`, and `Commitment.Hash` never equals
+  `Commitment`. The real two-hop population is **116**, which also retires my
+  §10.6 argument that a depth counter would read zero forever. Right decision,
+  both stated reasons wrong.)
+- **FR-007-old** (retired): The chase MUST stop at 4 hops inclusive and MUST detect cycles on
   `(source_module, target_path)`.
 - **FR-008** [US-2/D6]: The producer MUST report ambiguous, depth-exceeded, cyclic and
   no-candidate counts **separately**.
@@ -226,7 +386,14 @@ each file's `S.f` resolves to its own target and neither resolves to the other's
   fixture of US-1. Red-verify by disabling the chase.
 - **CHECK-2** [AC-2] (fail-closed-path): the ambiguity fixture leaves `callee_id IS
   NULL`; red-verify by making the chase pick the first candidate.
-- **CHECK-3** [AC-3]: `SELECT count(*) FROM calls WHERE callee_id IS NOT NULL AND kind
+- **CHECK-3-bis** [AC-3] (replaces CHECK-3, which the amendment is defined to
+  fail): every edge whose `kind` moved between the before and after runs MUST be
+  a chase that resolved — matched per edge on `(caller_id, callee_name,
+  call_site)`, not per total. The old check asserted a byte-identical kind
+  histogram; the honest successor asserts that the histogram moved **only where
+  a resolution explains it**. A count-level check cannot distinguish a resolved
+  edge from an unrelated regression that happens to balance it.
+- **CHECK-3-old** (retired): `SELECT count(*) FROM calls WHERE callee_id IS NOT NULL AND kind
   IS NULL` → 0, and the kind histogram is byte-identical before/after on both corpora
   (FR-004).
 - **CHECK-4** [AC-4]: bounded-node counts per channel, both corpora, before and after.
