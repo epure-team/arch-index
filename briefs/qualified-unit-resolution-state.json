@@ -1,7 +1,7 @@
 {
   "task": "qualified-unit-resolution",
   "mode": "full",
-  "current_phase": "implement",
+  "current_phase": "review",
   "events": [
     {
       "phase": "research",
@@ -36,7 +36,35 @@
       "outcome": "COMPLETED",
       "at": "2026-09-04",
       "by": "roster-implement",
-      "reason": "S2-S7 landed. S7's corpus run found a real defect in my own S4 design that no in-repo gate could have caught: prefix readings assume the reference spells a prefix of the defining unit's dune name, which a CROSS-LIBRARY RE-EXPORT FACADE breaks outright (Tezos_protocol_alpha.Protocol.Script_int.of_zint vs unit Tezos_raw_protocol_alpha__Script_int - no common prefix). Cost measured before fixing: 2385 lost resolutions on proto_alpha. Fixed with a SECOND resolution tier (bare segment -> every unit whose name ends in it, function table still arbitrating by the same 1/2+/0 rule), deliberately NOT a restoration of the old bare-segment walk, which keyed one basename to one path last-writer-wins. Tier order is semantic: prefix readings name the unit exactly as dune spells it, so the weaker inference is consulted only where the strong evidence is silent. Final: octez-manager 76 edges NULL->resolved 1:1, 0 lost, kind histogram identical, ambiguous_unit 0; proto_alpha/lib_protocol 73 gained 4 changed, of which THREE are main resolving production protocol code (script_interpreter.ml, clst_contract_storage.ml) to a TEST HELPER of the same basename, one stamped MUST. Fourth is an honest ambiguous_unit \u22a4 where main claimed a self-recursive call that does not exist. Answer sets: 0 removals on both corpora (+81 octez-manager, +101 proto_alpha). All \u00a78.1 tripwires exactly on baseline including exn_rebinds 6=6 content-identical. Scenario D pins the facade shape, verified red-then-green. 129/129 tezt, exit 0. Two measurement-scope errors made and caught in-phase (proto_alpha indexed at src/proto_alpha instead of lib_protocol; in-repo attribution indexed each worktree's own _build, i.e. two different corpora) - both caught by a cross-scope disagreement, not by care."
+      "reason": "S2-S7 landed. S7's corpus run found a real defect in my own S4 design that no in-repo gate could have caught: prefix readings assume the reference spells a prefix of the defining unit's dune name, which a CROSS-LIBRARY RE-EXPORT FACADE breaks outright (Tezos_protocol_alpha.Protocol.Script_int.of_zint vs unit Tezos_raw_protocol_alpha__Script_int - no common prefix). Cost measured before fixing: 2385 lost resolutions on proto_alpha [WITHDRAWN, round-2 review: this was a correct measurement of something else - a WIDER corpus scope (src/proto_alpha, not lib_protocol) through a set-diff that counts a re-target as a loss; see specs/qualified-unit-resolution.md \u00a710.3. The reproducible, scope-correct figure, re-measured repeatedly through round 6 on proto_alpha/lib_protocol (468 modules / 73 588 calls): the facade tier is worth 1 646 resolutions over facade-tier-disabled - see lib/arch_index/arch_index.ml's own comment for the full 2x2]. Fixed with a SECOND resolution tier (bare segment -> every unit whose name ends in it, function table still arbitrating by the same 1/2+/0 rule), deliberately NOT a restoration of the old bare-segment walk, which keyed one basename to one path last-writer-wins. Tier order is semantic: prefix readings name the unit exactly as dune spells it, so the weaker inference is consulted only where the strong evidence is silent. Final: octez-manager 76 edges NULL->resolved 1:1, 0 lost, kind histogram identical, ambiguous_unit 0; proto_alpha/lib_protocol 73 gained 4 changed, of which THREE are main resolving production protocol code (script_interpreter.ml, clst_contract_storage.ml) to a TEST HELPER of the same basename, one stamped MUST. Fourth is an honest ambiguous_unit \u22a4 where main claimed a self-recursive call that does not exist. Answer sets: 0 removals on both corpora (+81 octez-manager, +101 proto_alpha). All \u00a78.1 tripwires exactly on baseline including exn_rebinds 6=6 content-identical. Scenario D pins the facade shape, verified red-then-green. 129/129 tezt, exit 0 [SUPERSEDED: the suite grew to 142/142 across rounds 2-6 as further residuals and regression guards were added; see the review events below for each round's count]. Two measurement-scope errors made and caught in-phase (proto_alpha indexed at src/proto_alpha instead of lib_protocol; in-repo attribution indexed each worktree's own _build, i.e. two different corpora) - both caught by a cross-scope disagreement, not by care."
+    },
+    {
+      "phase": "review",
+      "outcome": "NO-GO",
+      "at": "2026-09-04",
+      "by": "roster-review",
+      "reason": "Round 2. Found the withdrawn/unreproducible-number pattern that became specs/qualified-unit-resolution.md \u00a710.1-10.3: 2385 (wrong corpus scope), -1638/-1616 (facade-tier-disabled variant miscited as the withdrawn conjunct's cost), and an O(N**2) registry-rebuild timing claim with no reproduction command. Also found the anchor gate's first version reproduced the exact defect it existed to remove for a deeper qualification (Ginca.Api.Inner.run -> gincb/api.ml, later pinned as scenario G). Fixed: gate anchored on the deepest reading naming an indexed unit (not the deepest reading alone); every cited number given a reproduction command or dropped. Golden recalibrated 5067->5068 and again 782->802 after a rebase onto main."
+    },
+    {
+      "phase": "review",
+      "outcome": "NO-GO",
+      "at": "2026-09-04",
+      "by": "roster-review",
+      "reason": "Round 4. Narrowed claims to the evidence actually gathered: scenario E's header claimed a general include-defined-homonym property while its fixture only exercised depth-2 qualification; a deeper reference (Ginca.Api.Inner.run) walked around the first anchor gate entirely, later pinned as scenario G in the same round. Corrected scoping language throughout arch_index.ml and the tezt fixtures rather than leaving the narrower-than-claimed property undisclosed."
+    },
+    {
+      "phase": "review",
+      "outcome": "NO-GO",
+      "at": "2026-09-04",
+      "by": "roster-review",
+      "reason": "Round 5. Found: the withdrawn 93/1 unit-name-collision census (corrected to 88/0, measured through known_unit_names/paths_of_unit); scenario S3's amendment written to reconcile the spec with scenarios B and D, narrowing CHECK-2 to the two/one-candidate cases; scenarios E, G and L's 'ACCEPTED OUTCOME' needed pinning exactly (kind=MUST, dir=None, or kind=MUST + exact wrong callee_id for L) rather than a loose 'unresolved or same-directory' assertion that stayed green under a re-route to a different wrong function in the same library; spec \u00a710.6 written ('a check that looks like a check') after finding assertions satisfiable by resolvers that did not do the work the comment claimed. Golden recalibrated after the fixes."
+    },
+    {
+      "phase": "review",
+      "outcome": "NO-GO",
+      "at": "2026-09-04",
+      "by": "roster-review",
+      "reason": "Round 6. The most significant round: found the branch had not merely retained the pre-existing wrong-library-MUST defect for the (wrapped false)/wrapped-main-module unit-name-collision shape (scenario M) but INTRODUCED a new instance of it, where main emitted an honest unresolved leaf. Closed by making a unit name registered with more than one path answerable-but-not-decidable in the PREFIX tier (ids_of_reading), not just the facade tier - corpus cost zero on all three corpora (arch-index 88 units, octez-manager 353, proto_alpha 468 - 0 collisions each). Also found (and this round's fix addresses): the S3 amendment's zero-candidate half was falsified by scenarios E and G (HIGH-2); scenario L's 'identical on origin/main' claim was false - main lands the same reference in the same wrong directory but at a DIFFERENT wrong function (HIGH-3); the registry_gaps detector had zero test coverage (MEDIUM-5); the withdrawn 93/1 census survived in arch_index_cmt.ml's Ambiguous_unit comment even after being corrected elsewhere in the same file (MEDIUM-6); F1 and S1's third clause were violated by shipped green tests with no STATUS note (MEDIUM-7); the F3 falsifier's MUST/MAY_ENUMERATED/MAY_TOP distribution summed to 3391 against 5168 calls and did not reproduce (LOW-8); the join-recipe comment gave delta 0 when followed literally, missing that disabling the facade tier is also required for the load-bearing 200 (actually 199, remeasured) to appear (LOW-9). Suite grew to 142/142 tezt across this and prior rounds; self-index golden 23/803/5168 byte-identical; arch-rules 1 proved/3 UNKNOWN/0 violations; corpora unchanged (octez-manager 58 477/76/0/0, proto_alpha 73 514/70/1/3)."
     }
   ]
 }
