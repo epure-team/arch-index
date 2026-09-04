@@ -740,7 +740,18 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
 
      That failure is silent by nature, so it gets a loud counter rather than
      trust. Reported, not raised: a diagnostic that aborts indexing would turn a
-     precision bug into an outage, and the number is actionable on its own. *)
+     precision bug into an outage, and the number is actionable on its own.
+
+     NARROWER THAN IT SOUNDS (found by review). This only sees a whole unit
+     missing from the registry — a gap in [known_unit_names ()] itself. It does
+     NOT see, and cannot see, a reference into a unit that IS registered but
+     whose named function has no row of its own because the definition arrives
+     through an [include] elsewhere in the same unit (scenarios E and G below):
+     there the registry has no gap, [resolve_qualified_unit] still reaches
+     `Not_found`, and the same kind=MUST/NULL-callee shape is emitted with zero
+     count here. That variant is not a registry-completeness defect; it is
+     accepted and budgeted against [must_null_ceiling] (see the resolver's
+     [`Not_found] arm and scenarios E/G's comments). *)
   (* Built ONCE into a set rather than re-derived per path. The obvious phrasing
      — for each stored path, scan every known unit's path list — rebuilds
      [known_unit_names ()] (a fold plus a sort) and re-sorts [paths_of_unit] on
@@ -882,19 +893,26 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
                      [_build/default] by patching [join] to the naive
                      ["__"]-join and re-indexing:
 
-                       facade tier OFF:  shipped join - naive join = 196
+                       facade tier OFF:  shipped join - naive join = 200
                                          references (112 distinct names, all
                                          [Arch_index__.*])
                        facade tier ON :  the difference is ZERO
 
-                     DELTAS ONLY, deliberately. Three revisions of this comment
-                     have carried three different absolute counts — 5306, 5329,
-                     5349 — and each was correct when taken: the corpus is this
-                     repository's own build, so it grows with every commit and
-                     an absolute is unreproducible by construction. The
-                     difference is the claim; the total is not. Recipe: patch
-                     [join] to [a ^ "__" ^ b], `dune build --root .`, index
-                     [_build/default], count [callee_id IS NOT NULL].
+                     DELTAS ONLY, deliberately. Four revisions of this comment
+                     have now carried four different absolute counts — 5306,
+                     5329, 5349, and a "196" that round-5 review found did NOT
+                     reproduce (re-running the recipe below gave 200, and it
+                     was already 200 at the commit whose title claimed to
+                     "correct every number it cited" — so it was wrong when
+                     written, not stale from corpus drift): each total was
+                     correct when taken, since the corpus is this repository's
+                     own build and grows with every commit, so an absolute is
+                     unreproducible by construction. The difference is the
+                     claim; the total is not, and the 196->200 miss is exactly
+                     why deltas are re-derived rather than copied forward.
+                     Recipe: patch [join] to [a ^ "__" ^ b], `dune build --root
+                     .`, index [_build/default], count [callee_id IS NOT
+                     NULL].
 
                      So this special case is not load-bearing as shipped: the
                      facade tier reaches the same references from the bare
@@ -980,7 +998,7 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
             |> List.sort_uniq compare
           in
           (* When the facade tier may be consulted at all.
- 
+
              Review found the first version of this gate reproduced the exact
              defect this change exists to remove. It fell back whenever the
              prefix tier reached zero FUNCTION ids — but that also happens when
@@ -989,25 +1007,25 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
              [include], a functor application, a re-export, or its row was
              dropped). The reference was then handed to whichever other library
              owned a module of that basename, as a NULL-free MUST:
- 
+
                liba/api.ml = "include Base_impl"     (so no [run] row in it)
                Liba.Api.run  ->  libb/api.ml:run  MUST
- 
+
              which is scenario A verbatim, with one word changed.
- 
+
              So the predicate is UNIT evidence, not function evidence, and it is
              the DEEPEST reading that decides — not "some prefix names a unit",
              which would also block the legitimate facade case, whose root
              ([Facade], [Tezos_protocol_alpha]) is always an indexed unit:
- 
+
                deepest reading names an INDEXED unit
                  -> the reference located its unit. A missing row there is an
-                    external leaf or ⊤, never another library's homonym.
-             WHERE THE PREFIX TIER HAS ALREADY SPOKEN. A reading that names
-             an indexed unit IDENTIFIES that segment: we know what
-             [Ginca.Api] means, because [Ginca__Api] is a stored row. The
-             facade tier must therefore never re-interpret that segment, or a
-             deeper reference walks straight around the gate:
+                    external leaf or ⊤, never another library's homonym, and
+                    the PREFIX TIER HAS ALREADY SPOKEN for that segment: we
+                    know what [Ginca.Api] means, because [Ginca__Api] is a
+                    stored row. The facade tier must therefore never
+                    re-interpret that segment, or a deeper reference walks
+                    straight around the gate:
 
                ginca/api.ml = "include Base_impl"   (no [Inner.run] row)
                Ginca.Api.Inner.run  ->  gincb/api.ml  MUST
@@ -1043,7 +1061,8 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
 
              WHAT THIS STILL DOES NOT CLOSE, stated wider than it first was.
              BELOW the anchor nothing constrains which library a bare segment
-             may reach, so two shapes leak, not one:
+             may reach, so three shapes leak, not two (round-5 review found the
+             third — see (c) below, which is not even a facade-tier hole):
 
                (a) rooted outside the index — [Stdlib.Buffer.add_string] in a
                    project owning a [buffer.ml];
@@ -1054,11 +1073,11 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
                        [owner/base.ml] indexed, and it binds
                        [other/submod.ml] in an UNLINKED library
                        (scenario J);
-                     - [Ginca.Api.Inner.run] where [ginca/api.ml] is
-                       [include Base_impl] and [gincb/inner.ml] exists: the
+                     - [Linca.Api.Inner.run] where [linca/api.ml] is
+                       [include Base_impl] and [lincb/inner.ml] exists: the
                        caller LINKS both, the right answer
-                       [ginca/base_impl.ml] is indexed, and it binds
-                       [gincb/inner.ml] as MUST (scenario L).
+                       [linca/base_impl.ml] is indexed, and it binds
+                       [lincb/inner.ml] as MUST (scenario L).
                    An earlier revision of this paragraph said "in a library the
                    caller does not link", which excluded the second and more
                    common shape — and scenario G's title claimed that shape was
@@ -1069,14 +1088,41 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
              version of this comment did not admit it, describing the hole as
              "rooted OUTSIDE the index" only. Both are identical on
              [origin/main] — retained, not introduced — and both are pinned by
-             {!Qualified_library_scoping.register_unlinked_residual} and
-             {!Qualified_library_scoping.register_aliased_nested_residual}.
+             {!Qualified_library_scoping.register_unlinked_residual},
+             {!Qualified_library_scoping.register_aliased_nested_residual} and
+             {!Qualified_library_scoping.register_linked_homonym_residual}.
 
              Confining the tier BELOW the anchor removed the case where it
              re-interpreted the anchor's own segment (scenario G). It did not,
              and cannot, decide which LIBRARY a segment below the anchor may
              reach: in scenario L exactly one indexed unit ends in [__Inner], so
              it wins outright.
+
+               (c) NOT a facade-tier hole at all — found by round-5 review, in
+                   the PREFIX tier, for (wrapped false) libraries. [Api.run]
+                   where TWO (wrapped false) libraries [wa] and [wb] each
+                   compile a unit literally named [Api] (unit-keying cannot
+                   tell them apart — the same fact scenario C degrades on),
+                   [wa/api.ml] is [include Base_impl] (no [run] row of its
+                   own), and the caller links [wa] ONLY:
+                   [paths_of_unit "Api"] returns BOTH [wa/api.ml] and
+                   [wb/api.ml]; the function table finds a row at exactly ONE
+                   of them ([wb/api.ml], since [wa]'s [run] lives under
+                   [base_impl.ml] instead); so [ids_of_readings] returns
+                   exactly one id and [resolve_qualified_unit] answers
+                   [`Resolved] from the PREFIX tier — the anchor gate that
+                   confines (a) and (b) below it is never consulted, because
+                   there is no facade-tier step here to gate. A NULL-free MUST
+                   into a library the caller never links (scenario M). Scenario
+                   C's ⊤ outcome depends on BOTH [api.ml] files defining [run]
+                   DIRECTLY, giving the function table two ids; the moment
+                   either arrives through an [include] instead, C's mechanism
+                   cannot fire and this is what happens instead. Measured
+                   incidence is ZERO across arch-index (88 units),
+                   octez-manager (353) and proto_alpha (468) — no
+                   [(wrapped false)] library collides in any of them — so this
+                   is a disclosure defect, not a corpus regression. Pinned by
+                   {!Qualified_library_scoping.register_unwrapped_unlinked_residual}.
 
              Note (b) is structurally IDENTICAL to the legitimate facade this
              tier exists for ([Facade.Protocol.Script_int] -> [Rawlib__…]):
