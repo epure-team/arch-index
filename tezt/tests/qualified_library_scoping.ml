@@ -285,10 +285,22 @@ let register () =
 
    Both libraries are (wrapped false) and both own an [Api] module, so both
    compile to a unit literally named [Api]. The registry maps that one name to
-   two distinct paths; two distinct functions answer to it; and FR-003 therefore
-   degrades to ⊤ rather than guessing. That is the honest outcome — the wrong
-   MUST is gone — but it is NOT resolution, and calling it one would overstate
-   what this change achieves. *)
+   two distinct paths; BOTH paths define [run] directly, so the function table
+   finds two ids and FR-003 degrades to ⊤ rather than guessing. That is the
+   honest outcome for THIS fixture — but it is NOT resolution, and calling it
+   one would overstate what this change achieves.
+
+   The ⊤ outcome here depends on that "both define it directly": it is a
+   property of this fixture, not a guarantee for the whole (wrapped false)
+   class. When one of the two [api.ml] files reaches its definition through an
+   [include] instead, the function table finds a row at only ONE of the two
+   paths [paths_of_unit] returns, [ids_of_readings] collapses to a single id,
+   and the PREFIX tier itself returns [`Resolved] — a NULL-free MUST into the
+   wrong, unlinked library, with the anchor gate never consulted at all. That
+   is shape (c) of the resolver's residual paragraph, pinned separately by
+   {!register_unwrapped_unlinked_residual} (scenario M); found by round-5
+   review after an earlier revision of this comment claimed "the wrong MUST is
+   gone" without qualification. *)
 let unwrapped_a_dune =
   ("uwa/dune", "(library\n (name uwa)\n (wrapped false)\n (modules api)\n (flags (:standard -w -a)))\n")
 
@@ -358,6 +370,100 @@ let register_unwrapped_residual () =
                       1.9 vocabulary member, and any other reason misattributes the cause"
                      reason)
                 (reason = "ambiguous_unit"))) ;
+  Lwt.return_unit
+
+(* Scenario M — DISCLOSED RESIDUAL, shape (c): a leak in the PREFIX tier
+   itself, found by round-5 review probing scenario C's boundary.
+
+   Scenario C's ⊤ outcome holds only because BOTH [(wrapped false)] [api.ml]
+   files define [run] DIRECTLY, so the function table finds two ids and FR-003
+   degrades honestly. Move one definition behind an [include] and that
+   mechanism cannot fire:
+
+     wa/api.ml (wrapped false) = "include Base_impl"   (no [run] row of its own)
+     wb/api.ml (wrapped false) = "let run () = …"       (the truth, wrong library)
+     caller links wa ONLY and writes Api.run
+
+   For (wrapped false), [paths_of_unit "Api"] returns BOTH [wa/api.ml] and
+   [wb/api.ml] — unit-keying cannot separate them, same as scenario C. But the
+   function table now finds a row at only ONE of those paths ([wb/api.ml]), so
+   [ids_of_readings] collapses to exactly one id and [resolve_qualified_unit]
+   answers [`Resolved] from the PREFIX tier, BEFORE the facade tier or its
+   anchor gate is ever consulted — a NULL-free MUST into a library the caller
+   does not even link. This is NOT the same hole as (a)/(b): those leak below
+   an anchor the facade tier consults; here there is no facade-tier step to
+   gate at all, because the prefix tier itself was fooled.
+
+   Identical on [origin/main] — retained, not introduced. Measured incidence
+   is ZERO: no [(wrapped false)] library collides with another across
+   arch-index (88 units), octez-manager (353) or proto_alpha (468), so this is
+   a disclosure defect, not a corpus regression — pinned here so it is not
+   discovered later as a surprise. *)
+let m_a_dune =
+  ("wa/dune", "(library\n (name wa)\n (wrapped false)\n (modules api base_impl)\n (flags (:standard -w -a)))\n")
+
+let m_a_base = ("wa/base_impl.ml", "let run () : int = 1\n")
+
+let m_a_api = ("wa/api.ml", "include Base_impl\n")
+
+let m_b_dune =
+  ("wb/dune", "(library\n (name wb)\n (wrapped false)\n (modules api)\n (flags (:standard -w -a)))\n")
+
+let m_b_api = ("wb/api.ml", "let run () : int = 2\n")
+
+(* Links wa ONLY. wb is in the index but not on this library's path. *)
+let m_caller_dune =
+  ( "wcaller/dune",
+    "(library\n (name wcaller)\n (libraries wa)\n (modules m)\n (flags (:standard -w -a)))\n" )
+
+let m_caller_m = ("wcaller/m.ml", "let go () : int = Api.run ()\n")
+
+let scenario_m_files =
+  [dune_project; m_a_dune; m_a_base; m_a_api; m_b_dune; m_b_api; m_caller_dune; m_caller_m]
+
+let register_unwrapped_unlinked_residual () =
+  Test.register ~__FILE__
+    ~title:
+      "cmt: a (wrapped false) homonym whose definition arrives via include still binds the \
+       UNLINKED library — pinned, not endorsed"
+    ~tags:["cmt"; "qualified_name"; "library_scoping"; "residual"]
+  @@ fun () ->
+  Batch.run (fun b ->
+      with_fixture ~name:"qual-scope-m" ~files:scenario_m_files @@ fun fixture ->
+      let db = index fixture in
+      Db.with_db db (fun conn ->
+          let wrong = fn_id conn ~mod_like:"%wb/api.ml" ~name:"run" b ~label:"M" in
+          let correct = fn_id conn ~mod_like:"%wa/base_impl.ml" ~name:"run" b ~label:"M" in
+          match (wrong, correct) with
+          | None, _ | _, None -> Batch.note b "M: one of the two run functions is not indexed"
+          | Some wrong, Some correct ->
+              let dir = single_call_callee_dir conn ~caller_fn:"go" ~label:"M" in
+              let callee, kind = single_call conn ~caller_fn:"go" ~label:"M" in
+              (* Asserting the DEFECT, like F, J and L. The day this reads "wa"
+                 the residual is closed: verify it points at wa/base_impl.ml,
+                 then delete this scenario together with shape (c) of the
+                 resolver's residual paragraph. *)
+              Batch.check b
+                ~msg:
+                  (Printf.sprintf
+                     "M: go -> Api.run landed in library directory %s (kind=%s), expected the \
+                      WRONG library wb. This pins a KNOWN DEFECT that also reproduces on \
+                      origin/main: the correct answer is wa/base_impl.ml run (%s), reachable \
+                      through the include, and the caller does NOT even link wb. Unlike \
+                      scenarios F/J/L this is a PREFIX-tier leak — the anchor gate that confines \
+                      the facade tier is never consulted"
+                     (Option.value ~default:"<none>" dir) kind correct)
+                (dir = Some "wb") ;
+              Batch.check b
+                ~msg:
+                  (Printf.sprintf
+                     "M: go -> Api.run resolved to callee_id=%s, expected exactly wb/api.ml run \
+                      (%s)"
+                     (show callee) wrong)
+                (callee = Some wrong) ;
+              Batch.check b
+                ~msg:(Printf.sprintf "M: go -> Api.run is kind=%s, expected MUST" kind)
+                (kind = "MUST"))) ;
   Lwt.return_unit
 
 (* ------------------------------------------------------------------ *)
@@ -487,7 +593,22 @@ let register_reexport_facade () =
    does NOT establish the general property, and its header used to claim it did
    — a reference qualified one level deeper walked around the first gate
    entirely. That shape is {!register_nested_include_homonym} (scenario G), and
-   it is what the anchor-depth gate exists for. *)
+   it is what the anchor-depth gate exists for.
+
+   ACCEPTED OUTCOME, stated exactly rather than left to a loose assertion
+   (round-5 review). The prefix tier reaches zero ids (the only row is under
+   [base_impl.ml], not [api.ml]) and the facade tier is confined to segments
+   STRICTLY DEEPER than the anchor [Inca__Api] — there is no such segment here
+   — so [resolve_qualified_unit] returns [`Not_found] and the call is emitted
+   kind=MUST with a NULL callee: a proof-shaped edge into a unit the graph DOES
+   index, just not at this row. This is tolerated, not fixed by this change:
+   the alternative (falling back to [include]-following, or demoting to
+   MAY_TOP whenever the prefix tier is silent) was rejected because it
+   reintroduces exactly the defect the anchor gate exists to remove (see the
+   resolver's "When the facade tier may be consulted at all" comment). It is
+   budgeted against [must_null_ceiling], the same ledger scenario D's
+   [`Not_found] would fall into if D's callee were ever dropped from the
+   index. *)
 let inc_a_dune =
   ( "inca/dune",
     "(library\n (name inca)\n (modules api base_impl)\n (flags (:standard -w -a)))\n" )
@@ -552,7 +673,25 @@ let register_include_homonym () =
                       the fixture could grow a second candidate in incb/ and the old assertion \
                       would still pass"
                      (Option.value ~default:"<none>" dir))
-                (dir = None || dir = Some "inca"))) ;
+                (dir = None || dir = Some "inca") ;
+              (* The ACCEPTED outcome, pinned exactly rather than left to
+                 "unresolved or inside inca/" (round-5 review): this reference
+                 stays unresolved and is stamped kind=MUST with a NULL callee
+                 — a proof-shaped edge into a unit ([Inca__Api]) the graph DOES
+                 index. See the extended comment above. If this ever becomes
+                 MAY_TOP or gains a non-NULL callee, the resolver changed and
+                 this test — and the "tolerated" note — must be revisited
+                 deliberately, not silently loosened. *)
+              Batch.check b
+                ~msg:
+                  (Printf.sprintf
+                     "E: from_a -> Inca.Api.run is kind=%s, dir=%s; expected the accepted \
+                      unresolved-MUST outcome (kind=MUST, dir=None). A different outcome means \
+                      the resolver's [`Not_found] handling for this shape changed and the \
+                      comment's tolerance note is stale"
+                     kind
+                     (Option.value ~default:"<none>" dir))
+                (kind = "MUST" && dir = None))) ;
   Lwt.return_unit
 
 (* Scenario F — DISCLOSED RESIDUAL, pinned and NOT endorsed.
@@ -659,6 +798,16 @@ let register_unlinked_residual () =
    on the deepest reading that names an indexed unit and lets the facade tier
    use only segments strictly deeper than it.
 
+   ACCEPTED OUTCOME, stated exactly (round-5 review, same shape as scenario E).
+   With [from_depth] set one past the [Ginca__Api] anchor, the only segment the
+   facade tier may still try is [Inner] — and no indexed unit in this fixture
+   ends in [__Inner] (gincb's [Inner] is nested INSIDE [api.ml], not its own
+   unit; that is exactly what scenario L adds). So the facade tier finds
+   nothing, [resolve_qualified_unit] returns [`Not_found], and the call is
+   emitted kind=MUST with a NULL callee — unresolved, into a unit
+   ([Ginca__Api]) the graph DOES index. Tolerated for the same reason as E:
+   see that scenario's comment. Budgeted against [must_null_ceiling].
+
    Credit: found by adversarial review, not by this suite. *)
 let g_a_dune =
   ("ginca/dune", "(library\n (name ginca)\n (modules api base_impl)\n (flags (:standard -w -a)))\n")
@@ -718,7 +867,22 @@ let register_nested_include_homonym () =
                       has already identified as [Ginca__Api]. It does NOT pin the general \
                       property — see scenario L for the shape that still leaks"
                      (Option.value ~default:"<none>" dir))
-                (dir = None || dir = Some "ginca"))) ;
+                (dir = None || dir = Some "ginca") ;
+              (* The ACCEPTED outcome, pinned exactly (round-5 review), same
+                 reasoning as scenario E: no indexed unit ends in [__Inner]
+                 here, so the facade tier finds nothing and this reference
+                 stays unresolved, stamped kind=MUST with a NULL callee into
+                 the indexed unit [Ginca__Api]. If this ever becomes MAY_TOP
+                 or gains a callee, the resolver's [`Not_found] handling
+                 changed and this comment's tolerance note must be revisited. *)
+              Batch.check b
+                ~msg:
+                  (Printf.sprintf
+                     "G: from_a -> Ginca.Api.Inner.run is kind=%s, dir=%s; expected the accepted \
+                      unresolved-MUST outcome (kind=MUST, dir=None)"
+                     kind
+                     (Option.value ~default:"<none>" dir))
+                (kind = "MUST" && dir = None))) ;
   Lwt.return_unit
 
 (* Scenario H — [include_subdirs qualified], a shape no test covered and which
@@ -1038,19 +1202,21 @@ let register_sibling_sites_residual () =
 (* Scenario L — DISCLOSED RESIDUAL: the shape scenario G's title used to claim
    was closed, and the one the residual paragraph used to exclude.
 
-   Scenario G with ONE file added — [gincb/inner.ml], so that a compilation unit
-   actually ends in [Inner]:
+   Scenario G's fixture with ONE file added — [lincb/inner.ml] (this scenario's
+   OWN fixture is [linca]/[lincb], not G's [ginca]/[gincb] — an earlier
+   revision of this comment cited the wrong pair, corrected after round-5
+   review), so that a compilation unit actually ends in [Inner]:
 
-     ginca/api.ml = "include Base_impl"        (no [Inner.run] row of its own)
-     ginca/base_impl.ml = "module Inner = struct let run = … end"   (the truth)
-     gincb/inner.ml -> unit Gincb__Inner       (a homonym, in a LINKED library)
-     caller links BOTH and writes Ginca.Api.Inner.run
+     linca/api.ml = "include Base_impl"        (no [Inner.run] row of its own)
+     linca/base_impl.ml = "module Inner = struct let run = … end" (the truth)
+     lincb/inner.ml -> unit Lincb__Inner       (a homonym, in a LINKED library)
+     caller links BOTH and writes Linca.Api.Inner.run
 
-   Measured on this branch: [Ginca.Api.Inner.run] -> [gincb/inner.ml:run], kind
-   MUST, while the correct answer [ginca/base_impl.ml:Inner.run] IS indexed.
+   Measured on this branch: [Linca.Api.Inner.run] -> [lincb/inner.ml:run], kind
+   MUST, while the correct answer [linca/base_impl.ml:Inner.run] IS indexed.
    FR-001's defect one qualification level deeper than scenario A.
 
-   Why the anchor gate does not stop it: the anchor is [Ginca__Api] at depth 1,
+   Why the anchor gate does not stop it: the anchor is [Linca__Api] at depth 1,
    the facade tier is confined to segments strictly deeper, and [Inner] at depth
    2 matches exactly one indexed unit ending in [__Inner] — so it wins outright.
    Confining the tier below the anchor removed the case where it re-interpreted
@@ -1061,8 +1227,8 @@ let register_sibling_sites_residual () =
 
    1. Scenario G was titled "never resolves into the other library" while
       asserting `callee <> Some wrong` — a single function id. Adding
-      [gincb/inner.ml] to G's own fixture left G GREEN while the library
-      boundary was crossed as a MUST.
+      [lincb/inner.ml] to a fixture otherwise like G's own left the analogous
+      test GREEN while the library boundary was crossed as a MUST.
    2. The resolver's residual paragraph scoped the leak to "a library the caller
       does NOT link". This caller links both. That exclusion made the more
       common shape invisible.
@@ -1116,8 +1282,9 @@ let register_linked_homonym_residual () =
       let db = index fixture in
       Db.with_db db (fun conn ->
           let correct = fn_id conn ~mod_like:"%linca/base_impl.ml" ~name:"Inner.run" b ~label:"L" in
+          let wrong = fn_id conn ~mod_like:"%lincb/inner.ml" ~name:"run" b ~label:"L" in
           let dir = single_call_callee_dir conn ~caller_fn:"from_a" ~label:"L" in
-          let _, kind = single_call conn ~caller_fn:"from_a" ~label:"L" in
+          let callee, kind = single_call conn ~caller_fn:"from_a" ~label:"L" in
           (* Asserting the DEFECT, like F, J and K. The day this reads "linca"
              the residual is closed: verify it points at base_impl.ml, then
              delete this scenario together with shape (b) of the resolver's
@@ -1130,5 +1297,30 @@ let register_linked_homonym_residual () =
                   on origin/main: the correct answer is linca/base_impl.ml Inner.run (%s), and the \
                   caller LINKS both libraries. A change here is good news and must be deliberate"
                  (Option.value ~default:"<none>" dir) kind (show correct))
-            (dir = Some "lincb"))) ;
+            (dir = Some "lincb") ;
+          (* Round-5 review: the directory check alone stays green even if the
+             leak re-routes to [lincb/api.ml:Inner.run] (a DIFFERENT wrong
+             function, same directory) or degrades to MAY_ENUMERATED with a
+             callee — at which point this comment's claims ("kind MUST",
+             "binds lincb/inner.ml") would be silently false while the test
+             stayed green. Pin the exact callee AND the exact kind. *)
+          (match wrong with
+          | None -> Batch.note b "L: lincb/inner.ml run is not indexed at all"
+          | Some wrong ->
+              Batch.check b
+                ~msg:
+                  (Printf.sprintf
+                     "L: from_a -> Linca.Api.Inner.run resolved to callee_id=%s, expected exactly \
+                      lincb/inner.ml run (%s). A re-route to a different function in lincb (e.g. \
+                      lincb/api.ml:Inner.run) must not pass silently under a directory-only check"
+                     (show callee) wrong)
+                (callee = Some wrong)) ;
+          Batch.check b
+            ~msg:
+              (Printf.sprintf
+                 "L: from_a -> Linca.Api.Inner.run is kind=%s, expected MUST. Degrading to \
+                  MAY_ENUMERATED with the same wrong callee must not pass this test silently \
+                  either — the comment's claim is specifically a NULL-free MUST"
+                 kind)
+            (kind = "MUST"))) ;
   Lwt.return_unit
