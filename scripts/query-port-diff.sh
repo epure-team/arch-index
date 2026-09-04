@@ -50,17 +50,26 @@
 # At the time of writing that reports: 396 comparison(s), 0 unexpected, 180 declared.
 set -u
 
+# One private scratch dir for everything this script writes, removed on exit.
+# The per-call stderr captures in run_both used the FIXED names /tmp/qp-oe and
+# /tmp/qp-ne: a fixed name in a world-writable directory is symlink-preemptable
+# (a symlink planted at /tmp/qp-oe redirects the truncating `>` into whatever it
+# points at, under this script's uid), and two concurrent runs silently clobber
+# each other's captures. Same class as the fixed scratch names review removed
+# from scripts/callgraph-diff.sh.
+TMPD="$(mktemp -d)"
+trap 'rm -rf "$TMPD"' EXIT
+
 if [ "${1:-}" = "--from-rev" ]; then
   shift
   REV="${1:?--from-rev needs a git revision that still contains the bash arch-query}"; shift
-  OLD="$(mktemp)"
+  OLD="$TMPD/arch-query.old"
   git show "$REV:arch-query" > "$OLD" \
     || { echo "query-port-diff: $REV has no arch-query at the repo root" >&2; exit 2; }
   grep -q 'q()    { sqlite3 -box "\$DB" "\$1"; }' "$OLD" \
     || { echo "query-port-diff: $REV:arch-query does not have the expected q() line — the patch below would silently not apply" >&2; exit 2; }
   sed -i 's|q()    { sqlite3 -box "\$DB" "\$1"; }|q()    { sqlite3 "-${ARCH_QUERY_FORMAT:-box}" "$DB" "$1"; }|' "$OLD"
   chmod +x "$OLD"
-  trap 'rm -f "$OLD"' EXIT
   echo "query-port-diff: oracle = $REV:arch-query + the documented ARCH_QUERY_FORMAT patch"
 else
   OLD="${1:?usage: query-port-diff.sh [--from-rev <sha>] <old> <new> <db>...}"; shift
@@ -106,8 +115,8 @@ expect_diff() { # $1=db, rest=args -> 0 if this pair is an expected divergence
 run_both() { # $1=db, rest=args
   local db="$1"; shift
   local oo no oc nc
-  oo=$("$OLD" "$db" "$@" 2>/tmp/qp-oe); oc=$?
-  no=$("$NEW" "$db" "$@" 2>/tmp/qp-ne); nc=$?
+  oo=$("$OLD" "$db" "$@" 2>"$TMPD/qp-oe"); oc=$?
+  no=$("$NEW" "$db" "$@" 2>"$TMPD/qp-ne"); nc=$?
   checked=$((checked+1))
   if expect_diff "$db" "$@"; then
     if [ "$oo" != "$no" ] || [ "$oc" != "$nc" ]; then expected=$((expected+1)); fi
