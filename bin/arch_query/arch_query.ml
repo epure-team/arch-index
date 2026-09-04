@@ -544,28 +544,50 @@ let () =
             let cov =
               Arch_db.rows t
                 ~params_ty:Arch_db.Ty.(t3 string string string)
-                ~shape:Arch_db.Rows.i_i_i
-                ~to_cells:(fun (a, b, c) ->
-                  [ Arch_db.int_cell a; Arch_db.int_cell b; Arch_db.int_cell c ])
+                ~shape:Arch_db.Ty.(t2 (t3 (option int) (option int) (option int))
+                                     (t2 (option int) (option int)))
+                ~to_cells:(fun ((a, b, c), (d, e)) ->
+                  List.map Arch_db.int_cell [ a; b; c; d; e ])
                 (ctes
                 ^ "SELECT (SELECT count(*) FROM reach),\n\
                   \       (SELECT count(*) FROM calls c JOIN reach r ON c.caller_id=r.id \
                    WHERE c.callee_id IS NULL),\n\
                   \       (SELECT count(*) FROM calls c JOIN reach r ON c.caller_id=r.id \
-                   WHERE c.kind='MAY_TOP')")
+                   WHERE c.kind='MAY_TOP'),\n\
+                  \       (SELECT count(*) FROM modules),\n\
+                  \       (SELECT count(*) FROM functions)")
                 (path_pat, root_name, root_name)
             in
             let cov_cells = match cov with r :: _ -> List.map Arch_db.string_of_cell r | [] -> [] in
+            (* The SCOPE line answers "on what did you answer this?".
+
+               Without it the same command prints 241 origins or 145 for the
+               same root, depending only on which corpus was indexed, with
+               nothing in the output to explain the difference — and someone
+               comparing two runs would read a corpus change as a regression.
+               (Measured: rooted identically, proto_alpha alone reaches 241
+               nodes and 12 origins; the whole Octez src tree reaches 145 and 9,
+               because 28-32 copies of every protocol module make the resolver
+               correctly refuse and emit ⊤.)
+
+               It is the same gesture as the coverage line one level out: that
+               one states what was unreachable INSIDE the index, this one states
+               which index. A number is only comparable against another number
+               taken over the same universe. *)
             let cov_text =
               match cov_cells with
-              | [ n; u; top ] ->
+              | [ n; u; top; m; f ] ->
                   Printf.sprintf
-                    "coverage: %s nodes reached · %s edges unresolved · %s ⊤ — LOWER BOUND \
+                    "scope: %s modules · %s functions indexed\n\
+                     coverage: %s nodes reached · %s edges unresolved · %s ⊤ — LOWER BOUND \
                      (the closure stops at every unresolved edge)"
-                    n u top
+                    m f n u top
               | _ -> "coverage: unavailable"
             in
-            preamble ~h:[ "coverage" ] ~cells:cov_cells ~text:cov_text ;
+            preamble
+              ~h:[ "nodes_reached"; "edges_unresolved"; "top_edges"; "modules_indexed";
+                   "functions_indexed" ]
+              ~cells:cov_cells ~text:cov_text ;
             q ~h:[ "function"; "site"; "form"; "exn"; "reach" ]
               ~shape:Arch_db.Rows.t5' ~cells:Arch_db.Rows.c5
               ~pty:Arch_db.Ty.(t3 string string string)
