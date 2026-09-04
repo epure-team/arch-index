@@ -257,6 +257,20 @@ val run_lsp_multi :
   unit ->
   (unit, string) Stdlib.result
 
+(** [compute_registry_gaps ~stored_module_paths ~known_unit_names ~paths_of_unit]
+    is the set of paths in [stored_module_paths] that no unit in
+    [known_unit_names] registers via [paths_of_unit] — the roadmap 1.6 R3
+    detector, extracted as a pure function so a test can fault-inject a
+    synthetic registry without indexing a real project (a real one can never
+    produce a genuine gap here, by construction — see the comment at its
+    definition and {!run}'s registry-gap paragraph). Exposed narrowly for
+    exactly that purpose, mirroring {!Db} above. *)
+val compute_registry_gaps :
+  stored_module_paths:string list ->
+  known_unit_names:string list ->
+  paths_of_unit:(string -> string list) ->
+  string list
+
 (** Current schema version, ["<major>.<minor>"] — what
     [comment_db_meta.schema_version] is stamped with by every run above.
     History and the table/column set each version added:
