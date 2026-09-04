@@ -22,9 +22,20 @@ let run build_dir db_path schema_path errors_config errors_profile errors_strict
      exit 0. A summary that overstates what it stored is worse than a crash:
      every consumer downstream believes it. *)
   if result.Arch_index.n_statement_failures > 0 then (
+    (* The counts above used to be described here as "ATTEMPTS, not stored
+       rows". That was true of the six [incr]-kept counters and is no longer
+       true of any of them: every number [Arch_index.run] reports is now a
+       COUNT over the table it names, taken after the writing transaction
+       committed (tezt/tests/reported_counts_are_row_counts.ml pins that).
+       Saying otherwise told a reader to distrust the one number that is
+       reliable, and to look for the loss in the wrong place — the counts are
+       accurate, the DATABASE is short of what the source contains, and the
+       per-table breakdown below is where the missing rows are named. *)
     Printf.eprintf
-      "ERROR: %d statement(s) failed during indexing. The counts above are \
-       ATTEMPTS, not stored rows — the database is incomplete.\n%!"
+      "ERROR: %d statement(s) failed during indexing. The counts above are the \
+       rows actually stored — the database is incomplete relative to the \
+       sources scanned.\n\
+       %!"
       result.Arch_index.n_statement_failures ;
     (* Name the destination tables. "437 statements failed" does not say
        whether the run lost type usages (a metric input) or calls (a graph

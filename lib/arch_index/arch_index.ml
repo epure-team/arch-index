@@ -225,6 +225,27 @@ let compute_registry_gaps ~stored_module_paths ~known_unit_names ~paths_of_unit 
     known_unit_names ;
   List.filter (fun path -> not (Hashtbl.mem registered_paths path)) stored_module_paths
 
+(* Every number [run] reports is read by its callers as a count of rows in a
+   table — épure's [test_indexer_accuracy] literally compares them against
+   COUNT queries, and [bin/arch_callgraph_ocaml] prints them as what was
+   indexed. A tally kept by [incr] is only ever an approximation of that: it
+   counts the events the producer BELIEVES it caused, and [exec_stmt] returns
+   normally on a refused row, so a rejection leaves the tally one ahead of the
+   table with no signal on any per-counter channel. The counters that were
+   already honest ([n_modules] and friends) were honest for exactly one reason
+   — they asked the database. This makes that the rule rather than the
+   exception: a number reported as a row count IS a row count, measured after
+   the transaction that wrote the rows has committed.
+
+   Safe because [run] unconditionally DROPs every producer-written table before
+   recreating the schema (see [Arch_index_support.schema_tables_to_drop] at the
+   [DROP TABLE] loop above), so these tables hold this run's rows and nothing
+   else. That is the same premise [n_modules] already rests on. *)
+let count_rows db sql =
+  let n = ref 0 in
+  ignore (Sqlite3.exec_not_null db ~cb:(fun row _h -> n := int_of_string row.(0)) sql) ;
+  !n
+
 let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors_profile
     ?(errors_strict = false) ~build_dir () =
   (* Reset global state for re-entrancy *)
@@ -575,9 +596,6 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
 
   (* Process all .cmt files inside a transaction *)
   exec_exn db "BEGIN TRANSACTION" ;
-  let n_modules = ref 0 in
-  let n_functions = ref 0 in
-  let n_types = ref 0 in
   let all_pending_calls = ref [] in
   let all_pending_deps = ref [] in
   let all_pending_type_usages = ref [] in
@@ -721,9 +739,6 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
     "Resolving %d pending calls...\n%!"
     (List.length !all_pending_calls) ;
   exec_exn db "BEGIN TRANSACTION" ;
-  let n_calls = ref 0 in
-  let n_resolved = ref 0 in
-  let n_dead_sites = ref 0 in
   let fn_lookup = Hashtbl.create 1024 in
   ignore
     (Sqlite3.exec_not_null
@@ -1379,7 +1394,7 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
                    callee may or may not invoke it), never MUST — conditional or
                    not, the candidate set is the same. *)
                 match resolve_local n with
-                | Some id -> incr n_resolved ; (Some id, n, "MAY_ENUMERATED", None)
+                | Some id -> (Some id, n, "MAY_ENUMERATED", None)
                 | None ->
                     (* A dropped candidate is not an enumerated one: its body is
                        unknown, so the honest kind is ⊤. *)
@@ -1388,7 +1403,6 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
             | Arch_index_cmt.Head_local n -> (
                 match resolve_local n with
                 | Some id ->
-                    incr n_resolved ;
                     (Some id, n, (if demoted then "MAY_ENUMERATED" else "MUST"), None)
                 | None ->
                     (* FIX (review, HIGH): this branch (a same-module name
@@ -1408,7 +1422,7 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
                 match mod_opt with
                 | None -> (
                     match resolve_local n with
-                    | Some id -> incr n_resolved ; (Some id, n, kind, None)
+                    | Some id -> (Some id, n, kind, None)
                     | None ->
                         if dropped_local n then (None, n, "MAY_TOP", Some "dropped_node")
                         else
@@ -1418,9 +1432,7 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
                             (if demoted then None else Some "callback_param") ))
                 | Some mod_name -> (
                     match resolve_qualified_unit mod_name n with
-                    | `Resolved id ->
-                        incr n_resolved ;
-                        (Some id, display_name, kind, None)
+                    | `Resolved id -> (Some id, display_name, kind, None)
                     | `Ambiguous ->
                         (* The reference names units that ARE in this index and
                            more than one distinct function answers to it. ⊤ —
@@ -1499,14 +1511,18 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
           (* R2: the call sits in a block unreachable from its function's CFG
              entry, so it can never execute. Recorded with its location — that
              is what makes the finding actionable. *)
+          (* [n_dead_sites] used to be incremented here. It was write-only:
+             declared, incremented, and dereferenced nowhere — not printed, not
+             in the result record, not exported. A counter no one can read
+             cannot be wrong, but it also cannot be right, and leaving it in
+             place invites a future reader to report it. [dead_code_sites] is a
+             real table; whoever needs the number should COUNT it. *)
           if call.dead then begin
             Arch_index_db.bind_int stmt_dead 1 caller_id ;
             Arch_index_db.bind_text stmt_dead 2 call.call_site ;
             Arch_index_db.bind_text stmt_dead 3 callee_display_name ;
-            Arch_index_db.exec_stmt db ~what:"dead_code_sites" stmt_dead ;
-            incr n_dead_sites
-          end ;
-          incr n_calls)
+            Arch_index_db.exec_stmt db ~what:"dead_code_sites" stmt_dead
+          end)
     !all_pending_calls ;
   (* Every emitted edge now carries a valid kind (MUST | MAY_ENUMERATED | MAY_TOP), so this
      backend satisfies the ⊤-marking contract — but ONLY stamp the flag when a
@@ -1547,18 +1563,26 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
    Arch_index_db.bind_text stmt_contract 2 error_contract ;
    Arch_index_db.exec_stmt db ~what:"comment_db_meta" stmt_contract ;
    ignore (Sqlite3.finalize stmt_contract)) ;
+  (* After COMMIT, so these read the rows that are actually there. "Resolved"
+     is not a separate event from writing the row: [callee_id] is non-NULL in
+     exactly the rows whose head resolved to a known function, which is why the
+     column can answer the question the old [incr] answered — and why the
+     [resolved <= total] bound now holds by construction, a filtered COUNT over
+     the same table being at most the unfiltered one. *)
+  let n_calls = count_rows db "SELECT COUNT(*) FROM calls" in
+  let n_calls_resolved =
+    count_rows db "SELECT COUNT(*) FROM calls WHERE callee_id IS NOT NULL"
+  in
   Arch_io.printf
     "Inserted %d calls (%d resolved to known functions)\n%!"
-    !n_calls
-    !n_resolved ;
+    n_calls
+    n_calls_resolved ;
 
   (* Resolve and insert module dependencies *)
   Arch_io.printf
     "Resolving %d module dependencies...\n%!"
     (List.length !all_pending_deps) ;
   exec_exn db "BEGIN TRANSACTION" ;
-  let n_deps = ref 0 in
-  let n_deps_resolved = ref 0 in
   let mod_path_to_id = Hashtbl.create 128 in
   ignore
     (Sqlite3.exec_not_null
@@ -1578,19 +1602,12 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
       | Some source_id ->
           let target_id =
             match Hashtbl.find_opt mod_path_to_id dep.target_path with
-            | Some id ->
-                incr n_deps_resolved ;
-                Some id
+            | Some _ as found -> found
             | None -> (
                 let parts = String.split_on_char '.' dep.target_path in
                 let name = List.hd (List.rev parts) in
                 match Hashtbl.find_opt mod_name_to_path name with
-                | Some path -> (
-                    match Hashtbl.find_opt mod_path_to_id path with
-                    | Some id ->
-                        incr n_deps_resolved ;
-                        Some id
-                    | None -> None)
+                | Some path -> Hashtbl.find_opt mod_path_to_id path
                 | None -> None)
           in
           insert_module_dep
@@ -1601,22 +1618,25 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
             ~target_path:dep.target_path
             ~dep_kind:dep.dep_kind
             ~alias_name:dep.alias_name
-            ~line_number:dep.line_number ;
-          incr n_deps)
+            ~line_number:dep.line_number)
     !all_pending_deps ;
   exec_exn db "COMMIT" ;
+  (* Same shape as the calls counters: [target_module] is non-NULL in exactly
+     the rows whose target path resolved to an indexed module. *)
+  let n_deps = count_rows db "SELECT COUNT(*) FROM module_deps" in
+  let n_deps_resolved =
+    count_rows db "SELECT COUNT(*) FROM module_deps WHERE target_module IS NOT NULL"
+  in
   Arch_io.printf
     "Inserted %d module deps (%d resolved to known modules)\n%!"
-    !n_deps
-    !n_deps_resolved ;
+    n_deps
+    n_deps_resolved ;
 
   (* Resolve and insert type usages *)
   Arch_io.printf
     "Resolving %d type usages...\n%!"
     (List.length !all_pending_type_usages) ;
   exec_exn db "BEGIN TRANSACTION" ;
-  let n_type_usages = ref 0 in
-  let n_type_usages_resolved = ref 0 in
   let type_lookup = Hashtbl.create 256 in
   ignore
     (Sqlite3.exec_not_null
@@ -1653,13 +1673,7 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
             (mod_name, name)
         | None -> ("", usage.type_path)
       in
-      let type_id =
-        match Hashtbl.find_opt type_lookup (mod_name, type_name) with
-        | Some id ->
-            incr n_type_usages_resolved ;
-            Some id
-        | None -> None
-      in
+      let type_id = Hashtbl.find_opt type_lookup (mod_name, type_name) in
       insert_type_usage
         db
         stmt_type_usage
@@ -1667,48 +1681,38 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
         ~type_id
         ~type_name:usage.type_path
         ~usage_role:usage.usage_role
-        ~position:usage.position ;
-      incr n_type_usages)
+        ~position:usage.position)
     !all_pending_type_usages ;
   exec_exn db "COMMIT" ;
+  (* The counter that started this: [type_usage] is the one table a real corpus
+     is known to have rows refused from (a dangling [function_id] fails the
+     foreign key, [exec_stmt] reports it to stderr and returns), so the old
+     [incr] over-reported by exactly the number of refusals — épure's
+     [test_indexer_accuracy] compares this against its own COUNT and failed by
+     3. Asking the same question the consumer asks removes the discrepancy at
+     the source rather than tracking it. *)
+  let n_type_usages = count_rows db "SELECT COUNT(*) FROM type_usage" in
+  let n_type_usages_resolved =
+    count_rows db "SELECT COUNT(*) FROM type_usage WHERE type_id IS NOT NULL"
+  in
   Arch_io.printf
     "Inserted %d type usages (%d resolved to known types)\n%!"
-    !n_type_usages
-    !n_type_usages_resolved ;
+    n_type_usages
+    n_type_usages_resolved ;
 
-  (* Count results *)
-  ignore
-    (Sqlite3.exec_not_null
-       db
-       ~cb:(fun row _h -> n_modules := int_of_string row.(0))
-       "SELECT COUNT(*) FROM modules") ;
-  ignore
-    (Sqlite3.exec_not_null
-       db
-       ~cb:(fun row _h -> n_functions := int_of_string row.(0))
-       "SELECT COUNT(*) FROM functions") ;
-  ignore
-    (Sqlite3.exec_not_null
-       db
-       ~cb:(fun row _h -> n_types := int_of_string row.(0))
-       "SELECT COUNT(*) FROM types") ;
+  (* Count results. These five were always row counts; the six above are now
+     the same shape, so every number this function reports is measured the same
+     way and none of them can drift from the table it names. *)
+  let n_modules = count_rows db "SELECT COUNT(*) FROM modules" in
+  let n_functions = count_rows db "SELECT COUNT(*) FROM functions" in
+  let n_types = count_rows db "SELECT COUNT(*) FROM types" in
 
   (* Restore intents *)
   Arch_index_support.restore_intents db backup ;
 
   (* Summary *)
-  let n_fields = ref 0 in
-  let n_ctors = ref 0 in
-  ignore
-    (Sqlite3.exec_not_null
-       db
-       ~cb:(fun row _h -> n_fields := int_of_string row.(0))
-       "SELECT COUNT(*) FROM type_fields") ;
-  ignore
-    (Sqlite3.exec_not_null
-       db
-       ~cb:(fun row _h -> n_ctors := int_of_string row.(0))
-       "SELECT COUNT(*) FROM type_constructors") ;
+  let n_fields = count_rows db "SELECT COUNT(*) FROM type_fields" in
+  let n_ctors = count_rows db "SELECT COUNT(*) FROM type_constructors" in
   Arch_io.printf
     "\n\
      Done! Indexed:\n\
@@ -1719,33 +1723,33 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
     \  %d module deps (%d resolved)\n\
     \  %d type usages (%d resolved)\n\
      Database: %s\n"
-    !n_modules
-    !n_functions
-    !n_types
-    !n_fields
-    !n_ctors
-    !n_calls
-    !n_resolved
-    !n_deps
-    !n_deps_resolved
-    !n_type_usages
-    !n_type_usages_resolved
+    n_modules
+    n_functions
+    n_types
+    n_fields
+    n_ctors
+    n_calls
+    n_calls_resolved
+    n_deps
+    n_deps_resolved
+    n_type_usages
+    n_type_usages_resolved
     db_path ;
 
   ignore (Sqlite3.db_close db) ;
 
   {
-    n_modules = !n_modules;
-    n_functions = !n_functions;
-    n_types = !n_types;
-    n_fields = !n_fields;
-    n_constructors = !n_ctors;
-    n_calls = !n_calls;
-    n_calls_resolved = !n_resolved;
-    n_deps = !n_deps;
-    n_deps_resolved = !n_deps_resolved;
-    n_type_usages = !n_type_usages;
-    n_type_usages_resolved = !n_type_usages_resolved;
+    n_modules;
+    n_functions;
+    n_types;
+    n_fields;
+    n_constructors = n_ctors;
+    n_calls;
+    n_calls_resolved;
+    n_deps;
+    n_deps_resolved;
+    n_type_usages;
+    n_type_usages_resolved;
     n_statement_failures = Arch_index_db.statement_failures ();
     rejections_by_table = Arch_index_db.rejections_by_table ();
     db_path;

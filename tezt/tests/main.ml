@@ -76,6 +76,7 @@ let () =
   Callgraph_soundness.register () ;
   Shadowed_definitions.register () ;
   Reported_equals_stored.register () ;
+  Reported_counts_are_row_counts.register () ;
   Effects.register_ocaml () ;
   Effects.register_go () ;
   Effects.register_rust_contract () ;
