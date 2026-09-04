@@ -95,6 +95,8 @@ let () =
   Qualified_library_scoping.register () ;
   Qualified_library_scoping.register_unwrapped_residual () ;
   Qualified_library_scoping.register_reexport_facade () ;
+  Qualified_library_scoping.register_include_homonym () ;
+  Qualified_library_scoping.register_unlinked_residual () ;
   Must_null_ceiling.register () ;
   Query_limits.register () ;
   Exn_raise_sets.register () ;

@@ -400,3 +400,154 @@ let register_reexport_facade () =
                      kind)
                 (kind = "MUST"))) ;
   Lwt.return_unit
+
+(* ------------------------------------------------------------------ *)
+(* S8 — the two shapes adversarial review found the facade tier opened  *)
+(* ------------------------------------------------------------------ *)
+
+(* Scenario E — the homonym whose definition arrives through [include].
+
+   Scenario A passes only because both [api.ml] files define [run], which
+   forces the prefix tier to answer. Move the definition behind an [include]
+   and the prefix tier reaches ZERO function ids for [Liba.Api.run] — the unit
+   is right there and indexed, only the row is elsewhere. The first version of
+   the facade tier fell back on exactly that condition and handed the reference
+   to the OTHER library:
+
+     Liba.Api.run  ->  libb/api.ml:run   MUST
+
+   which is scenario A verbatim with one word changed. The gate is therefore on
+   UNIT evidence, not function evidence: when the DEEPEST reading names an
+   indexed unit, the reference has located its unit and a missing row there is
+   an external leaf or ⊤ — never another library's homonym. *)
+let inc_a_dune =
+  ( "inca/dune",
+    "(library\n (name inca)\n (modules api base_impl)\n (flags (:standard -w -a)))\n" )
+
+let inc_a_base = ("inca/base_impl.ml", "let run () : int = 1\n")
+
+(* The definition is reachable but not a row of [inca/api.ml] itself. *)
+let inc_a_api = ("inca/api.ml", "include Base_impl\n")
+
+let inc_b_dune =
+  ("incb/dune", "(library\n (name incb)\n (modules api)\n (flags (:standard -w -a)))\n")
+
+let inc_b_api = ("incb/api.ml", "let run () : int = 2\n")
+
+let inc_caller_dune =
+  ( "inccaller/dune",
+    "(library\n (name inccaller)\n (libraries inca incb)\n (modules g)\n (flags (:standard -w \
+     -a)))\n" )
+
+let inc_caller_g =
+  ("inccaller/g.ml", "let from_a () : int = Inca.Api.run ()\nlet from_b () : int = Incb.Api.run ()\n")
+
+let scenario_e_files =
+  [dune_project; inc_a_dune; inc_a_base; inc_a_api; inc_b_dune; inc_b_api;
+   inc_caller_dune; inc_caller_g]
+
+let register_include_homonym () =
+  Test.register ~__FILE__
+    ~title:"cmt: an include-defined homonym never resolves into the other library"
+    ~tags:["cmt"; "qualified_name"; "library_scoping"; "facade"]
+  @@ fun () ->
+  Batch.run (fun b ->
+      with_fixture ~name:"qual-scope-e" ~files:scenario_e_files @@ fun fixture ->
+      let db = index fixture in
+      Db.with_db db (fun conn ->
+          let wrong = fn_id conn ~mod_like:"%incb/api.ml" ~name:"run" b ~label:"E" in
+          match wrong with
+          | None -> Batch.note b "E: incb/api.ml run is not indexed at all"
+          | Some wrong ->
+              let callee, kind = single_call conn ~caller_fn:"from_a" ~label:"E" in
+              (* The whole point. Not "resolves correctly" — resolving through
+                 [include] is a separate capability this change does not claim.
+                 What must hold is that it never lands in the WRONG library. *)
+              Batch.check b
+                ~msg:
+                  (Printf.sprintf
+                     "E: from_a -> Inca.Api.run resolved to %s (kind=%s), which is incb/api.ml \
+                      run (%s) — the other library. inca/api.ml IS indexed; its [run] simply \
+                      arrives via include. A reference whose own unit is in the index must never \
+                      be handed to a homonym elsewhere, least of all as MUST"
+                     (show callee) kind wrong)
+                (callee <> Some wrong))) ;
+  Lwt.return_unit
+
+(* Scenario F — DISCLOSED RESIDUAL, pinned and NOT endorsed.
+
+   A reference rooted entirely outside the index — [Stdlib.Buffer.add_string],
+   or any library the caller does not link — still resolves to a local module
+   of the same basename, as a MUST. Scenario E's gate does not catch it: no
+   reading of [Stdlib.Buffer] names an indexed unit, so the deepest one does
+   not either, and the facade tier fires.
+
+   This behaves identically on [origin/main]: retained, not introduced. It is
+   pinned here rather than described in prose because a comment does not stop
+   the next reader taking the green for a guarantee — they will read the test
+   list, not the note. When someone closes this, this test fails and makes them
+   decide deliberately instead of believing they fixed a bug.
+
+   The fix needs LINKAGE evidence — the caller's own `.cmt` import list, which
+   is not captured today. The tempting cheap conjunct (require some prefix
+   reading to name an indexed unit) was implemented and measured: it costs 1616
+   correct resolutions on proto_alpha, because a facade library is routinely
+   not indexed at the scope being analysed. *)
+let unlinked_lib_dune =
+  ("unlmylib/dune", "(library\n (name unlmylib)\n (modules buffer)\n (flags (:standard -w -a)))\n")
+
+let unlinked_lib_buffer = ("unlmylib/buffer.ml", "let add_string (_ : int) (_ : string) = ()\n")
+
+(* Does NOT link unlmylib. Its Buffer is Stdlib's. *)
+let unlinked_user_dune =
+  ("unluser/dune", "(library\n (name unluser)\n (modules u)\n (flags (:standard -w -a)))\n")
+
+let unlinked_user_u =
+  ( "unluser/u.ml",
+    "let go () : string =\n\
+    \  let b = Buffer.create 16 in\n\
+    \  Buffer.add_string b \"x\" ;\n\
+    \  Buffer.contents b\n" )
+
+let scenario_f_files =
+  [dune_project; unlinked_lib_dune; unlinked_lib_buffer; unlinked_user_dune; unlinked_user_u]
+
+let register_unlinked_residual () =
+  Test.register ~__FILE__
+    ~title:
+      "cmt: a reference rooted outside the index still binds a local homonym — pinned, not endorsed"
+    ~tags:["cmt"; "qualified_name"; "library_scoping"; "residual"]
+  @@ fun () ->
+  Batch.run (fun b ->
+      with_fixture ~name:"qual-scope-f" ~files:scenario_f_files @@ fun fixture ->
+      let db = index fixture in
+      Db.with_db db (fun conn ->
+          let local = fn_id conn ~mod_like:"%unlmylib/buffer.ml" ~name:"add_string" b ~label:"F" in
+          match local with
+          | None -> Batch.note b "F: unlmylib/buffer.ml add_string is not indexed at all"
+          | Some local ->
+              let rows =
+                Db.rows conn
+                  "SELECT ifnull(c.callee_id, -1) FROM calls c WHERE c.callee_name = \
+                   'Stdlib.Buffer.add_string'"
+              in
+              match rows with
+              | [[id]] ->
+                  let id = Db.to_string ~sql:"F callee" id in
+                  (* Asserting the DEFECT. If this ever fails, the residual has
+                     been closed and this test is what tells you so — delete it
+                     then, deliberately, rather than discovering the change in a
+                     corpus diff six months later. *)
+                  Batch.check b
+                    ~msg:
+                      (Printf.sprintf
+                         "F: Stdlib.Buffer.add_string resolved to %s, expected the local \
+                          unlmylib/buffer.ml add_string (%s). This test pins a KNOWN DEFECT that \
+                          also reproduces on origin/main; a change here is good news but must be \
+                          deliberate — update this test and its comment together"
+                         id local)
+                    (id = local)
+              | _ ->
+                  Batch.note b "F: expected exactly one Stdlib.Buffer.add_string call row, got %d"
+                    (List.length rows))) ;
+  Lwt.return_unit

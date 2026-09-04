@@ -741,15 +741,23 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
      That failure is silent by nature, so it gets a loud counter rather than
      trust. Reported, not raised: a diagnostic that aborts indexing would turn a
      precision bug into an outage, and the number is actionable on its own. *)
+  (* Built ONCE into a set rather than re-derived per path. The obvious phrasing
+     — for each stored path, scan every known unit's path list — rebuilds
+     [known_unit_names ()] (a fold plus a sort) and re-sorts [paths_of_unit] on
+     every probe, which is O(N²·log N) in the number of modules. Measured before
+     this rewrite: 800 modules 0.109s → 0.174s, 1600 modules 0.258s → 0.662s.
+     Doubling the corpus multiplied the overhead by 6.2, so at octez scale
+     (~10k modules) a diagnostic expected to print NOTHING would have cost tens
+     of seconds. With the set it is indistinguishable from the baseline. *)
+  let registered_paths = Hashtbl.create 256 in
+  List.iter
+    (fun unit_name ->
+      List.iter
+        (fun p -> Hashtbl.replace registered_paths p ())
+        (Arch_index_cmt.paths_of_unit unit_name))
+    (Arch_index_cmt.known_unit_names ()) ;
   let registry_gaps =
-    List.filter
-      (fun path ->
-        not
-          (List.exists
-             (fun unit_name ->
-               List.mem path (Arch_index_cmt.paths_of_unit unit_name))
-             (Arch_index_cmt.known_unit_names ())))
-      !stored_module_paths
+    List.filter (fun path -> not (Hashtbl.mem registered_paths path)) !stored_module_paths
   in
   if registry_gaps <> [] then
     Arch_io.eprintf
@@ -758,15 +766,6 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
        as a MUST external leaf: %s\n"
       (List.length registry_gaps)
       (String.concat ", " registry_gaps) ;
-  (* Compilation units whose [modules] row was rejected have no path in
-     [mod_name_to_path] — the table is built from STORED rows — so they must be
-     recognised by name. Derived through the same function as the stored names
-     so the two agree by construction. *)
-  let dropped_unit_names = Hashtbl.create 8 in
-  List.iter
-    (fun path ->
-      Hashtbl.replace dropped_unit_names (module_name_of_path path) ())
-    (Arch_index_cmt.dropped_unit_paths ()) ;
   (* Roadmap 1.6 (S7, found by the proto_alpha corpus run — see the resolver
      below). A reference can reach a module through a RE-EXPORT FACADE that
      lives in a DIFFERENT library, and then the reference and the defining unit
@@ -946,6 +945,59 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
               readings
             |> List.sort_uniq compare
           in
+          (* When the facade tier may be consulted at all.
+ 
+             Review found the first version of this gate reproduced the exact
+             defect this change exists to remove. It fell back whenever the
+             prefix tier reached zero FUNCTION ids — but that also happens when
+             the prefix names precisely the right, indexed unit and only the
+             function row is missing (the definition arrives through an
+             [include], a functor application, a re-export, or its row was
+             dropped). The reference was then handed to whichever other library
+             owned a module of that basename, as a NULL-free MUST:
+ 
+               liba/api.ml = "include Base_impl"     (so no [run] row in it)
+               Liba.Api.run  ->  libb/api.ml:run  MUST
+ 
+             which is scenario A verbatim, with one word changed.
+ 
+             So the predicate is UNIT evidence, not function evidence, and it is
+             the DEEPEST reading that decides — not "some prefix names a unit",
+             which would also block the legitimate facade case, whose root
+             ([Facade], [Tezos_protocol_alpha]) is always an indexed unit:
+ 
+               deepest reading names an INDEXED unit
+                 -> the reference located its unit. A missing row there is an
+                    external leaf or ⊤, never another library's homonym.
+             WHAT THIS DOES NOT CLOSE. A reference rooted OUTSIDE the index
+             ([Stdlib.Buffer.add_string] in a project owning a [buffer.ml], or
+             any unlinked library) still resolves to the local homonym, as a
+             MUST. Identical on [origin/main] — retained, not introduced — but
+             not fixed here, and not to be read as fixed. Pinned red-side-up by
+             {!Qualified_library_scoping.register_unlinked_residual}.
+
+             The obvious extra conjunct — also require SOME prefix reading to
+             name an indexed unit — does not work, and the corpus said so
+             rather than review. It costs 1616 correct resolutions on
+             proto_alpha, because the facade library is frequently not indexed
+             at all at the scope being analysed:
+             [Tezos_protocol_alpha.Protocol.Main.acceptable_pass] legitimately
+             reaches [lib_protocol/main.ml] while NONE of the three units it
+             spells is a stored row. That phrasing was implemented, measured at
+             a plausible-looking 25116 resolved against a baseline of 26693,
+             and withdrawn.
+
+             Separating an unlinked homonym from a legitimate facade needs
+             LINKAGE evidence — the caller's own `.cmt` import list — which is
+             not captured today. A separate slice, not a conjunct guessed
+             here. *)
+          let facade_admissible mod_name name =
+            match unit_readings mod_name name with
+            | [] -> false
+            | readings ->
+                let deepest_unit, _ = List.nth readings (List.length readings - 1) in
+                Arch_index_cmt.paths_of_unit deepest_unit = []
+          in
           let resolve_qualified_unit mod_name name =
             (* Tier order matters and is not an optimisation. A prefix reading
                names the unit EXACTLY as dune spells it, so when one answers it
@@ -956,11 +1008,13 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
             match ids_of_readings (unit_readings mod_name name) with
             | [id] -> `Resolved id
             | _ :: _ :: _ -> `Ambiguous
-            | [] -> (
-                match ids_of_readings (facade_readings mod_name name) with
-                | [id] -> `Resolved id
-                | [] -> `Not_found
-                | _ -> `Ambiguous)
+            | [] ->
+                if not (facade_admissible mod_name name) then `Not_found
+                else (
+                  match ids_of_readings (facade_readings mod_name name) with
+                  | [id] -> `Resolved id
+                  | [] -> `Not_found
+                  | _ -> `Ambiguous)
           in
           (* "Not in [fn_lookup]" has two very different causes, and the
              resolver above cannot tell them apart: the callee is genuinely
@@ -991,17 +1045,16 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
           let dropped_qualified mod_name name =
             List.exists
               (fun (unit_name, residual) ->
-                let paths = Arch_index_cmt.paths_of_unit unit_name in
                 (* A whole dropped unit indexed nothing, so it has no stored
-                   path and no per-function entry — it is matched by the unit
-                   owning a dropped path, not by a function lookup. *)
+                   path and no per-function entry. It needs no separate clause:
+                   [is_dropped_node] already answers true for any path in the
+                   dropped-unit set, whatever name is asked of it. The explicit
+                   [List.mem … (dropped_unit_paths ())] this replaced was both
+                   subsumed and quadratic — a fold-and-sort re-run per path, per
+                   reading, per unresolved qualified call. *)
                 List.exists
-                  (fun p -> List.mem p (Arch_index_cmt.dropped_unit_paths ()))
-                  paths
-                || List.exists
-                     (fun p ->
-                       Arch_index_cmt.is_dropped_node ~module_path:p ~name:residual)
-                     paths)
+                  (fun p -> Arch_index_cmt.is_dropped_node ~module_path:p ~name:residual)
+                  (Arch_index_cmt.paths_of_unit unit_name))
               (unit_readings mod_name name @ facade_readings mod_name name)
           in
           let demoted = call.cond || call.partial in
