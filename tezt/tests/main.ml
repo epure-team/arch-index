@@ -86,6 +86,7 @@ let () =
   Lsp_readiness.register_silent_server () ;
   Rejection_attribution.register () ;
   Schema_drop_list.register () ;
+  Completion_markers.register () ;
   Insert_rowid_attribution.register () ;
   Dropped_node_dependents.register_dropped_function () ;
   Dropped_node_dependents.register_dropped_module () ;
