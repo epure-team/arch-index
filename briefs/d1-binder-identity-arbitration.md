@@ -90,3 +90,68 @@ figure is **116**, which also falsifies the §10.6 argument built on it ("the co
 would read zero forever" — at 116 cases they fire). D4 holds anyway, on the quantity that
 decides: a second hop reaches **50 edges out of 8318**. Right conclusion, both stated
 reasons wrong — kept by replacing the reasons rather than by defending them.
+
+---
+
+## CORRECTION, one hour later — gate 1 splits the item this brief merged
+
+The merge above ("two consumers of one producer change") is **wrong**, and the peer's
+gate-1 measurement is what falsifies it. They share the *principle* — the producer must
+carry identity, not a name — but **not the data**:
+
+- the **alias** consumer needs a module binder's identity: one field, already in the
+  walker's hand at the moment it is discarded;
+- the **functor** consumer needs the **argument**, and 34 % of arguments are inline
+  anonymous structures. Closing that means indexing those structures, which is not
+  "carry one more field".
+
+I generalised from *"both want more than a name"* to *"both want the same thing"*. The
+first is true; the second was asserted with no measurement behind it.
+
+**Gate 1, measured on proto_alpha** (3310 argument occurrences, 1450 applications):
+
+| | share |
+|---|---|
+| arguments that are inline anonymous structures | 1125 (34 %) |
+| arguments that are themselves applications | 555 (17 %) |
+| arguments that are a nameable path | ~1630 (49 %) |
+| **applications where ALL arguments are nameable** | **315 / 1450 = 21 %** |
+
+Heads were 1450/1450 recoverable; arguments come nowhere near it. And the split follows
+**functor families** rather than scattering, which is the useful part — it can be written
+as a scope decision that stays true, instead of a percentage to re-measure per corpus:
+
+| always fully nameable | never fully nameable |
+|---|---|
+| `Map.Make`, `Set.Make`, `Path_encoding.Make_hex`, `TzPervasives.Map.Make`, `Skip_list.Make` | every `Indexed_context.Make_*`, `Bond_id_index.Make_carbonated_map` |
+
+**The storage functors are entirely in the right-hand column**, because each takes an
+inline `struct let name = [...] end` as its naming argument. So head+args covers 21 % of
+applications and **none** of the ones blocking the crash question — `storage_functors.ml`'s
+7 `assert false` stay unreachable by this route.
+
+### Revised decision
+
+- **D1 proceeds alone, for the alias consumer only.** SA-1 closes with binder identity,
+  independently of anything about functor applications. Merging held the cheap item
+  hostage to the expensive one — the opposite of the intent.
+- **The functor tier is a separate item, repriced**: head-only 5.2 %; head+args 21 % of
+  applications and 0 % of the named targets. Scope it by family ("container functors yes,
+  storage functors no"), not by percentage.
+- **Gates 2 and 3 are deferred** — they gate an item that just moved down the queue.
+- **Gate 3 is answered as a rule, not a measurement**: when one body is reachable from
+  several instantiations and the call site's qualified name pins none, the answer is **⊤,
+  never a pick**. That is [[ambiguity-is-absence-of-proof]] and it is not arbitrable; the
+  measurement only prices it — how much of the 21 % survives.
+
+### A third instance of the same family, from the same probe
+
+The peer's first gate-1 build **failed** while their command printed `BUILD=0`, because
+`head` in the pipeline masked the exit status — the `pipefail` defect they themselves
+reported on PR #61, turned on their own probe. Fixed with `PIPESTATUS`.
+
+That completes the family observed in this session: a **mutant that fails to build reports
+green**; a **tier never reached reports zero**; a **probe whose status is masked reports
+success**. All three are the same shape — *the output does not distinguish "it worked"
+from "it never ran"* — and all three close by counting what was **reached**, not what was
+found.
