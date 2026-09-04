@@ -372,33 +372,50 @@ let register_unwrapped_residual () =
                 (reason = "ambiguous_unit"))) ;
   Lwt.return_unit
 
-(* Scenario M — DISCLOSED RESIDUAL, shape (c): a leak in the PREFIX tier
-   itself, found by round-5 review probing scenario C's boundary.
+(* Scenario M — a GUARANTEE, and it did not start as one.
 
-   Scenario C's ⊤ outcome holds only because BOTH [(wrapped false)] [api.ml]
-   files define [run] DIRECTLY, so the function table finds two ids and FR-003
-   degrades honestly. Move one definition behind an [include] and that
-   mechanism cannot fire:
+   Round 5 found this shape as a leak in the PREFIX tier itself, and pinned it
+   here as a disclosed residual. Round 6 then measured something worse: for
+   this class the branch did not merely retain main's defect, it INTRODUCED
+   one — main emitted an honest unresolved leaf where the branch bound the
+   wrong library. So it was closed rather than disclosed a fourth time
+   (6e7b429), and this scenario now asserts the guarantee.
+
+   The shape. Scenario C's ⊤ outcome holds only because BOTH [(wrapped false)]
+   [api.ml] files define [run] DIRECTLY, so the function table finds two ids
+   and FR-003 degrades honestly. Move one definition behind an [include] and
+   that mechanism cannot fire:
 
      wa/api.ml (wrapped false) = "include Base_impl"   (no [run] row of its own)
-     wb/api.ml (wrapped false) = "let run () = …"       (the truth, wrong library)
+     wb/api.ml (wrapped false) = "let run () = …"       (a homonym, wrong library)
      caller links wa ONLY and writes Api.run
 
-   For (wrapped false), [paths_of_unit "Api"] returns BOTH [wa/api.ml] and
-   [wb/api.ml] — unit-keying cannot separate them, same as scenario C. But the
-   function table now finds a row at only ONE of those paths ([wb/api.ml]), so
-   [ids_of_readings] collapses to exactly one id and [resolve_qualified_unit]
-   answers [`Resolved] from the PREFIX tier, BEFORE the facade tier or its
-   anchor gate is ever consulted — a NULL-free MUST into a library the caller
-   does not even link. This is NOT the same hole as (a)/(b): those leak below
-   an anchor the facade tier consults; here there is no facade-tier step to
-   gate at all, because the prefix tier itself was fooled.
+   [paths_of_unit "Api"] returns BOTH paths — unit-keying cannot separate them,
+   exactly as in C. Before the fix the function table found a row at only ONE
+   of them, [ids_of_readings] collapsed to a single id, and
+   [resolve_qualified_unit] answered [`Resolved] from the PREFIX tier before
+   the facade tier or its anchor gate was ever consulted: a NULL-free MUST into
+   a library the caller does not link. Not the same hole as residuals (a)/(b),
+   which leak BELOW an anchor the facade tier consults — here the prefix tier
+   itself was fooled, so there was no facade step to gate.
 
-   Identical on [origin/main] — retained, not introduced. Measured incidence
-   is ZERO: no [(wrapped false)] library collides with another across
-   arch-index (88 units), octez-manager (353) or proto_alpha (468), so this is
-   a disclosure defect, not a corpus regression — pinned here so it is not
-   discovered later as a surprise. *)
+   Nor was the precondition what the disclosure said. It read "two
+   [(wrapped false)] libraries", but the mechanism is any two units sharing a
+   name, and a bare unit name comes from a [(wrapped false)] module OR from a
+   wrapped library's MAIN MODULE — much the commoner case. A reader applying
+   the stated precondition to their own project would have concluded they were
+   safe.
+
+   The fix: a unit name mapping to SEVERAL paths is
+   answerable-but-not-decidable. One row among several candidate paths is the
+   ABSENCE of evidence in the others, not proof — so the reference degrades to
+   ⊤ with [top_reason = "ambiguous_unit"] and no callee. Corpus cost measured
+   at ZERO on all three corpora (arch-index 88 units, octez-manager 353,
+   proto_alpha 468 — no unit name maps to more than one path on any of them),
+   which is what made closing it cheaper than disclosing it again.
+
+   Verified RED against main's producer, so this is a new guarantee and not a
+   restatement of behaviour main already had. *)
 let m_a_dune =
   ("wa/dune", "(library\n (name wa)\n (wrapped false)\n (modules api base_impl)\n (flags (:standard -w -a)))\n")
 
