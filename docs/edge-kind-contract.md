@@ -5,8 +5,17 @@ arch-index tags every `calls` row with a `kind` value that encodes what is stati
 | `calls.kind` | Meaning | Use |
 |---|---|---|
 | `MUST` | Uniquely-resolved static call that runs on **every** execution of the caller (dominance: its CFG block post-dominates the entry) | `reaches` (a positive path = must-reach ground truth) |
-| `MAY_ENUMERATED` | Call bounded to a **known candidate set** — a conditional call to a resolved callee (candidate set of one), a callback/lambda passed by value, or a CHA interface set | Over-approx closure for `unreachable` (can prove UNREACHABLE) |
+| `MAY_ENUMERATED` | Target bounded to a **known candidate set** — a conditional call to a resolved callee (candidate set of one), a callback/lambda passed by value, a CHA interface set, or (OCaml, schema `1.10`) a **point-free value alias** `let f = M.g`, which is a *binding*, not a call site | Over-approx closure for `unreachable` (can prove UNREACHABLE) |
 | `MAY_TOP` | Genuinely **unknowable** target — computed head, parameter call, dynamic module root, reflection/cgo, over-application residual | Forces `UNKNOWN`; never silently dropped |
+
+**`MAY_ENUMERATED` bounds the target, it does not assert that a call site exists.** Since schema
+`1.10` the set includes one member where no call happens at all: a point-free value alias
+(`let f = M.g`), whose row carries `edge_form = 'value_alias'` — see
+[`specs/point-free-aliases.md`](../specs/point-free-aliases.md). Effect and reachability
+consumers are right to traverse it (the alias genuinely forwards `M.g`'s body), but a consumer
+counting **call sites** or **callers** must exclude it, and the three that do are `fan-in`,
+`god-modules` and `callers-of`. `edge_form IS NULL` is the predicate; the column is nullable and
+absent on a pre-`1.10` database, so gate on `Arch_db.has_col` rather than assuming it.
 
 When a backend produces a ⊤-marked index it sets `callgraph_contract = v1` in `comment_db_meta`. Backends that cannot tag edges must not produce a DB at all — the loader aborts on missing or invalid `kind` values (exit 2) to prevent a silent false-confidence index.
 
@@ -36,7 +45,7 @@ the stamp rather than answering emptily.
 | Backend | Edge kinds | Notes |
 |---|---|---|
 | Go SSA (`callgraph-go` → `arch-load`) | ✅ execution-sound | A statically-resolved call (`StaticCallee() != nil`) is `MUST` only if its SSA basic block **post-dominates the function entry** (runs on every execution); a call in an `if`/`switch`/`select`/loop block is demoted to `MAY_ENUMERATED` (candidate set of one). CHA candidate set → `MAY_ENUMERATED`; interface/closure/reflection/cgo (incl. in-package `_Cfunc_*` wrappers) → `MAY_TOP`. Output is emitted in deterministic sorted order. |
-| OCaml CMT (`arch-callgraph-ocaml`) | ✅ execution-sound | Each function body — and each promoted lambda — is lowered to a real per-node **CFG** (`arch_index_cfg.ml`); a call is `MUST` iff its block post-dominates the node's entry AND the head resolves uniquely AND the application is saturated. Conditional/partial calls to resolved callees → `MAY_ENUMERATED`; unknowable targets → `MAY_TOP`. Resolution is `Ident`-stamp-based (shadows never forge a `MUST`). |
+| OCaml CMT (`arch-callgraph-ocaml`) | ✅ execution-sound | Each function body — and each promoted lambda — is lowered to a real per-node **CFG** (`arch_index_cfg.ml`); a call is `MUST` iff its block post-dominates the node's entry AND the head resolves uniquely AND the application is saturated. Conditional/partial calls to resolved callees → `MAY_ENUMERATED`; unknowable targets → `MAY_TOP`. A **point-free value alias** (`let f = M.g`, a bare arrow-typed `Texp_ident` RHS) also emits `MAY_ENUMERATED`, marked `edge_form = 'value_alias'`: it resolves through the ordinary heads so identity is carried, and is demoted in the kind matrix (`arch_index.ml:1376-1377`) because there is no application to saturate — never `MUST`. Resolution is `Ident`-stamp-based (shadows never forge a `MUST`). |
 
 **Both backends define `MUST` as execution-sound dominance computed over a real CFG** (Go: SSA
 post-dominators; OCaml: Typedtree lowered onto a per-node CFG with an iterative post-dominance
@@ -73,9 +82,18 @@ callback bodies are precise `MUST` edges of the lambda node instead of ⊤ noise
 Occurrence edges are per-site: a saturated head invocation of a let-bound literal on an always-exec
 block → `MUST`; every other occurrence (argument, record/tuple/ref store, return, partial or
 conditional invocation) → `MAY_ENUMERATED`; a literal bound and never referenced gets **no** edge
-(honestly dead). Bindings that are not a single-literal `Tpat_var` (conditional RHS, tuple pattern,
-alias) are not tracked — calls through them stay `MAY_TOP`. `reaches` still refuses to traverse
-`MAY_ENUMERATED`, so a merely-passed callback never yields a false must-path; the win is that
+(honestly dead). This paragraph is about **`fun …`/`function` literal** bindings only: a binding is
+tracked in `local_lam_stamps` iff its pattern is a plain `Tpat_var` and its RHS is a single
+`Texp_function` literal (`arch_index_cmt.ml:1176-1183`). Bindings that are not that shape —
+a conditional RHS, a tuple pattern, or a `Tpat_alias` **pattern-alias** (`let (p as x) = fun …`) —
+are not tracked, and calls through them stay `MAY_TOP` (`top_reason = 'callback_param'`, which
+folds in this `pattern_bound` sub-case; `arch_index_cmt.ml:537-548`). *"Alias" here is the OCaml
+pattern form `p as x`, and is unrelated to `edge_form = 'value_alias'`*, which is a point-free
+**identifier** RHS (`let f = M.g`), is tracked, resolves to a `callee_id`, and is `MAY_ENUMERATED`
+rather than `MAY_TOP`. The two are different constructs that share an English word — the same
+collision `edge_form` was named to avoid (`specs/point-free-aliases.md`, C-15).
+
+`reaches` still refuses to traverse `MAY_ENUMERATED`, so a merely-passed callback never yields a false must-path; the win is that
 `unreachable` decides through callbacks and `escapes` shows only true ⊤.
 
 All cases are locked by `selftest-callgraph-soundness.sh` (run `STRICT=1` in CI).
@@ -184,7 +202,7 @@ arch-index makes call-graph reachability answerable as a SQL query. This makes i
 - **Reachability gates**: "does `paymentHandler` reach any `log_plaintext` sink?" → `reaches paymentHandler log_plaintext`. Block a PR if the answer is PATH EXISTS.
 - **Attack surface audits**: `arch-query db.sqlite exported` lists every externally-callable function. An agent can cross-reference this against an allowlist.
 - **Panic/error-exit reachability**: "is `os.Exit` reachable from `ServeHTTP`?" → `reaches ServeHTTP os.Exit`. Useful for detecting accidental shutdown paths in handlers.
-- **Variant analysis**: find all callers of a fixed function to check for siblings: `arch-query db.sqlite callers-of vulnerableHelper`.
+- **Variant analysis**: find all callers of a fixed function to check for siblings: `arch-query db.sqlite callers-of vulnerableHelper`. On a schema-`1.10` index this list **excludes re-export bindings** (`let safe = vulnerableHelper`, `edge_form = 'value_alias'`) — nothing is invoked at such a site, so it is not a caller. To see them, use `reachable-from` / `callees-of`, which are deliberately not gated, or query directly: `SELECT * FROM calls WHERE edge_form = 'value_alias' AND callee_name = 'vulnerableHelper'`.
 - **Documentation quality gate**: every function row carries a `comment_quality_score`. An agent can query `SELECT name FROM functions WHERE comment_quality_score < 50 AND exposed = 1` to find underdocumented public API.
 - **Test coverage linking**: `{tests}` sections in doc-comments are parsed and stored. An agent can verify that every exported function has at least one linked test case.
 

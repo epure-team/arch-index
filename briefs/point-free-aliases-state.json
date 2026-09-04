@@ -1,7 +1,7 @@
 {
   "task": "point-free-aliases",
   "mode": "full",
-  "current_phase": "implement",
+  "current_phase": "review",
   "events": [
     {
       "phase": "question",
@@ -38,6 +38,42 @@
       "outcome": "COMPLETED",
       "at": "2026-09-04T18:50:00Z",
       "by": "roster-implement"
+    },
+    {
+      "phase": "review",
+      "outcome": "NO_GO",
+      "at": "2026-09-04T21:30:00Z",
+      "by": "roster-review",
+      "blockers": [
+        "BLOCKER-1: the alias slice did not close under its own construct - an alias whose RHS is itself an alias binder emitted nothing, so hop2/hop3 read BOUNDED: {} beside hop1's correct set (two names for one function, contradictory raise-sets).",
+        "BLOCKER-2: calls.edge_form was added without a schema version bump, so a consumer comparing a pre- and post-feature run had nothing to refuse against while fan-in/god-modules silently answered a different number."
+      ],
+      "note": "Both fixed in the same round: FR-005c (build_local_alias_stamps, threaded into both producers) and schema 1.10 / flat 1.2."
+    },
+    {
+      "phase": "review",
+      "outcome": "CHANGES_REQUIRED",
+      "at": "2026-09-05T09:00:00Z",
+      "by": "roster-review",
+      "note": "Round 2, 'narrowly, and close to GO'. Both blockers confirmed fixed and could not break the shipped route - no fabricated MUST across 23 adversarial shapes, two real corpora (5482 alias edges), a 500-hop chain, or eleven mutants. Explicitly: nothing in the CODE needs to change. Every finding is documentation, spec text, or one ledger file.",
+      "findings": [
+        "MEDIUM-1: docs/edge-kind-contract.md contradicts the producer - MAY_ENUMERATED defined as three call forms, the OCaml row silent on aliases, and line 76's 'alias' ambiguous.",
+        "MEDIUM-2: specs/point-free-aliases.md's Scope says multi-hop chains cannot resolve ('single pass'), contradicting FR-005c and the shipped behaviour; briefs/point-free-aliases-reviewer.md repeats it.",
+        "MEDIUM-3: callers-of is the documented variant-analysis entry point and the exclusion silently narrows it - undocumented in README.md:59 and docs/edge-kind-contract.md:187.",
+        "MEDIUM-5: the residual's '45 -> 45, so the convention predates it' conflates the convention with the rows; the two corpora invert.",
+        "LOW-1: the 1.10 version-history row is orphaned from its table by a blank line at docs/schema.md:271.",
+        "LOW-2: flat-schema edge_form had zero coverage - mutant M10 was the only survivor of eleven.",
+        "LOW-3/4/5/6: undocumented calls columns, stale line citations, six-vs-seven comments, unnamed consumer-visible changes.",
+        "LOW-7: Arch_db.has_col returns false on query error (arch_db.ml:250) - pre-existing, now load-bearing. Deferred by instruction, not fixed here.",
+        "NOT REPRODUCED: round 1's '27 UNIQUE modules.path rejections when indexing the whole _build'. Re-measured as 90 modules / 2494 functions / 13880 calls, producer exit 0, 0 rejections. The number appears nowhere in this branch's docs or commit messages, so there was nothing to correct."
+      ]
+    },
+    {
+      "phase": "implement",
+      "outcome": "COMPLETED",
+      "at": "2026-09-05T22:30:00Z",
+      "by": "roster-implement",
+      "note": "Round-2 fix round. Documentation, spec text, one ledger file, and one test (LOW-2, flat-schema edge_form coverage, red-verified against two independent mutations). lib/ is byte-identical to 61e2572 - no implementation change. LOW-7 surfaced as a follow-up rather than fixed."
     }
   ]
 }

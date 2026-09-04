@@ -73,10 +73,10 @@ rustc/rust-analyzer, merlin/odoc) defines a first-class transitive alias relatio
 frozen documents forbid `MUST`, and the existing resolution matrix reaches the same
 answer by itself.
 
-- `docs/edge-kind-contract.md:36-40` — an OCaml `MUST` requires three conjuncts, the
+- `docs/edge-kind-contract.md:48` — an OCaml `MUST` requires three conjuncts, the
   third being *"the application is saturated"*. A `Texp_ident` RHS has **no
   application** to saturate.
-- `docs/edge-kind-contract.md:42-44` — *"Both backends define MUST as execution-sound
+- `docs/edge-kind-contract.md:50-53` — *"Both backends define MUST as execution-sound
   dominance computed over a real CFG… so a `reaches`/`unreachable` verdict means the
   same thing regardless of source language."* Emitting `MUST` for a non-call
   relationship in OCaml alone breaks that cross-language invariant.
@@ -85,19 +85,21 @@ answer by itself.
   unique resolution."* The closest textual precedent, and it rules against `MUST`.
 - Nearest internal precedent: lambda **occurrence** edges are `MAY_ENUMERATED`
   whenever the occurrence is not a saturated head invocation
-  (`docs/edge-kind-contract.md:78-82`).
+  (`docs/edge-kind-contract.md:82-84`).
 - The matrix does **not** decide it for us, and an earlier revision of this spec said it
-  did. Correction, verified: `demoted = call.cond || call.partial`
-  (`arch_index.ml:832`), and `partial` means *"under-saturated / returns-a-function →
-  body deferred"* (`arch_index_cmt.ml:535`) — a property of an **application**. A
+  did. Correction, verified: before this feature `demoted = call.cond || call.partial`
+  (`arch_index.ml:1376-1377`, where the `edge_form` disjunct was added), and `partial`
+  means *"under-saturated / returns-a-function → body deferred"*
+  (`arch_index_cmt.ml:621`) — a property of an **application**. A
   point-free alias is not an application at all, and it is not conditional, so a naively
   synthesised pending call has `demoted = false` and `Head_local`/`Head_qualified` would
-  emit **`MUST`** (`arch_index.ml:859`, `:874`). Setting `partial = true` on something
+  emit **`MUST`** (`arch_index.ml:1405`, `:1420`). Setting `partial = true` on something
   that is not an application would be a lie in the data to obtain the right answer by
   accident.
 
   The candidate mechanism was **`Head_enumerated`**, which forces `MAY_ENUMERATED`
-  unconditionally (`arch_index.ml:843`) and whose meaning fits: a bounded
+  unconditionally — its arm never consults `demoted` (`arch_index.ml:1389-1400`) — and
+  whose meaning fits: a bounded
   candidate set, here of exactly one. That is the repository's own precedent —
   `specs/cfg-postdom-dominance.md:25`: *"Demotion target for a conditional call with
   uniquely-resolved callee? MAY_ENUMERATED (candidate set of one)… MAY_TOP is reserved
@@ -152,8 +154,9 @@ miscounting this decision exists to prevent. The column is **`edge_form`**, with
 values `NULL` (an ordinary call, the default for every existing row) and
 `'value_alias'`.
 
-**Day-one reader.** `fan-in` (`arch_query.ml:357`) and `god-modules` (`:556`) MUST
-exclude `edge_form = 'value_alias'` from their counts. This is not decoration: an
+**Day-one reader.** `fan-in` (`arch_query.ml:387`) and `god-modules` (`:604`) MUST
+exclude `edge_form = 'value_alias'` from their counts — and, added in review,
+`callers-of` (`:221-243`), the command on which it matters most (FR-006). This is not decoration: an
 alias is not a call site, and a "most-called" ranking that counts re-exports as
 callers measures the façade, not the code. Naming a reader is mandatory here —
 `top_reason`/`top_anchor` are written by producers and read by **no consumer
@@ -164,11 +167,18 @@ one that was never added.
 
 **Out of scope**, explicitly:
 - Module aliases (`module N = P`) — a different object, owned by roadmap 1.6.
-- Multi-hop alias chains. Resolution is a **single pass** over pending calls, not a
-  fixpoint (confirmed), so hop 2 cannot resolve. Out of scope by mechanism, not by
-  preference.
+- ~~Multi-hop alias chains. Resolution is a **single pass** over pending calls, not a
+  fixpoint (confirmed), so hop 2 cannot resolve.~~ **Brought back in scope and shipped**
+  (FR-005c). The premise was wrong: no fixpoint is needed, because each binder emits its
+  own edge to its *immediate* predecessor, so an n-hop chain is n ordinary edges that
+  every consumer's existing graph traversal already follows. Pinned at three hops by
+  `tezt/tests/point_free_aliases.ml` (`hop1→chain_target`, `hop2→hop1`, `hop3→hop2`, all
+  `MAY_ENUMERATED` and all resolved, and the raise-set inherited at every hop); the
+  review round additionally exercised a 500-hop chain adversarially, which resolved
+  end to end. See Residuals.
 - Homonym disambiguation in verdict output. Two blocks with an identical bare label
-  and no file/line (`arch_exn.ml:500`, `arch_query.ml:837-870`) is a real defect and
+  and no file/line (`arch_exn.ml:500` `keys_of_name`, consumed at `arch_query.ml:767`
+  and `:921-925`) is a real defect and
   is not this one.
 - Non-OCaml producers.
 
@@ -374,9 +384,41 @@ the expected value by hand **before** running.
   Measured on octez-manager: of 548 `value_alias` edges, **472 resolved**, **45**
   `MAY_ENUMERATED` with `callee_id IS NULL` *and* `top_reason IS NULL`, and 31 `MAY_TOP`.
   Those 45 follow the existing `Head_qualified`/`Not_found` "enumerated leaf"
-  convention, and many are plainly in-project rather than external. They are **not**
-  new unsoundness — observable raise-sets are unchanged, and the count is identical
-  before and after this feature (45 → 45), so the convention predates it. But they are
+  convention, and many are plainly in-project rather than external.
+
+  **The convention predates this feature; these 45 rows do not.** An earlier revision of
+  this line said "the count is identical before and after this feature (45 → 45), so the
+  convention predates it", and that conflated two different things. The 45 are
+  `edge_form = 'value_alias'` rows: they could not have existed before the feature, and
+  no before/after comparison of *them* is possible. What predates the feature is the
+  **convention** they follow, and the evidence for that is the ordinary-call population
+  on the same database — 16211 non-alias enumerated leaves, against 16256 in total.
+
+  The two corpora **invert**, which is why one number is not enough. On octez-manager the
+  feature adds 45 alias leaves and the ordinary-call population is untouched. On
+  proto_alpha (measured independently by the spec's author, on the full protocol tree
+  that is not present in this worktree) the ordinary-call leaves move 20309 → 20278 while
+  the alias leaves number **115** (268 `MAY_ENUMERATED` alias edges minus 153 resolved) —
+  where octez-manager has 0 movement in the ordinary population. So "the feature adds
+  enumerated leaves" is true of one corpus and not the other, and neither corpus alone
+  characterises it.
+
+  Reproducing command (schema `1.10` database; §10.3 — the numbers above are what it
+  printed on octez-manager at `61e2572`, `480 .cmt`, `12317` functions, `59101` calls):
+
+  ```sh
+  arch-callgraph-ocaml -b <corpus>/_build/default -d /tmp/c.db -s architecture-schema.sql
+  sqlite3 /tmp/c.db "
+    SELECT 'alias_edges',            count(*) FROM calls WHERE edge_form='value_alias';
+    SELECT 'alias_resolved',         count(*) FROM calls WHERE edge_form='value_alias' AND callee_id IS NOT NULL;
+    SELECT 'alias_may_top',          count(*) FROM calls WHERE edge_form='value_alias' AND kind='MAY_TOP';
+    SELECT 'alias_enum_leaf',        count(*) FROM calls WHERE edge_form='value_alias' AND kind='MAY_ENUMERATED' AND callee_id IS NULL AND top_reason IS NULL;
+    SELECT 'enum_leaf_all',          count(*) FROM calls WHERE kind='MAY_ENUMERATED' AND callee_id IS NULL AND top_reason IS NULL;
+    SELECT 'enum_leaf_ordinary',     count(*) FROM calls WHERE kind='MAY_ENUMERATED' AND callee_id IS NULL AND top_reason IS NULL AND edge_form IS NULL;"
+  # octez-manager: 548 | 472 | 31 | 45 | 16256 | 16211
+  ```
+
+  These are **not** new unsoundness — observable raise-sets are unchanged. But they are
   edges that *look* resolved while delivering none of the propagation the feature exists
   for. Stated here rather than discovered later; fixing it means fixing the
   enumerated-leaf convention, which is not this spec's subject.
@@ -400,3 +442,21 @@ answers. Two consequences worth naming before someone meets them as a surprise:
   against the version rather than attribute the drop to the code under analysis. The
   `Arch_db.has_col` gate in `arch_query.ml` keeps an older database answering; it is a
   courtesy to old data, not a substitute for the version.
+- **Every ungated graph view gains alias edges.** `Arch_graph` loads `calls` without an
+  `edge_form` predicate (`arch_graph.ml:83`, `:91`), so its four consumers
+  (`arch-impact`, `arch-coverage`, `arch-mutants`, `arch-rules`) see the new edges, and
+  `arch-serve`'s neighbourhood endpoints (`arch_serve.ml:139-140`, the incoming query)
+  list an alias binder among a node's neighbours. This is **deliberate and not an
+  oversight**: those are *graph* views answering "what is connected to this", not
+  caller counts, and the three commands that answer "who invokes this" — `fan-in`,
+  `god-modules`, `callers-of` — are the ones gated. The distinction is the question,
+  not the table. Named here so a reader meeting an alias in an `arch-serve`
+  neighbourhood knows it is by design.
+- **`--errors-strict` sees more value paths.** Routing an alias through
+  `add_path_call` also routes it through `note_seen_value_path`
+  (`arch_index_cmt.ml:1297-1299`), which feeds the error-channels declaration-miss
+  collector. So a `.toml` path that was previously never observed — because the only
+  place it appeared was a point-free binding — is now observed, and
+  `--errors-strict`'s per-path miss report changes accordingly. The direction is
+  toward *fewer* spurious misses, but it is a change in a fatal-on-miss mode and is
+  therefore stated rather than left to be met.

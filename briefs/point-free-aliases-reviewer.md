@@ -25,7 +25,10 @@
 
 ## Known residuals — do not report as findings
 - `reaches` does not traverse alias edges (a consequence of `MAY_ENUMERATED`, tracked).
-- Multi-hop chains do not resolve (resolution is a single pass, not a fixpoint).
+- ~~Multi-hop chains do not resolve (resolution is a single pass, not a fixpoint).~~
+  **No longer a residual — chains ship and resolve** (FR-005c). No fixpoint was needed:
+  each binder emits its own edge to its immediate predecessor, so an n-hop chain is n
+  ordinary edges. A chain that fails to resolve IS a finding.
 - Arrow-type detection may under-detect on `.cmt`-restored aliased arrow types; it fails
   to today's zero-edge behaviour, the safe direction.
 - Pre-existing `MAY_TOP`/`MAY_ENUMERATED` inflation of `fan-in` — real, but out of scope.

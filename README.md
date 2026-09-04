@@ -56,7 +56,7 @@ arch-index makes call-graph reachability answerable as a SQL query:
 
 - **Reachability gates** — "does `paymentHandler` reach any `log_plaintext` sink?" → `reaches paymentHandler log_plaintext`. Block a PR if the path exists.
 - **Attack-surface audit** — `exported` lists every externally-callable function. Cross-reference against an allowlist.
-- **Variant analysis** — find all callers of a fixed function to check for unfixed siblings: `callers-of vulnerableHelper`.
+- **Variant analysis** — find all callers of a fixed function to check for unfixed siblings: `callers-of vulnerableHelper`. On a schema-`1.10` index this excludes **re-export bindings** (`let safe = vulnerableHelper`): nothing is invoked at such a site, so it is not a caller. `reachable-from` and `callees-of` still traverse them, and `SELECT * FROM calls WHERE edge_form = 'value_alias'` lists them outright. See [edge-kind contract](docs/edge-kind-contract.md).
 - **Panic / exit reachability** — "is `os.Exit` reachable from `ServeHTTP`?" Useful for detecting accidental shutdown paths in request handlers.
 - **Documentation quality** — every function row carries a `comment_quality_score` (0–100). Query `SELECT name FROM functions WHERE comment_quality_score < 50 AND exposed = 1` to surface underdocumented public API.
 - **Change-impact briefing** — `./arch-impact /tmp/repo.db --diff main...HEAD` answers what a PR touches, which exported functions are affected, the blast radius, and where the ⊤ frontier makes that radius a lower bound rather than a bound. See [change impact](docs/change-impact.md).
