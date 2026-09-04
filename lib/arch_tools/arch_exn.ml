@@ -261,13 +261,23 @@ let load ?(channel = "exception") ?(use_builtin_summaries = false) (t : Arch_db.
         let e = {callee = text callee; kind = text kind; scope; site = text site} in
         SM.update (text caller) (function None -> Some [e] | Some l -> Some (e :: l)) acc)
       SM.empty
+      (* The [call_exn_scopes] join MUST be filtered to scopes on the channel
+         being loaded. Its key is (call_id, scope_id), so one call site can
+         carry both an exception-channel scope and a value-channel one; an
+         unfiltered join would (a) emit that call's edge TWICE and (b) — far
+         worse — hand this channel's solver a scope belonging to another
+         channel, whose caught set would then be subtracted from an answer it
+         has nothing to do with. The [EXISTS] sits in the ON clause so the
+         join stays a LEFT one: a call with no scope on THIS channel must
+         still produce its edge, with a NULL scope. *)
       (if channel = "exception" then
          q
            Arch_db.Ty.(t2 (t3 s s s) (t2 i s))
            (Printf.sprintf
               "SELECT '#'||c.caller_id, CASE WHEN c.callee_id IS NULL THEN 'ext:'||c.callee_name \
                ELSE '#'||c.callee_id END, %s, l.scope_id, COALESCE(c.call_site,'') FROM calls c \
-               LEFT JOIN call_exn_scopes l ON l.call_id=c.id ORDER BY c.id"
+               LEFT JOIN call_exn_scopes l ON l.call_id=c.id AND EXISTS (SELECT 1 FROM \
+               exn_scopes s WHERE s.id=l.scope_id AND s.channel='exception') ORDER BY c.id"
               (Arch_db.kind_sql t))
        else
          qc
@@ -276,7 +286,8 @@ let load ?(channel = "exception") ?(use_builtin_summaries = false) (t : Arch_db.
               "SELECT '#'||c.caller_id, CASE WHEN c.callee_id IS NULL THEN 'ext:'||c.callee_name \
                ELSE '#'||c.callee_id END, %s, l.scope_id, COALESCE(c.call_site,'') FROM calls c \
                JOIN exn_edges ee ON ee.call_id=c.id AND ee.role='propagates' AND ee.channel=? \
-               LEFT JOIN call_exn_scopes l ON l.call_id=c.id ORDER BY c.id"
+               LEFT JOIN call_exn_scopes l ON l.call_id=c.id AND EXISTS (SELECT 1 FROM \
+               exn_scopes s WHERE s.id=l.scope_id AND s.channel=ee.channel) ORDER BY c.id"
               (Arch_db.kind_sql t)))
   in
   (* edges were consed in reverse; restore call order for deterministic provenance *)

@@ -247,11 +247,17 @@ type pending_call = {
           reachable, so this never over-claims. *)
   call_site : string;
   exn_scope : int option;
-      (** innermost exception-handler scope enclosing the call site in the
-          caller node, OR a value-channel handler scope covering this call's
-          head (specs/error-channels.md "Handler scopes") — a walker-local
-          id inside [collect_calls_from_expr], the [exn_scopes] row id once
-          [process_cmt] has stored the scope (specs/exn-raise-sets.md). *)
+      (** innermost EXCEPTION-handler scope enclosing the call site in the
+          caller node — a walker-local id inside [collect_calls_from_expr],
+          the [exn_scopes] row id once [process_cmt] has stored the scope
+          (specs/exn-raise-sets.md). *)
+  errch_scope : int option;
+      (** innermost VALUE-CHANNEL handler scope covering this call's head
+          (specs/error-channels.md "Handler scopes"), in its own local id
+          space, rewritten to an [exn_scopes] row id the same way.
+          Independent of {!exn_scope}: a call site can carry both, and
+          [call_exn_scopes] keys on [(call_id, scope_id)] so both are
+          stored. *)
   errch_propagates : string option;
       (** [Some channel]: this call is a propagating edge on [channel]
           (specs/error-channels.md "Propagating edges") — an [exn_edges]

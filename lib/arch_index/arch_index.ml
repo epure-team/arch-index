@@ -847,13 +847,17 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
                ()
            with
           | Some call_id -> (
-              (* The handler scope enclosing THIS call site, linked to this
-                 call's own rowid — the pair is written back to back so no
-                 other insert can slip in between. *)
-              (match call.exn_scope with
-              | Some scope_id ->
-                  Arch_index_db.insert_call_exn_scope db stmt_call_scope ~call_id ~scope_id
-              | None -> ()) ;
+              (* The handler scopes enclosing THIS call site, linked to this
+                 call's own rowid — written back to back with the call so no
+                 other insert can slip in between. Up to TWO rows: a call can
+                 sit inside a `try` (exception channel) AND have its result
+                 matched on (a value channel). [call_exn_scopes] keys on
+                 (call_id, scope_id), so both fit; before that only one did
+                 and the value-channel one was dropped. *)
+              List.iter
+                (fun scope_id ->
+                  Arch_index_db.insert_call_exn_scope db stmt_call_scope ~call_id ~scope_id)
+                (List.filter_map Fun.id [call.exn_scope; call.errch_scope]) ;
               (* Propagating value-channel edge (specs/error-channels.md
                  "Propagating edges"): only once the callee's resolution is
                  known, so a call to a DROPPED node — genuinely a c-carrier,
