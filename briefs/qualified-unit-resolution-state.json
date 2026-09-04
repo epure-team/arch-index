@@ -1,7 +1,7 @@
 {
   "task": "qualified-unit-resolution",
   "mode": "full",
-  "current_phase": "review",
+  "current_phase": "ship",
   "events": [
     {
       "phase": "research",
@@ -65,6 +65,13 @@
       "at": "2026-09-04",
       "by": "roster-review",
       "reason": "Round 6. The most significant round: found the branch had not merely retained the pre-existing wrong-library-MUST defect for the (wrapped false)/wrapped-main-module unit-name-collision shape (scenario M) but INTRODUCED a new instance of it, where main emitted an honest unresolved leaf. Closed by making a unit name registered with more than one path answerable-but-not-decidable in the PREFIX tier (ids_of_reading), not just the facade tier - corpus cost zero on all three corpora (arch-index 88 units, octez-manager 353, proto_alpha 468 - 0 collisions each). Also found (and this round's fix addresses): the S3 amendment's zero-candidate half was falsified by scenarios E and G (HIGH-2); scenario L's 'identical on origin/main' claim was false - main lands the same reference in the same wrong directory but at a DIFFERENT wrong function (HIGH-3); the registry_gaps detector had zero test coverage (MEDIUM-5); the withdrawn 93/1 census survived in arch_index_cmt.ml's Ambiguous_unit comment even after being corrected elsewhere in the same file (MEDIUM-6); F1 and S1's third clause were violated by shipped green tests with no STATUS note (MEDIUM-7); the F3 falsifier's MUST/MAY_ENUMERATED/MAY_TOP distribution summed to 3391 against 5168 calls and did not reproduce (LOW-8); the join-recipe comment gave delta 0 when followed literally, missing that disabling the facade tier is also required for the load-bearing 200 (actually 199, remeasured) to appear (LOW-9). Suite grew to 142/142 tezt across this and prior rounds; self-index golden 23/803/5168 byte-identical; arch-rules 1 proved/3 UNKNOWN/0 violations; corpora unchanged (octez-manager 58 477/76/0/0, proto_alpha 73 514/70/1/3)."
+    },
+    {
+      "phase": "ship",
+      "outcome": "AUTHORISED",
+      "at": "2026-09-04",
+      "by": "human",
+      "reason": "Human resolved the round-cap escalation: ship with residuals explicitly accepted. Five residuals enumerated in docs/adr/003-qualified-unit-resolution-accepted-residuals.md, each pinned by a test that asserts the defect and therefore fails when it closes, and each reproducing identically on main. Residual 4 (module_deps/type_usage, spec S4 sites 2 and 3) is called out as the most consequential: arch-rules derives its forbid-dep verdict from module_deps.target_module, so on a cross-library homonym it can report pass on a real violation \u2014 unchanged from main, accepted because the two sibling sites need their own slice with their own corpus validation. Residuals 1-3 are one defect in three shapes and none is closable from the index alone: each is structurally identical to the legitimate re-export facade the resolver must serve, so separating them requires the caller's .cmt import list (briefs/linkage-evidence-followup.md). Settled and not in doubt: octez-manager 58477/76/0/0 and proto_alpha 73514/70/1/3 on two independent keyings, zero answer-set removals on both corpora, every peer tripwire on its frozen baseline, MUST-with-NULL down on both, no top inflation."
     }
   ]
 }
