@@ -56,6 +56,7 @@ let fixture_files =
       "[channel.myres]\n\
        type = \"myres\"\n\
        origins = [{path = \"Error\", arg = 1}]\n\
+       binds = [\"Res_syntax.let*\"]\n\
        transforms = [{path = \"add_err\", mode = \"add\", arg = 1}]\n\
        converters = [{path = \"opt_of_res\", from = \"myres\", to = \"option\", arg = 1}]\n\
        sinks = [\"never_matched\"]\n\
@@ -66,7 +67,7 @@ let fixture_files =
        error_arg = 2\n\
        origins = [{path = \"Error2\", arg = 1}]\n" );
     ( "ec_a.ml",
-      {|type err = A | B of int | C
+      {|type err = A | B of int | C | Wrap of err
 
 (* A custom result-shaped carrier, distinct from Stdlib.result. *)
 type 'a myres = Ok of 'a | Error of err
@@ -113,6 +114,67 @@ exception Boom of int
 let boom_raiser n = if n = 0 then raise (Boom 0) else raise (Boom 1)
 
 let narrow_handler n = try boom_raiser n with Boom 0 -> ()
+
+(* US-2.16 (review round 2, MEDIUM): ONE call site covered by BOTH an
+   exception scope and a value-channel scope. The call to [f_boom] sits
+   inside a [try] (an exception-channel scope) and its result is the
+   scrutinee of a [match] (a myres scope), so both cover the same call.
+   [call_exn_scopes] used to have PRIMARY KEY (call_id) — room for one link
+   per call — and the walker resolved the clash by keeping the exception
+   scope and DROPPING the value-channel one, so [Ec_a.A] was reported as
+   escaping [both_scopes] even though the match closes it. The key is now
+   (call_id, scope_id) and both links are stored. *)
+let f_boom n : int myres = if n = 0 then raise (Boom 1) else Error A
+
+let both_scopes n = try (match f_boom n with Error A -> Ok 0 | r -> r) with Boom _ -> Ok 2
+
+(* US-2.9 — the C-21 PARAMETER rule, and the single reason generic
+   combinators stay BOUNDED instead of ⊤.
+
+   [wrap]'s carrier argument [r] is a PARAMETER. Whatever errors it carries
+   were already counted at their creation site, so by induction over callers
+   [wrap] must contribute only the identity it constructs itself:
+   [BOUNDED: {Ec_a.Wrap}], never ⊤. Treat a carrier parameter as an unknown
+   source instead and EVERY combinator in a codebase answers "unbounded",
+   which is sound and useless — the failure mode this rule exists to prevent,
+   and one no other assertion in this suite would notice.
+
+   [nest] pins the other direction, which is the SOUND one: the match covers
+   only the head call [wrap], so [f ()] — an argument, a lexically different
+   call — still propagates and [Ec_a.A] must survive. An over-broad notion of
+   "covered" would answer [BOUNDED: {}] and silently drop a reachable
+   error. *)
+let wrap (r : int myres) : int myres = match r with Error e -> Error (Wrap e) | ok -> ok
+
+let nest () = match wrap (f ()) with Error (Wrap _) -> Ok 0 | ok -> ok
+
+(* US-2.6 : a declared let-operator bind over [myres] ([Res_syntax.let*] in
+   the fixture config's [binds]) — the bound call propagates. *)
+module Res_syntax = struct
+  let ( let* ) (r : int myres) (k : int -> int myres) =
+    match r with Ok x -> k x | Error e -> Error e
+end
+
+let k_bind () =
+  let open Res_syntax in
+  let* x = f () in
+  Ok x
+
+(* US-2.6 : sinks. [ignore (E)] and [let _ = E in …] both mean the head call
+   of [E] does not propagate, so nothing of [f]'s escapes. *)
+let s () =
+  ignore (f ()) ;
+  Ok 0
+
+let s2 () =
+  let _ = f () in
+  Ok 0
+
+(* US-2.12 : a node that is a [myres] carrier AND raises. The two channels
+   are separate universes: the exception belongs to [exception] only, and the
+   [myres] answer stays empty — an exception-channel origin inside a carrier
+   node is an exception fact only. *)
+let mixed () : int myres = if Sys.opaque_identity true then raise Not_found else Ok 0
 
 (* US-3.1 : not a myres carrier at all *)
 let plain () = 42
@@ -251,6 +313,22 @@ let register_producer () =
                    s.channel='myres'"
                   g))
             1 ;
+          (* US-2.16 : one call site, two channels' scopes. Both links must
+             be stored — with PRIMARY KEY (call_id) only one could be, and
+             the value-channel one was the one lost. *)
+          let both_scopes = fn_id conn "both_scopes" in
+          let scopes_on channel =
+            Db.int conn
+              (Printf.sprintf
+                 "SELECT count(*) FROM calls c JOIN call_exn_scopes l ON l.call_id=c.id JOIN \
+                  exn_scopes s ON s.id=l.scope_id WHERE c.caller_id=%d AND \
+                  c.callee_name='f_boom' AND s.channel='%s'"
+                 both_scopes channel)
+          in
+          Batch.eq_int b ~msg:"US-2.16 the both_scopes->f_boom call keeps its EXCEPTION scope"
+            (scopes_on "exception") 1 ;
+          Batch.eq_int b ~msg:"US-2.16 the same call ALSO keeps its myres value-channel scope"
+            (scopes_on "myres") 1 ;
           (* US-2.4 : g3's own origin from the literal Error (B 1) in a
              closing (catch-all) arm *)
           let g3 = fn_id conn "g3" in
@@ -328,6 +406,37 @@ let register_query () =
          not swallow `Boom 1`. This one is pre-existing shipped behaviour. *)
       Batch.contains b ~msg:"US-2.15 `with Boom 0` does not close every Boom"
         ~haystack:(may_fail "exception" "narrow_handler") "Boom" ;
+      (* US-2.16 : the SAME call site is covered on both channels, so both
+         answers are empty. The myres one is the load-bearing half — with a
+         single-link table the value-channel scope was dropped and Ec_a.A
+         escaped. *)
+      Batch.contains b ~msg:"US-2.16 both_scopes closes Ec_a.A on myres"
+        ~haystack:(may_fail "myres" "both_scopes") "BOUNDED: {}" ;
+      Batch.contains b ~msg:"US-2.16 both_scopes closes Ec_a.Boom on the exception channel"
+        ~haystack:(may_fail "exception" "both_scopes") "BOUNDED: {}" ;
+      (* US-2.9 : THE parameter rule (C-21). Both halves, and both are
+         load-bearing — see the fixture comment on [wrap]/[nest]. *)
+      Batch.contains b
+        ~msg:
+          "US-2.9 a carrier PARAMETER contributes nothing, so the combinator is BOUNDED, not ⊤"
+        ~haystack:(may_fail "myres" "wrap") "BOUNDED: {Ec_a.Wrap}" ;
+      Batch.contains b
+        ~msg:"US-2.9 only the HEAD call is covered — the argument call's Ec_a.A still escapes"
+        ~haystack:(may_fail "myres" "nest") "BOUNDED: {Ec_a.A}" ;
+      (* US-2.6 : a declared let-operator bind, and the two sink forms. *)
+      Batch.contains b ~msg:"US-2.6 a declared let* bind propagates the bound call"
+        ~haystack:(may_fail "myres" "k_bind") "BOUNDED: {Ec_a.A}" ;
+      Batch.contains b ~msg:"US-2.6 ignore (E) sinks the head call of E"
+        ~haystack:(may_fail "myres" "s") "BOUNDED: {}" ;
+      Batch.contains b ~msg:"US-2.6 let _ = E in … sinks the head call of E"
+        ~haystack:(may_fail "myres" "s2") "BOUNDED: {}" ;
+      (* US-2.12 : a raise inside a carrier node belongs to the exception
+         channel ONLY. Both assertions matter: the raise must appear on one
+         channel and must NOT leak onto the other. *)
+      Batch.contains b ~msg:"US-2.12 mixed's raise is an exception-channel fact"
+        ~haystack:(may_fail "exception" "mixed") "Not_found" ;
+      Batch.contains b ~msg:"US-2.12 …and does not appear on the myres channel"
+        ~haystack:(may_fail "myres" "mixed") "BOUNDED: {}" ;
       (* US-3.1 : plain is not a myres carrier at all *)
       Batch.contains b ~msg:"US-3.1 plain is NOT_A_CARRIER(myres)"
         ~haystack:(may_fail "myres" "plain") "NOT_A_CARRIER(myres)" ;
@@ -410,7 +519,7 @@ let register_query () =
       let fw_result = query db ["fails-with"; "Ec_a.A"; "--channel"; "result"] in
       Batch.check b ~msg:"h is listed by fails-with Ec_a.A --channel result"
         (Batch.has_substring ~needle:"h|" fw_result) ;
-      (* [w2]'s set is [Top(∅, {unknown_error_value})]: "replace" mode
+      (* [w2]'s set is [Top(∅, {unknown_exn_value})]: "replace" mode
          discards the inner [Ec_a.A] and the mapper is a parameter, so its
          KNOWN part is empty — it correctly does NOT land in [may_include]
          (that table lists ⊤ nodes whose KNOWN part contains the target,
@@ -445,11 +554,105 @@ let register_strict () =
      [--errors-strict], for the SAME never-matched declared path
      ([Ec_a."never_matched"] in [channel.myres.sinks]). *)
   let code, out, _db = Arch_tezt.index_raw ~extra_args:["--errors-strict"] fixture in
-  ignore out ;
   Batch.run (fun b ->
       Batch.eq_int b ~msg:"--errors-strict turns the declared-but-unmatched sink into exit 1"
-        (match code with 0 -> 0 | n -> n)
-        1) ;
+        code 1 ;
+      (* The exit code alone was all this asserted, which cannot tell a
+         refusal about the operator's own path from a refusal about anything
+         else the run might dislike. The MESSAGE is the contract: it must
+         name the path and the channel, and the verdict must count exactly
+         the one declaration the operator wrote and that did not match. *)
+      Batch.check b ~msg:"the warning names the unmatched path and its channel"
+        (Batch.has_substring ~needle:"channel myres: 'never_matched' matched nothing" out) ;
+      Batch.check b ~msg:"the strict verdict counts exactly the operator's one miss"
+        (Batch.has_substring ~needle:"--errors-strict: 1 declaration(s) matched nothing" out)) ;
+  Lwt.return_unit
+
+(* AC-15 scenario 6: profile discovery precedence. [ARCH_ERRORS_PROFILES_DIR]
+   beats [<analysed project root>/profiles], and the path actually used is
+   PRINTED. Untested until review round 2 — the precedence was only ever
+   confirmed by hand, and a silent reordering would send an operator the
+   wrong vocabulary while still reporting success. Both directories hold a
+   file of the same name, declaring DIFFERENT channels, so which one won is
+   visible in the output and not merely in a path string. *)
+let register_profile_precedence () =
+  Test.register ~__FILE__
+    ~title:"error-channels: ARCH_ERRORS_PROFILES_DIR wins over <root>/profiles, and is printed"
+    ~tags:["cmt"; "error_channels"; "config"; "profile"]
+  @@ fun () ->
+  with_fixture ~name:"errch_profile_prec"
+    ~files:
+      [
+        Fixture.dune_project;
+        ( "dune",
+          "(library\n\
+          \ (name errch_prec)\n\
+          \ (wrapped false)\n\
+          \ (modules es_p)\n\
+          \ (flags (:standard -w -8-11-21-26-27-32-33-37-39)))\n" );
+        (* The LOSER: same profile name, in the project root's own profiles/. *)
+        ( "profiles/prec-errors.toml",
+          "[channel.from_project_root]\ntype = \"pres\"\norigins = [{path = \"Bad\", arg = 1}]\n" );
+        (* The WINNER: pointed at by ARCH_ERRORS_PROFILES_DIR below. *)
+        ( "envprofiles/prec-errors.toml",
+          "[channel.from_env_dir]\ntype = \"pres\"\norigins = [{path = \"Bad\", arg = 1}]\n" );
+        ("es_p.ml", "type e = X\n\ntype 'a pres = Good of 'a | Bad of e\n\nlet f () : int pres = Bad X\n");
+      ]
+  @@ fun fixture ->
+  let code, out, db =
+    Arch_tezt.index_raw
+      ~env:[("ARCH_ERRORS_PROFILES_DIR", Filename.concat fixture.Arch_tezt.root "envprofiles")]
+      ~extra_args:["--errors-profile"; "prec"]
+      fixture
+  in
+  Batch.run (fun b ->
+      Batch.eq_int b ~msg:(Printf.sprintf "indexing with --errors-profile must succeed:\n%s" out)
+        code 0 ;
+      Batch.check b ~msg:"the resolved profile path is printed"
+        (Batch.has_substring ~needle:"arch-errors: using profile " out) ;
+      Batch.check b ~msg:"…and it is the ARCH_ERRORS_PROFILES_DIR one, not <root>/profiles"
+        (Batch.has_substring ~needle:"envprofiles/prec-errors.toml" out) ;
+      Db.with_db db (fun conn ->
+          let contract =
+            match
+              Db.string_opt conn "SELECT value FROM comment_db_meta WHERE key='error_contract'"
+            with
+            | Some s -> s
+            | None -> ""
+          in
+          (* The decisive check: the CHANNEL that got loaded, not just a path
+             string in a log line. *)
+          Batch.check b
+            ~msg:(Printf.sprintf "the env-dir profile's channel is the one emitted (got %S)" contract)
+            (Batch.has_substring ~needle:"from_env_dir" contract) ;
+          Batch.check b ~msg:"the <root>/profiles channel is NOT emitted"
+            (not (Batch.has_substring ~needle:"from_project_root" contract)))) ;
+  Lwt.return_unit
+
+(* AC-18 scenario 6: a Flat-schema database has none of the exception/
+   error-channel tables and never can, so EVERY channel — including a value
+   channel, which takes a different code path in [Arch_exn.load] than the
+   exception channel's own check — must refuse NOT_ANALYSED rather than
+   answer from an empty table. "No rows" and "never looked" are the
+   distinction this whole feature exists to keep. *)
+let register_flat_not_analysed () =
+  Test.register ~__FILE__
+    ~title:"error-channels: a Flat-schema DB refuses NOT_ANALYSED on every channel"
+    ~tags:["error_channels"; "query"; "refusal"]
+  @@ fun () ->
+  let flat = Fixture.flat ~name:"errch_flat" Fixture.minimal_flat_stream in
+  Batch.run (fun b ->
+      List.iter
+        (fun channel ->
+          let code, out = query_raw flat ["may-fail"; "f"; "--channel"; channel] in
+          Batch.eq_int b
+            ~msg:(Printf.sprintf "may-fail --channel %s on a Flat DB exits 3 (got %d):\n%s"
+                    channel code out)
+            code 3 ;
+          Batch.check b
+            ~msg:(Printf.sprintf "…and says NOT_ANALYSED for channel %s" channel)
+            (Batch.has_substring ~needle:"NOT_ANALYSED" out))
+        ["exception"; "result"; "option"]) ;
   Lwt.return_unit
 
 let register_summaries () =
@@ -686,8 +889,113 @@ let register_unreachable_channel () =
         (Batch.has_substring ~needle:"'first'" out) ;
       Batch.check b ~msg:"the refusal names the contested carrier type"
         (Batch.has_substring ~needle:"'myopt'" out) ;
+      (* Both channels here come from the operator's own file, so reordering
+         is a remedy they can actually carry out — and the message names the
+         order to put them in, not just the word "reorder". *)
       Batch.check b ~msg:"the refusal tells the operator what to do about it"
-        (Batch.has_substring ~needle:"Reorder" out)) ;
+        (Batch.has_substring ~needle:"Declare 'second' before 'first'" out)) ;
+  Lwt.return_unit
+
+(* Review round 2 (MEDIUM): the remedy has to be one the operator can carry
+   out. When the shadowing channel is a BUILT-IN, "reorder the channels" is
+   impossible — built-ins are always merged first and no config file can move
+   them — so the message must name the two remedies that do work: extend the
+   built-in under its own name, or add a distinguishing [error_type]. *)
+let register_unreachable_over_builtin () =
+  Test.register ~__FILE__
+    ~title:"error-channels: shadowing a BUILT-IN channel is refused with an actionable remedy"
+    ~tags:["cmt"; "error_channels"; "config"; "reachability"]
+  @@ fun () ->
+  with_fixture ~name:"errch_shadow_builtin"
+    ~files:
+      [
+        Fixture.dune_project;
+        ( "dune",
+          "(library\n\
+          \ (name errch_shb)\n\
+          \ (wrapped false)\n\
+          \ (modules es_shb)\n\
+          \ (flags (:standard -w -8-11-21-26-27-32-33-37-39)))\n" );
+        (* [mine] claims the predefined [result] carrier, which the BUILT-IN
+           [result] channel (declared first, always) already claims with no
+           narrower argument test. *)
+        ( "arch-errors.toml",
+          "[channel.mine]\ntype = \"result\"\nerror_arg = 2\norigins = [{path = \"Error\", arg = 1}]\n" );
+        ("es_shb.ml", "type e = X\n\nlet f () : (int, e) result = Error X\n");
+      ]
+  @@ fun fixture ->
+  let code, out, _db = Arch_tezt.index_raw fixture in
+  Batch.run (fun b ->
+      Batch.eq_int b ~msg:"shadowing a built-in makes the run exit 1" code 1 ;
+      Batch.check b ~msg:"the refusal names the shadowed channel"
+        (Batch.has_substring ~needle:"channel mine" out) ;
+      Batch.check b ~msg:"the refusal says the shadowing channel is a built-in"
+        (Batch.has_substring ~needle:"BUILT-IN channel" out) ;
+      Batch.check b ~msg:"…and therefore does NOT tell the operator to reorder"
+        (not (Batch.has_substring ~needle:"before 'result'" out)) ;
+      Batch.check b ~msg:"the refusal offers extending the built-in under its own name"
+        (Batch.has_substring ~needle:"[channel.result]" out) ;
+      Batch.check b ~msg:"the refusal offers a distinguishing error_type as the other remedy"
+        (Batch.has_substring ~needle:"error_type" out)) ;
+  Lwt.return_unit
+
+(* Review round 2 (HIGH): the point of [merge] extending rather than
+   replacing. A profile-shaped config that adds ONE bind to a built-in must
+   pass [--errors-strict] without restating the built-in's own vocabulary —
+   the inherited [Stdlib.*] paths are not the operator's declarations, and
+   holding them to those made strict unsatisfiable for every real profile. *)
+let register_strict_over_extended_builtin () =
+  Test.register ~__FILE__
+    ~title:"error-channels: --errors-strict passes over a config that EXTENDS a built-in"
+    ~tags:["cmt"; "error_channels"; "config"; "strict"]
+  @@ fun () ->
+  with_fixture ~name:"errch_strict_extend"
+    ~files:
+      [
+        Fixture.dune_project;
+        ( "dune",
+          "(library\n\
+          \ (name errch_ext)\n\
+          \ (wrapped false)\n\
+          \ (modules es_ext)\n\
+          \ (flags (:standard -w -8-11-21-26-27-32-33-37-39)))\n" );
+        (* Exactly the shipped Tezos profile's shape: name the built-in
+           [option] channel and add a bind vocabulary of our own. Nothing of
+           the built-in's is restated — under the old replace-semantics this
+           file would have had to copy six [Stdlib.Option.*] paths in, and
+           those copies would then have counted against the strict run. *)
+        ( "arch-errors.toml",
+          (* [my_bind] is called UNQUALIFIED from inside the module that
+             defines it, so its resolved head is the bare name — same rule as
+             the main fixture's [add_err]/[opt_of_res]. *)
+          "[channel.option]\ntype = \"option\"\nbinds = [\"my_bind\"]\n" );
+        ( "es_ext.ml",
+          {|let my_bind (o : int option) (k : int -> int option) =
+  match o with None -> None | Some x -> k x
+
+let src () : int option = if Sys.opaque_identity true then None else Some 1
+
+let use () = my_bind (src ()) (fun x -> Some x)
+|} );
+      ]
+  @@ fun fixture ->
+  let code, out, _db = Arch_tezt.index_raw ~extra_args:["--errors-strict"] fixture in
+  Batch.run (fun b ->
+      Batch.eq_int b
+        ~msg:
+          (Printf.sprintf
+             "--errors-strict must exit 0 when the operator's own paths all matched; got %d, \
+              output:\n\
+              %s"
+             code out)
+        code 0 ;
+      (* The built-in's unmatched Stdlib vocabulary is still REPORTED — it is
+         a warning, which is the honest thing to print; it just may not fail
+         the run. *)
+      Batch.check b ~msg:"an inherited built-in path that matched nothing is still warned about"
+        (Batch.has_substring ~needle:"'Stdlib.Option.value' matched nothing" out) ;
+      Batch.check b ~msg:"…but does not appear in a strict verdict"
+        (not (Batch.has_substring ~needle:"--errors-strict:" out))) ;
   Lwt.return_unit
 
 let register () =
@@ -695,7 +1003,11 @@ let register () =
   register_reindex () ;
   register_strict_success () ;
   register_unreachable_channel () ;
+  register_unreachable_over_builtin () ;
+  register_strict_over_extended_builtin () ;
   register_query () ;
   register_config () ;
   register_strict () ;
+  register_profile_precedence () ;
+  register_flat_not_analysed () ;
   register_summaries ()

@@ -354,14 +354,18 @@ let temp_db name =
    ([Arch_index_support.schema_tables_to_drop]) is only exercised by a second
    invocation, and a table missing from that list is invisible to every test
    that indexes once into an empty database. *)
-let index_raw_into ~db ?(extra_args = []) fixture =
-  run_command (callgraph_ocaml ())
+(* [env]: extra environment assignments for the producer process — needed by
+   the profile-discovery precedence scenario (AC-15 scenario 6), where
+   [ARCH_ERRORS_PROFILES_DIR] is the input under test and setting it in THIS
+   process would leak into every other test in the same run. *)
+let index_raw_into ~db ?env ?(extra_args = []) fixture =
+  run_command ?env (callgraph_ocaml ())
     (["--build-dir"; fixture.build_dir; "--db-path"; db; "--schema-path"; schema ()]
     @ extra_args)
 
-let index_raw ?extra_args fixture =
+let index_raw ?env ?extra_args fixture =
   let db = temp_db fixture.name in
-  let code, output = index_raw_into ~db ?extra_args fixture in
+  let code, output = index_raw_into ~db ?env ?extra_args fixture in
   (code, output, db)
 
 let index ?extra_args fixture =

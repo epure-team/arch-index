@@ -25,10 +25,15 @@
   it cannot fail this way") and `NOT_ANALYSED` (exit 3, "nobody looked") — the last two are kept
   apart because an empty set and an unperformed analysis must never be confusable. Polymorphic
   variants are recognised as error identities, which matters: real corpora spell errors
-  `` Error `Msg `` far more often than with ordinary constructors. Schema **1.6**, additive
-  (`channel` columns, `exn_edges`, `channel_carriers`). Config errors — a bad path, an unknown
-  TOML key, or a declared carrier type that matches nothing in the corpus — exit 1 rather than
-  degrade silently; `--errors-strict` promotes unmatched-path warnings to fatal.
+  `` Error `Msg `` far more often than with ordinary constructors. Schema **1.8**, additive
+  (`channel` columns, `exn_edges`, `channel_carriers`, and `call_exn_scopes` keyed on
+  `(call_id, scope_id)` so a call site can carry one scope per channel). Config errors — a bad
+  path, an unknown TOML key, a declared carrier type that matches nothing in the corpus, or a
+  channel structurally shadowed by an earlier one — exit 1 rather than degrade silently;
+  `--errors-strict` promotes unmatched-path warnings to fatal, counting only paths your own
+  config files spell. Declaring a channel that already exists **extends** it field by field, so a
+  profile adds vocabulary to a built-in without restating it. The effective config's digest
+  (`comment_db_meta.error_config_digest`) is SHA-256.
   See `docs/error-channels.md`, the adapter contract in `docs/error-channels-porting.md`, and
   `specs/error-channels.md`.
 - Exception-identity may-raise sets for OCaml (roadmap 3.4): the CMT producer records raise
