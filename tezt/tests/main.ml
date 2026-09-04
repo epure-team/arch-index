@@ -85,6 +85,7 @@ let () =
   Lsp_readiness.register_interphase_gap_is_not_completion () ;
   Lsp_readiness.register_silent_server () ;
   Rejection_attribution.register () ;
+  Schema_drop_list.register () ;
   Insert_rowid_attribution.register () ;
   Dropped_node_dependents.register_dropped_function () ;
   Dropped_node_dependents.register_dropped_module () ;

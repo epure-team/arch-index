@@ -161,6 +161,16 @@ module Arch_index_git = Arch_index_git
 (** Pure per-function CFG with post-dominance (dominance-MUST engine). *)
 module Arch_index_cfg = Arch_index_cfg
 
+(** Schema-lifecycle helpers: the view/table drop lists {!run} uses before
+    recreating [architecture-schema.sql], and the intent backup/restore that
+    survives that recreation. Re-exported (the module is not private, but the
+    library's main module shadows the name) so
+    [tezt/tests/schema_drop_list.ml] can cross-check
+    {!Arch_index_support.schema_tables_to_drop} against the tables the
+    producer actually writes — an omission there silently doubles a table on
+    every re-index. *)
+module Arch_index_support = Arch_index_support
+
 (** Minimal re-export of the per-table rejected-row accounting from
     {!Arch_index_db} (a [private_modules] library-internal module, invisible
     outside this library). Exposed so a test can drive [exec_stmt] directly
