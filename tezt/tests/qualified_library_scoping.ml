@@ -424,46 +424,44 @@ let scenario_m_files =
 let register_unwrapped_unlinked_residual () =
   Test.register ~__FILE__
     ~title:
-      "cmt: a (wrapped false) homonym whose definition arrives via include still binds the \
-       UNLINKED library — pinned, not endorsed"
-    ~tags:["cmt"; "qualified_name"; "library_scoping"; "residual"]
+      "cmt: a homonym unit name is never resolved to whichever library owns the row"
+    ~tags:["cmt"; "qualified_name"; "library_scoping"]
   @@ fun () ->
   Batch.run (fun b ->
       with_fixture ~name:"qual-scope-m" ~files:scenario_m_files @@ fun fixture ->
       let db = index fixture in
       Db.with_db db (fun conn ->
           let wrong = fn_id conn ~mod_like:"%wb/api.ml" ~name:"run" b ~label:"M" in
-          let correct = fn_id conn ~mod_like:"%wa/base_impl.ml" ~name:"run" b ~label:"M" in
-          match (wrong, correct) with
-          | None, _ | _, None -> Batch.note b "M: one of the two run functions is not indexed"
-          | Some wrong, Some correct ->
-              let dir = single_call_callee_dir conn ~caller_fn:"go" ~label:"M" in
+          match wrong with
+          | None -> Batch.note b "M: wb/api.ml run is not indexed at all"
+          | Some wrong ->
               let callee, kind = single_call conn ~caller_fn:"go" ~label:"M" in
-              (* Asserting the DEFECT, like F, J and L. The day this reads "wa"
-                 the residual is closed: verify it points at wa/base_impl.ml,
-                 then delete this scenario together with shape (c) of the
-                 resolver's residual paragraph. *)
+              let reason = single_call_reason conn ~caller_fn:"go" ~label:"M" in
+              (* This was a DISCLOSED RESIDUAL until round 6 measured that the
+                 branch did not merely retain the defect — it INTRODUCED one.
+                 Two units both named [Api] (one from a (wrapped false) module,
+                 one from a wrapped library's main module), only one owning the
+                 [run] row because the other gets it through an [include]:
+                 exactly one id came back and the resolver called that
+                 resolution, binding a library the caller does not link. main
+                 emitted an honest unresolved leaf there.
+
+                 So it is closed rather than disclosed a fourth time: a unit
+                 name mapping to several paths is answerable-but-not-decidable,
+                 and one row among several candidate paths is the ABSENCE of
+                 evidence in the others. Corpus cost of closing it: zero — no
+                 unit name maps to more than one path on any of the three
+                 corpora. *)
               Batch.check b
                 ~msg:
                   (Printf.sprintf
-                     "M: go -> Api.run landed in library directory %s (kind=%s), expected the \
-                      WRONG library wb. This pins a KNOWN DEFECT that also reproduces on \
-                      origin/main: the correct answer is wa/base_impl.ml run (%s), reachable \
-                      through the include, and the caller does NOT even link wb. Unlike \
-                      scenarios F/J/L this is a PREFIX-tier leak — the anchor gate that confines \
-                      the facade tier is never consulted"
-                     (Option.value ~default:"<none>" dir) kind correct)
-                (dir = Some "wb") ;
-              Batch.check b
-                ~msg:
-                  (Printf.sprintf
-                     "M: go -> Api.run resolved to callee_id=%s, expected exactly wb/api.ml run \
-                      (%s)"
-                     (show callee) wrong)
-                (callee = Some wrong) ;
-              Batch.check b
-                ~msg:(Printf.sprintf "M: go -> Api.run is kind=%s, expected MUST" kind)
-                (kind = "MUST"))) ;
+                     "M: go -> Api.run resolved to %s (kind=%s, top_reason=%s). Two indexed \
+                      units answer to [Api] and only wb/api.ml owns the row, so a single hit is \
+                      not proof — it is the absence of evidence in the other path. Expected ⊤ \
+                      with top_reason='ambiguous_unit' and no callee; binding wb (%s) is the \
+                      wrong-library MUST this item exists to remove"
+                     (show callee) kind reason wrong)
+                (kind = "MAY_TOP" && callee = None && reason = "ambiguous_unit"))) ;
   Lwt.return_unit
 
 (* ------------------------------------------------------------------ *)
