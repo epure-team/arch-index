@@ -122,6 +122,25 @@ fi
 #                that everything agreed. Caught here as a defensive second
 #                layer; the main loop below also rejects a per-cell empty or
 #                malformed measurement before it ever reaches classify().
+# A cell is well-formed for a metric when it is USABLE as that metric's value,
+# not merely non-empty-as-a-string. is_int alone would do for the ratchet, but
+# the golden is multi-line free text — "is an integer" is the wrong question
+# for it, and reusing is_int there would refuse every legitimate golden cell.
+# "well-formed" instead means: non-empty, and (for the golden) none of its
+# "label: value" lines has an empty value — the shape q() produces when the
+# underlying query returned nothing (e.g. a renamed column) instead of erroring
+# loudly. Applied to every one of A/B/C/D, before classify() and before the
+# currency comparison, in every mode: a degraded cell must never reach either.
+metric_well_formed() {
+  local metric="$1" val="$2"
+  [ -n "$val" ] || return 1
+  case "$metric" in
+    ceiling) is_int "$val" ;;
+    golden)  ! printf '%s\n' "$val" | grep -qE ': *$' ;;
+    *) return 1 ;;
+  esac
+}
+
 # A measured or pinned value is only comparable as a number if it IS one.
 is_int() { case "${1:-}" in ''|*[!0-9]*) return 1 ;; *) return 0 ;; esac; }
 
@@ -186,6 +205,33 @@ f: 780" "m: 23
 f: 780")"
   if [ "$got" = SOURCE_ONLY ]; then echo "  ok   SOURCE_ONLY  multi-line golden"
   else echo "  FAIL multi-line golden classified $got"; fails=$(( fails + 1 )); fi
+
+  # metric_well_formed is the guard between a silently-failed query and a
+  # written constant. It had NO coverage: stubbing it to `return 0` left this
+  # self-test reporting "all cases pass". That is the arm round 2's CRITICAL
+  # lived in, so it is the last place that should have been untested.
+  local m
+  for m in "340" "0"; do
+    if metric_well_formed ceiling "$m"; then echo "  ok   well_formed ceiling '$m'"
+    else echo "  FAIL well_formed REJECTED ceiling '$m'"; fails=$(( fails + 1 )); fi
+  done
+  for m in "" " " "34a" "3.4"; do
+    if metric_well_formed ceiling "$m"; then
+      echo "  FAIL well_formed ACCEPTED ceiling '$m' — this is the degraded path"; fails=$(( fails + 1 ))
+    else echo "  ok   well_formed rej ceiling '$m'"; fi
+  done
+  local good_golden="modules: 23
+functions: 781
+calls: 5068"
+  if metric_well_formed golden "$good_golden"; then echo "  ok   well_formed golden (full triple)"
+  else echo "  FAIL well_formed REJECTED a valid golden"; fails=$(( fails + 1 )); fi
+  for m in "" "modules: 23
+functions: 
+calls: 5068" "modules: 23"; do
+    if metric_well_formed golden "$m"; then
+      echo "  FAIL well_formed ACCEPTED a degraded golden"; fails=$(( fails + 1 ))
+    else echo "  ok   well_formed rej golden (degraded)"; fi
+  done
 
   # is_int guards the ratchet write. An empty or non-numeric value reaching the
   # comparison is what made that guard fail OPEN and emit an uncompilable file.
@@ -303,7 +349,15 @@ CONSTANT_FILES="test/fixtures/self-index-stats.txt tezt/tests/must_null_ceiling.
 # space anyway. `git diff --name-only` emits one whole path per line (renames
 # split into their own delete+add lines with --no-renames) and is read with
 # `IFS= read -r`, not word-split, so neither shape is mangled. Found in review.
-dirty="$(git diff --no-renames --name-only HEAD -- 2>/dev/null)"
+# `git diff` cannot see untracked files AT ALL, so the commonest workflow —
+# add a module, recalibrate, then commit — walked straight past this gate and
+# wrote a golden measured over two pristine worktrees that do not contain the
+# new file. It was then wrong the instant the file was committed, and reported
+# success. Round 2 reworked this line for renames and spaces and did not close
+# the larger hole. `--others --exclude-standard` adds exactly the untracked,
+# non-ignored files.
+dirty="$(git diff --no-renames --name-only HEAD -- 2>/dev/null
+         git ls-files --others --exclude-standard 2>/dev/null)"
 unexpected=""
 while IFS= read -r f; do
   [ -z "$f" ] && continue
@@ -425,24 +479,6 @@ metric_pinned() {
 
 metric_kind() { case "$1" in golden) echo descriptive ;; ceiling) echo ratchet ;; esac; }
 
-# A cell is well-formed for a metric when it is USABLE as that metric's value,
-# not merely non-empty-as-a-string. is_int alone would do for the ratchet, but
-# the golden is multi-line free text — "is an integer" is the wrong question
-# for it, and reusing is_int there would refuse every legitimate golden cell.
-# "well-formed" instead means: non-empty, and (for the golden) none of its
-# "label: value" lines has an empty value — the shape q() produces when the
-# underlying query returned nothing (e.g. a renamed column) instead of erroring
-# loudly. Applied to every one of A/B/C/D, before classify() and before the
-# currency comparison, in every mode: a degraded cell must never reach either.
-metric_well_formed() {
-  local metric="$1" val="$2"
-  [ -n "$val" ] || return 1
-  case "$metric" in
-    ceiling) is_int "$val" ;;
-    golden)  ! printf '%s\n' "$val" | grep -qE ': *$' ;;
-    *) return 1 ;;
-  esac
-}
 
 # ---------------------------------------------------------------------------
 # the 2x2
@@ -626,8 +662,27 @@ for metric in ${METRICS}; do
             if [ -n "${GOLDEN_RAW:-}" ] && [ -f "$GOLDEN_RAW" ] \
                && diff -q "$WORK/golden.new" "$GOLDEN_RAW" >/dev/null 2>&1
             then
-              mv "$WORK/golden.new" "$REPO_ROOT/test/fixtures/self-index-stats.txt"
-              echo "   ✓ WROTE test/fixtures/self-index-stats.txt (byte-identical to a raw measurement)"
+              # Check the mv, then re-verify the INSTALLED file — not the scratch
+              # copy. Round 2 moved the write to scratch so a refusal could not
+              # leave a half-edited tracked file, and moved the verification
+              # with it; nothing then checked the artifact that matters. With
+              # the target directory read-only this printed
+              # "✓ WROTE … byte-identical to a raw measurement" and exited 0
+              # having written NOTHING. For a tool whose entire product is a
+              # trustworthy verdict about a written constant, that is the worst
+              # available failure. Third round of review, third fix that had
+              # moved the verification off the thing being verified.
+              if ! mv "$WORK/golden.new" "$REPO_ROOT/test/fixtures/self-index-stats.txt"; then
+                echo "   ✗ REFUSED: could not install test/fixtures/self-index-stats.txt" >&2
+                bump_status 2
+              elif ! diff -q "$REPO_ROOT/test/fixtures/self-index-stats.txt" "$GOLDEN_RAW" \
+                     >/dev/null 2>&1; then
+                echo "   ✗ INSTALLED file does not match a raw measurement:" >&2
+                diff "$REPO_ROOT/test/fixtures/self-index-stats.txt" "$GOLDEN_RAW" >&2
+                bump_status 2
+              else
+                echo "   ✓ WROTE test/fixtures/self-index-stats.txt (installed file verified byte-identical)"
+              fi
             else
               echo "   ✗ REFUSED to write: measurement does not match a raw measurement" >&2
               echo "     byte-for-byte — the tracked file is UNCHANGED." >&2
@@ -647,8 +702,21 @@ for metric in ${METRICS}; do
             sed -i "s/^let clean_measured = [0-9]\+/let clean_measured = $D/" "$WORK/ceiling.new"
             written="$(sed -n 's/^let clean_measured = \([0-9]\+\).*/\1/p' "$WORK/ceiling.new")"
             if [ "$written" = "$D" ]; then
-              mv "$WORK/ceiling.new" "$REPO_ROOT/tezt/tests/must_null_ceiling.ml"
-              echo "   ✓ TIGHTENED clean_measured $PINNED → $D (read back and confirmed)"
+              # Same as the golden: check the mv, then re-read the INSTALLED
+              # file. "(read back and confirmed)" was literally false — the
+              # read-back was on $WORK/ceiling.new.
+              if ! mv "$WORK/ceiling.new" "$REPO_ROOT/tezt/tests/must_null_ceiling.ml"; then
+                echo "   ✗ REFUSED: could not install tezt/tests/must_null_ceiling.ml" >&2
+                bump_status 2
+              else
+                installed="$(metric_pinned ceiling)"
+                if [ "$installed" = "$D" ]; then
+                  echo "   ✓ TIGHTENED clean_measured $PINNED → $D (installed file re-read and confirmed)"
+                else
+                  echo "   ✗ INSTALLED file reads '$installed', expected $D" >&2
+                  bump_status 2
+                fi
+              fi
             else
               echo "   ✗ REFUSED to write: clean_measured would read '$written', expected $D —" >&2
               echo "     the tracked file is UNCHANGED. The constant is probably not spelled" >&2
