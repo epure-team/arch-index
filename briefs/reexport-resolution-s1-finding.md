@@ -202,3 +202,69 @@ apply.
 counting ALIASES when the decision-relevant quantity is EDGES. Counting the right thing
 gives a better justification than a wrong count of the wrong thing, and this is the
 second time today a correct decision rested on a number that did not support it.
+
+---
+
+## D1-bis feasibility, and a better design than the spec describes (2026-09-05)
+
+Probed on the merged main (`cf35a13`), reverted.
+
+**The stamp is available at the PRODUCER's emission site.** `qualified_is_dynamic`
+is `match path_root path with Some id -> not (Ident.persistent id)`, so the root
+`Ident` — and therefore `Ident.unique_name` — is in hand exactly where the
+`Module_param` ⊤ is decided. Nothing needs to travel to the resolver.
+
+That inverts the design. Instead of carrying binder identity through
+`call_head`/`pending_call` into a resolver splice, the producer can **rewrite the
+head** where the stamp exists: `S.safe_int` becomes
+`Tezos_raw_protocol_alpha.Saturation_repr.safe_int` and is emitted as
+`Head_qualified`, which then goes through 1.6's ordinary resolution — including
+its ambiguity rule — with no new code path at all.
+
+**Measured with a stamp-keyed module-alias table (nested binders included):**
+
+| emission site | HIT | MISS |
+|---|---|---|
+| `record_head` (applied heads) | **3 224** | 1 847 |
+| argument escape | 23 | 137 |
+| **total** | **3 247** | |
+
+Against the 3 203 the name-keyed design reached. The stamp table covers
+everything the name key did **and more**, because the `prefix = ""` gate had
+excluded nested binders — the same nested binders SA-1 attacked.
+
+Top rewrites are the flagship cases: `S.safe_int → Saturation_repr` (1 323),
+`S.Syntax.+` (594), `S.Syntax.lsr` (393).
+
+### Why this is better than what the spec currently says
+
+- **SA-1 and SA-2 close by construction**, not by a filter: two binders of one
+  name are two stamps, so a nested `module S = Test_stub` and a toplevel
+  `module S = Saturation_repr` are simply different keys. No join to lose the
+  precision in.
+- **D1-ter's two obligations evaporate.** There is no `Head_unknown` display
+  string to re-split (the `"F.( *. )"` empty-callee-name problem disappears),
+  and `dropped_qualified` ordering is inherited rather than re-established,
+  because the edge now arrives at the `Head_qualified` arm that already performs
+  it.
+- **C-5's four construction sites become two**, and both are in the file that
+  owns the classification, rather than four sites plus a resolver that must
+  agree with them.
+- The `module_deps` table is not read at all, so ADR 003 residual 4 cannot bite.
+
+### What does NOT change
+
+**D2-bis still holds and is still the reason.** Emitting `Head_qualified` would
+land MUST when not demoted, and the chase still discharges only the NAMING
+conjunct. The landing kind must be forced to `MAY_ENUMERATED` — and the
+mechanism already exists: the `edge_form` demotion #69 added
+(`demoted = cond || partial || edge_form = Some "value_alias"`) extends to a
+second value. Same mechanism, one more member, no new vocabulary in `kind`.
+
+### The spec needs amending again, and it is a simplification
+
+D1-ter (splice at `Head_unknown`) and its two obligations should be replaced by
+"the producer rewrites the head at the site where the stamp is available". This
+is smaller than what is written, not larger. Recorded here rather than edited
+into the spec silently, because a spec that changes shape twice deserves to say
+why both times.
