@@ -156,6 +156,32 @@ let register_surface () =
            (fun l ->
              Arch_tezt.contains ~needle:"asserter" l && Arch_tezt.contains ~needle:"MAY" l)
            (String.split_on_char '\n' out)) ;
+      (* HIGH-1: the CHANNEL restriction must be named in the answer. Origins
+         are recorded per error channel and this command reports one of them; on
+         proto_alpha only 1219 of 30526 origins are on 'exception', and of the
+         29218 rows whose form is 'raise' just 20 are. An unnamed restriction
+         turns "86% of what I recorded is not in this answer" into an empty
+         table under a plausible header. *)
+      Batch.check b
+        ~msg:("the scope line names the channel it reports:\n" ^ out)
+        (Arch_tezt.contains ~needle:"channel exception" out
+        && Arch_tezt.contains ~needle:"NOT reported" out) ;
+      (* ...and a channel with no origin in the index is REFUSED, because an
+         empty table there reads as "nothing found" when the truth is "nothing
+         looked at". *)
+      let c_nochan, out_nochan = run db ["--roots"; "eo_a.ml:entry"; "--channel"; "nosuch"] in
+      Batch.eq_int b ~msg:"a channel absent from the index is refused (exit 3)" c_nochan 3 ;
+      Batch.check b
+        ~msg:("...and the refusal lists the channels that ARE present:\n" ^ out_nochan)
+        (Arch_tezt.contains ~needle:"Channels present" out_nochan) ;
+      (* MEDIUM-D: nothing asserted that a row can be MUST, so a mutant marking
+         every row MAY survived. [entry] calls [divider] unconditionally. *)
+      Batch.check b
+        ~msg:("an unconditionally-reached origin is marked MUST:\n" ^ out)
+        (List.exists
+           (fun l ->
+             Arch_tezt.contains ~needle:"divider" l && Arch_tezt.contains ~needle:"MUST" l)
+           (String.split_on_char '\n' out)) ;
       (* Scope: something outside the closure must NOT be reported. Without
          this, a command that ignored --roots entirely would pass every other
          assertion in this test. *)
@@ -380,14 +406,24 @@ let register_not_analysed () =
   if Sys.file_exists flat_db then Sys.remove flat_db ;
   Db.with_db_rw flat_db (fun conn ->
       Db.exec conn
+        (* exn_origins IS present here on purpose. Without it the neighbouring
+           NOT_ANALYSED guard refuses first and this test passes for the wrong
+           reason — two guards producing the same exit 3 are indistinguishable
+           from one guard doing both jobs. Asserting the MESSAGE is the other
+           half of that. *)
         "CREATE TABLE calls(caller_name TEXT, callee_name TEXT, kind TEXT);\n\
          CREATE TABLE functions(id INTEGER PRIMARY KEY, name TEXT);\n\
+         CREATE TABLE exn_origins(id INTEGER PRIMARY KEY, function_id INT, form TEXT,\n\
+         exn_path TEXT, escapes INT, line INT, col INT, channel TEXT);\n\
          CREATE TABLE comment_db_meta(key TEXT PRIMARY KEY, value TEXT);\n\
          INSERT INTO comment_db_meta VALUES('callgraph_contract','v1');") ;
   let c_flat, out_flat = run flat_db ["--roots"; "a.ml:entry"] in
   let c, out = run db ["--roots"; "a.ml:f"] in
   Batch.run (fun b ->
       Batch.eq_int b ~msg:"a FLAT index is REFUSED (exit 3), not crashed into" c_flat 3 ;
+      Batch.check b
+        ~msg:("the flat refusal is the FLAT one, named — not the origin-table guard:\n" ^ out_flat)
+        (Arch_tezt.contains ~needle:"flat schema" out_flat) ;
       Batch.check b
         ~msg:("the flat refusal leaks no SQL:\n" ^ out_flat)
         (not (Arch_tezt.contains ~needle:"SELECT" out_flat)) ;
