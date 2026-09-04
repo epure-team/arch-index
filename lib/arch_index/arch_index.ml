@@ -767,6 +767,46 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
     (fun path ->
       Hashtbl.replace dropped_unit_names (module_name_of_path path) ())
     (Arch_index_cmt.dropped_unit_paths ()) ;
+  (* Roadmap 1.6 (S7, found by the proto_alpha corpus run — see the resolver
+     below). A reference can reach a module through a RE-EXPORT FACADE that
+     lives in a DIFFERENT library, and then the reference and the defining unit
+     share no prefix at all:
+
+       reference:      Tezos_protocol_alpha.Protocol.Script_int.of_zint
+       defining unit:  Tezos_raw_protocol_alpha__Script_int   (script_int.ml)
+
+     [tezos_protocol_alpha] re-exports [tezos_raw_protocol_alpha] through a
+     nested module [Protocol]. No "__"-join of a PREFIX of the reference can
+     ever name that unit, so the prefix readings alone cannot bridge it — and
+     the old bare-segment walk bridged it only as a side effect of the same
+     basename erasure that mis-attributed homonyms.
+
+     Index every known unit by its LAST "__" component, so a bare module name
+     can find the units that could define it. Unlike the old basename table
+     this is a MULTI-map: when several libraries define a [Script_int], all of
+     them are candidates and the function table arbitrates, rather than one
+     silently overwriting the other. *)
+  let unit_last_component unit_name =
+    let n = String.length unit_name in
+    let rec go i last =
+      if i + 1 >= n then last
+      else if unit_name.[i] = '_' && unit_name.[i + 1] = '_' then go (i + 2) (i + 2)
+      else go (i + 1) last
+    in
+    (* A wrapper spelled [Lib__] has no component after the separator; it names
+       itself. Guarding on [j < n] also keeps [String.sub] total. *)
+    let j = go 0 0 in
+    if j > 0 && j < n then String.sub unit_name j (n - j) else unit_name
+  in
+  let units_by_last_component : (string, string list) Hashtbl.t = Hashtbl.create 128 in
+  List.iter
+    (fun unit_name ->
+      let key = unit_last_component unit_name in
+      let existing =
+        Option.value ~default:[] (Hashtbl.find_opt units_by_last_component key)
+      in
+      Hashtbl.replace units_by_last_component key (unit_name :: existing))
+    (Arch_index_cmt.known_unit_names ()) ;
   List.iter
     (fun (call : pending_call) ->
       match
@@ -870,17 +910,57 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
                      Conflating "not in the index" with "in the index but
                      unidentifiable" is what took the abandoned branch's
                      repo-wide MAY_TOP from 660 to 875. *)
-          let resolve_qualified_unit mod_name name =
-            let ids =
-              List.concat_map
-                (fun (unit_name, residual) ->
-                  List.filter_map
-                    (fun path -> Hashtbl.find_opt fn_lookup (path, residual))
-                    (Arch_index_cmt.paths_of_unit unit_name))
-                (unit_readings mod_name name)
-              |> List.sort_uniq compare
+          (* Second tier, consulted only when no prefix reading answers: read
+             each SUFFIX segment as a bare module name and ask which known
+             compilation units END in it. This is what bridges a cross-library
+             re-export facade (see [units_by_last_component]).
+
+             It is NOT the old bare-segment lookup restored. The old code keyed
+             [capitalize (basename path)] in a last-writer-wins table, so a
+             second [api.ml] silently evicted the first and the survivor
+             answered for BOTH — the defect this whole change exists to remove.
+             Here a bare segment maps to EVERY unit that could define it, and
+             the function table arbitrates by the same 1 / 2+ / 0 rule as the
+             prefix tier: a genuine homonym reaches two ids and goes to ⊤
+             instead of being guessed. *)
+          let facade_readings mod_name name =
+            let parts = String.split_on_char '.' mod_name in
+            let rec go acc rest =
+              match rest with
+              | [] -> acc
+              | seg :: deeper ->
+                  let residual = String.concat "." (deeper @ [name]) in
+                  let units =
+                    Option.value ~default:[] (Hashtbl.find_opt units_by_last_component seg)
+                  in
+                  go (List.map (fun u -> (u, residual)) units @ acc) deeper
             in
-            match ids with [id] -> `Resolved id | [] -> `Not_found | _ -> `Ambiguous
+            go [] parts
+          in
+          let ids_of_readings readings =
+            List.concat_map
+              (fun (unit_name, residual) ->
+                List.filter_map
+                  (fun path -> Hashtbl.find_opt fn_lookup (path, residual))
+                  (Arch_index_cmt.paths_of_unit unit_name))
+              readings
+            |> List.sort_uniq compare
+          in
+          let resolve_qualified_unit mod_name name =
+            (* Tier order matters and is not an optimisation. A prefix reading
+               names the unit EXACTLY as dune spells it, so when one answers it
+               is the reference's own account of where the callee lives. The
+               facade tier infers a unit from a bare segment, which is weaker
+               evidence, so it is consulted only where the strong evidence is
+               silent — never allowed to outvote it or to add ambiguity to it. *)
+            match ids_of_readings (unit_readings mod_name name) with
+            | [id] -> `Resolved id
+            | _ :: _ :: _ -> `Ambiguous
+            | [] -> (
+                match ids_of_readings (facade_readings mod_name name) with
+                | [id] -> `Resolved id
+                | [] -> `Not_found
+                | _ -> `Ambiguous)
           in
           (* "Not in [fn_lookup]" has two very different causes, and the
              resolver above cannot tell them apart: the callee is genuinely
@@ -922,7 +1002,7 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
                      (fun p ->
                        Arch_index_cmt.is_dropped_node ~module_path:p ~name:residual)
                      paths)
-              (unit_readings mod_name name)
+              (unit_readings mod_name name @ facade_readings mod_name name)
           in
           let demoted = call.cond || call.partial in
           (* Roadmap 1.4 (⊤-anchor taxonomy): [top_reason] is [None] whenever
