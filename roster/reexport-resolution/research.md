@@ -96,7 +96,14 @@ same basename/last-writer-wins scheme (Q2), so it may point at the wrong file.
 `target_path` is the raw parsed string and is always populated — it is the trustworthy
 column, `target_module` is not.
 
-## Q6 — the sibling branch **[PERISHABLE — `feat/qualified-unit-resolution`, in review, 15 commits ahead]**
+## Q6 — the sibling branch **[PERISHABLE — `feat/qualified-unit-resolution`, in review]**
+
+> **Ahead-count corrected 2026-09-04, plan phase.** This section was written claiming
+> "15 commits ahead". Re-measured during `/roster-plan`: **29**, then **30** twenty
+> minutes later, with `636 ++++` / 596 insertions / 40 deletions on
+> `lib/arch_index/arch_index.ml` alone. The figure is not merely stale, it is *moving*;
+> do not quote a number from this file without re-running
+> `git rev-list --count origin/main..origin/feat/qualified-unit-resolution`.
 
 **Finding.** It replaces basename keying with a compilation-unit registry
 (`unit_paths : (string, string list) Hashtbl.t` keyed on `cmt_modname`, a **multimap**,
