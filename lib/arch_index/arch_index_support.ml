@@ -57,6 +57,19 @@ let schema_tables_to_drop =
        kept dependents-first so the list stays correct if enforcement is
        ever left on, and so it reads the same way as the rest of the list.
        Nothing here depends on FK enforcement being off. *)
+    (* FIX (review round 2, HIGH): [dead_code_sites] is producer-written
+       ([arch_index.ml]'s [stmt_dead]), was never dropped and never deleted,
+       so re-indexing an existing database appended a fresh copy of every
+       dead-call row on top of the previous run's — TRIPLED after three runs
+       — with the survivors pointing at [function_id]s that are reused across
+       runs and so no longer name the function the row was recorded for.
+       Before [calls]/[functions], which it FK-references.
+
+       This was the THIRD omission from this list in a row ([producer_runs],
+       then the seven exception/error-channel tables, then this), which is
+       why [tezt/tests/schema_drop_list.ml] now cross-checks the list against
+       the tables the producer actually writes. *)
+    "dead_code_sites";
     "channel_carriers";
     "exn_edges";
     "call_exn_scopes";

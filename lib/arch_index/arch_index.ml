@@ -1121,6 +1121,7 @@ module Lsp_client = Lsp_client
 module Lsp_types = Lsp_types
 module Ocaml_enricher = Ocaml_enricher
 module Db = Arch_index_db
+module Arch_index_support = Arch_index_support
 
 (* -------------------------------------------------------------------------- *)
 (* LSP-based run (Story #406 / #416)                                          *)
