@@ -168,9 +168,14 @@ default keeps that class out of the gate entirely. It was chosen because
 artefact nobody had diagnosed yet is luck, and worth saying so rather than
 claiming foresight.
 
-Forms are `exn_origins.form`'s own vocabulary — `raise`, `reraise`, `unknown`, `failwith`,
-`invalid_arg`, `assert`, `partial_match`, `compare`, `division`, `index`, `inferred_bind`. An
-unknown form **aborts**: it would select nothing, and the rule would report a PASS while policing
+Forms are `exn_origins.form`'s own vocabulary — and it is read from **the database's own `CHECK`
+constraint**, not from a list in the tool. That matters because a column added to a table crashes
+loudly while a **value added to an existing column's vocabulary is dropped in silence**: `form`
+gained `inferred_bind` at schema 1.8 and `top_reason` gained `ambiguous_unit` at 1.9, and a tool
+holding a list from before either would refuse a legal member while insisting it is not one — with
+neither `has_col` nor a capability probe able to see it, since the column is present and the value
+is the thing they never look at. So: a version is what a database *claims*, a column is what it
+*has*, and a vocabulary is what the schema *declares*. An unknown form **aborts**: it would select nothing, and the rule would report a PASS while policing
 an empty population. **So does an unknown `channel:`**, for the identical reason — measured before
 it was fixed, `channel:banana` and `channel:result` produced byte-identical `[UNKNOWN] 0 origin(s)`
 verdicts at exit 0, so a misspelling was indistinguishable from a genuinely clean channel. Unlike
