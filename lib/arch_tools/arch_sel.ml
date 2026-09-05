@@ -1,13 +1,31 @@
-(** Selectors: [file:<glob>], [fn:<glob>], [module:<glob>], [ext:<glob>].
+(** Selectors: [file:<glob>], [fn:<glob>], [module:<glob>], [ext:<glob>],
+    [exported:<glob>].
 
     Shared so that [file:test/**] means the same thing in [arch-rules], [arch-mutants] and
     [arch-coverage]. *)
 
-type kind = File | Fn | Module | Ext
+(** [Exported] is [Fn] restricted to the API surface — the same population, filtered on the
+    node's [exported] flag.
+
+    {b Why it is spelled [exported:] and not [entry:].} This repository already names the concept
+    three times: [Arch_graph.node.exported], [arch-query --roots exported], and the
+    [forbid exported outside] rule form. A fourth spelling for the same set is the defect that
+    rendered a failed SARIF import as [covered] on PR #80 — two names for one thing, agreeing
+    everywhere except where it mattered. The verb [forbid exported outside] and the selector kind
+    [exported:] live in different namespaces (rule verbs vs selector kinds) and cannot be
+    confused by the parser.
+
+    The flag itself is already normalised across the two schemas by {!Arch_graph}: the MAIN
+    schema's column is [functions.exposed] and the FLAT schema's is [functions.exported], and
+    both are read into [node.exported]. Selecting through the node rather than through SQL is
+    what keeps that single normalisation point single. *)
+type kind = File | Fn | Module | Ext | Exported
 type t = kind * string
 
-let kind_name = function File -> "file" | Fn -> "fn" | Module -> "module" | Ext -> "ext"
-let all_kinds = [ File; Fn; Module; Ext ]
+let kind_name = function
+  | File -> "file" | Fn -> "fn" | Module -> "module" | Ext -> "ext" | Exported -> "exported"
+
+let all_kinds = [ File; Fn; Module; Ext; Exported ]
 let kinds_doc allow = String.concat ", " (List.map (fun k -> kind_name k ^ ":<glob>") allow)
 
 (* The allow-list every call site used before `ext:` existed, and the one every call site that
@@ -16,6 +34,14 @@ let kinds_doc allow = String.concat ", " (List.map (fun k -> kind_name k ^ ":<gl
    `arch-mutants` used to spell [File; Fn; Module] out by hand, which is exactly the duplication
    this guards against. *)
 let structural = [ File; Fn; Module ]
+
+(** The kinds valid as the SOURCE of a cone — [structural] plus [exported:].
+
+    Deliberately a separate name rather than an addition to [structural]: [structural] is the
+    list [arch-coverage] and [arch-mutants] pass, and neither ranges over a call cone, so
+    widening it in place would hand them a kind by omission — the exact "silent reinterpretation
+    by omission" the #73 review found in [Dep]. A new kind must be granted, never inherited. *)
+let cone_source = [ File; Fn; Module; Exported ]
 
 (** [allow] is MANDATORY, and that is the point.
 
@@ -53,6 +79,7 @@ let parse ~allow tok =
                (String.concat ", " (List.map kind_name allow))
                (match c with
                 | Ext -> "`ext:` matches external leaves, which have no body, no outgoing edge and no file, so it is answerable only as the target of `forbid reach`. Here it would select keys that cannot serve this position."
+                | Exported -> "`exported:` matches FUNCTIONS on the API surface. A position that reads declared module paths, or one that does not range over a call cone, cannot answer it — the operand would be compared against a population it never ranges over, and an empty match there is reported as a proof rather than as vacuity."
                 | File | Fn | Module -> "This position reads a different population."))
       | Some c -> Ok (c, pat))
 
@@ -132,10 +159,20 @@ let select (g : Arch_graph.t) ((k, pat) : t) =
       Arch_graph.SS.filter
         (fun key -> glob_match pat (Arch_graph.ext_name key))
         (Arch_graph.ext_keys g)
-  | File | Fn | Module ->
+  | File | Fn | Module | Exported ->
       List.fold_left
         (fun acc (n : Arch_graph.node) ->
-          let target = match k with Fn -> Some n.name | File | Module -> n.file | Ext -> None in
+          let target =
+            match k with
+            | Fn -> Some n.name
+            (* An unexported node is not "a node that fails the glob" — it is outside the
+               population entirely, so it is filtered before the glob is consulted rather than
+               by an unmatchable pattern. [exported:**] therefore means "every entry point",
+               not "every node". *)
+            | Exported -> if n.exported then Some n.name else None
+            | File | Module -> n.file
+            | Ext -> None
+          in
           match target with
           | Some v when glob_match pat v -> Arch_graph.SS.add n.key acc
           | _ -> acc)

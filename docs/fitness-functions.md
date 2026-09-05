@@ -127,8 +127,28 @@ silently stops gating.
 | `fn:<glob>` | the function's name |
 | `module:<glob>` | file path, except in `forbid dep` where it is the declared module path |
 | `ext:<glob>` | the name of an external leaf (a callee with no body in the index) — valid only as the **target** of `forbid reach` |
+| `exported:<glob>` | the name of a function **on the API surface** — `fn:` restricted to nodes flagged exported. Valid only as the **source** of `forbid reach` |
 
 `forbid origin` accepts `file:` and `fn:` only; `module:` and `ext:` abort (exit 2).
+`forbid dep` accepts `module:` only, on both sides — including against `exported:`.
+
+**Why `exported:` and not `entry:`.** The concept is already named three times in this
+repository — `Arch_graph.node.exported`, `arch-query --roots exported`, and the
+`forbid exported outside` rule form. A fourth spelling for one set is how two names for the same
+thing come to disagree in the one place it matters. The rule verb and the selector kind are
+different namespaces and cannot be confused by the parser.
+
+The flag is normalised across the two schemas before any selector sees it: the MAIN schema's
+column is `functions.exposed`, the FLAT schema's is `functions.exported`, and `Arch_graph` reads
+both into `node.exported`. `exported:` selects through the node, never through SQL, which is what
+keeps that normalisation in one place.
+
+**`exported:` is granted per position, never inherited.** It is absent from `Arch_sel.structural`
+— the list `arch-coverage` and `arch-mutants` pass — and lives in `Arch_sel.cone_source`, which
+only `forbid reach`'s source uses. The hazard is the mirror of `ext:`'s, and `ext:` documents it
+against itself: a selector answerable in one position only, accepted in another, matches a
+population that position never ranges over, and the empty result is then reported as a **proof
+rather than as vacuity** — a green nobody earned. A kind must be granted at each call site.
 
 Globs: `*` stops at `/`, `**` crosses it, and `**/` matches **whole directory components** — so
 `**/parser.ml` matches `lib/parser.ml` and `parser.ml`, but never `lib/my_parser.ml`. That
