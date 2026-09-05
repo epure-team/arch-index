@@ -69,7 +69,112 @@ let origins db ~channel =
            channel))
   |> List.map (function [ x ] -> Db.to_string ~sql:"origins" x | _ -> Test.fail "shape")
 
-let register () =
+(* A SECOND FIXTURE, for the placement of [note_seen_value_path] alone.
+
+   No [None] is WRITTEN anywhere in it, and the only [None] nodes the compiler puts in the tree
+   are the two it synthesises for the omitted optional arguments. The carrier type is present, so
+   the [option] channel is live and its declared origin ["None"] is the only thing whose
+   observation is in question. *)
+let seen_only_files =
+  [
+    Fixture.dune_project;
+    ( "dune",
+      "(library\n\
+      \ (name ph_seen)\n\
+      \ (wrapped false)\n\
+      \ (modules ph_s)\n\
+      \ (flags (:standard -w -8-11-21-26-27-32-33-37-39)))\n" );
+    (* [channel.option] EXTENDS the built-in field by field rather than replacing it, which is
+       the only spelling the config accepts: a differently-named channel over the same carrier is
+       refused outright, because selection is first-match-wins and the built-in is merged first.
+       The profile exists at all because validation does not run without one — the first draft of
+       this test asserted on the strict output of a run that never validated anything, and passed
+       against the mutant for that reason. *)
+    ("profiles/ph-errors.toml", "[channel.option]\ntype = \"option\"\norigins = [{path = \"None\", arg = 0}]\n");
+    ( "ph_s.ml",
+      {|(* The carrier: something of type _ option exists, so the channel is not vacuous. *)
+let carrier (x : int option) : int option = x
+
+let with_opts ?title ?description n = ignore title ; ignore description ; n
+
+(* The ONLY None nodes in this unit are the two the compiler synthesises here. *)
+let omits_both n = with_opts n
+|} );
+  ]
+
+(* THE DECISION THIS TEST EXISTS FOR, and it had none.
+
+   [note_seen_value_path] is called OUTSIDE the [has_source] guard. A review pointed out that
+   moving it INSIDE survives the whole suite — nine lines of comment and a CHANGELOG paragraph
+   defended a placement that nothing could distinguish from its opposite. That is this PR's own
+   thesis turned on the PR: a table lost 89 % of its rows with every assertion green, because
+   nothing asserted on the thing that changed.
+
+   The two placements answer different questions, and this fixture separates them:
+
+     outside (correct)  "is the declared path ['None'] plausible for this corpus?" — a question
+                        about the CONFIG. A synthetic [None] is still a [None] node the compiler
+                        put in the tree, so the declaration IS observed.
+     inside  (wrong)    conflates that with "did the program produce an error here?", so on a
+                        corpus whose only [None]s are synthetic, [--errors-strict] reports a
+                        correctly-declared channel as never observed — a false alarm about the
+                        config, raised by a fact about the code.
+
+   Red-verified by hand before this test was written, same binary, same fixture:
+     correct  exit 0, no [channel option: 'None'] line
+     mutant   exit 1, [arch-errors: channel option: 'None' matched nothing] *)
+let register_seen_outside_the_guard () =
+  Test.register ~__FILE__
+    ~title:"phantom origins: a synthetic None still OBSERVES the declared path (3.14)"
+    ~tags:["cmt"; "errch"; "option"; "origins"; "strict"]
+  @@ fun () ->
+  with_fixture ~name:"phantom_seen" ~files:seen_only_files @@ fun fixture ->
+  let db = Arch_tezt.temp_db "phantom_seen" in
+  let code, output =
+    Arch_tezt.index_raw_into ~db
+      ~env:[("ARCH_ERRORS_PROFILES_DIR", Filename.concat fixture.Arch_tezt.root "profiles")]
+      ~extra_args:["--errors-profile"; "ph"; "--errors-strict"]
+      fixture
+  in
+  Batch.run (fun b ->
+      (* PREMISE 0: the profile was actually loaded. Without it no validation runs at all and
+         every assertion below is vacuous — which is exactly how the first version of this test
+         passed against the mutant it was written to kill. *)
+      Batch.check b
+        ~msg:(Printf.sprintf "premise: the error profile was loaded:\n%s" output)
+        (Batch.has_substring ~needle:"arch-errors: using profile " output) ;
+      (* PREMISE 1: the omissions are really there. Without them the unit has no [None] node at
+         all, and "the declaration was observed" would be false for an uninteresting reason. *)
+      Batch.check b ~msg:"premise: the function that omits optional arguments was indexed"
+        (Db.with_db db (fun c ->
+             Db.int c "SELECT count(*) FROM functions WHERE name = 'omits_both'")
+        = 1) ;
+      (* PREMISE 2: and NO origin row survives — this fixture writes no real [None], so the guard
+         drops everything it produced. This is what makes the assertion discriminate: the path is
+         reported as observed while contributing zero rows. *)
+      Batch.eq_int b ~msg:"premise: this fixture contributes no option origin at all"
+        (List.length (origins db ~channel:"option"))
+        0 ;
+      (* PREMISE 3: the mechanism can say "matched nothing" on THIS run. Other declarations of the
+         same channel do go unobserved here, so a silent 'None' is a decision, not an empty
+         validator. *)
+      Batch.check b
+        ~msg:(Printf.sprintf "premise: the validator does report misses on this run:\n%s" output)
+        (Batch.has_substring ~needle:"arch-errors: channel option: 'Stdlib.Option.get'" output) ;
+      (* THE ASSERTION, on the exact line and not on a substring shared with every other
+         channel's misses. *)
+      Batch.check b
+        ~msg:
+          (Printf.sprintf
+             "the declared origin 'None' is observed, so it is NOT reported unmatched:\n%s"
+             output)
+        (not
+           (Batch.has_substring ~needle:"arch-errors: channel option: 'None' matched nothing"
+              output)) ;
+      Batch.eq_int b ~msg:(Printf.sprintf "--errors-strict exits 0:\n%s" output) code 0) ;
+  Lwt.return_unit
+
+let register_exact_set () =
   Test.register ~__FILE__
     ~title:"phantom origins: an omitted optional argument is not a returned None (3.14)"
     ~tags:["cmt"; "errch"; "option"; "origins"]
@@ -110,3 +215,7 @@ let register () =
            is self-consistent. *)
         "raises@16") ;
   Lwt.return_unit
+
+let register () =
+  register_exact_set () ;
+  register_seen_outside_the_guard ()

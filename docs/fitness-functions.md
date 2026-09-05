@@ -159,14 +159,22 @@ disagreement — which is why a number here names its build state and not just i
 
 An unscoped rule reported an option-typed return as a crash site.
 
-**And the `option` count is mostly not even that.** Roadmap 3.14 established that
-the walker records a `None` origin for every **omitted optional argument** — the
-`None` the type-checker synthesises, not one anyone wrote — so 51 % of the
-functions carrying `option` origins have no real-position origin at all. The
-default keeps that class out of the gate entirely. It was chosen because
-`exception` is what a crash-surface rule means; that it also excludes a producer
+**And the `option` count was mostly not even that — until 3.14 removed the cause.**
+The walker used to record a `None` origin for every **omitted optional argument** —
+the `None` the type-checker synthesises, not one anyone wrote — so 51 % of the
+functions carrying `option` origins had no real-position origin at all. Roadmap
+3.14 stopped writing that class, so the counts above (**128** on `option`, **247**
+on `tzresult`, **376** together) describe an index built **before** it; on a
+current index the `option` figure is smaller, and the difference is the phantoms
+rather than any change in the code being measured. The numbers are kept in their
+pre-3.14 form because they are what the paragraph's argument was made from, and
+re-deriving them would date the prose without dating the claim.
+
+The default keeps that class out of the gate entirely. It was chosen because
+`exception` is what a crash-surface rule means; that it also excluded a producer
 artefact nobody had diagnosed yet is luck, and worth saying so rather than
-claiming foresight.
+claiming foresight — and it is why removing the artefact changes no verdict this
+document reports.
 
 Forms are `exn_origins.form`'s own vocabulary — and it is read from **the database's own `CHECK`
 constraint**, not from a list in the tool. That matters because a column added to a table crashes
@@ -245,8 +253,20 @@ investigation into the `option` channel (roadmap 3.14) established that every
 `line = 0` origin is a **phantom**: the walker records a `None` origin for each
 *omitted optional argument*, the `None` that `Typecore.option_none` synthesises
 during type-checking. Those are not `None` returns anyone wrote. Attribution was
-measured at **100 %, zero residue, on two corpora** — proto_alpha 2 402 / 2 402,
-arch-index 394 / 394.
+measured at **100 %, zero residue, on two corpora** — proto_alpha 2 402 / 2 402.
+
+> **A number withdrawn, 2026-09-05.** This sentence also read *"arch-index
+> 394 / 394"*, and 394 reproduces on nothing. Re-derived with the `0982a42`
+> producer over this repository's own `_build/default`, `line = 0` `option`
+> origins are **245** for `_build/default/lib/arch_index` and **1 205** for the
+> whole `_build/default`. A reviewer measuring the same two scopes on their own
+> checkout got 253 and 1 310 — neither of us is wrong, and the gap is which units
+> happened to be compiled, which is the point this page makes two paragraphs
+> above and which the withdrawn figure did not carry. It is replaced rather than
+> corrected because there is no build state under which it was right, so there is
+> nothing to re-label. The attribution claim itself is unaffected: it was verified
+> independently on proto_alpha, and the `arch-index` figure was only ever a second
+> witness.
 
 Within one function every such row collapses to `<fn> | <file>:0 | None`, so
 2 158 functions yield **exactly 2 158 identities** — verified here, not assumed.

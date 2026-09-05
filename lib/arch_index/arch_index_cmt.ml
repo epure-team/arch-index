@@ -2437,7 +2437,17 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels
 
                      Sound before and after — the class only ever ADDED [None], so nothing
                      downstream was unsound. It was a precision loss that drowned the real signal
-                     twenty to one. *)
+                     twenty to one.
+
+                     REJECTING [loc_ghost] IS NOT A STYLE CHOICE, and the counterexamples exist:
+                     a review probed the same 1751 [.cmt] and found 8541 [None] nodes with a real
+                     position, of which 666 ALSO carry [loc_ghost] — ppx and desugaring output
+                     that a ghost test would have deleted. Of the 9984 at [pos_lnum = 0], 9983 are
+                     omitted optional arguments and the single residue is an [Ev_backend.t option]
+                     in [lwt_engine], a class instantiation omitting [?backend] — the same
+                     phenomenon under a node that is not [Texp_apply], not a counterexample.
+
+                     The guard applies to BOTH arms below; see the note on the second. *)
                   let has_source = expr.exp_loc.Location.loc_start.Lexing.pos_lnum > 0 in
                   (match carrier_of cstr_desc.cstr_res with
               | Some c -> (
@@ -2466,6 +2476,19 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels
                           ()
                   | Some (opath, pos) -> (
                       note_seen_value_path opath ;
+                      (* [has_source] guards THIS arm too, and the symmetry is deliberate. A
+                         review found the guard applied only to the [pos = 0] arm above and
+                         measured the gap: across 1751 [.cmt] in the opam switch, constructor
+                         nodes with no source position that are NOT [None] number seven in total,
+                         none of them plausible as a declared origin. So there is no live defect
+                         here — which is exactly why it would have stayed. A fix that is partial
+                         by construction, with nothing in the code saying so, leaves the next
+                         reader to rediscover that one arm answers the question and the other
+                         does not. The predicate is the same and the reason is the same: a node
+                         the compiler synthesised has no source, and an origin with no source is
+                         not a fact about the program. *)
+                      if not has_source then ()
+                      else
                       match List.nth_opt args (pos - 1) with
                       | None -> ()
                       | Some argexpr -> (

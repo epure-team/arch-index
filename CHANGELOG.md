@@ -68,6 +68,25 @@
   report a correctly-declared channel as never observed on a corpus whose only `None`s are
   synthetic.
 
+  **Both constructor arms are guarded**, not only the one that produced the measured class. On
+  1 751 `.cmt` from the opam switch, position-less constructor nodes that are *not* `None` number
+  seven in total and none is plausible as a declared origin — so the second arm had no live
+  defect, which is exactly why it would have stayed unguarded and undocumented.
+
+  **A number withdrawn while the surrounding claim stands.** `docs/fitness-functions.md` cited
+  *"arch-index 394 / 394"* for this attribution; 394 reproduces under no build state. Re-derived
+  with the `0982a42` producer, `line = 0` `option` origins are **245** over
+  `_build/default/lib/arch_index` and **1 205** over the whole `_build/default`; a reviewer on
+  their own checkout measured 253 and 1 310, and the gap is which units were compiled. The
+  attribution claim is unaffected — it was verified on proto_alpha independently.
+
+  **Two texts this change falsifies are corrected in the same commit**, because it is the only
+  moment that can be done honestly: `docs/fitness-functions.md`'s pre-3.14 counts are now labelled
+  as such, and the allow-list justification in `bin/arch_rules/arch_rules.ml` — which said in its
+  own words that its 88 % *"would have gone false the day 3.14 lands"* — keeps the half that
+  survives (5–8 % collisions on real-position rows, worst group nine) and marks the other half as
+  a population that no longer exists.
+
   **Known residual, not closed here:** `exn_origins.line` is `NOT NULL`, so an origin with no
   position remains indistinguishable from one at line 0. That set is now empty, but the invariant
   holds by absence of counter-example rather than by the schema. Making the columns nullable is a

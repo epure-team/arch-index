@@ -77,24 +77,36 @@ let strip_prefix p s = String.sub s (String.length p) (String.length s - String.
    so a collision count is a joint property of the code and the build's coverage,
    never of the code alone.
 
-                            all rows            rows with a real position
-     proto_alpha     30526 / 26901 colliding    3344 / 281 (8.4%), worst 9
-     octez-manager   18758 / 15569 (83%)        3100 / 218 (7.0%), worst 7
-     whole src      265217 / 169525 (64%)      86198 / 4196 (4.9%), worst 9
+     ONLY THE SECOND COLUMN IS STILL A FACT ABOUT THIS TOOL'S OUTPUT.
+     The first is kept as the historical population, because it is what the
+     original justification quoted and a reader meeting the smaller number
+     elsewhere would otherwise think one of the two is wrong.
 
-   READ THE SECOND COLUMN. Every line = 0 origin is a PHANTOM: the walker records
-   a None origin for each OMITTED OPTIONAL ARGUMENT -- the None Typecore
-   synthesises during type-checking, not one anyone wrote. Attributed at 100%,
-   zero residue, on two corpora (roadmap 3.14). Within a function they all
-   collapse to one identity, so 2158 functions yield exactly 2158 identities
-   (verified). The 139-row worst group is one value's phantoms:
-   receipt_repr.ml's balance_and_update_encoding is a VALUE, not a function, so
-   it cannot return None at all.
+                            all rows, BEFORE 3.14   rows with a real position
+     proto_alpha     30526 / 26901 colliding        3344 / 281 (8.4%), worst 9
+     octez-manager   18758 / 15569 (83%)            3100 / 218 (7.0%), worst 7
+     whole src      265217 / 169525 (64%)          86198 / 4196 (4.9%), worst 9
 
-   The decision stands on the narrower number: on rows describing real code the
-   identity still collides 5-8% of the time with a worst group of NINE, which is
-   still a set exemption waiting to grow. But the 88% argued it from a producer
-   artefact and would have gone false the day 3.14 lands.
+   THE FIRST COLUMN DESCRIBES A POPULATION THAT NO LONGER EXISTS. Every line = 0
+   origin was a PHANTOM: the walker recorded a None origin for each OMITTED
+   OPTIONAL ARGUMENT -- the None Typecore synthesises during type-checking, not
+   one anyone wrote. Roadmap 3.14 stopped writing them, so on an index built
+   after it the left column collapses onto the right and the 88%/83%/64% figures
+   are unreachable by any query. Attributed at 100%, zero residue, on two corpora.
+   Within a function the phantoms all collapsed to one identity, so 2158
+   functions yielded exactly 2158 identities (verified). The 139-row worst group
+   was one value's phantoms: receipt_repr.ml's balance_and_update_encoding is a
+   VALUE, not a function, so it cannot return None at all.
+
+   This block said, in its own words, that the 88% "would have gone false the day
+   3.14 lands". That day is the commit carrying this edit, which is the only
+   moment the correction can be made honestly -- afterwards the number is merely
+   wrong, with nothing left in the tree to date it against.
+
+   THE DECISION IS UNCHANGED, because it never rested on the falsified half: on
+   rows describing real code the identity still collides 5-8% of the time with a
+   worst group of NINE, and that is a set exemption waiting to grow. The count
+   field earns its place from the second column alone.
 
    Adding the COLUMN does not rescue it (26901 -> 26786 on proto_alpha): 139
    origins can share a function, file, line, form and exception. So no positional
