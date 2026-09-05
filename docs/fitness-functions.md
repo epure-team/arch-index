@@ -127,7 +127,7 @@ silently stops gating.
 | `fn:<glob>` | the function's name |
 | `module:<glob>` | file path, except in `forbid dep` where it is the declared module path |
 | `ext:<glob>` | the name of an external leaf (a callee with no body in the index) — valid only as the **target** of `forbid reach` |
-| `exported:<glob>` | the name of a function **on the API surface** — `fn:` restricted to nodes flagged exported. Valid only as the **source** of `forbid reach` |
+| `exported:<glob>` | the name of a function **on the API surface** — `fn:` restricted to nodes flagged exported. Granted at exactly two positions: the **source** of `forbid reach`, and `arch-coverage --roots` |
 
 `forbid origin` accepts `file:` and `fn:` only; `module:` and `ext:` abort (exit 2).
 `forbid dep` accepts `module:` only, on both sides — including against `exported:`.
@@ -154,9 +154,12 @@ than make it unanswerable.
 
 *(An earlier draft of this paragraph said `structural` is "the list `arch-coverage` and
 `arch-mutants` pass" **and** that `arch-coverage --roots` uses `cone_source` — two claims about
-one tool, in one sentence, that cannot both hold. The same fact is stated in three places: here,
-beside `Arch_sel.cone_source`, and in the `arch-rules` grant site. Two of the three had drifted;
-when you change one, change all three.)*
+one tool, in one sentence, that cannot both hold. The same fact is stated in **five** places:
+the selector table above, this paragraph, beside `Arch_sel.cone_source`, at the `arch-rules`
+grant site, and in the CHANGELOG entry. An earlier revision of this warning said "three", and
+undercounting is how the two it omitted — the table row above, which is the line a rule author
+actually reads, and the CHANGELOG's opening sentence — stayed stale through two rounds of
+fixing the other three. When you change one, change all five.)*
 
 **The reason is scoping, not soundness — and the difference was measured.** An earlier draft of
 this section called it "the mirror of `ext:`'s hazard". It is not. `ext:` in *source* position is

@@ -192,14 +192,22 @@ let register_filters () =
 
 let register_refused_in_dep () =
   Test.register ~__FILE__
-    ~title:"exported selector: refused in a position that cannot answer it"
+    ~title:"exported selector: refused where it is not granted, before it can answer wrongly"
     ~tags:["rules"; "reach"; "selector"; "exported"; "vacuity"]
   @@ fun () ->
   with_indexed "es_refuse" @@ fun db ->
-  (* [forbid dep] reads DECLARED MODULE PATHS from a table, not the call graph, so a
-     function-level selector ranges over a population it never sees. The refusal must be at
-     PARSE time and fatal — a verdict computed over an empty match is the false green this
-     kind is guarded against. *)
+  (* [forbid dep] reads DECLARED MODULE PATHS from a table, not the call graph. The refusal
+     must be at PARSE time and fatal, and the reason measured rather than assumed:
+
+     - [Dep]'s evaluator never calls {!Arch_sel.select} AT ALL — it globs the pattern against
+       [module_deps] rows, so the selector KIND is discarded and only the pattern survives.
+     - Widening [dep_allow] to admit [Exported] and running this very fixture returns
+       [1 proved], exit 0. The position does not fail to answer; it answers WRONGLY, over a
+       rule that policed nothing.
+
+     An earlier revision of this comment called it "a verdict computed over an empty match".
+     The match is not empty — [source_size] is 2. The assertions below were right and
+     red-capable throughout; only this rationale was invented. *)
   let code, out =
     rules
       [ db;
