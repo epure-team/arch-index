@@ -30,7 +30,8 @@ Contract: `specs/mutation-campaign-313.md`. Plan and reasoning:
 
 **A survivor must never be published as `SURVIVED` under a bounded selection.** `proved_superset`
 requires **both** a closed test cone and a soundness contract. Check that the implementation reuses
-the predicate at `bin/arch_mutants/arch_mutants.ml:122` rather than recomputing a weaker one. A
+the `proof` binding — `let proof = escapes = [] && sound`, at `bin/arch_mutants/arch_mutants.ml:122`
+on this branch's base, one line below the `sound` half — rather than recomputing a weaker one. A
 recomputation that drops the contract half looks identical in every fixture whose index happens to
 carry a contract.
 
@@ -42,8 +43,15 @@ a proof, a survivor is not.
 could hold either. Storing a verdict means a later change to the derivation leaves old rows
 disagreeing with new ones, with nothing to signal it.
 
-**No emitter may write a status without its provenance in the same record.** `CHECK-7` greps for
-this; verify the grep actually covers every emitter rather than the one the author remembered.
+**No emitter may write a status without its provenance in the same record.** `CHECK-7` is
+`scripts/check-status-provenance.sh`, which **does not exist yet** — the implementer creates it in
+slice 2. Verify it exists, then verify the grep actually covers every emitter rather than the one
+the author remembered. A guard that greps one file and passes is worse than no guard.
+
+**`selection_provenance` must be a stored column with a CHECK constraint**, not a value recomputed
+at report time. Confirm the migration declares
+`CHECK(selection_provenance IN ('proved_superset','top_bounded','no_contract'))` and that the
+consumer matches on it totally.
 
 **Attribution must never be inferred.** A `mutant_kills` row may exist only when the executed set
 was a singleton or the engine named the killer. An implementation that writes a row whenever a

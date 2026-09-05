@@ -176,7 +176,7 @@ node; a language with no profile yields `not_analysed` rather than an empty camp
 
 - **FR-010** [US-3]: Each `mutant_runs` row MUST carry `selection_provenance ∈ {proved_superset, top_bounded, no_contract}`, constrained by a CHECK.
 - **FR-011** [US-3]: The published verdict MUST be computed, never stored, as: KILLED or TIMEOUT → `KILLED`; ERROR → `ERROR`; SURVIVED with `proved_superset` → `SURVIVED`; SURVIVED with `top_bounded` → `UNKNOWN`; SURVIVED with `no_contract` → `UNKNOWN_NO_CONTRACT`.
-- **FR-012** [US-3]: `selection_provenance` MUST be `proved_superset` only when the test cone holds no ⊤ edge **and** the index carries a soundness contract, reusing the predicate already computed at `bin/arch_mutants/arch_mutants.ml:122`.
+- **FR-012** [US-3]: `selection_provenance` MUST be `proved_superset` only when the test cone holds no ⊤ edge **and** the index carries a soundness contract, reusing the `proof` binding — `let proof = escapes = [] && sound` — rather than recomputing it. On this branch's base that binding is at `bin/arch_mutants/arch_mutants.ml:122`, one line below the `sound` half; cite the **binding**, because a line number moves under a rebase and this branch's base has moved three times in one day.
 - **FR-013** [US-3]: No report, view, or JSON output MUST expose `engine_status` without the accompanying `selection_provenance` in the same record.
 - **FR-014** [US-3]: A mutant with no `mutant_runs` row in a campaign whose `completed_at` is NULL MUST be reported PENDING, and MUST NOT be reported SURVIVED.
 - **FR-015** [US-3]: The system MUST NOT emit any mutation score, ratio, percentage, or threshold.

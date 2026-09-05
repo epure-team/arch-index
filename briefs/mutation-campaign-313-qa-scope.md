@@ -4,6 +4,12 @@
 
 Worktree `/mnt/ssd-external-2to/arch-index-mutation-313`, branch `feat/mutation-campaign-313`.
 
+## The contract
+
+Every term used below — `not_analysed`, self-uncertified, "three indexes", exit 3, provenance — is
+defined in **`specs/mutation-campaign-313.md`**, in this worktree. Read it before running anything;
+this file names what to check, not what the words mean.
+
 ## Environment
 
 ```
@@ -64,11 +70,19 @@ not a broken gate. Do not report an absent script as a failing check.
 - A language with no profile reports `not_analysed` rather than an empty result.
 - A subprocess exiting **3** is reported as refused, distinctly from a failure.
 
+## What a GO looks like
+
+Say GO when the build is clean, every tezt case passes, the standing guard scripts exit 0, and
+every behaviour above was observed rather than assumed. A clean `dune test --force` is a normal,
+expected GO — the rule below is about **mutation campaign results**, not about this test suite.
+
 ## Verdicts QA must refuse to give
 
-- **Do not pass a green run that contains no red anywhere.** A campaign with at least one kill
-  self-certifies, because a stale binary is unmutated and cannot produce a kill. An entirely green
-  campaign cannot distinguish a weak suite from the wrong binary having run.
+- **Do not accept a mutation campaign whose every mutant survived**, as evidence of anything. A
+  campaign with at least one kill self-certifies, because a stale binary is unmutated and cannot
+  produce a kill; an all-survivor campaign cannot distinguish a weak suite from the wrong binary
+  having run. **This applies to campaign results only.** It is not a rule about the tezt suite: a
+  passing test suite with no failures is exactly what a GO looks like.
 - **Do not accept a measurement without its corpus, its commit and its build state.**
 - **Do not accept a bare zero.** The report must say what would have made it non-zero.
 - **Do not accept a mutation score, ratio or threshold** in any output or any prose.
