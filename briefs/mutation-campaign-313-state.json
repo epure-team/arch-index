@@ -1,7 +1,7 @@
 {
   "task": "mutation-campaign-313",
   "mode": "full",
-  "current_phase": "spec",
+  "current_phase": "plan",
   "events": [
     {
       "phase": "question",
@@ -26,6 +26,12 @@
       "outcome": "VALIDATED",
       "at": "2026-09-05T13:05:00+02:00",
       "by": "human-gate"
+    },
+    {
+      "phase": "plan",
+      "outcome": "COMPLETED",
+      "at": "2026-09-05T14:55:00+02:00",
+      "by": "roster-plan"
     }
   ]
 }

@@ -1,0 +1,16 @@
+{
+  "task": "mutation-campaign-313",
+  "mode": "critical",
+  "schema_version": "1.0",
+  "steps": [
+    { "id": "step-1", "skill": "roster-implement",     "inputs": ["briefs/mutation-campaign-313-implementer.md", "specs/mutation-campaign-313.md"], "outputs": ["briefs/mutation-campaign-313-impl.md"], "hook": false },
+    { "id": "step-2", "skill": "roster-formal-verify", "inputs": ["specs/mutation-campaign-313.qnt", "briefs/mutation-campaign-313-formal-triage.md"], "outputs": ["briefs/mutation-campaign-313-formal-verify.md"], "hook": false },
+    { "id": "step-3", "skill": "roster-review",        "inputs": ["briefs/mutation-campaign-313-reviewer.md"], "outputs": ["briefs/mutation-campaign-313-review.json"], "hook": false },
+    { "id": "step-4", "skill": "roster-ship",          "inputs": ["briefs/mutation-campaign-313-review.json"], "outputs": ["briefs/mutation-campaign-313-ship.md"], "hook": false }
+  ],
+  "quality_gates": {
+    "build": "eval \"$(opam env --switch=/home/mathias/dev/arch-index --set-switch)\" && dune build",
+    "test": "eval \"$(opam env --switch=/home/mathias/dev/arch-index --set-switch)\" && dune test --force",
+    "lint": ""
+  }
+}

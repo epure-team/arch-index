@@ -1,7 +1,7 @@
 # Plan — mutation-campaign-313
 
 **Date:** 2026-09-05T14:20:00+02:00
-**Status: DRAFT**
+**Status: VALIDATED**
 **Base:** `879fedb`. Re-verified after rebase in `/mnt/ssd-external-2to/arch-index-mutation-313`:
 build clean, **188/188** tezt cases, 0 failures. Was 165 on `2ac80eb`; the SARIF-out merge added 23.
 

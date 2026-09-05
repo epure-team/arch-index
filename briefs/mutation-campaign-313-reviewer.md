@@ -1,7 +1,7 @@
 # Reviewer sub-brief — mutation-campaign-313
 
 **Date:** 2026-09-05T14:45:00+02:00
-**Status: DRAFT**
+**Status: VALIDATED**
 
 Self-contained. You are not assumed to have seen anything else in this session.
 
