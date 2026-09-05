@@ -161,11 +161,15 @@
   message that merely over-claims. It now mirrors the `ext:` arm one line above: say what the
   kind is answerable for, and stop.
 
-  **The ceiling metric moves 358 → 361** (`MUST` with a NULL callee, whole-repo index, whole
-  `_build/default`, measured on both trees with the same binary). +3 from the source change,
-  advisory and well inside `clean_measured + headroom`. It does not touch
-  `tezt/tests/must_null_ceiling.ml`, so it does not collide with #83's serialised recalibration
-  to 367 — after which this lands at 370 against a ceiling of 392.
+  **The ceiling metric moves 367 → 370** (`MUST` with a NULL callee, whole `_build/default`,
+  same binary on both trees). +3 from the source change, advisory, against a ceiling of 392
+  (`clean_measured` 367 + headroom 25). `tezt/tests/must_null_ceiling.ml` is untouched, so this
+  cannot collide by value with #83's recalibration of that constant.
+
+  *Re-derived after #83 merged rather than carried over.* The same measurement on the previous
+  base read 358 → 361; both the base and the delta had to be taken again on the tree that exists,
+  because a number kept across a rebase describes a tree nobody can check any more. The delta
+  held at +3 — but that it held is a result, not a reason to have skipped the measurement.
 
   Red-verified rather than argued, each mutation named by its binding so a reader can reproduce
   it (a bare build hash is a coordinate nobody else can check):
