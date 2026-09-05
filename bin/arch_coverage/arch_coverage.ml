@@ -73,7 +73,14 @@ let main () =
            explicit --roots selector, or use a producer that records exports.";
       (k, "exported"))
     else
-      match Arch_sel.parse ~allow:Arch_sel.structural roots_arg with
+      (* [Exported] is granted HERE and not by inheriting [structural], for the reason the whole
+         selector exists: the bare keyword `--roots exported` above computes exactly this set,
+         by the same fold over [node.exported]. Refusing `--roots exported:**` while accepting
+         `--roots exported` would be two spellings of one set, in one flag, with opposite
+         outcomes — the defect this kind was named to avoid, shipped by the change that named
+         it. Both spellings now answer, and the empty-cone refusal below covers the selector
+         path exactly as the keyword's own guard covers the keyword. *)
+      match Arch_sel.parse ~allow:Arch_sel.cone_source roots_arg with
       | Error e -> die ("arch-coverage: " ^ e)
       | Ok s ->
           let k = Arch_sel.select g s in

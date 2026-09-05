@@ -79,7 +79,7 @@ let parse ~allow tok =
                (String.concat ", " (List.map kind_name allow))
                (match c with
                 | Ext -> "`ext:` matches external leaves, which have no body, no outgoing edge and no file, so it is answerable only as the target of `forbid reach`. Here it would select keys that cannot serve this position."
-                | Exported -> "`exported:` matches FUNCTIONS on the API surface. A position that reads declared module paths, or one that does not range over a call cone, cannot answer it — the operand would be compared against a population it never ranges over, and an empty match there is reported as a proof rather than as vacuity."
+                | Exported -> "`exported:` matches FUNCTIONS on the API surface. It is granted at the positions that were designed and tested for it, and nowhere else — a selector kind is granted deliberately, per position, never inherited. This is a SCOPING decision, not a claim that the position would answer wrongly: `arch-coverage --roots exported` computes exactly this set today, and a `forbid reach` target that matches nothing is already reported as vacuous rather than as a proof. Widening a position is additive; ask for it."
                 | File | Fn | Module -> "This position reads a different population."))
       | Some c -> Ok (c, pat))
 
