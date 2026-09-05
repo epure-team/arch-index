@@ -163,3 +163,52 @@ When mutation-testing this verb, the binary whose hash must move is
 `arch_rules.exe`, **not** `tezt/tests/main.exe`: the tests drive the CLI as a
 subprocess, so the test binary's md5 is unchanged by a `lib/` or `bin/` mutation
 and every mutant would read as a false survivor.
+
+---
+
+## RE-DERIVATION, 2026-09-05 — the correction figures were themselves wrong
+
+The section above says "I specified a site identity and then tested it instead of
+assuming it", and cites **25 479 origins, 1 150 collisions (4.5 %), 139 with the
+column**. Those numbers went into a PR body, `docs/fitness-functions.md`, a test
+docstring and a source comment.
+
+**They do not reproduce on any corpus available here.** Re-derived with
+`GROUP BY … HAVING count(*) > 1` — and after first checking that `exn_origins`
+carries no `UNIQUE` constraint over these columns, so the probe could legitimately
+return zero:
+
+| corpus | origins | distinct 4-field | rows in colliding groups | worst group |
+|---|---|---|---|---|
+| proto_alpha | 30 526 | 5 305 | **26 901 (88 %)** | 139 |
+| octez-manager | 18 758 | 6 367 | **15 569 (83 %)** | 118 |
+| whole `src` | 265 217 | 116 684 | **169 525 (64 %)** | 139 |
+
+Two things are wrong, not one:
+
+1. **The rate.** 4.5 % published against 64–88 % measured — an order of magnitude,
+   in the direction that makes the count MORE necessary.
+2. **The claim about the column.** "Adding the column still leaves 139" reads as
+   *the column nearly fixes it, 139 remain*. It does not: 26 901 → 26 786 on
+   proto_alpha, 169 525 → 166 584 on the whole tree — under half a percent. And
+   **139 is the worst GROUP SIZE**, not a residual count. Two different quantities
+   fused into one sentence.
+
+**What survives, and is now verified with the shipped tool rather than by SQL:**
+the 37 crash-surface sites reachable from proto_alpha's `main.ml` with forms
+`assert,division,index` are **all ×1**. So the design's own argument — *a format
+that is a key on the population you demo and not on the table it reads is exactly
+the shape that survives review* — is not merely intact, it is sharper: the demo
+population collides zero times while the table behind it collides 88 %.
+
+**Why this is worth its own section.** The decision was right and the reasoning was
+right; the evidence quoted for it was not, and it was quoted four times before
+anyone re-derived it. That is the same failure this repository already has a note
+for — *a baseline repeated into briefs becomes fact unmeasured* — committed by the
+person who wrote the note, one day later, inside a document whose entire subject is
+testing an identity instead of assuming one.
+
+The correction ran in the safe direction this time. That is luck, not method: had it
+run the other way, the count would have been argued into the design on numbers that
+did not support it, exactly as D4's depth limit was.
+
