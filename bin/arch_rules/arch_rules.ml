@@ -77,8 +77,14 @@ let kind_of = function
 (* parsing — a malformed rule file ABORTS                              *)
 (* ------------------------------------------------------------------ *)
 
-let sel tok line =
-  match Arch_sel.parse tok with
+(* Every call site names the selector kinds it can honestly answer. [ext:] appears in exactly
+   one: the target of `forbid reach`. See Arch_sel.parse for why that is enforced by the type
+   rather than by convention. *)
+let structural = Arch_sel.[ File; Fn; Module ]
+let with_ext = Arch_sel.[ File; Fn; Module; Ext ]
+
+let sel ~allow tok line =
+  match Arch_sel.parse ~allow tok with
   | Ok s -> s
   | Error e -> die (Printf.sprintf "arch-rules: line %d: %s" line e)
 
@@ -125,12 +131,19 @@ let parse_rules path =
                let toks = String.split_on_char ' ' line |> List.filter (fun s -> s <> "") in
                let b =
                  match toks with
-                 | [ "forbid"; "reach"; "from"; a; "to"; c ] -> Reach (sel a !lineno, sel c !lineno)
-                 | [ "forbid"; "dep"; "from"; a; "to"; c ] -> Dep (sel a !lineno, sel c !lineno)
-                 | [ "forbid"; "exported"; "outside"; a ] -> Exported (sel a !lineno)
+                 | [ "forbid"; "reach"; "from"; a; "to"; c ] ->
+                     (* Source structural, target may be `ext:` — an external leaf is a legitimate
+                        thing to forbid REACHING, and an illegitimate thing to start FROM. *)
+                     Reach (sel ~allow:structural a !lineno, sel ~allow:with_ext c !lineno)
+                 | [ "forbid"; "dep"; "from"; a; "to"; c ] ->
+                     (* `dep` never consults the graph: it globs against module_deps rows, so an
+                        `ext:` operand would be matched against module paths as though the kind
+                        did not exist. *)
+                     Dep (sel ~allow:structural a !lineno, sel ~allow:structural c !lineno)
+                 | [ "forbid"; "exported"; "outside"; a ] -> Exported (sel ~allow:structural a !lineno)
                  | [ "forbid"; "effect"; "from"; a; k ]
                    when String.length k > 5 && String.sub k 0 5 = "kind:" ->
-                     Effect (sel a !lineno, String.sub k 5 (String.length k - 5))
+                     Effect (sel ~allow:structural a !lineno, String.sub k 5 (String.length k - 5))
                  | _ ->
                      die
                        (Printf.sprintf
@@ -209,6 +222,25 @@ let take n l = List.filteri (fun i _ -> i < n) l
 let eval (t : Arch_db.t) (g : Arch_graph.t) ~sound r =
   let lbl k = Arch_graph.label g k in
   match r.body with
+  | Reach (_, d) when fst d = Arch_sel.Ext && t.Arch_db.schema = Arch_db.Flat ->
+      (* The flat (NDJSON) schema cannot represent an external leaf: `arch-load` synthesises a
+         `functions` row for every callee it sees, so "a call towards something we do not hold" is
+         erased at write time — a stream declaring 2 functions and calling `Stdlib.+` writes 3.
+         An `ext:` selector here would match nothing, and "matched nothing" reads as a typo in the
+         pattern rather than as a property of the index.
+
+         So this is NOT_COMPUTED, exactly as an `effect` rule is on an index carrying no effects
+         data: the question was never answered, and saying so is the only honest verdict. It fails
+         the gate by default. *)
+      { rule = r.name; kind = kind_of r.body; exact = false; verdict = "NOT_COMPUTED"; detail = [];
+        detail_total = 0; sizes = None; witness = [];
+        note =
+          Some
+            (Printf.sprintf
+               "%s cannot be answered on a flat (NDJSON) index: arch-load gives every callee a \
+                function row, so this index holds no external leaves to match — not zero of them, \
+                but no way to represent one. Re-index with the .cmt backend for this rule."
+               (Arch_sel.to_string d)) }
   | Reach (s, d) ->
       let src = Arch_sel.select g s and dst = Arch_sel.select g d in
       let v, hit = reach_verdict g ~sound src dst in

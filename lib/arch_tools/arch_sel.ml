@@ -1,24 +1,47 @@
-(** Selectors: [file:<glob>], [fn:<glob>], [module:<glob>].
+(** Selectors: [file:<glob>], [fn:<glob>], [module:<glob>], [ext:<glob>].
 
     Shared so that [file:test/**] means the same thing in [arch-rules], [arch-mutants] and
     [arch-coverage]. *)
 
-type kind = File | Fn | Module
+type kind = File | Fn | Module | Ext
 type t = kind * string
 
-let parse tok =
+let kind_name = function File -> "file" | Fn -> "fn" | Module -> "module" | Ext -> "ext"
+let all_kinds = [ File; Fn; Module; Ext ]
+let kinds_doc allow = String.concat ", " (List.map (fun k -> kind_name k ^ ":<glob>") allow)
+
+(** [allow] is MANDATORY, and that is the point.
+
+    [ext:] is meaningful in exactly one position — the TARGET of a [forbid reach]. An external
+    leaf has no body, hence no outgoing edge and no file, so as a [reach] SOURCE, an [exported]
+    allow-list, an [effect] cone or a [dep] operand it selects keys that can never participate:
+    the rule then reports a green verdict it never earned. That is the failure this tool exists to
+    prevent, so a caller cannot get it by omission — the compiler makes every call site name the
+    kinds it can honestly serve, and a rejection is loud and specific rather than a silent empty
+    set. Asymmetry that is recorded is fine; asymmetry that is silent is the bug. *)
+let parse ~allow tok =
   match String.index_opt tok ':' with
-  | None -> Error (Printf.sprintf "bad selector %S — expected file:<glob>, fn:<glob> or module:<glob>" tok)
+  | None -> Error (Printf.sprintf "bad selector %S — expected one of: %s" tok (kinds_doc allow))
   | Some i -> (
       let k = String.sub tok 0 i and pat = String.sub tok (i + 1) (String.length tok - i - 1) in
-      match k with
-      | "file" -> Ok (File, pat)
-      | "fn" -> Ok (Fn, pat)
-      | "module" -> Ok (Module, pat)
-      | _ -> Error (Printf.sprintf "bad selector kind %S — expected file, fn or module" k))
+      match List.find_opt (fun c -> kind_name c = k) all_kinds with
+      | None ->
+          Error
+            (Printf.sprintf "bad selector kind %S — expected one of: %s" k
+               (String.concat ", " (List.map kind_name allow)))
+      | Some c when not (List.mem c allow) ->
+          (* Named separately from an unknown kind: `ext` IS a selector kind, it is just not
+             answerable here, and "expected file, fn or module" would send the author looking for
+             a typo that is not there. *)
+          Error
+            (Printf.sprintf "selector kind %S is not valid in this position — only %s. %s" k
+               (String.concat ", " (List.map kind_name allow))
+               (match c with
+                | Ext -> "`ext:` matches external leaves, which have no body, no outgoing edge and no file, so it is answerable only as the target of `forbid reach`. Here it would match nothing that can participate, and the rule would report a green verdict it never earned."
+                | File | Fn | Module -> "This position reads a different population."))
+      | Some c -> Ok (c, pat))
 
-let to_string (k, p) =
-  (match k with File -> "file" | Fn -> "fn" | Module -> "module") ^ ":" ^ p
+let to_string (k, p) = kind_name k ^ ":" ^ p
 
 (** Shell-style glob where [*] stops at ['/'] and [**] crosses it.
 
@@ -67,12 +90,23 @@ let glob_match pattern value =
   go 0 0
 
 (** Resolve a selector to graph keys. [module:] matches the path, like [file:], everywhere
-    except [forbid dep] — which reads declared module paths from a table, not from the graph. *)
+    except [forbid dep] — which reads declared module paths from a table, not from the graph.
+
+    [ext:] is the one kind that does NOT range over [Arch_graph.nodes]: external leaves are not
+    nodes (see [Arch_graph.ext_keys]), so it ranges over the external keys and matches the glob
+    against the callee name with any ["ext:"] prefix stripped — the name as written at the call
+    site, which is what a report shows and what a rule author can be asked to type. *)
 let select (g : Arch_graph.t) ((k, pat) : t) =
-  List.fold_left
-    (fun acc (n : Arch_graph.node) ->
-      let target = match k with Fn -> Some n.name | File | Module -> n.file in
-      match target with
-      | Some v when glob_match pat v -> Arch_graph.SS.add n.key acc
-      | _ -> acc)
-    Arch_graph.SS.empty (Arch_graph.nodes g)
+  match k with
+  | Ext ->
+      Arch_graph.SS.filter
+        (fun key -> glob_match pat (Arch_graph.ext_name key))
+        (Arch_graph.ext_keys g)
+  | File | Fn | Module ->
+      List.fold_left
+        (fun acc (n : Arch_graph.node) ->
+          let target = match k with Fn -> Some n.name | File | Module -> n.file | Ext -> None in
+          match target with
+          | Some v when glob_match pat v -> Arch_graph.SS.add n.key acc
+          | _ -> acc)
+        Arch_graph.SS.empty (Arch_graph.nodes g)

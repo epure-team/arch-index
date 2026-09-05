@@ -207,6 +207,38 @@ let label g key =
         String.sub key 4 (String.length key - 4)
       else key
 
+(** External leaves: keys that appear as a call TARGET but have no indexed body.
+
+    The definition is structural — {b in [bwd], absent from [nodes]} — and deliberately not "the
+    key starts with [ext:]". The two schemas spell an unresolved callee differently: [Main] stores
+    it as ["ext:" ^ callee_name] (see [load]), while [Flat] stores the bare [callee_name], which is
+    indistinguishable from a resolved one by shape alone. A prefix test would therefore work on
+    [Main] and silently return the EMPTY SET on [Flat] — a selector that quietly matches nothing is
+    exactly the failure this vocabulary exists to prevent, so it is defined once, on the property
+    both schemas share.
+
+    Reading them off [bwd] (keyed by callee) rather than scanning [fwd]'s values is both cheaper
+    and exact.
+
+    Note what this set does NOT contain: a ⊤ edge never reaches [bwd] at all ([load] counts it in
+    [tops] instead), so these are exactly the NULL-callee MUST and MAY_ENUMERATED targets — the
+    calls asserted to happen towards something we do not hold. *)
+let ext_prefix = "ext:"
+
+let has_ext_prefix k =
+  String.length k > String.length ext_prefix
+  && String.sub k 0 (String.length ext_prefix) = ext_prefix
+
+(** The name as written at the call site: what a report shows and what a rule author can be asked
+    to type. Strips [Main]'s prefix; [Flat]'s keys carry none. *)
+let ext_name k =
+  if has_ext_prefix k then
+    String.sub k (String.length ext_prefix) (String.length k - String.length ext_prefix)
+  else k
+
+let ext_keys g =
+  SM.fold (fun k _ acc -> if SM.mem k g.nodes then acc else SS.add k acc) g.bwd SS.empty
+
 let nodes g = SM.bindings g.nodes |> List.map snd
 let find_by_name g name = List.filter (fun n -> n.name = name) (nodes g)
 let keys_of g = SM.fold (fun k _ acc -> SS.add k acc) g.nodes SS.empty
