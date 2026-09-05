@@ -140,7 +140,40 @@ assertion is for.
 
 **Date:** 2026-09-06T00:18:45+02:00 · **Status: COMPLETED** · Base `4e74c72`, HEAD `8ab712d`.
 
-Round 1 returned NO-GO on 9 HIGH. All nine are fixed. Each fix was accepted only because the
+**RETRACTED: this section claimed "all nine are fixed" and SIX were.** Round 1 returned NO-GO on
+9 HIGH. Three of them — every one raised by the `architect` specialist — were never dispatched to
+any block, and the claim above was written without auditing the dispatch against the finding list.
+Round 2's own architect pass caught it by execution, not by reading:
+
+| Round-1 HIGH | Dispatched | State |
+|---|---|---|
+| `check-no-score.sh:57` — gate vacuous over 58% of the driver | block 1 | fixed |
+| `check-status-provenance.sh:80` — judges the file, not the record | block 1 | fixed |
+| `arch_mutants.ml:1426` — planned set recorded as executed | block 2 | fixed |
+| `mutaml-wrapper.sh:41` — a refusal read as a kill | block 2 | fixed |
+| `arch_mutants.ml:1263` — unmapped mutant publishes SURVIVED | block 2 | fixed |
+| `arch_mutants.ml:887` — FR-030/AC-24 unimplemented | block 2 | fixed |
+| `arch_mutants.ml:1393` — outcomes joined on (basename, line) | **NEVER** | **OPEN** |
+| `arch_mutants.ml:1456` — a zero-narrowed `--diff` completes | **NEVER** | **OPEN** |
+| `arch_mutants.ml:938` — the arch-impact boundary accepts `[]` | **NEVER** | **OPEN** |
+
+The three survivors are not near-misses. Executed probes: two mutants on one line had their
+KILLED/SURVIVED verdicts **inverted in the database**; a kill was written against the wrong site
+with `attribution = singleton_executed_set`, the one attribution that claims to name a killer; and
+the campaign published `certification: self_certifying` while doing it. A `--diff` narrowed to zero
+still stamps `completed_at` with `report_entries_unmatched: 2`, i.e. a total join failure, present
+in the JSON and absent from the `complete` conjunction.
+
+**How it happened, because the mechanism matters more than the omission.** The three blocks were
+scoped as "the three vacuous guards", "the coupled boundary and wrapper cluster", and "the
+remaining MEDIUM findings". The third prompt enumerated seven MEDIUMs and silently skipped three
+HIGHs, because it was written from a theme rather than from the finding list. Nothing checked the
+dispatch against `briefs/<task>-review.json`; the claim of nine was carried from the round-1
+headline count, not derived from what had been assigned. **This is the same class as a summary that
+has stopped tracking its population** — the failure this task has been cataloguing all day, in the
+brief that catalogues it.
+
+What follows below was written under the false claim and is otherwise accurate for the six. Each fix was accepted only because the
 positive control that exposed the defect turns the repaired code red — a fix whose control was
 not re-run is not a fix, and three of these findings were themselves gates that had been reported
 green all day on their exit codes alone.
