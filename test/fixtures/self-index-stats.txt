@@ -1,3 +1,3 @@
 modules: 23
-functions: 811
-calls: 5155
+functions: 818
+calls: 5187
