@@ -36,7 +36,21 @@ let is_executable path =
    for is executable — [architecture-schema.sql] (used by [find_repo_root]
    below) is a plain file, and checking [is_executable] against it would
    never match, walking all the way to filesystem root and reporting
-   "no repo root found" even when one genuinely exists two directories up. *)
+   "no repo root found" even when one genuinely exists two directories up.
+
+   Ported from tezt/lib/arch_tezt.ml's own [find_upwards] (issue #77 / PR
+   #78): the search MUST stop at the first ancestor holding a [dune-project]
+   rather than walking past it into an enclosing checkout. An agent worktree
+   (e.g. [.claude/worktrees/agent-*]) lives INSIDE a parent checkout and
+   carries its own [dune-project]; without the boundary, a worktree whose own
+   [_build/default] is missing a compiled tool would silently climb into the
+   parent checkout and find *its* copy instead — this function is a presence
+   probe ("is this tool built, here?"), and a stale-but-working sibling
+   answers that question with a plausible lie. Unlike [arch_tezt.ml]'s
+   [locate], every caller here already treats "not found" as a legitimate,
+   expected outcome ([Not_analysed]), so the boundary is expressed by
+   returning [None] rather than raising: the honest answer to "is it built"
+   when the search hits the workspace edge is "no", not an exception. *)
 let rec find_upwards ~exists ~from rel =
   let candidates =
     [Filename.concat from rel; Filename.concat from (Filename.concat "_build/default" rel)]
@@ -44,13 +58,20 @@ let rec find_upwards ~exists ~from rel =
   match List.find_opt exists candidates with
   | Some _ as found -> found
   | None ->
-      let parent = Filename.dirname from in
-      if parent = from then None else find_upwards ~exists ~from:parent rel
+      if Sys.file_exists (Filename.concat from "dune-project") then None (* workspace root reached; do not climb past it *)
+      else
+        let parent = Filename.dirname from in
+        if parent = from then None (* filesystem root; nothing left to try *)
+        else find_upwards ~exists ~from:parent rel
 
-let find_sibling_tool ~from_dir rel =
-  match find_upwards ~exists:is_executable ~from:from_dir rel with
-  | Some _ as found -> found
-  | None -> find_upwards ~exists:is_executable ~from:(Sys.getcwd ()) rel
+(* The [Sys.getcwd ()] fallback that used to run here on a [None] is a
+   SECOND unbounded search that defeats the boundary [find_upwards] just
+   enforced: whatever the first search's [from_dir] failed to find bounded
+   by its own [dune-project], a search rooted at the process's current
+   working directory could still climb straight into a sibling checkout —
+   exactly the escape this function exists to close. Dropped; [from_dir]'s
+   own bounded search is the only answer. *)
+let find_sibling_tool ~from_dir rel = find_upwards ~exists:is_executable ~from:from_dir rel
 
 (* FIX (review, CRITICAL): an earlier draft computed [repo_root] in
    [bin/arch_coverage_matrix/arch_coverage_matrix.ml] as a single
@@ -91,18 +112,32 @@ let find_sibling_tool ~from_dir rel =
    the source root — [_build/default] itself has no [_build] subdirectory of
    its own (dune does not recursively stage its own build output), so
    requiring both conditions together cannot match the mirror. *)
+(* Same [dune-project] boundary as [find_upwards] above, and for the same
+   reason: without it, a checkout that has never been built (no
+   [architecture-schema.sql]+[_build] pair of its own yet) would let this
+   walk climb straight out of its own workspace and return an ENCLOSING
+   checkout's root instead of reporting "not found" — and [find_repo_root]
+   is not only a presence probe: [bin/arch_coverage_matrix/arch_coverage_matrix.ml]
+   also writes into whatever directory it returns via the Go/Rust driver
+   probes it gates, so a wrong-but-existing root here is worse than a merely
+   wrong tool path. The marker legitimately sits at the same directory as
+   [dune-project] in every real layout, so this boundary never fires before
+   a genuine match on a built checkout — it only changes what an unbuilt one
+   reports, from "some ancestor's root" to "none". *)
 let rec find_repo_root_from ~from =
   let marker = Filename.concat from "architecture-schema.sql" in
   let build_dir = Filename.concat from "_build" in
   if Sys.file_exists marker && Sys.file_exists build_dir && Sys.is_directory build_dir then Some from
+  else if Sys.file_exists (Filename.concat from "dune-project") then None (* workspace root reached; do not climb past it *)
   else
     let parent = Filename.dirname from in
     if parent = from then None else find_repo_root_from ~from:parent
 
-let find_repo_root ~from_dir =
-  match find_repo_root_from ~from:from_dir with
-  | Some _ as found -> found
-  | None -> find_repo_root_from ~from:(Sys.getcwd ())
+(* The [Sys.getcwd ()] fallback that used to run here on a [None] is the same
+   second unbounded search dropped from [find_sibling_tool] above, for the
+   same reason: it defeats the boundary [find_repo_root_from] just enforced
+   by trying again from a different, equally unbounded starting point. *)
+let find_repo_root ~from_dir = find_repo_root_from ~from:from_dir
 
 (* FIX (review, CRITICAL): a dangling symlink or a symlink cycle under
    [_build/default] (which dune builds are dense with) crashed this whole

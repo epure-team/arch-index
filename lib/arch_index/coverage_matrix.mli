@@ -63,15 +63,20 @@ val status_to_string : status -> string
 (** [find_sibling_tool ~from_dir rel] searches upward from [from_dir] (trying
     both [rel] and [_build/default/rel] at each ancestor, mirroring the
     convention every producer wrapper script in this repo uses to find its
-    own compiled binary), then from the current working directory if that
-    search fails, for an executable file at the relative path [rel].
+    own compiled binary) for an executable file at the relative path [rel].
+    The search stops at the first ancestor containing a [dune-project] file
+    (the enclosing workspace root) rather than climbing past it — an agent
+    worktree living inside a parent checkout carries its own [dune-project],
+    and escaping that boundary would silently answer this presence probe
+    with a sibling checkout's stale-but-working tool instead of an honest
+    "not built here".
 
     {pre}
     (none)
 
     {post}
-    [Some path] to the first executable match found, or [None] if no
-    ancestor of [from_dir] or the current directory has one.
+    [Some path] to the first executable match found at or below the
+    enclosing [dune-project], or [None] if none exists there.
 
     {violators}
     (none)
@@ -81,25 +86,29 @@ val status_to_string : status -> string
 val find_sibling_tool : from_dir:string -> string -> string option
 
 (** [find_repo_root ~from_dir] locates this arch-index checkout's own SOURCE
-    root by searching upward from [from_dir] (then the current working
-    directory) for a directory that contains both [architecture-schema.sql]
-    and a [_build] subdirectory. Both conditions together, not
-    [architecture-schema.sql] alone: dune mirrors every file it depends on
-    into [_build/default/] as part of its own build sandbox, so
-    [_build/default/architecture-schema.sql] is a real, separate file dune
-    creates — a marker-alone search starting from inside
+    root by searching upward from [from_dir] for a directory that contains
+    both [architecture-schema.sql] and a [_build] subdirectory. Both
+    conditions together, not [architecture-schema.sql] alone: dune mirrors
+    every file it depends on into [_build/default/] as part of its own build
+    sandbox, so [_build/default/architecture-schema.sql] is a real, separate
+    file dune creates — a marker-alone search starting from inside
     [_build/default/bin/...] (where every executable built by this project
     lives) finds THAT copy first, one directory short of the genuine root.
     [_build/default] itself never contains a further [_build] subdirectory
     of its own, so requiring both conditions cannot match the mirror.
 
+    The search stops at the first ancestor containing a [dune-project] file
+    rather than climbing past it, for the same reason as {!find_sibling_tool}:
+    an unbuilt worktree living inside a parent checkout must report "no repo
+    root here", never an enclosing checkout's root.
+
     {pre}
     (none)
 
     {post}
-    [Some dir] naming the first ancestor (of [from_dir] or the current
-    directory) satisfying both conditions, or [None] if neither search finds
-    one.
+    [Some dir] naming the first ancestor of [from_dir] satisfying both
+    conditions, or [None] if the search reaches the enclosing [dune-project]
+    or the filesystem root without finding one.
 
     {violators}
     (none)

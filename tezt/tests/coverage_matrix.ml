@@ -230,6 +230,126 @@ let register_rust_driver_and_merge_built () =
                  got %L") ;
           Lwt.return_unit))
 
+(* Issue #77 (production half): [find_sibling_tool]/[find_repo_root] must
+   stop climbing at the enclosing [dune-project] rather than escape into an
+   outer checkout and answer a presence question with a stale sibling's
+   truth. The fixture below plants a real, executable "ancestor tool" TWO
+   levels above a nested directory that itself carries its own
+   [dune-project] — mirroring an agent worktree ([.claude/worktrees/agent-*])
+   living inside a parent checkout, each with its own [dune-project] — and
+   the search must come back empty from inside the nested tree.
+
+   The precondition that the ancestor tool genuinely sits where an unbounded
+   walk WOULD find it is checked with plain [Sys.file_exists], never with
+   [find_sibling_tool] itself: a check built from the function under test
+   would report the fixture as correct even if that function were the
+   thing miscounting directories — see the sibling assertion further down,
+   which instead runs the very same search from a directory with NO
+   intervening [dune-project] and confirms it non-vacuously finds the
+   ancestor tool, proving the fixture is a real escape route and not merely
+   an unreachable one. *)
+let register_find_sibling_tool_stops_at_dune_project () =
+  Test.register ~__FILE__
+    ~title:"coverage-matrix: find_sibling_tool never climbs past the enclosing dune-project"
+    ~tags:["coverage_matrix"; "worktree_boundary"]
+  @@ fun () ->
+  let outer = Temp.dir "covmatrix_boundary_outer" in
+  let rel = "bin/arch_effects_ocaml/arch_effects_ocaml.exe" in
+  let rec mkdir_p d =
+    if not (Sys.file_exists d) then (
+      mkdir_p (Filename.dirname d) ;
+      try Unix.mkdir d 0o755 with Unix.Unix_error _ -> ())
+  in
+  (* The ancestor tool: what a parent checkout's own build would have
+     produced, sitting directly under [outer]. *)
+  let ancestor_tool = Filename.concat outer rel in
+  mkdir_p (Filename.dirname ancestor_tool) ;
+  write_executable ancestor_tool "#!/bin/sh\nexit 0\n" ;
+  (* The nested worktree: its own dune-project, its own (empty) tool
+     directory tree, no copy of the tool itself. *)
+  let nested = Filename.concat outer "nested_worktree" in
+  mkdir_p nested ;
+  write_file (Filename.concat nested "dune-project") "(lang dune 3.0)\n" ;
+  let from_dir = Filename.concat nested "bin/some_other_tool" in
+  mkdir_p from_dir ;
+  (* Precondition, established WITHOUT the function under test. *)
+  Check.(
+    (Sys.file_exists ancestor_tool = true) bool
+      ~error_msg:"fixture bug: the ancestor tool this test plants must exist, got %L") ;
+  Check.(
+    (Sys.file_exists (Filename.concat nested "dune-project") = true) bool
+      ~error_msg:"fixture bug: the nested worktree's own dune-project must exist, got %L") ;
+  (* Non-vacuous escape route: searching from a directory under [outer]
+     with NO dune-project in between DOES find the ancestor tool — so the
+     nested-worktree search below is bounded by the dune-project, not by
+     the tool being unreachable in the first place. *)
+  let unbounded_sibling = Filename.concat outer "no_boundary_here/bin/some_other_tool" in
+  mkdir_p unbounded_sibling ;
+  Check.(
+    (Arch_index.Coverage_matrix.find_sibling_tool ~from_dir:unbounded_sibling rel = Some ancestor_tool)
+      (option string)
+      ~error_msg:
+        "fixture bug: an unbounded search (no dune-project in between) must find the ancestor \
+         tool, got %L -- the boundary test below would be vacuous otherwise") ;
+  (* The actual assertion: bounded by [nested]'s own dune-project, the
+     search must never see [outer]'s tool. *)
+  Check.(
+    (Arch_index.Coverage_matrix.find_sibling_tool ~from_dir rel = None)
+      (option string)
+      ~error_msg:
+        "find_sibling_tool must stop at the nested worktree's own dune-project and report None, \
+         never escape to an enclosing checkout's tool, got %L") ;
+  Lwt.return_unit
+
+let register_find_repo_root_stops_at_dune_project () =
+  Test.register ~__FILE__
+    ~title:"coverage-matrix: find_repo_root never climbs past the enclosing dune-project"
+    ~tags:["coverage_matrix"; "worktree_boundary"]
+  @@ fun () ->
+  let outer = Temp.dir "covmatrix_boundary_outer_root" in
+  let rec mkdir_p d =
+    if not (Sys.file_exists d) then (
+      mkdir_p (Filename.dirname d) ;
+      try Unix.mkdir d 0o755 with Unix.Unix_error _ -> ())
+  in
+  (* The outer checkout: a real repo root, built ([architecture-schema.sql]
+     + [_build] together). *)
+  write_file (Filename.concat outer "architecture-schema.sql") "-- stub schema\n" ;
+  mkdir_p (Filename.concat outer "_build") ;
+  (* The nested worktree: its own dune-project, no schema/_build pair of its
+     own (never built). *)
+  let nested = Filename.concat outer "nested_worktree" in
+  mkdir_p nested ;
+  write_file (Filename.concat nested "dune-project") "(lang dune 3.0)\n" ;
+  let from_dir = Filename.concat nested "_build/default/bin/some_tool" in
+  mkdir_p from_dir ;
+  (* Precondition, established WITHOUT the function under test. *)
+  Check.(
+    (Sys.file_exists (Filename.concat outer "architecture-schema.sql") = true) bool
+      ~error_msg:"fixture bug: the outer checkout's schema marker must exist, got %L") ;
+  Check.(
+    (Sys.is_directory (Filename.concat outer "_build") = true) bool
+      ~error_msg:"fixture bug: the outer checkout's _build directory must exist, got %L") ;
+  (* Non-vacuous escape route: searching from a directory under [outer] with
+     no dune-project in between DOES find [outer] as the repo root. *)
+  let unbounded_sibling = Filename.concat outer "no_boundary_here/deep/dir" in
+  mkdir_p unbounded_sibling ;
+  Check.(
+    (Arch_index.Coverage_matrix.find_repo_root ~from_dir:unbounded_sibling = Some outer)
+      (option string)
+      ~error_msg:
+        "fixture bug: an unbounded search (no dune-project in between) must find the outer \
+         checkout's root, got %L -- the boundary test below would be vacuous otherwise") ;
+  (* The actual assertion: bounded by [nested]'s own dune-project, the
+     search must never see [outer]'s root. *)
+  Check.(
+    (Arch_index.Coverage_matrix.find_repo_root ~from_dir = None)
+      (option string)
+      ~error_msg:
+        "find_repo_root must stop at the nested worktree's own dune-project and report None, \
+         never escape to an enclosing checkout's root, got %L") ;
+  Lwt.return_unit
+
 let register_cross_language_rows () =
   Test.register ~__FILE__
     ~title:"coverage-matrix: coverage and decisions are always not_analysed without --lcov, language NULL"
@@ -361,6 +481,8 @@ let register () =
   register_rust_no_driver () ;
   register_go_driver_built () ;
   register_rust_driver_and_merge_built () ;
+  register_find_sibling_tool_stops_at_dune_project () ;
+  register_find_repo_root_stops_at_dune_project () ;
   register_cross_language_rows () ;
   register_snapshot_semantics () ;
   register_existing_main_schema () ;
