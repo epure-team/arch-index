@@ -93,6 +93,40 @@
   separate slice with its own version bump.
 
 ### Added
+
+- **`exported:<glob>` — a selector for the API surface, so `forbid reach` has a `from` that can
+  be written at repository scale.** `fn:` restricted to nodes flagged exported; valid only as the
+  SOURCE of `forbid reach`. `forbid reach from exported:** to fn:Vuln.parse` is now expressible,
+  which is the shape a reachability gate is for — the question vulnerability triage asks of a CVE
+  symbol, and a blast-radius review asks of a refactor.
+
+  `functions.exposed` has carried the answer since the beginning, with its own index, and nothing
+  that selects ever read it.
+
+  **Spelled `exported:`, not `entry:`, deliberately.** The concept is already named three times —
+  `Arch_graph.node.exported`, `arch-query --roots exported`, and the `forbid exported outside`
+  rule form. A fourth spelling for one set is how two names for the same thing come to disagree
+  in the one place it matters, which is what rendered a failed SARIF import as `covered` on #80.
+  The rule verb and the selector kind are different namespaces; the parser cannot confuse them.
+  The flag itself is normalised before any selector sees it: MAIN spells the column `exposed`,
+  FLAT spells it `exported`, and `Arch_graph` reads both into `node.exported`, so the selector
+  goes through the node and never through SQL.
+
+  **Granted per position, never inherited.** It is absent from `Arch_sel.structural` — the list
+  `arch-coverage` and `arch-mutants` pass — and lives in a new `Arch_sel.cone_source` that only
+  `forbid reach`'s source uses. The hazard is the mirror of `ext:`'s, which `Arch_sel` documents
+  against itself: a selector answerable in one position, accepted in another, matches a
+  population that position never ranges over, comes back empty, and the empty result is reported
+  as a **proof rather than as vacuity**. That false green was measured on this repository before
+  (`forbid dep from module:src/** to file:bar` printed "1 proved"), so `forbid dep` refuses
+  `exported:` at parse time with exit 2 and a message naming the POSITION rather than claiming
+  the kind is unknown.
+
+  Both halves are red-verified with distinct binaries rather than argued. Widening `dep_allow`
+  to accept `Exported` (`ecc35d3b7bb4`) makes the refusal test fail; dropping the exported filter
+  so the kind aliases `fn:` (`6de7538ef672`) makes the filter test fail. The fixture is built to
+  discriminate: the UNEXPORTED function is the one that reaches the target, so a selector that
+  quietly matched every node would report a violation identically to the control.
 - **`arch-report <db> --out <dir>` — one query pass, three artifacts** (roadmap 2.2,
   `specs/reporting-and-integration.md`). Writes `report.json` (the machine contract),
   `report.sarif` (SARIF 2.1.0, one run per analysis with distinct categories) and `report.html`

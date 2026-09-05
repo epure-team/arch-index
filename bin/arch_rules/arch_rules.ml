@@ -46,6 +46,8 @@ Usage: arch-rules <db> [rules-file] [--format text|md|json|sarif]
 Rule syntax (line-oriented, # comments, one statement per rule):
   rule "ui must not reach persistence"
     forbid reach from file:src/ui/** to file:lib/db/**
+  rule "no entry point reaches the vulnerable symbol"
+    forbid reach from exported:** to fn:Vuln.parse
   rule "only the api layer is exported"
     forbid exported outside file:lib/api/**
   rule "validate must not mutate global state"
@@ -265,6 +267,11 @@ let kind_of = function
    one: the target of `forbid reach`. See Arch_sel.parse for why that is enforced by the type
    rather than by convention. *)
 let structural = Arch_sel.structural
+
+(* `reach`'s SOURCE also accepts `exported:`, which `structural` deliberately does not carry —
+   see Arch_sel.cone_source. It is granted here, at the one position that ranges over a call
+   cone, rather than added to `structural` where three other tools would inherit it silently. *)
+let cone_source = Arch_sel.cone_source
 let with_ext = Arch_sel.[ File; Fn; Module; Ext ]
 
 (* `forbid dep` never consults the graph: both operands are globbed straight against strings read
@@ -435,7 +442,7 @@ let parse_rules path =
                  | [ "forbid"; "reach"; "from"; a; "to"; c ] ->
                      (* Source structural, target may be `ext:` — an external leaf is a legitimate
                         thing to forbid REACHING, and an illegitimate thing to start FROM. *)
-                     Reach (sel ~allow:structural a !lineno, sel ~allow:with_ext c !lineno)
+                     Reach (sel ~allow:cone_source a !lineno, sel ~allow:with_ext c !lineno)
                  | [ "forbid"; "dep"; "from"; a; "to"; c ] ->
                      (* See [dep_allow]: `Module` only, on both sides. `ext:` on the TARGET side
                         is not meaningless — `module_deps.target_module IS NULL` genuinely marks

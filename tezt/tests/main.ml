@@ -105,6 +105,7 @@ let () =
   Report.register () ;
 
   Sarif_in.register () ;
+  Exported_selector.register () ;
   Insert_rowid_attribution.register () ;
   Dropped_node_dependents.register_dropped_function () ;
   Dropped_node_dependents.register_dropped_module () ;
