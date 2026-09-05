@@ -269,8 +269,15 @@ let kind_of = function
 let structural = Arch_sel.structural
 
 (* `reach`'s SOURCE also accepts `exported:`, which `structural` deliberately does not carry —
-   see Arch_sel.cone_source. It is granted here, at the one position that ranges over a call
-   cone, rather than added to `structural` where three other tools would inherit it silently. *)
+   see Arch_sel.cone_source, and note that list's OTHER consumer is `arch-coverage --roots`, so
+   widening it changes two tools.
+
+   Granted here rather than added to `structural`. Counting who would have inherited it: exactly
+   ONE other binary passes `structural` (`arch-mutants --tests`), plus two more positions inside
+   this file (`forbid exported outside`, `forbid effect`). An earlier revision of this comment
+   said "three other tools", which overstates the blast radius and sends an auditor looking for
+   two binaries that do not exist — a number wrong in the direction that makes the audit it
+   exists to enable harder. *)
 let cone_source = Arch_sel.cone_source
 let with_ext = Arch_sel.[ File; Fn; Module; Ext ]
 

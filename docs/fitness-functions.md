@@ -143,9 +143,17 @@ column is `functions.exposed`, the FLAT schema's is `functions.exported`, and `A
 both into `node.exported`. `exported:` selects through the node, never through SQL, which is what
 keeps that normalisation in one place.
 
-**`exported:` is granted per position, never inherited.** It is absent from `Arch_sel.structural`
-— the list `arch-coverage` and `arch-mutants` pass — and lives in `Arch_sel.cone_source`, which
-only `forbid reach`'s source and `arch-coverage --roots` use.
+**`exported:` is granted per position, never inherited.** It lives in `Arch_sel.cone_source`,
+whose two consumers are `forbid reach`'s source and `arch-coverage --roots` — both of which
+genuinely range over a call cone. It is absent from `Arch_sel.structural`, which
+`arch-mutants --tests` passes (test roots, not a cone) along with `forbid exported outside` and
+`forbid effect` inside `arch-rules`.
+
+*(An earlier draft of this paragraph said `structural` is "the list `arch-coverage` and
+`arch-mutants` pass" **and** that `arch-coverage --roots` uses `cone_source` — two claims about
+one tool, in one sentence, that cannot both hold. The same fact is stated in three places: here,
+beside `Arch_sel.cone_source`, and in the `arch-rules` grant site. Two of the three had drifted;
+when you change one, change all three.)*
 
 **The reason is scoping, not soundness — and the difference was measured.** An earlier draft of
 this section called it "the mirror of `ext:`'s hazard". It is not. `ext:` in *source* position is
