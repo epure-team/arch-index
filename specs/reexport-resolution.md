@@ -535,6 +535,53 @@ value by hand **before** running. The golden is checked only by CI, never by `ru
 Golden and `clean_measured` re-measured per slice with a 2×2 attribution, written only
 when A=B and C=D.
 
+## Measured result (2026-09-05, both corpora, baseline = origin/main 0982a42)
+
+Distinct binaries confirmed by md5. Neither corpus changed its total call count,
+so no edge was created or destroyed — every number below is a reclassification.
+
+| | proto_alpha base → after | octez-manager base → after |
+|---|---|---|
+| total calls | 73 939 → 73 939 | 59 101 → 59 101 |
+| **MUST** | 22 416 → **22 416** | 22 476 → **22 476** |
+| MAY_TOP `callback_param` | 5 739 → 5 739 | 5 187 → 5 187 |
+| MAY_TOP `module_param` | 5 464 → **2 195** | 5 334 → **213** |
+| MAY_ENUMERATED | 40 319 → 43 588 | 26 104 → 31 225 |
+| `edge_form='module_alias'` | **3 247** (2 839 resolved, **0 MUST**) | **5 115** (3 009 resolved, **0 MUST**) |
+
+The accounting closes exactly on proto_alpha: 3 247 rewritten heads + 22 edges
+that were already `value_alias` and kept that (narrower) form = 3 269, which is
+the `module_param` drop to the row. FR-011 holds as a measurement, not only as a
+matrix argument: **zero** rewritten edges are MUST on either corpus.
+
+### What it is worth in BOUNDED NODES, which is the only figure that decides anything
+
+| | externals open | externals assumed pure |
+|---|---|---|
+| proto_alpha base | 3 084 (21.3 %) | 6 439 (44.6 %) |
+| proto_alpha after | 3 085 (21.3 %) — **+1 node** | 6 576 (**45.5 %**) — **+0.9 pt** |
+| octez-manager base | 2 587 (21.0 %) | 5 544 (45.0 %) |
+| octez-manager after | 2 596 (21.1 %) — **+9 nodes** | 6 536 (**53.1 %**) — **+8.1 pt** |
+
+**With externals open this feature bounds one node on one corpus and nine on the
+other, having deleted 3 269 and 5 121 ⊤ edges.** That is not a disappointment to
+explain away; it is ⊤'s absorption restated, and it is the finding this spec's
+US-4 was written to force into the open rather than let a ⊤-rate headline hide.
+
+What actually moved is *why* the remaining nodes are unbounded:
+`unbounded.may_top_edge` falls (8 009 → 7 872, 6 773 → 5 781) while
+`unbounded.external` rises (3 359 → 3 495, 2 957 → 3 940). The nodes did not
+become provable — they stopped being blocked by "I cannot tell what this module
+is" and started being blocked by "that module is outside the index". That is a
+reclassification from an unknowable to a *fixable* cause, and it is why the
+externals-pure column is the honest measure of this slice: **+0.9 pt and
++8.1 pt**, a ninefold spread between two corpora, reported per corpus because an
+average of two inverted numbers describes neither.
+
+This reproduces, on a third class, the correction already recorded against the
+ceiling table: **a class measured while another dominates measures the other
+class.**
+
 ## Residuals
 
 - The `include` tier, and with it the 25 273-edge `Lwt_result_syntax` bucket, until the
@@ -546,3 +593,14 @@ when A=B and C=D.
   in different libraries still collide. The sibling's roadmap-1.6 unit registry is the
   fix, and this task should adopt it once merged rather than build a second one.
 - Per-edge queryable non-resolution state (D6).
+- **An alias whose TARGET is a unit-local module** (`module D = Deep`) rewrites
+  to the unqualified `Deep.Syntax.plus` and does not resolve: the rewrite is
+  only as good as `Path.name` of the target, and a local path carries no unit.
+  The edge is honest — MAY_ENUMERATED with no `callee_id` — and strictly better
+  than the ⊤ it replaces, but it is not the resolution the cross-unit case gets.
+  Pinned by a test so that closing it is a visible change.
+- **`classify_head_path` is deliberately not rewritten.** It emits nothing and
+  feeds error-channel config matching, so rewriting it would change which calls
+  match declared `binds`/`transforms` paths — outside this spec's scope, and
+  with no measurement here to justify it. Named rather than left to be found as
+  a divergence from `record_head`.
