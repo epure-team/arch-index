@@ -122,6 +122,23 @@
   `exported:` at parse time with exit 2 and a message naming the POSITION rather than claiming
   the kind is unknown.
 
+  **Accepted in exactly one position, and that is pinned across all seven the parser has.**
+  A review noted the first evidence covered one direction only. Measured: `exported:` is taken
+  at `forbid reach`'s source and refused — exit 2, naming the position — at `reach`'s target,
+  both `dep` operands, `exported outside`, `effect`'s source and `origin`'s source. Each row
+  carries a control (the same body with `fn:`), because an exit 2 for the wrong reason looks
+  identical to one for the right reason: the first sweep scored `forbid origin` as a refusal
+  when both spellings were failing on a missing `allow-file:` clause and neither had reached
+  selector parsing.
+
+  **The target-position hazard is not the mirror it looks like, and the honest measurement says
+  so.** `ext:` as a *source* is structurally always-PASS — an external leaf has no outgoing edge,
+  so the cone can never reach anything. `exported:` as a *target* selects real nodes and asks a
+  meaningful question ("does this reach the API surface?"); with the kind admitted there,
+  `forbid reach from fn:hidden to exported:**` reports `1 proved` and that PASS is **earned** on
+  the fixture. It is refused because a kind must be granted deliberately, with tests, at each
+  position — not because it was measured to lie there.
+
   Both halves are red-verified with distinct binaries rather than argued. Widening `dep_allow`
   to accept `Exported` (`ecc35d3b7bb4`) makes the refusal test fail; dropping the exported filter
   so the kind aliases `fn:` (`6de7538ef672`) makes the filter test fail. The fixture is built to
