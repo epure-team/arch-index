@@ -95,12 +95,49 @@ let register_round_trip () =
   let code, output = Arch_tezt.index_raw_into ~db fixture in
   if code <> 0 then Test.fail "index failed (exit %d):\n%s" code output ;
   seed_findings db ;
+  (* AN IMPORTED FINDING TOO, and its absence is why this test could not see the defect it exists
+     for. With only dead_code rows — whose producer is legitimately [None] — the round-trip never
+     exercised a finding that CARRIES a provenance, so [report.sarif] dropping the producer
+     entirely passed unnoticed. A round-trip over the one class that has nothing to carry proves
+     nothing about carrying. *)
+  Db.with_db_rw db (fun c ->
+      List.iter
+        (fun sql -> ignore (Db.exec_result c sql))
+        [
+          "CREATE TABLE IF NOT EXISTS imported_findings (id INTEGER PRIMARY KEY AUTOINCREMENT, \
+           producer_run_id INTEGER NOT NULL, rule_id TEXT NOT NULL, level TEXT NOT NULL, \
+           message TEXT NOT NULL, uri TEXT, start_line INTEGER, module_id INTEGER, resolution \
+           TEXT NOT NULL, created_at TEXT DEFAULT CURRENT_TIMESTAMP)";
+          "INSERT INTO producer_runs (producer, producer_version, soundness_class) VALUES \
+           ('semgrep', '1.2.3', 'heuristic')";
+          "INSERT INTO imported_findings (producer_run_id, rule_id, level, message, uri, \
+           start_line, resolution) SELECT id, 'ocaml.taint', 'error', 'tainted input', \
+           'rep_a.ml', 2, 'resolved' FROM producer_runs WHERE producer='semgrep'";
+        ]) ;
   let json, sarif, html = run_report db in
   Batch.run (fun b ->
       let fs = json_findings json in
+      (* The provenance a SARIF finding cannot carry itself: it lives on the RUN, so the producer
+         reaches that channel only if runs are grouped by (producer, analysis). It was one run per
+         analysis, so every finding was attributed to "arch-report" while the JSON and the HTML
+         named semgrep — CHECK-5 failing for exactly the class that has a provenance. *)
+      Batch.check b ~msg:"premise: a finding WITH a producer is in the round-trip"
+        (List.exists (fun (id, _, _) -> Arch_tezt.contains ~needle:"semgrep" id) fs) ;
+      Batch.check b ~msg:"the producer reaches report.sarif, not only the JSON and the HTML"
+        (Arch_tezt.contains ~needle:"semgrep" sarif
+        && Arch_tezt.contains ~needle:"semgrep" json
+        && Arch_tezt.contains ~needle:"semgrep" html) ;
+      (* And the foreign severity is carried rather than rewritten. The ingest slice stores it
+         under a closed CHECK precisely so it is not flattened; folding every finding to
+         "warning" here undid that one layer up. *)
+      Batch.check b ~msg:"the foreign level survives into the SARIF as error, not warning"
+        (Arch_tezt.contains ~needle:"\"level\": \"error\"" sarif) ;
       (* PREMISE. A round-trip over zero findings holds for every implementation, correct or not.
          The empty case is a DIFFERENT test, below. *)
-      Batch.eq_int b ~msg:"premise: the report carries the two seeded findings" (List.length fs) 2 ;
+      (* Three now: two dead_code rows with no producer, and one imported row with one. Both
+         KINDS matter — the unattributed case and the attributed one exercise different branches,
+         and a round-trip over only the first cannot see a provenance being dropped. *)
+      Batch.eq_int b ~msg:"premise: the report carries all three seeded findings" (List.length fs) 3 ;
       List.iter
         (fun (id, loc, sc) ->
           (* The SARIF channel. Matching on the LOCATION and the soundness class rather than on
@@ -256,10 +293,19 @@ let register_imported_section () =
         in
         (st, html)
       in
+      (* The absent-table state is CONSTRUCTED, not assumed. An earlier version relied on
+         "`main` has no imported_findings table today", which stopped being true the moment the
+         ingest slice's schema landed: the table is then always created and always empty, so the
+         state is `unknown` and this assertion failed whichever order the two merged in.
+
+         A test that depends on what main happens to lack is a test that expires on someone
+         else's schedule. All three states are now produced here. *)
+      Db.with_db_rw db (fun c ->
+          ignore (Db.exec_result c "DROP TABLE IF EXISTS imported_findings")) ;
       let before, _ = sections () in
       Batch.check b
-        ~msg:("without the table, the section is present and not_analysed (got " ^ before ^ ")")
-        (Arch_tezt.contains ~needle:"imported=not_analysed" before) ;
+        ~msg:("with the table ABSENT, the section is present and not_analysed (got " ^ before ^ ")")
+        (Arch_tezt.contains ~needle:"sarif_import=not_analysed" before) ;
       (* Now the 2.3 shape: the table, a heuristic producer run, and a finding attributed to it.
          Created here rather than by invoking the adapter, so this test does not depend on a
          binary from another branch — it depends on the SHAPE that branch writes. *)
@@ -280,7 +326,7 @@ let register_imported_section () =
       let after, html = sections () in
       Batch.check b
         ~msg:("with the table and a row, the section is covered (got " ^ after ^ ")")
-        (Arch_tezt.contains ~needle:"imported=covered" after) ;
+        (Arch_tezt.contains ~needle:"sarif_import=covered" after) ;
       (* THE PROVENANCE, and it is the point rather than a detail. A heuristic finding rendered
          with the SOUND producer's class would be an ADR-002 mislabel — the class must come from
          the finding's OWN run, since several producers coexist in one database. *)
@@ -295,7 +341,7 @@ let register_imported_section () =
         | Error e -> Test.fail "%s" e
         | Ok j ->
             (match Json.member "sections" j with Some (`List l) -> l | _ -> [])
-            |> List.filter (fun sec -> str "analysis" sec = Some "imported")
+            |> List.filter (fun sec -> str "analysis" sec = Some "sarif_import")
             |> List.concat_map (fun sec ->
                    match Json.member "findings" sec with Some (`List l) -> l | _ -> [])
       in
@@ -351,8 +397,80 @@ let register_sarif_validates () =
       Batch.check b ~msg:("report.sarif is schema-valid (validator said:\n" ^ msg ^ ")") valid) ;
   Lwt.return_unit
 
+(* THE COVERAGE MATRIX, which no test in this file ever exercised — so the round-1 fix that made
+   a `failed` analysis stop rendering `covered` was real in the source and held by nothing. Three
+   mutants survived on it for exactly that reason: an assertion cannot fail against a table no
+   fixture ever writes to. *)
+let register_coverage_matrix () =
+  Test.register ~__FILE__
+    ~title:"arch-report: a failed analysis never renders covered, and reaches all three channels"
+    ~tags:["report"; "coverage"; "matrix"]
+  @@ fun () ->
+  with_fixture ~name:"rep_cov" ~files:fixture_files @@ fun fixture ->
+  let db = Arch_tezt.temp_db "rep_cov" in
+  let code, output = Arch_tezt.index_raw_into ~db fixture in
+  if code <> 0 then Test.fail "index failed (exit %d):\n%s" code output ;
+  seed_findings db ;
+  Batch.run (fun b ->
+      (* Two languages, one analysis, and they disagree. status_of used to take the FIRST row
+         whose analysis matched and ignore the language, so a covered row could mask a failed
+         one. Worst status wins, and the order is failed > partial > not_analysed > covered: a
+         reader must be told the worst thing that happened, not the most common. *)
+      Db.with_db_rw db (fun c ->
+          List.iter
+            (fun sql -> ignore (Db.exec_result c sql))
+            [
+              "INSERT INTO analysis_coverage (language, analysis, status, detail) VALUES \
+               ('ocaml', 'dead_code', 'covered', 'ran')";
+              "INSERT INTO analysis_coverage (language, analysis, status, detail) VALUES \
+               ('rust', 'dead_code', 'failed', 'the rust adapter crashed')";
+            ]) ;
+      let json, sarif, html = run_report db in
+      Batch.eq_int b ~msg:"premise: both coverage rows are there to disagree with each other"
+        (Db.with_db db (fun c ->
+             Db.int c "SELECT count(*) FROM analysis_coverage WHERE analysis='dead_code'"))
+        2 ;
+      let status =
+        match Json.strict_object ~what:"report.json" json with
+        | Error e -> Test.fail "%s" e
+        | Ok j ->
+            (match Json.member "sections" j with Some (`List l) -> l | _ -> [])
+            |> List.find_opt (fun sec -> str "analysis" sec = Some "dead_code")
+            |> (function Some sec -> Option.value ~default:"<none>" (str "status" sec)
+                       | None -> "<no section>")
+      in
+      Batch.eq_string b
+        ~msg:"a failed row for ANY language makes the analysis failed, not covered"
+        status "failed" ;
+      (* All three channels, because the matrix reaching only two is the multi-channel defect
+         this module's construction is meant to prevent — and the HTML was the one that had it. *)
+      Batch.check b ~msg:"the failed row reaches report.json"
+        (Arch_tezt.contains ~needle:"the rust adapter crashed" json) ;
+      Batch.check b ~msg:"and report.sarif"
+        (Arch_tezt.contains ~needle:"the rust adapter crashed" sarif) ;
+      Batch.check b ~msg:"and report.html, which rendered no coverage matrix at all before"
+        (Arch_tezt.contains ~needle:"the rust adapter crashed" html) ;
+      (* AND A NAME NOBODY KNOWS. The two slices disagreed on one — the producer wrote
+         `sarif_import`, the report looked for `imported` — and the mismatch degraded into a
+         `covered` instead of announcing itself. A coverage row for an analysis with no section
+         is now a finding. *)
+      Db.with_db_rw db (fun c ->
+          ignore
+            (Db.exec_result c
+               "INSERT INTO analysis_coverage (language, analysis, status, detail) VALUES \
+                (NULL, 'a_name_no_section_knows', 'failed', 'drift probe')")) ;
+      let json2, _, html2 = run_report db in
+      Batch.check b
+        ~msg:"a coverage row with no matching section is surfaced, not dropped"
+        (Arch_tezt.contains ~needle:"a_name_no_section_knows" json2
+        && Arch_tezt.contains ~needle:"a_name_no_section_knows" html2) ;
+      Batch.check b ~msg:"and the message says the two disagree about the name"
+        (Arch_tezt.contains ~needle:"disagree about the name" json2)) ;
+  Lwt.return_unit
+
 let register () =
   register_round_trip () ;
+  register_coverage_matrix () ;
   register_sarif_validates () ;
   register_not_analysed () ;
   register_imported_section ()
