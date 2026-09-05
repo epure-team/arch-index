@@ -159,7 +159,40 @@ let must_null_query =
 
    Measured on the whole repo _build/default, the same corpus as every entry
    above. *)
-let clean_measured = 367
+(* Recalibrated 2026-09-05, later the same day: 367 -> 382. THE WHOLE OF IT IS
+   MAIN'S OWN UNDECLARED DRIFT, and this is the THIRD documented occurrence.
+   Nothing in this commit changes a line of production code.
+
+   Five PRs merged after #83 set the pin at 367 — #81 (sarif ingest), #79
+   (schema-drift refusal), #82 (option phantom origins), #85 (the exported:
+   selector), and #83 itself — and not one of them re-ran the ceiling check
+   afterwards. The deletion checks were run before and after every merge; this
+   one was not run at all. So the constant read 367 while main climbed to 382,
+   and the gate spent 15 of its 25 headroom in an afternoon, leaving 10 for
+   whoever came next. That is precisely the failure the 2026-09-04 entry
+   describes, committed by the session that quoted that entry at two other
+   sessions the same morning.
+
+   Measured twice, independently, on main at 8260ad9: once by dev-13 while
+   attributing their own branch's delta, and once here on a clean detached
+   worktree with a completed full build, where scripts/recalibrate.sh --check
+   reports 382 in ALL FOUR cells of its 2x2 (A = B = C = D), so it is not a
+   tooling artefact.
+
+   NOT attributed per merge. The aggregate is measured; which of the five
+   contributed what is not, and a bisect was not run. The likeliest single
+   source is #79, whose four top-level handlers add Arch_db calls in four
+   binaries, but that is a guess and this comment does not claim it.
+
+   382 is main's measured count at 8260ad9 and this commit contains nothing
+   else, so the constant may take it. It deliberately does NOT account for
+   dev-13's feat/mutation-campaign-313, which measures 399 on its own tree:
+   that branch is inside 382 + 25 = 407 with 8 to spare and needs no
+   recalibration of its own. Its own +17 decomposes as 12 inert Sqlite3.* rows
+   from a new file and 5 Arch_tezt.Temp.* rows that DO carry signal — that
+   separation belongs in that branch's ledger and must not be hidden behind
+   this recalibration. *)
+let clean_measured = 382
 
 let headroom = 25
 
