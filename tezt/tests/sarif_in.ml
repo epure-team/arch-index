@@ -197,6 +197,156 @@ let register_failure_states () =
         1) ;
   Lwt.return_unit
 
+(* THE THREE A REVIEW FOUND, and the first is the worst outcome this adapter names for itself. *)
+let register_foreign_input_hazards () =
+  Test.register ~__FILE__
+    ~title:"sarif-in: an underscore is not a wildcard, a non-string level is not a warning"
+    ~tags:["sarif"; "ingest"; "resolve"; "vocabulary"]
+  @@ fun () ->
+  indexed "si_hazards" @@ fun db ->
+  let count sql = Db.with_db db (fun c -> Db.int c sql) in
+  Batch.run (fun b ->
+      (* A DECOY differing from the target only where an underscore sits. The old resolver used
+         SQL [LIKE '%/' || path] with no [ESCAPE], so ['_'] was a single-character wildcard and
+         [si_a.ml] matched [vendor/siXa.ml]. Measured on a real index before the fix: that query
+         returns the decoy, ALONE — so the finding was recorded `resolved` and pointed at a file
+         with no relation to it. Underscores are ordinary in OCaml names; this was not a corner
+         case. *)
+      Db.with_db_rw db (fun c ->
+          ignore (Db.exec_result c "INSERT INTO modules (path, lines) VALUES ('vendor/siXa.ml', 1)")) ;
+      Batch.eq_int b ~msg:"premise: the decoy is in the index, and the real target is NOT"
+        (count "SELECT count(*) FROM modules WHERE path='vendor/siXa.ml'") 1 ;
+      (* PREMISE THAT MAKES THE PROBE DISCRIMINATE: the SQL the old code ran must actually match
+         the decoy here, or this test would pass against the buggy version too. *)
+      Batch.eq_int b
+        ~msg:"premise: a LIKE without ESCAPE really does match the decoy — the hazard is live"
+        (count
+           "SELECT count(*) FROM modules WHERE 'si_zz.ml' = path OR 'si_zz.ml' LIKE '%/' || path \
+            OR path LIKE '%/' || 'si_zz.ml'")
+        0 ;
+      Batch.eq_int b
+        ~msg:"premise (the real one): LIKE matches the decoy for the underscore uri"
+        (count
+           "SELECT count(*) FROM modules WHERE 'si_a.ml' = path OR 'si_a.ml' LIKE '%/' || path \
+            OR path LIKE '%/' || 'si_a.ml'")
+        2 ;
+      let f =
+        write (Temp.file "underscore.sarif")
+          {|{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"probe"}},"results":[
+            {"ruleId":"R1","level":"note","message":{"text":"underscore"},
+             "locations":[{"physicalLocation":{"artifactLocation":{"uri":"si_a.ml"}}}]}]}]}|}
+      in
+      let code, _ = load db f in
+      Batch.eq_int b ~msg:"the import succeeds" code 0 ;
+      (* THE ASSERTION. With two candidates — the real file and the wildcard decoy — the honest
+         answer is unresolved. Matching moved into OCaml on a full path-segment boundary, so the
+         decoy is not a candidate at all and the real file resolves. Either way the decoy must
+         never be the answer. *)
+      Batch.eq_int b
+        ~msg:"with the real file present, two candidates means unresolved — not the decoy"
+        (count
+           "SELECT count(*) FROM imported_findings f JOIN modules m ON f.module_id = m.id \
+            WHERE m.path = 'vendor/siXa.ml'")
+        0 ;
+      (* THE DISCRIMINATING CASE, and the first version did not have it. With the real file
+         INDEXED, a wildcard match is merely a second candidate and the resolver refuses either
+         way — so "refuses two" and "takes the decoy" are the same behaviour and the mutant
+         survived. The hazard is a uri whose real file is ABSENT and whose only match is the
+         wildcard decoy: the old code resolved it, alone, to a file with no relation to it.
+
+         Measured on a real index before the fix: the LIKE query returns exactly
+         [vendor/ixXa.ml] for the uri [ix_a.ml]. One row, so `resolved`. *)
+      Db.with_db_rw db (fun c ->
+          ignore (Db.exec_result c "INSERT INTO modules (path, lines) VALUES ('vendor/ixXa.ml', 1)")) ;
+      (* Written with substr rather than LIKE, because the first version of this PREMISE used
+         [LIKE '%/ix_a.ml'] and was bitten by the very wildcard it exists to describe: the decoy
+         matched, so the premise reported the file as indexed and the probe measured nothing. The
+         hazard reached the assertion written to catch it. *)
+      Batch.eq_int b
+        ~msg:"premise: ix_a.ml is NOT indexed, so the decoy would be the ONLY candidate"
+        (count
+           "SELECT count(*) FROM modules WHERE path='ix_a.ml' \
+            OR substr(path, length(path) - 7) = '/ix_a.ml'")
+        0 ;
+      Batch.eq_int b
+        ~msg:"premise: and the unescaped LIKE really returns the decoy, alone — the hazard is live"
+        (count
+           "SELECT count(*) FROM modules WHERE 'ix_a.ml' = path OR 'ix_a.ml' LIKE '%/' || path \
+            OR path LIKE '%/' || 'ix_a.ml'")
+        1 ;
+      let decoy =
+        write (Temp.file "decoy.sarif")
+          {|{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"probe3"}},"results":[
+            {"ruleId":"D1","level":"note","message":{"text":"decoy only"},
+             "locations":[{"physicalLocation":{"artifactLocation":{"uri":"ix_a.ml"}}}]}]}]}|}
+      in
+      let code_d, _ = load db decoy in
+      Batch.eq_int b ~msg:"the import succeeds" code_d 0 ;
+      Batch.eq_int b
+        ~msg:"a uri whose ONLY match is a wildcard decoy is UNRESOLVED, never attached to it"
+        (count
+           "SELECT count(*) FROM imported_findings WHERE uri='ix_a.ml' AND resolution='unresolved' \
+            AND module_id IS NULL")
+        1 ;
+      (* A NON-STRING level. The guard read only the string case, so [{"level": 5}] and
+         [{"level": null}] fell through to the `warning` default — accepting a record from a
+         document we cannot read. An ABSENT key is different and still defaults, which SARIF
+         permits; the distinction is the point. *)
+      let odd =
+        write (Temp.file "oddlevel.sarif")
+          {|{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"probe2"}},"results":[
+            {"ruleId":"numeric","level":5,"message":{"text":"numeric level"}},
+            {"ruleId":"nulled","level":null,"message":{"text":"null level"}},
+            {"ruleId":"absent","message":{"text":"no level key at all"}}]}]}|}
+      in
+      let before = count "SELECT count(*) FROM imported_findings" in
+      let code_o, out_o = load db odd in
+      Batch.eq_int b ~msg:"the import still succeeds — refused records are partial, not fatal" code_o 0 ;
+      Batch.check b
+        ~msg:("two records are refused, one accepted (output:\n" ^ out_o ^ ")")
+        (Arch_tezt.contains ~needle:"2 refused" out_o) ;
+      Batch.eq_int b ~msg:"and exactly the absent-key record was written"
+        (count "SELECT count(*) FROM imported_findings" - before) 1 ;
+      Batch.eq_int b ~msg:"the accepted one defaulted to warning, which SARIF permits for an absent key"
+        (count "SELECT count(*) FROM imported_findings WHERE rule_id='absent' AND level='warning'")
+        1) ;
+  Lwt.return_unit
+
+(* An index written before schema 1.12 has no table to import into. The first version wrote the
+   producer_runs row FIRST and discovered the missing table afterwards, leaving an ORPHAN run
+   claiming a heuristic import that never happened — and no coverage row saying so. *)
+let register_pre_schema_index () =
+  Test.register ~__FILE__
+    ~title:"sarif-in: an index predating the table is refused before anything is written"
+    ~tags:["sarif"; "ingest"; "schema"]
+  @@ fun () ->
+  indexed "si_old" @@ fun db ->
+  let count sql = Db.with_db db (fun c -> Db.int c sql) in
+  Db.with_db_rw db (fun c -> ignore (Db.exec_result c "DROP TABLE imported_findings")) ;
+  let f =
+    write (Temp.file "any.sarif")
+      {|{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"probe"}},"results":[
+        {"ruleId":"R","level":"note","message":{"text":"m"}}]}]}|}
+  in
+  let code, out = load db f in
+  Batch.run (fun b ->
+      Batch.eq_int b ~msg:"premise: the table really is gone"
+        (count "SELECT count(*) FROM sqlite_master WHERE name='imported_findings'") 0 ;
+      Batch.eq_int b ~msg:"the import is refused" code 2 ;
+      Batch.check b ~msg:("and the message names the schema version that added it (out:\n" ^ out ^ ")")
+        (Arch_tezt.contains ~needle:"1.12" out) ;
+      (* THE POINT: no orphan run. A producer_runs row claiming a heuristic import that never
+         happened is a provenance lie, and it is exactly what writing before checking produced. *)
+      Batch.eq_int b ~msg:"NO producer run was created — nothing claims an import happened"
+        (count "SELECT count(*) FROM producer_runs WHERE soundness_class='heuristic'") 0 ;
+      Batch.eq_int b ~msg:"but the failure IS recorded, as it is for a malformed input"
+        (count
+           "SELECT count(*) FROM analysis_coverage WHERE analysis='sarif_import' AND status='failed'")
+        1) ;
+  Lwt.return_unit
+
 let register () =
   register_heuristic_cannot_reach () ;
+  register_foreign_input_hazards () ;
+  register_pre_schema_index () ;
   register_failure_states ()

@@ -99,7 +99,19 @@ let parse (raw : string) : (parsed, string) result =
                     List.filter_map
                       (fun r ->
                         let rule_id = str (member "ruleId" r) in
-                        let level = Option.value ~default:"warning" (str (member "level" r)) in
+                        (* [None] means the key is ABSENT, which SARIF permits and which
+                           defaults to warning. A key that is PRESENT with a non-string value —
+                           [{"level": 5}], [{"level": null}] — is a malformed record from a
+                           producer we do not control, and defaulting it would silently accept a
+                           document we cannot read. The distinction is the whole point of the
+                           vocabulary guard, and the first version collapsed it by looking only
+                           at the string case. *)
+                        let level =
+                          match member "level" r with
+                          | None -> Some "warning"
+                          | Some (`String l) -> Some l
+                          | Some _ -> None
+                        in
                         let message =
                           match member "message" r with
                           | Some m -> Option.value ~default:"" (str (member "text" m))
@@ -130,12 +142,13 @@ let parse (raw : string) : (parsed, string) result =
                                refused rather than given a placeholder id that would later look
                                like a real rule. *)
                             incr refused ; None
-                        | Some rid ->
-                            if not (List.mem level known_levels) then (incr refused ; None)
-                            else
-                              Some
-                                { rule_id = rid; level; message; uri = fst loc;
-                                  start_line = snd loc })
+                        | Some rid -> (
+                            match level with
+                            | Some l when List.mem l known_levels ->
+                                Some
+                                  { rule_id = rid; level = l; message; uri = fst loc;
+                                    start_line = snd loc }
+                            | _ -> incr refused ; None))
                       results
                 | _ -> [])
               runs
@@ -176,19 +189,33 @@ let resolve_uri db uri =
             String.sub u 7 (String.length u - 7) else u in
         u
       in
-      let matches = ref [] in
-      let stmt =
-        Sqlite3.prepare db
-          "SELECT id, path FROM modules WHERE ? = path OR ? LIKE '%/' || path OR path LIKE '%/' || ?"
+      (* Matching is done in OCaml, not by SQL [LIKE], and that is a correctness fix rather than
+         a style choice. The previous query used [LIKE '%/' || path] with no [ESCAPE], so every
+         ['_'] in a path was a SINGLE-CHARACTER WILDCARD: a finding on [ix_a.ml] matched a module
+         at [vendor/ixXa.ml] and was recorded [resolved]. That is the exact outcome this adapter
+         is written to prevent — a finding attached to the wrong function — produced by the code
+         meant to prevent it. Underscores are ordinary in OCaml file names, so it was not a corner
+         case.
+
+         Escaping would have worked and leaves the hazard one edit away from returning. A
+         suffix test on a full path-segment boundary cannot have wildcards at all. *)
+      let ends_with_segment path =
+        path = u
+        || (let lu = String.length u and lp = String.length path in
+            (* [path] ends with ["/" ^ u] — a whole trailing segment, never a bare suffix, so
+               [other/ab.ml] does not match [b.ml]. *)
+            lp > lu + 1 && String.sub path (lp - lu) lu = u && path.[lp - lu - 1] = '/')
+        || (let lu = String.length u and lp = String.length path in
+            lu > lp + 1 && String.sub u (lu - lp) lp = path && u.[lu - lp - 1] = '/')
       in
-      ignore (Sqlite3.bind stmt 1 (Sqlite3.Data.TEXT u)) ;
-      ignore (Sqlite3.bind stmt 2 (Sqlite3.Data.TEXT u)) ;
-      ignore (Sqlite3.bind stmt 3 (Sqlite3.Data.TEXT u)) ;
+      let matches = ref [] in
+      let stmt = Sqlite3.prepare db "SELECT id, path FROM modules" in
       let rec loop () =
         match Sqlite3.step stmt with
         | Sqlite3.Rc.ROW ->
-            (match Sqlite3.column stmt 0 with
-             | Sqlite3.Data.INT i -> matches := Int64.to_int i :: !matches
+            (match (Sqlite3.column stmt 0, Sqlite3.column stmt 1) with
+             | Sqlite3.Data.INT i, Sqlite3.Data.TEXT path when ends_with_segment path ->
+                 matches := Int64.to_int i :: !matches
              | _ -> ()) ;
             loop ()
         | _ -> ()
@@ -234,6 +261,43 @@ let () =
             die 2 (Printf.sprintf "arch-sarif-load: cannot parse %s: %s" sarif_path e)
       in
       let db = Sqlite3.db_open db_path in
+      (* An index written before schema 1.12 has no [imported_findings] table. The first version
+         wrote the producer_runs row FIRST and only then discovered the missing table, leaving an
+         ORPHAN run claiming a heuristic import that never happened — and no coverage row saying
+         so, which is the "silence and failure look alike" shape this adapter exists to avoid.
+
+         Checked before anything is written, and refused with the same failure accounting a
+         malformed input gets: a coverage row about the failure, exit 2. *)
+      let has_table =
+        let stmt =
+          Sqlite3.prepare db
+            "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='imported_findings'"
+        in
+        let n =
+          match Sqlite3.step stmt with
+          | Sqlite3.Rc.ROW -> (
+              match Sqlite3.column stmt 0 with Sqlite3.Data.INT i -> Int64.to_int i | _ -> 0)
+          | _ -> 0
+        in
+        ignore (Sqlite3.finalize stmt) ;
+        n > 0
+      in
+      if not has_table then (
+        exec db
+          (Printf.sprintf
+             "INSERT INTO analysis_coverage (language, analysis, status, detail) VALUES (NULL, \
+              'sarif_import', 'failed', %s)"
+             (quote
+                (Printf.sprintf
+                   "%s: this index has no imported_findings table (schema 1.12 added it); \
+                    re-index before importing"
+                   p.tool))) ;
+        ignore (Sqlite3.db_close db) ;
+        die 2
+          (Printf.sprintf
+             "arch-sarif-load: %s has no `imported_findings` table — this index predates schema \
+              1.12. Re-index it before importing; nothing was written."
+             db_path)) ;
       exec db
         (Printf.sprintf
            "INSERT INTO producer_runs (producer, producer_version, soundness_class) VALUES \
