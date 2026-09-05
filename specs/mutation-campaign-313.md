@@ -207,6 +207,21 @@ node; a language with no profile yields `not_analysed` rather than an empty camp
   **self-uncertified**, and the report MUST state that such a campaign cannot distinguish a weak
   test suite from a stale or wrong binary. A campaign containing at least one kill is
   self-certifying, because a stale binary is unmutated and therefore cannot produce a kill.
+- **FR-031** [US-2, US-3]: Wherever the campaign consumes a closed vocabulary that a schema `CHECK`
+  constraint declares — `selection_provenance`, the engine status set, `top_reason`, edge `kind` —
+  the OCaml consumer MUST use a **total** match with no `| _ ->` catch-all, so the compiler fails
+  when a member is added later. A value added to an existing column's vocabulary is dropped by a
+  filtering consumer **with no error at all**: no crash, no log, only a smaller answer. Every
+  defence built for the missing-column case is blind to this one — a column-existence guard, a
+  capability record and a refusal all see a column that is present and a match arm whose domain no
+  longer covers it. Measured precedents in this repository: `top_reason = 'ambiguous_unit'` arrived
+  at schema 1.9 and `form = 'inferred_bind'` at 1.8. Where the filter must live in SQL rather than
+  in OCaml, the migration gesture is to grep for the **members**, never for the column name.
+- **FR-032** [US-1]: The driver MUST treat a subprocess **exit code 3 as "refused"** — the callee
+  declined to answer — and MUST NOT collapse it into a failure or into an empty result. This is the
+  transport for FR-029's distinction: `Arch_db.ok` is being changed to return 3 rather than 2 on a
+  missing column, so "did not really run" arrives as a distinct code the campaign can propagate
+  instead of confusing it with "ran and found nothing".
 - **FR-030** [US-1]: The campaign MUST refuse to run when a binary it resolves lies **outside** the
   working tree it was invoked from, unless an environment override names a path that exists. This
   is a structural guard, not a documented precaution: on 2026-09-05 an agent briefed specifically
@@ -243,6 +258,8 @@ node; a language with no profile yields `not_analysed` rather than an empty camp
 - AC-20 [C-22]: the mutaml integration is exercised against a real mutaml, or the report states it is unverified — never silently assumed.
 - AC-21 [FR-027]: an all-survivor campaign prints "self-uncertified" and names the reason → an entirely green campaign never reads as evidence.
 - AC-22 [FR-028]: the campaign record names the resolved engine and runner paths → a reader can tell which binary ran.
+- AC-25 [FR-031]: adding a member to a CHECK-declared vocabulary without updating its consumer fails the build → the next addition cannot be dropped silently.
+- AC-26 [FR-032]: a subprocess exiting 3 is reported as refused, distinctly from a failure and from an empty result → "did not really run" survives the process boundary.
 - AC-24 [FR-030]: a binary resolved through an ancestor directory outside the tree makes the campaign refuse, exit 1 → the stale-parent-binary case cannot silently produce a page of survivors.
 - AC-23 [FR-029]: an all-ERROR campaign and an all-survivor campaign print different reasons for having no kills → "didn't really run" is never dressed as "ran and found nothing".
 
@@ -276,6 +293,7 @@ and the shared `Fixture.flat` / `Fixture.malformed_contract` helpers.
 - CHECK-7 [AC-10]: `scripts/check-status-provenance.sh` — greps every emitter in `bin/arch_mutants/` for a status field written without a provenance field in the same record; exit 1 on any hit. Self-contained, no test runner.
 - CHECK-8 [AC-20]: `scripts/check-mutaml-integration.sh` — runs a real `mutaml-runner` over a two-function fixture and asserts the wrapper resolved `MUTAML_MUTANT` to the right test set. Exit 3 (not 1) when mutaml is absent, so an unverified integration stays distinguishable from a failed one. **The mechanism itself is no longer in doubt** — it was established by reading `src/runner/runner.ml:123-130` and `src/ppx/mutaml_ppx.ml:40`; this check confirms the runtime behaviour, not the premise.
 - CHECK-9 [AC-19]: `scripts/check-mutant-key.sh <db>` — inserts the campaign's mutants and reports the count of rows **rejected** by the UNIQUE constraint, not a `GROUP BY` count, because under a constraint a duplicate never becomes a group. Run against the largest population available and print the population size and the working tree with the count.
+- CHECK-17 [AC-25]: `scripts/check-total-matches.sh` — greps the campaign's consumers for a `| _ ->` arm on any vocabulary a schema `CHECK` declares, and fails naming the site. Self-contained. This is a lint, not a proof: the real defence is the total match itself, which the compiler enforces.
 - CHECK-16 [AC-12, AC-13]: `dune test --force` — `mutants: a diff touching only a test helper selects mutants in the code that helper's tests reach`. Added because the runnable-check table had no entry for US-4 at all: the story had acceptance criteria and no automated check, which the architect voice caught. A story whose only verification is an AC read by a human is a story that ships unverified.
 - CHECK-15 [AC-24]: `scripts/check-binary-provenance.sh` → exit 0 when every resolved binary is inside the tree, exit 1 otherwise. **Already implemented and red-verified on both detection branches**: an environment override pointing outside the tree, and a nested tree whose ancestor walk reaches the parent's `_build`, which reproduces issue #77's exact mechanism. Self-contained, no test runner.
 - CHECK-14 [AC-21, AC-22]: `dune test --force` — `mutants: an all-survivor campaign is reported self-uncertified and names the binaries it resolved`. This closes the failure mode issue #77 describes: `tezt/lib/arch_tezt.ml`'s `locate` walks ancestors from the working directory, so an incomplete `_build` silently runs the parent checkout's binary. That binary is unmutated, every mutant survives, and the report becomes a page of false test gaps that looks exactly like a real finding.
