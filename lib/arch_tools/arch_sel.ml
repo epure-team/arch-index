@@ -37,10 +37,24 @@ let structural = [ File; Fn; Module ]
 
 (** The kinds valid as the SOURCE of a cone — [structural] plus [exported:].
 
-    Deliberately a separate name rather than an addition to [structural]: [structural] is the
-    list [arch-coverage] and [arch-mutants] pass, and neither ranges over a call cone, so
-    widening it in place would hand them a kind by omission — the exact "silent reinterpretation
-    by omission" the #73 review found in [Dep]. A new kind must be granted, never inherited. *)
+    {b This list has TWO consumers}: [forbid reach]'s source position ([arch_rules.ml]) and
+    [arch-coverage --roots] ([arch_coverage.ml]). Both genuinely range over a call cone, which
+    is what makes one shared list the honest modelling rather than a convenience — but it means
+    a kind added here lands in BOTH at once, and a reviewer looking at one need not look at the
+    other. Smaller blast radius than [structural], identical mechanism. Name both when you
+    widen it.
+
+    Deliberately a separate name rather than an addition to [structural], which
+    [arch-mutants --tests] still passes: that flag's population is TEST ROOTS, not a cone, so
+    widening [structural] in place would have handed it a kind by omission — the "silent
+    reinterpretation by omission" the #73 review found in [Dep]. A kind is granted, never
+    inherited.
+
+    (An earlier revision of this comment said [structural] is "the list [arch-coverage] and
+    [arch-mutants] pass, and neither ranges over a call cone". Both halves stopped being true
+    when [arch-coverage --roots] was granted [Exported] — and the second half is the very
+    argument that made the grant defensible, so the comment had come to contradict the change
+    three lines below it.) *)
 let cone_source = [ File; Fn; Module; Exported ]
 
 (** [allow] is MANDATORY, and that is the point.
@@ -79,7 +93,7 @@ let parse ~allow tok =
                (String.concat ", " (List.map kind_name allow))
                (match c with
                 | Ext -> "`ext:` matches external leaves, which have no body, no outgoing edge and no file, so it is answerable only as the target of `forbid reach`. Here it would select keys that cannot serve this position."
-                | Exported -> "`exported:` matches FUNCTIONS on the API surface. It is granted at the positions that were designed and tested for it, and nowhere else — a selector kind is granted deliberately, per position, never inherited. This is a SCOPING decision, not a claim that the position would answer wrongly: `arch-coverage --roots exported` computes exactly this set today, and a `forbid reach` target that matches nothing is already reported as vacuous rather than as a proof. Widening a position is additive; ask for it."
+                | Exported -> "`exported:` matches FUNCTIONS on the API surface, so it is answerable where a cone STARTS from them: the source of `forbid reach`, and `arch-coverage --roots`. Here it would select keys this position cannot serve."
                 | File | Fn | Module -> "This position reads a different population."))
       | Some c -> Ok (c, pat))
 

@@ -149,6 +149,24 @@
   to avoid, shipped by the change that names it. Both spellings now answer, and the test asserts
   they **agree with each other** rather than matching a hard-coded cone size.
 
+  **The refusal message states a per-position reason and makes no cross-position claim**, which
+  took three attempts to get right. It first asserted that such a position "does not range over a
+  call cone" and that an empty match there reads as a proof — both measurably false. The
+  replacement asserted instead that the refusal was "a SCOPING decision, not a claim that the
+  position would answer wrongly", and invited the reader to ask for the widening. That is false
+  at `forbid dep`, and dangerously so: admitting `exported:` there, `forbid dep from exported:**
+  to module:Es_vuln` reports `1 proved`, exit 0 — a proof over a rule that policed nothing,
+  because `dep` compares operands against declared module paths and would silently reinterpret
+  the glob. A message inviting the one widening this change measured as unsafe is worse than a
+  message that merely over-claims. It now mirrors the `ext:` arm one line above: say what the
+  kind is answerable for, and stop.
+
+  **The ceiling metric moves 358 → 361** (`MUST` with a NULL callee, whole-repo index, whole
+  `_build/default`, measured on both trees with the same binary). +3 from the source change,
+  advisory and well inside `clean_measured + headroom`. It does not touch
+  `tezt/tests/must_null_ceiling.ml`, so it does not collide with #83's serialised recalibration
+  to 367 — after which this lands at 370 against a ceiling of 392.
+
   Red-verified rather than argued, each mutation named by its binding so a reader can reproduce
   it (a bare build hash is a coordinate nobody else can check):
 
