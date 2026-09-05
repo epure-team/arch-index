@@ -73,7 +73,7 @@ let () =
            explicit --roots selector, or use a producer that records exports.";
       (k, "exported"))
     else
-      match Arch_sel.parse ~allow:Arch_sel.[ File; Fn; Module ] roots_arg with
+      match Arch_sel.parse ~allow:Arch_sel.structural roots_arg with
       | Error e -> die ("arch-coverage: " ^ e)
       | Ok s ->
           let k = Arch_sel.select g s in

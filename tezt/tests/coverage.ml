@@ -172,7 +172,17 @@ let register_tracefile_refusals () =
           "the DEFAULT roots on an index that marks no exports must abort too — same failure, \
            different clothes"
         ~expected:2
-        (coverage [no_exports; trace "noexp" lcov])) ;
+        (coverage [no_exports; trace "noexp" lcov]) ;
+
+      (* `--roots` shares `Arch_sel.parse` with arch-rules, and `ext:` is meaningless as a set of
+         COVERAGE ROOTS — an external leaf has no body to trace coverage over — so it must be
+         refused the same way arch-rules refuses it in the equivalent positions: exit 2, naming
+         the kind. Behaviour was already correct; only the test was missing. *)
+      Batch.exit_code b ~msg:"ext: as --roots must abort, not silently match nothing" ~expected:2
+        (coverage [db; trace "ext_roots" lcov; "--roots"; "ext:Stdlib.+"]) ;
+      let _, ext_out = coverage [db; trace "ext_roots2" lcov; "--roots"; "ext:Stdlib.+"] in
+      Batch.contains b ~msg:"the ext: refusal on --roots must name the kind, not read as a typo"
+        ~haystack:ext_out "not valid in this position") ;
   Lwt.return_unit
 
 (* Before the "outside the API cone" bucket existed, a covered function that was

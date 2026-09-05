@@ -52,8 +52,15 @@ let load_nodes (db : Arch_db.t) =
     | Arch_db.Flat ->
         "SELECT name, name, file_path, COALESCE(exported,0), line_start, line_end FROM functions"
     | Arch_db.Main ->
+        (* LEFT, not INNER: a `functions` row whose `module_id` does not join is still an
+           INTERNAL function — it must still become a node, with [file = None], or it falls out
+           of [nodes] while its edges (built straight off [calls.caller_id]/[callee_id] in
+           [load], independently of this join) survive, and [ext_keys] — "in [bwd], absent from
+           [nodes]" — would then misclassify it as an external leaf. This cannot happen from any
+           producer in this repo (FKs are on; `arch_index.ml` is the sole writer), so this join
+           guards a foreign/malformed-DB case, not a live one. *)
         "SELECT '#'||f.id, f.name, m.path, COALESCE(f.exposed,0), f.line_start, f.line_end \
-         FROM functions f JOIN modules m ON f.module_id = m.id"
+         FROM functions f LEFT JOIN modules m ON f.module_id = m.id"
   in
   let rows =
     Arch_db.rows db ~params_ty:Arch_db.Ty.unit ~shape:Arch_db.Rows.node_shape
@@ -222,7 +229,15 @@ let label g key =
 
     Note what this set does NOT contain: a ⊤ edge never reaches [bwd] at all ([load] counts it in
     [tops] instead), so these are exactly the NULL-callee MUST and MAY_ENUMERATED targets — the
-    calls asserted to happen towards something we do not hold. *)
+    calls asserted to happen towards something we do not hold.
+
+    {b Exactness.} "Absent from [nodes]" is exact — never a false external — PROVIDED every
+    internal function is guaranteed a node. [load_nodes] arranges that with a LEFT (not INNER)
+    join on [Main]: an internal function whose [module_id] fails to join still gets a node (with
+    [file = None]) rather than silently dropping out while its edges, built independently off
+    [calls.caller_id]/[callee_id], survive. On a DB where that invariant does not hold — one
+    written by something other than this repo's own producer — this can still return a false
+    external for a genuinely internal, unjoinable function. *)
 let ext_prefix = "ext:"
 
 let has_ext_prefix k =

@@ -183,7 +183,17 @@ let register_allowlist () =
          unreached — a plan that mutates everything, justified by a typo. *)
       let code, output = mutants ["plan"; db; "--tests"; "file:nope/**"] in
       Batch.exit_code b ~msg:"a --tests selector matching nothing must abort" ~expected:2
-        (code, output)) ;
+        (code, output) ;
+
+      (* `--tests` shares `Arch_sel.parse` with arch-rules, and `ext:` is meaningless as a TEST
+         selector — an external leaf is not a function a test can be attributed to — so it must
+         be refused the same way arch-rules refuses it: exit 2, naming the kind. Behaviour was
+         already correct; only the test was missing. *)
+      let ext_code, ext_out = mutants ["plan"; db; "--tests"; "ext:Stdlib.+"] in
+      Batch.exit_code b ~msg:"ext: as --tests must abort, not silently match nothing" ~expected:2
+        (ext_code, ext_out) ;
+      Batch.contains b ~msg:"the ext: refusal on --tests must name the kind, not read as a typo"
+        ~haystack:ext_out "not valid in this position") ;
   Lwt.return_unit
 
 let survivors_report =

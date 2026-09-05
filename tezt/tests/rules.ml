@@ -836,11 +836,16 @@ let register_vacuity_covers_every_rule_form () =
 
     - it selects, and the population is exactly the external leaves, not every callee;
     - it is REFUSED in the five positions where it could only be inert, and refused loudly
-      (exit 2) — an inert selector yields a green verdict the rule never earned;
-    - it is NOT_COMPUTED on a flat index. [arch-load] synthesises a [functions] row for every
-      callee it sees, so that schema {b cannot represent an external leaf at all}: a stream
-      declaring two functions and calling [Stdlib.+] writes three. "Matched nothing" there would
-      read as a typo in the pattern rather than as a property of the index;
+      (exit 2) — an inert selector is a defect there regardless of what downstream vacuity
+      happens to catch: as a [reach] source (and, in principle, an [effect] cone) it would be a
+      silent false PASS, while [dep] and [exported] already report ordinary VACUOUS on it;
+    - it is NOT_COMPUTED on a flat index — a claim about what [arch-load], this repo's one
+      producer of that schema, writes, not about what the schema itself can hold: [arch-load]
+      synthesises a [functions] row for every callee it sees, so a stream declaring two functions
+      and calling [Stdlib.+] writes three, and on any index it produces the external-leaf
+      population is empty by construction. (A hand-built flat DB can still hold a real one; that
+      case is not what this guard is claiming.) "Matched nothing" there would read as a typo in
+      the pattern rather than as a property of the index;
     - and a cone reaching no external still PASSes, which is the control proving the VIOLATION
       came from the edge rather than from a selector matching everything. *)
 
@@ -875,6 +880,32 @@ let register_ext_selector () =
       | Some j -> (
           Batch.eq_string_opt b ~msg:"ext: must find the MUST edge into the external leaf"
             (verdict_of j ~prefix:"no raw arithmetic") (Some "VIOLATION") ;
+          (* M10: disabling the `ext:` prefix-strip in Arch_graph.label renders the leaf as
+             `ext:Stdlib.+` instead of `Stdlib.+`. Nothing above pins the RENDERING — target_size
+             is a count, not a string — so that mutant survived the suite. detail and the
+             witness's last hop are the two places a report actually shows the name, and both
+             are asserted here as the exact stripped form. *)
+          (match Json.list ~what:"ext_arith" "results" j with
+          | Ok (`Assoc f :: _) -> (
+              match List.assoc_opt "detail" f with
+              | Some (`List detail) ->
+                  let names = List.filter_map (function `String s -> Some s | _ -> None) detail in
+                  Batch.eq_int b ~msg:"ext:Stdlib.+ must flag exactly one detail entry"
+                    (List.length names) 1 ;
+                  Batch.eq_string b
+                    ~msg:"ext:Stdlib.+ must render as the bare name in detail, not `ext:`-prefixed"
+                    (String.concat "," names) "Stdlib.+"
+              | _ -> Batch.note b "the ext: rule has no detail list")
+          | _ -> Batch.note b "the ext: rule produced no result row") ;
+          (match witness_of j ~prefix:"no raw arithmetic" with
+          | Some w -> (
+              match List.rev w with
+              | last :: _ ->
+                  Batch.eq_string b
+                    ~msg:"the witness's last hop must be the bare external name, not `ext:`-prefixed"
+                    last "Stdlib.+"
+              | [] -> Batch.note b "ext: witness was empty")
+          | None -> Batch.note b "ext: rule produced no witness") ;
           match Json.list ~what:"ext_arith" "results" j with
           | Ok (`Assoc f :: _) ->
               (* target_size = 1, not 2: `Stdlib.+` and not `Stdlib.List.iter`. A selector that
@@ -947,23 +978,42 @@ let register_ext_selector () =
           Batch.eq_string_opt b ~msg:"a cone that reaches no external must PASS, not VIOLATION"
             (verdict_of j ~prefix:"pure code") (Some "PASS")) ;
 
-      (* A flat index cannot represent an external leaf, so the question is unanswerable rather
-         than answered "none" — NOT_COMPUTED, which fails the gate by default. This is the case a
-         prefix-based implementation got wrong by returning the empty set. *)
-      let flat_db = Fixture.flat ~name:"rules_ext_flat" layered_stream in
+      (* NOT_COMPUTED is a claim about arch-load's OUTPUT, not about what the flat schema can
+         hold — a hand-built flat DB can carry a genuine external leaf (a `calls` row whose
+         `callee_name` has no `functions` row at all), which is exactly what this fixture does:
+         `calc.add` really MUST-calls `Stdlib.+`, on a LIVE source (`file:src/calc/**` matches a
+         real function). Without the guard this would be a real, computable VIOLATION — not the
+         doubly-vacuous NO_SOURCE a fixture with no matching source would give, which cannot show
+         the guard firing on a question that was otherwise answerable. Column shapes mirror what
+         `arch-load` itself writes (`Arch_db`'s schema detector keys off `calls.caller_name`). *)
+      let flat_db =
+        Fixture.raw ~name:"rules_ext_flat"
+          "CREATE TABLE functions(name TEXT, file_path TEXT, exported INTEGER DEFAULT 0, \
+           line_start INTEGER, line_end INTEGER, language TEXT); \
+           CREATE TABLE calls(caller_name TEXT, caller_file TEXT, callee_name TEXT, callee_file \
+           TEXT, call_site TEXT, kind TEXT, top_reason TEXT, top_anchor TEXT); \
+           CREATE TABLE comment_db_meta(key TEXT, value TEXT); \
+           INSERT INTO comment_db_meta VALUES ('callgraph_contract','v1'); \
+           INSERT INTO functions VALUES ('calc.add','src/calc/add.ml',1,NULL,NULL,NULL); \
+           INSERT INTO calls VALUES \
+           ('calc.add','src/calc/add.ml','Stdlib.+',NULL,'src/calc/add.ml:1','MUST',NULL,NULL);"
+      in
       (match rules_json b ~what:"ext_flat" [flat_db; rf; "--format"; "json"] with
       | None -> ()
       | Some j ->
           Batch.eq_string_opt b
-            ~msg:"ext: on a flat index is NOT_COMPUTED — the schema cannot hold an external leaf"
+            ~msg:
+              "ext: on a flat index is NOT_COMPUTED even for a live source that would otherwise \
+               VIOLATE"
             (verdict_of j ~prefix:"no raw arithmetic") (Some "NOT_COMPUTED")) ;
       Batch.exit_code b
         ~msg:"and that unanswerable rule fails the gate rather than passing quietly"
         ~expected:1 (rules [flat_db; rf]) ;
 
-      (* The five refusals. Each position consults a population an external leaf can never join,
-         so the selector would match nothing and the rule would report a green verdict it never
-         earned. Exit 2 = the parse aborted, which is how this tool refuses. *)
+      (* The five refusals. Each position consults a population an external leaf can never join —
+         a false PASS for reach-source and (in principle) effect, ordinary VACUOUS for dep-source,
+         dep-target and exported — so an inert selector is a defect regardless of which. Exit 2 =
+         the parse aborted, which is how this tool refuses. *)
       List.iter
         (fun (what, body) ->
           let f = rule_file ("ext_bad_" ^ what) (Printf.sprintf "rule \"r\"\n  %s\n" body) in
@@ -980,5 +1030,76 @@ let register_ext_selector () =
           ("dep-target", "forbid dep from module:src/** to ext:Stdlib.+");
           ("exported", "forbid exported outside ext:Stdlib.+");
           ("effect", "forbid effect from ext:Stdlib.+ kind:GlobalVar");
+        ] ;
+
+      (* `dep`'s allow-list is [Module] only, not the usual [File; Fn; Module]: `forbid dep`
+         throws the selector KIND away and globs both sides against strings read out of
+         `module_deps`, so `file:`/`fn:` are exactly as unimplemented there as `ext:` is — a rule
+         author writing `forbid dep from fn:foo to file:bar` would otherwise get it silently
+         reinterpreted as a module-path glob rather than refused. *)
+      List.iter
+        (fun (what, body) ->
+          let f = rule_file ("dep_bad_" ^ what) (Printf.sprintf "rule \"r\"\n  %s\n" body) in
+          Batch.exit_code b
+            ~msg:(Printf.sprintf "dep: %s must abort, not be silently reinterpreted as module:" what)
+            ~expected:2 (rules [db; f]) ;
+          let _, out = rules [db; f] in
+          Batch.contains b
+            ~msg:(Printf.sprintf "the %s refusal must name the kind, not read as a typo" what)
+            ~haystack:out "not valid in this position")
+        [
+          ("dep-source-fn", "forbid dep from fn:calc.add to module:Web.**");
+          ("dep-source-file", "forbid dep from file:src/calc/** to module:Web.**");
+          ("dep-target-fn", "forbid dep from module:src/** to fn:foo");
+          ("dep-target-file", "forbid dep from module:src/** to file:bar");
         ]) ;
+  Lwt.return_unit
+
+(* MEDIUM-1 regression. `functions.module_id` dangling (no matching `modules` row) is not
+   reachable from any producer in this repo — `architecture-schema.sql` itself turns
+   `PRAGMA foreign_keys = ON`, and `arch_index.ml` is the sole Main writer — but nothing stops a
+   hand-built or foreign DB from having one, made here by loading the real schema over a
+   connection with that pragma turned back OFF (mirroring a foreign writer, or a DB produced
+   before FK enforcement existed) so this seed can insert the dangling row at all. Before the
+   fix, `load_nodes`'s INNER JOIN dropped such a function from `nodes` while `load`'s edges
+   (built straight off `calls.caller_id`/`callee_id`, independent of that join) kept it — so
+   `ext_keys` ("in bwd, absent from nodes") misclassified a genuinely INTERNAL function as an
+   external leaf, rendered with no name at all (`label` falls back to the raw key for anything
+   not `ext:`-prefixed and not in `nodes`). *)
+(* The real schema minus its own `PRAGMA foreign_keys = ON` — SQLite defaults that pragma OFF
+   per-connection, so simply not asserting it (rather than asserting OFF and racing the schema
+   file's own ON) is what actually lets the dangling insert below through. *)
+let schema_fk_off () =
+  read_file (schema ())
+  |> String.split_on_char '\n'
+  |> List.filter (fun l -> not (contains ~needle:"PRAGMA foreign_keys" l))
+  |> String.concat "\n"
+
+let dangling_module_sql =
+  schema_fk_off ()
+  ^ "INSERT INTO modules(id,path,lines) VALUES (1,'src/calc/a.ml',10); \
+     INSERT INTO functions(id,module_id,name) VALUES (1,1,'a'),(2,99,'b'); \
+     INSERT INTO calls(caller_id,callee_id,callee_name,kind) VALUES (1,2,'b','MUST'); \
+     INSERT OR REPLACE INTO comment_db_meta(key,value) VALUES ('callgraph_contract','v1');"
+
+let register_ext_join_hazard () =
+  Test.register ~__FILE__
+    ~title:"rules: an internal function cannot be classified ext: even with a dangling module_id"
+    ~tags:["rules"; "selectors"; "ext"]
+  @@ fun () ->
+  let db = Fixture.raw ~name:"rules_ext_dangling" dangling_module_sql in
+  Batch.run (fun b ->
+      let rf =
+        rule_file "ext_dangling"
+          "rule \"nothing external\"\n  forbid reach from file:src/calc/** to ext:**\n"
+      in
+      match rules_json b ~what:"ext_dangling" [db; rf; "--format"; "json"] with
+      | None -> ()
+      | Some j ->
+          (* `b` (function #2) is internal — it has a `functions` row — even though its
+             `module_id` does not join. It must never be swept up by `ext:**`: the correct
+             verdict is NO_TARGET (the ext: population is empty), not a VIOLATION naming `#2`. *)
+          Batch.eq_string_opt b
+            ~msg:"a dangling module_id must not turn an internal function into an external leaf"
+            (verdict_of j ~prefix:"nothing external") (Some "NO_TARGET")) ;
   Lwt.return_unit

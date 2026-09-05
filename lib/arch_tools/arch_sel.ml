@@ -10,15 +10,30 @@ let kind_name = function File -> "file" | Fn -> "fn" | Module -> "module" | Ext 
 let all_kinds = [ File; Fn; Module; Ext ]
 let kinds_doc allow = String.concat ", " (List.map (fun k -> kind_name k ^ ":<glob>") allow)
 
+(* The allow-list every call site used before `ext:` existed, and the one every call site that
+   has not been taught about `ext:` still wants. Named once so that adding a fifth kind is one
+   edit here rather than an audit of every `~allow` at every call site — `arch-coverage` and
+   `arch-mutants` used to spell [File; Fn; Module] out by hand, which is exactly the duplication
+   this guards against. *)
+let structural = [ File; Fn; Module ]
+
 (** [allow] is MANDATORY, and that is the point.
 
     [ext:] is meaningful in exactly one position — the TARGET of a [forbid reach]. An external
-    leaf has no body, hence no outgoing edge and no file, so as a [reach] SOURCE, an [exported]
-    allow-list, an [effect] cone or a [dep] operand it selects keys that can never participate:
-    the rule then reports a green verdict it never earned. That is the failure this tool exists to
-    prevent, so a caller cannot get it by omission — the compiler makes every call site name the
-    kinds it can honestly serve, and a rejection is loud and specific rather than a silent empty
-    set. Asymmetry that is recorded is fine; asymmetry that is silent is the bug. *)
+    leaf has no body, hence no outgoing edge and no file, so everywhere else it selects keys that
+    cannot serve that position, and the two failure modes are not the same failure:
+
+    - as a [reach] SOURCE, or (in principle) an [effect] cone, the selector still matches
+      something real — the leaf itself — so no vacuity check fires. The cone then starts at a
+      node with no outgoing edges, so it can never reach anything, and the rule reports a PASS it
+      never earned: a false green, silently.
+    - as a [dep] operand or an [exported] allow-list, the emptiness is caught the ordinary way —
+      NO_SOURCE / VACUOUS — because those positions do not read [ext_keys] at all once the kind is
+      rejected upstream of them.
+
+    Either way a caller should not get it by omission, so the argument is mandatory rather than
+    conventional: the compiler makes every call site name the kinds it can honestly serve, and a
+    rejection is loud and specific rather than a silent wrong answer of either kind. *)
 let parse ~allow tok =
   match String.index_opt tok ':' with
   | None -> Error (Printf.sprintf "bad selector %S — expected one of: %s" tok (kinds_doc allow))
@@ -37,7 +52,7 @@ let parse ~allow tok =
             (Printf.sprintf "selector kind %S is not valid in this position — only %s. %s" k
                (String.concat ", " (List.map kind_name allow))
                (match c with
-                | Ext -> "`ext:` matches external leaves, which have no body, no outgoing edge and no file, so it is answerable only as the target of `forbid reach`. Here it would match nothing that can participate, and the rule would report a green verdict it never earned."
+                | Ext -> "`ext:` matches external leaves, which have no body, no outgoing edge and no file, so it is answerable only as the target of `forbid reach`. Here it would select keys that cannot serve this position."
                 | File | Fn | Module -> "This position reads a different population."))
       | Some c -> Ok (c, pat))
 
@@ -52,7 +67,15 @@ let to_string (k, p) = kind_name k ^ ":" ^ p
     both directions. (An earlier version compiled [**/] to [.*/?] and did exactly that.)
 
     Implemented as a direct matcher rather than via Str, so the library needs no regexp
-    dependency and the semantics are visible in one place. *)
+    dependency and the semantics are visible in one place.
+
+    {b The [*]/[**] distinction is meaningful only where the value can contain ['/'].} For
+    [ext:], it cannot: external OCaml names are dot-separated ([Stdlib.List.iter]), never
+    slash-separated, so [*]'s "stop at ['/']" rule never triggers and [*] matches exactly as much
+    as [**] does. [ext:Stdlib.*] and [ext:Stdlib.**] are therefore the same selector — both match
+    the whole [Stdlib] subtree, which over-matches loudly in a [forbid] rule rather than silently
+    passing something it should have caught, so this is a documentation gap, not a correctness
+    one. See [select] below for where this matters. *)
 let glob_match pattern value =
   let plen = String.length pattern and vlen = String.length value in
   (* memo.(i).(j) = "already proved (i,j) cannot match", so a pattern with several `**` cannot
@@ -95,7 +118,14 @@ let glob_match pattern value =
     [ext:] is the one kind that does NOT range over [Arch_graph.nodes]: external leaves are not
     nodes (see [Arch_graph.ext_keys]), so it ranges over the external keys and matches the glob
     against the callee name with any ["ext:"] prefix stripped — the name as written at the call
-    site, which is what a report shows and what a rule author can be asked to type. *)
+    site, which is what a report shows and what a rule author can be asked to type.
+
+    It is also the one kind for which [*] and [**] are indistinguishable — see the note on
+    {!glob_match} — because an external name never contains ['/']. [ext:Stdlib.*] matches the
+    same set as [ext:Stdlib.**]: the whole subtree, not just [Stdlib]'s immediate members. This
+    is deliberately not special-cased into a different separator for [ext:]: doing that would
+    make the same character mean two different things depending on which kind precedes it, which
+    is the more surprising failure mode of the two. *)
 let select (g : Arch_graph.t) ((k, pat) : t) =
   match k with
   | Ext ->
