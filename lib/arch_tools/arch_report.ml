@@ -71,8 +71,21 @@ type finding = {
   f_message : string;
   f_location : string option;  (** ["file:line"], the repo's existing call-site spelling *)
   f_subject : string option;  (** the function or callee the finding is about *)
-  f_producer : string;
-  f_soundness_class : string;
+  f_producer : string option;
+  f_soundness_class : string option;
+      (** [None] when the table this finding came from records no [producer_run_id].
+
+          That is not a gap to paper over with the first run in the table. A review demonstrated
+          what [match producers with p :: _] does: it labels EVERY finding with whichever run
+          sorted first, so a dead-code finding reported [producer=semgrep,
+          soundness_class=heuristic] as soon as an importer existed — and the same line labels an
+          imported heuristic finding [sound_with_top] when the indexer sorts first, which is the
+          ordinary order.
+
+          It also defeated the guarantee the ingest slice enforces structurally. That slice decides
+          WHERE rows go; this decided provenance by WHICH ROW SORTED FIRST. The two did not
+          compose, and neither was wrong alone. A finding with no recorded run is rendered
+          unattributed, which is a fact; the alternative was a label that looked like one. *)
   f_verdict : string option;
 }
 
@@ -178,10 +191,10 @@ let collect ~db_path (t : Arch_db.t) : t =
                      Printf.sprintf "call to %s in %s sits in a CFG-unreachable block" callee fn;
                    f_location = opt site;
                    f_subject = opt callee;
-                   f_producer =
-                     (match producers with p :: _ -> p.p_name | [] -> "arch-index");
-                   f_soundness_class =
-                     (match producers with p :: _ -> p.p_soundness_class | [] -> "heuristic");
+                   (* dead_code_sites carries no producer_run_id, so this finding's run is not
+                      recorded and is therefore not known. *)
+                   f_producer = None;
+                   f_soundness_class = None;
                    f_verdict = None }
            | _ -> None)
   in
@@ -204,9 +217,26 @@ let collect ~db_path (t : Arch_db.t) : t =
        recorded. *)
     if not (Arch_db.has_table t table) then "not_analysed"
     else
-      match List.find_opt (fun c -> c.c_analysis = analysis) coverage with
-      | Some c -> c.c_status
-      | None -> (
+      (* Across ALL languages, worst status wins. An earlier version took the FIRST row whose
+         analysis matched and ignored [c_language] entirely, so an index with (ocaml, dead_code)
+         = covered and (rust, dead_code) = failed reported `covered` — a partially-failed analysis
+         rendered as clean, which is the one outcome this report exists to prevent.
+
+         The order is deliberate and is not alphabetical: `failed` beats `partial` beats
+         `not_analysed` beats `covered`, because a reader must be told the worst thing that
+         happened, not the most common. *)
+      let rank = function
+        | "failed" -> 3
+        | "partial" -> 2
+        | "not_analysed" -> 1
+        | _ -> 0
+      in
+      match
+        List.filter (fun c -> c.c_analysis = analysis) coverage
+        |> List.sort (fun a b -> compare (rank b.c_status) (rank a.c_status))
+      with
+      | c :: _ -> c.c_status
+      | [] -> (
           match q1 t (Printf.sprintf "SELECT CAST(count(*) AS TEXT) FROM %s" table) with
           | [ "0" ] -> "unknown"
           | [ _ ] -> "covered"
@@ -247,8 +277,9 @@ let collect ~db_path (t : Arch_db.t) : t =
                    f_message = msg;
                    f_location = loc;
                    f_subject = Some rid;
-                   f_producer = producer;
-                   f_soundness_class = sc;
+                   (* Imported findings DO record their run, so these are facts. *)
+                   f_producer = Some producer;
+                   f_soundness_class = Some sc;
                    f_verdict = None }
            | _ -> None)
   in
@@ -304,7 +335,9 @@ let finding_json (f : finding) =
     [ ("id", `String f.f_id); ("kind", `String f.f_kind); ("message", `String f.f_message);
       ("location", match f.f_location with Some l -> `String l | None -> `Null);
       ("subject", match f.f_subject with Some s -> `String s | None -> `Null);
-      ("producer", `String f.f_producer); ("soundness_class", `String f.f_soundness_class);
+      ("producer", match f.f_producer with Some p -> `String p | None -> `Null);
+      ( "soundness_class",
+        match f.f_soundness_class with Some c -> `String c | None -> `Null );
       ("verdict", match f.f_verdict with Some v -> `String v | None -> `Null) ]
 
 let to_json (r : t) : Yojson.Safe.t =
@@ -323,8 +356,20 @@ let to_json (r : t) : Yojson.Safe.t =
 let to_sarif (r : t) : Yojson.Safe.t =
   let sarif_finding (f : finding) : Arch_sarif.finding =
     { rule_id = f.f_kind; level = Arch_sarif.Warning; message = f.f_message;
-      verdict = f.f_verdict; soundness_class = Some f.f_soundness_class; soundness = None;
-      top_reasons = []; locations = (match f.f_location with Some l -> [ l ] | None -> []);
+      verdict = f.f_verdict; soundness_class = f.f_soundness_class; soundness = None;
+      top_reasons = [];
+      (* [Arch_sarif] parses a label as ["name  (file)"] — the shape [Arch_graph.label] produces.
+         An earlier version passed a bare ["file:line"], which has no such separator, so every
+         finding degraded to a logical-only location and report.sarif carried ZERO
+         physicalLocation: GitHub could not map a single one to a file. Emitting the shape the
+         library documents is the fix; the line survives because [split_line] now reads a numeric
+         suffix off the file part. *)
+      locations =
+        (match (f.f_subject, f.f_location) with
+        | Some subj, Some loc -> [ Printf.sprintf "%s  (%s)" subj loc ]
+        | None, Some loc -> [ Printf.sprintf "%s  (%s)" f.f_kind loc ]
+        | Some subj, None -> [ subj ]
+        | None, None -> []);
       detail_total = 1; code_flow = [] }
   in
   (* One run per SECTION, so each carries its own category. GitHub OVERWRITES a run sharing
@@ -402,6 +447,26 @@ let to_html (r : t) : string =
   p "</tr><tr>" ;
   List.iter (fun (_, n) -> p "<td>%d</td>" n) r.verdicts ;
   p "</tr></table>\n" ;
+  (* The coverage matrix, which the HTML channel did not render at all — so the one artifact a
+     human opens was missing the per-(language, analysis) statuses the other two carry. FR-021
+     asks for the SAME header on all three; a channel that silently drops part of it is the
+     multi-channel defect this module's construction was meant to make impossible, surviving in
+     the one place the shared type does not reach: the rendering itself. *)
+  p "<h2>Coverage</h2>\n" ;
+  if r.coverage = [] then
+    p "<p class=\"empty\">no <code>analysis_coverage</code> rows — coverage is unrecorded, which \
+       is not the same as complete</p>\n"
+  else (
+    p "<table><tr><th>language</th><th>analysis</th><th>status</th><th>detail</th></tr>\n" ;
+    List.iter
+      (fun c ->
+        p "<tr%s><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>\n"
+          (if c.c_status = "covered" then "" else " class=\"notrun\"")
+          (esc (Option.value ~default:"(all)" c.c_language))
+          (esc c.c_analysis) (esc c.c_status)
+          (esc (Option.value ~default:"—" c.c_detail)))
+      r.coverage ;
+    p "</table>\n") ;
   p "<h2>⊤ frontier</h2><p>%s</p>\n"
     (match r.top_frontier with
     | Some n -> Printf.sprintf "%d MAY_TOP edge(s)" n
@@ -418,12 +483,19 @@ let to_html (r : t) : string =
           (esc s.s_status) ;
       if s.s_findings = [] then p "<p class=\"empty\">no findings</p>\n"
       else (
-        p "<table><tr><th>id</th><th>location</th><th>message</th><th>soundness</th></tr>\n" ;
+        p
+          "<table><tr><th>id</th><th>location</th><th>message</th><th>producer</th>\
+           <th>soundness</th></tr>\n" ;
         List.iter
           (fun f ->
-            p "<tr><td><code>%s</code></td><td>%s</td><td>%s</td><td>%s</td></tr>\n" (esc f.f_id)
+            p "<tr><td><code>%s</code></td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>\n"
+              (esc f.f_id)
               (esc (Option.value ~default:"—" f.f_location))
-              (esc f.f_message) (esc f.f_soundness_class))
+              (esc f.f_message)
+              (esc (Option.value ~default:"—" f.f_producer))
+              (* An unrecorded class renders as an explicit "unattributed", never as a blank a
+                 reader would take for "nothing special". *)
+              (esc (Option.value ~default:"unattributed" f.f_soundness_class)))
           s.s_findings ;
         p "</table>\n"))
     r.sections ;

@@ -82,9 +82,8 @@ let json_findings raw =
       |> List.concat_map (fun s ->
              match Json.member "findings" s with Some (`List l) -> l | _ -> [])
       |> List.map (fun f ->
-             ( Option.value ~default:"<no id>" (str "id" f),
-               str "location" f,
-               Option.value ~default:"<none>" (str "soundness_class" f) ))
+             (Option.value ~default:"<no id>" (str "id" f), str "location" f,
+               str "soundness_class" f))
 
 let register_round_trip () =
   Test.register ~__FILE__
@@ -108,14 +107,52 @@ let register_round_trip () =
              the id: the id is this report's own handle, while location and provenance are what a
              consumer of the SARIF actually reads, so asserting on them is what makes "identical
              provenance" mean something to a reader of that file. *)
+          (* Asserted on the FACT, not on the spelling. This looked for the literal
+             ["file:line"] and broke the moment the SARIF started splitting a path from a
+             [region.startLine] — which is the correct SARIF and the reason the finding now has
+             a physicalLocation at all. An assertion coupled to a rendering detail resists an
+             improvement to that rendering, and reports it as a regression. *)
           Batch.check b
-            ~msg:(Printf.sprintf "finding %s: its location reaches report.sarif" id)
+            ~msg:(Printf.sprintf "finding %s: its file and line both reach report.sarif" id)
             (match loc with
-             | Some l -> Arch_tezt.contains ~needle:l sarif
+             | Some l ->
+                 let file, line =
+                   match String.rindex_opt l ':' with
+                   | Some i ->
+                       ( String.sub l 0 i,
+                         Some (String.sub l (i + 1) (String.length l - i - 1)) )
+                   | None -> (l, None)
+                 in
+                 Arch_tezt.contains ~needle:file sarif
+                 && (match line with
+                    | Some n -> Arch_tezt.contains ~needle:("\"startLine\": " ^ n) sarif
+                    | None -> true)
              | None -> true) ;
+          (* And the physicalLocation exists at all, which it did not before: passing a bare
+             "file:line" where the library documents "name  (file)" made every finding degrade to
+             a logical-only location, so report.sarif carried ZERO physicalLocation and GitHub
+             could map none of them to a file. *)
           Batch.check b
-            ~msg:(Printf.sprintf "finding %s: its soundness_class reaches report.sarif" id)
-            (Arch_tezt.contains ~needle:sc sarif) ;
+            ~msg:(Printf.sprintf "finding %s: the SARIF carries a physicalLocation for it" id)
+            (Arch_tezt.contains ~needle:"physicalLocation" sarif) ;
+          (* A finding whose table records no producer_run has NO class, and that is a fact
+             rather than a gap: an earlier version took it from whichever run sorted first,
+             which labelled dead-code findings with an importer's class as soon as one existed.
+             So the assertion branches on presence — and the absent case is asserted too, because
+             "no class in the SARIF" must mean "none recorded" and not "we forgot to write it". *)
+          (match sc with
+           | Some c ->
+               Batch.check b
+                 ~msg:(Printf.sprintf "finding %s: its soundness_class %S reaches report.sarif" id c)
+                 (Arch_tezt.contains ~needle:c sarif)
+           | None ->
+               Batch.check b
+                 ~msg:
+                   (Printf.sprintf
+                      "finding %s has no recorded producer run, so it is rendered UNATTRIBUTED \
+                       rather than given the first run's class"
+                      id)
+                 (Arch_tezt.contains ~needle:"unattributed" html)) ;
           (* The HTML channel. Same two facts, and the id as well, since the HTML is the one a
              human reads and the handle is what they would quote back. *)
           Batch.check b
@@ -283,7 +320,39 @@ let register_imported_section () =
         (Arch_tezt.contains ~needle:"sound_with_top" html)) ;
   Lwt.return_unit
 
+(* CHECK-4. The spec asks that [report.sarif] validate against the published 2.1.0 schema, and
+   this file did not check it — [validate_sarif] exists in [sarif_out.ml] from the 2.1 slice and
+   nothing here referenced it. A requirement with a helper already written and no caller is the
+   cheapest kind of unmet obligation to miss: the machinery is present, so a reader assumes it
+   runs.
+
+   The validator never skips. An absent python3 or an absent [jsonschema] module fails the test
+   rather than passing it — because "the schema check did not run" and "the document is valid"
+   must not produce the same green. That property belongs to [validate_sarif] and is why this
+   reuses it rather than writing a second one. *)
+let register_sarif_validates () =
+  Test.register ~__FILE__
+    ~title:"arch-report: report.sarif validates against the published 2.1.0 schema (CHECK-4)"
+    ~tags:["report"; "sarif"; "schema"; "check4"]
+  @@ fun () ->
+  with_fixture ~name:"rep_valid" ~files:fixture_files @@ fun fixture ->
+  let db = Arch_tezt.temp_db "rep_valid" in
+  let code, output = Arch_tezt.index_raw_into ~db fixture in
+  if code <> 0 then Test.fail "index failed (exit %d):\n%s" code output ;
+  seed_findings db ;
+  let _, sarif, _ = run_report db in
+  Batch.run (fun b ->
+      (* PREMISE: a document with no results validates trivially, so the check would hold for a
+         writer that emitted nothing. The seeded findings are what make it mean something. *)
+      Batch.check b ~msg:"premise: the SARIF carries results to validate"
+        (Arch_tezt.contains ~needle:"\"results\"" sarif
+        && Arch_tezt.contains ~needle:"dead_code" sarif) ;
+      let valid, msg = Sarif_out.validate_sarif ~what:"arch-report" sarif in
+      Batch.check b ~msg:("report.sarif is schema-valid (validator said:\n" ^ msg ^ ")") valid) ;
+  Lwt.return_unit
+
 let register () =
   register_round_trip () ;
+  register_sarif_validates () ;
   register_not_analysed () ;
   register_imported_section ()

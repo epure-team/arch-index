@@ -168,6 +168,22 @@ let uri_encode s =
     s ;
   Buffer.contents buf
 
+(** Split a trailing [":<digits>"] off a file part, so a label written ["name  (file:12)"]
+    yields a [region.startLine]. Returns the file unchanged when there is no such suffix — the
+    labels [arch-rules] produces carry no line and must keep behaving exactly as before.
+
+    A line is only recognised when EVERY character after the last colon is a digit: a Windows
+    drive or a path that merely contains a colon is left alone rather than silently truncated. *)
+let split_line file =
+  match String.rindex_opt file ':' with
+  | None -> (file, None)
+  | Some i ->
+      let tail = String.sub file (i + 1) (String.length file - i - 1) in
+      let all_digits =
+        tail <> "" && String.for_all (function '0' .. '9' -> true | _ -> false) tail
+      in
+      if all_digits then (String.sub file 0 i, int_of_string_opt tail) else (file, None)
+
 let location_of_label label =
   let name, file = split_label label in
   `Assoc
@@ -176,8 +192,13 @@ let location_of_label label =
     match file with
     | None -> []
     | Some f ->
-        [ ("physicalLocation",
-           `Assoc [ ("artifactLocation", `Assoc [ ("uri", `String (uri_encode f)) ]) ]) ])
+        let path, line = split_line f in
+        [ ( "physicalLocation",
+            `Assoc
+              (("artifactLocation", `Assoc [ ("uri", `String (uri_encode path)) ])
+              :: (match line with
+                 | Some l -> [ ("region", `Assoc [ ("startLine", `Int l) ]) ]
+                 | None -> [])) ) ])
 
 (** A [codeFlow] with exactly one thread flow, one location per witness step — the shape a SARIF
     viewer (GitHub included) renders as a clickable path. [[]] when there is no witness, which
