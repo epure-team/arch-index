@@ -38,6 +38,13 @@
   channel, and on `option` "raising" means returning `None`. On proto_alpha `form:raise` sees 1
   origin on `exception` against 75 on `option` and 161 on `tzresult` — an unscoped rule quantified
   over 237 origins while appearing to police crashes.
+
+  channel, and on `option` "raising" means returning `None`. Measured — on proto_alpha (`lib_protocol`, indexed from `origin/main` `0982a42` with
+`--errors-profile=tezos`) `form:raise` from `file:**/main.ml` sees **1** origin on `exception`,
+**128** on `option` and **247** on `tzresult` — so the unscoped rule quantified over **376**
+origins while appearing to police crashes. An independent reviewer measured 1 / 75 / 161 on their
+own build of the same tree; both are internally consistent and the gap is corpus COVERAGE, not
+disagreement — which is why a number here names its build state and not just its tree.
   **What a PASS claims:** on a real index the cone almost always escapes through a ⊤ edge, so the
   rule normally reports `UNKNOWN` and says how many. It proves *no new site among those it can
   see*, never *no fatal origin exists*. `VIOLATION` fails regardless of ⊤, which is what makes it

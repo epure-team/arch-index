@@ -313,18 +313,71 @@ let register_refusals () =
       Batch.check b
         ~msg:("the refusal lists the channels this index DOES contain (output:\n" ^ out_ch ^ ")")
         (Arch_tezt.contains ~needle:"exception" out_ch) ;
+      (* THE ASSERTION THAT MAKES THE OTHER TWO MEAN ANYTHING, and without which
+         this check was itself vacuous.
+
+         `banana` and a needle of "exception" are satisfied by ANY hardcoded
+         list containing that word. Proved by mutation: replacing
+         [channels_in_index] with the literal
+         ["exception";"option";"result";"tzresult";"error_monad"] left the suite
+         at 170/0 — reinstalling the round-2 defect in full, since `channel:result`
+         against an index with no `result` channel then reports [ pass ] at
+         exit 0.
+
+         The discriminating probe is a channel that is PLAUSIBLE ELSEWHERE and
+         ABSENT HERE. This fixture's index carries exactly two channels,
+         `exception` and `option`; `result` and `tzresult` are real members of
+         the Tezos errors profile — both are named in this PR's own CHANGELOG —
+         and neither is in this database. A hardcoded list accepts them; reading
+         the index refuses them. That is the whole thesis of the fix, and it is
+         the only assertion that can see it. *)
+      List.iter
+        (fun ch ->
+          let code_p, out_p =
+            run ("ror_plausible_" ^ ch)
+              (Printf.sprintf
+                 "forbid origin from file:**/ro_main.ml form:division channel:%s allow-file:%s"
+                 ch ok_allow)
+          in
+          Batch.eq_int b
+            ~msg:
+              (Printf.sprintf
+                 "channel %S is a real channel elsewhere but ABSENT from this index, so it is \
+                  refused — a hardcoded vocabulary would accept it (output:\n%s)"
+                 ch out_p)
+            code_p 2)
+        [ "result"; "tzresult" ] ;
+      (* The premise the two lines above rest on, stated rather than assumed:
+         this index really has only the two channels. If a future fixture gained
+         a `result` origin, the probe above would start measuring nothing and
+         this assertion is what says so. *)
+      Batch.eq_string b
+        ~msg:"premise: the fixture index carries exactly the two channels the probe assumes"
+        (String.concat ","
+           (Db.with_db db (fun c ->
+                Db.rows c "SELECT DISTINCT channel FROM exn_origins ORDER BY 1")
+            |> List.map (function
+                 | [x] -> Db.to_string ~sql:"chan" x
+                 | _ -> Test.fail "chan: unexpected row shape")))
+        "exception,option" ;
       (* And the negation, which is what stops the check from being a blanket
          refusal: a channel that IS present is accepted even when it yields no
          origin in this cone. A typo and a genuinely clean channel must be
          distinguishable in BOTH directions. *)
-      let code_ok_ch, _ =
+      let code_ok_ch, out_ok_ch =
         run "ror_chan_ok"
           (Printf.sprintf
              "forbid origin from file:**/ro_main.ml form:division channel:option allow-file:%s"
              ok_allow)
       in
-      Batch.check b ~msg:"a channel present in the index is accepted, empty or not"
-        (code_ok_ch <> 2) ;
+      (* The negation, and it asserts the OUTPUT rather than the absence of an
+         abort: [code <> 2] is satisfied by an implementation with no channel
+         check whatsoever, so it could not distinguish "accepted correctly" from
+         "never looked". *)
+      Batch.check b
+        ~msg:("a channel present in the index is accepted, empty or not, and is the one \
+               policed (output:\n" ^ out_ok_ch ^ ")")
+        (code_ok_ch <> 2 && Arch_tezt.contains ~needle:"on channel 'option'" out_ok_ch) ;
       (* A MISSING allow-file must abort at PARSE time. A gate that starts
          evaluating and then finds it cannot read its own exemptions has already
          printed half a verdict. *)
@@ -462,10 +515,14 @@ let register_coverage_and_scope () =
       Batch.check b ~msg:"and how many allow-entries matched nothing"
         (Arch_tezt.contains ~needle:"matching nothing" out) ;
       (* THE CHANNEL SCOPE. exn_origins holds every error channel, not just
-         exceptions: on proto_alpha, `form:raise` finds 1 origin on the
-         `exception` channel and 128 on `option`, where "raising" means
-         RETURNING None. Without scoping, this gate reported an option-typed
-         return as a crash site. Default is `exception`. *)
+         exceptions. Measured on proto_alpha's lib_protocol, indexed from
+         origin/main 0982a42 with --errors-profile=tezos: `form:raise` from
+         file:**/main.ml finds 1 origin on `exception`, 128 on `option` (where
+         "raising" means RETURNING None) and 247 on `tzresult` — so the unscoped
+         gate quantified over 376. A reviewer measured 1/75/161 on their own
+         build of the same tree; both are internally consistent and the gap is
+         corpus COVERAGE, which is why the figure names its build state and not
+         just its tree. Default is `exception`. *)
       Batch.check b ~msg:"the coverage line names the channel it polices"
         (Arch_tezt.contains ~needle:"on channel 'exception'" out) ;
       let _, out_o =
