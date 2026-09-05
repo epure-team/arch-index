@@ -130,7 +130,14 @@ let register_refuses_an_unmarked_index () =
         (Db.with_db db (fun c ->
              Db.int c "SELECT count(*) FROM exn_origins WHERE form='division'")
         >= 1) ;
-      Batch.eq_int b ~msg:(Printf.sprintf "refuses with exit 3:\n%s" out) code 3 ;
+      (* CONTROL, NOT THIS TEST'S SUBJECT — and the distinction is load-bearing enough to
+         be in the title. Exit 3 here is guaranteed by [Arch_db.ok], which converts a raw
+         "no such column: exposed" into a Refused at any site with no guard of its own;
+         measured by deleting the guard below and re-running, where this line still passes
+         and only the two message assertions fail. So a reader who breaks [Arch_db.ok] and
+         finds this test green has NOT been told they are safe: nothing here pins the
+         refusal. What this test owns is the DIAGNOSIS. *)
+      Batch.eq_int b ~msg:(Printf.sprintf "control (owned by Arch_db.ok, not by this test): exit 3:\n%s" out) code 3 ;
       Batch.check b
         ~msg:(Printf.sprintf "…and says the cone would be empty for want of a root:\n%s" out)
         (contains ~needle:"no function in this index is marked exported" out) ;
@@ -141,6 +148,87 @@ let register_refuses_an_unmarked_index () =
         (not (contains ~needle:"coverage:" out))) ;
   Lwt.return_unit
 
+(* A FLAT-schema index spells the API-surface flag [functions.exported]; MAIN spells it
+   [functions.exposed], and this subcommand reads MAIN throughout — its root CTE joins
+   [functions.module_id], which FLAT has no column for. So [--roots exported] against FLAT
+   has three possible outcomes and only one of them is acceptable:
+
+     crash            loud, recoverable
+     EMPTY RESULT     silent, confident, about the wrong population — and for THIS question
+                      an empty list reads as "nothing escapes", the reassuring answer
+     refusal          what this test pins
+
+   The middle one is the same shape #87's [COALESCE(exported,0) -> 1] mutant was built to
+   catch: no crash and no empty set is precisely what makes it invisible. This test exists
+   because the convention "escaping-origins is MAIN-only" was in our heads and in no
+   executable form — the defect #87 itself was written to close, one file over. *)
+let register_refuses_a_flat_index () =
+  Test.register ~__FILE__
+    ~title:"escaping-origins --roots exported: a FLAT index is told WHY (the refusal itself is Arch_db.ok's)"
+    ~tags:["query"; "origins"; "exported"; "crash"; "flat"; "schema"]
+  @@ fun () ->
+  let db = Arch_tezt.temp_db "eoe_flat" in
+  (* The fixture must clear every EARLIER guard, or the refusal below is credited to the
+     wrong one: escaping-origins refuses in turn on a missing contract flag, a missing
+     exn_origins table, and an empty exn_origins, all before it looks at any column. A
+     fixture that tripped one of those would make this test pass without the schema guard
+     existing at all. *)
+  Db.with_db_rw db (fun c ->
+      Db.exec c
+        {|
+CREATE TABLE comment_db_meta(key TEXT, value TEXT);
+INSERT INTO comment_db_meta VALUES('callgraph_contract','v1');
+CREATE TABLE modules(path TEXT);
+INSERT INTO modules VALUES ('api.ml'),('vuln.ml');
+CREATE TABLE functions(name TEXT, file_path TEXT, exported INT, line_start INT, line_end INT);
+INSERT INTO functions VALUES ('flat_entry','api.ml',1,1,2),('flat_danger','vuln.ml',0,1,2);
+CREATE TABLE calls(caller_name TEXT, caller_file TEXT, callee_name TEXT, callee_file TEXT, call_site TEXT, kind TEXT);
+INSERT INTO calls VALUES ('flat_entry','api.ml','flat_danger','vuln.ml','api.ml:1','MUST');
+CREATE TABLE exn_origins(id INTEGER PRIMARY KEY AUTOINCREMENT, function_id INTEGER, scope_id INTEGER,
+  form TEXT NOT NULL, exn_path TEXT, escapes BOOLEAN NOT NULL DEFAULT 1,
+  line INTEGER NOT NULL, col INTEGER NOT NULL, channel TEXT NOT NULL DEFAULT 'exception');
+INSERT INTO exn_origins(function_id,form,escapes,line,col,channel) VALUES (2,'division',1,1,0,'exception');
+|}) ;
+  let code, out = query [ db; "escaping-origins"; "--roots"; "exported" ] in
+  Batch.run (fun b ->
+      (* PREMISE — the discriminator, asserted on the columns the guard actually branches on
+         rather than on the fixture text meant to produce them. *)
+      Batch.eq_int b ~msg:"premise: functions.exported exists (this really is FLAT's spelling)"
+        (Db.with_db db (fun c ->
+             Db.int c "SELECT count(*) FROM pragma_table_info('functions') WHERE name='exported'"))
+        1 ;
+      Batch.eq_int b ~msg:"premise: and functions.exposed does NOT, so the MAIN path is unreachable"
+        (Db.with_db db (fun c ->
+             Db.int c "SELECT count(*) FROM pragma_table_info('functions') WHERE name='exposed'"))
+        0 ;
+      (* PREMISE — a fatal origin IS recorded, so a later empty list could not be blamed on
+         an index with nothing in it. This is what makes the refusal load-bearing. *)
+      Batch.check b ~msg:"premise: a fatal origin is recorded, so an empty report would be a LIE"
+        (Db.with_db db (fun c -> Db.int c "SELECT count(*) FROM exn_origins") >= 1) ;
+      (* CONTROL, NOT THIS TEST'S SUBJECT — and the distinction is load-bearing enough to
+         be in the title. Exit 3 here is guaranteed by [Arch_db.ok], which converts a raw
+         "no such column: exposed" into a Refused at any site with no guard of its own;
+         measured by deleting the guard below and re-running, where this line still passes
+         and only the two message assertions fail. So a reader who breaks [Arch_db.ok] and
+         finds this test green has NOT been told they are safe: nothing here pins the
+         refusal. What this test owns is the DIAGNOSIS. *)
+      Batch.eq_int b ~msg:(Printf.sprintf "control (owned by Arch_db.ok, not by this test): exit 3:\n%s" out) code 3 ;
+      (* THE TWO ASSERTIONS THIS TEST ACTUALLY OWNS. The remedy is the point, not the refusal. Telling a FLAT user to "re-index
+         with a producer that records exports" names a defect they do not have: their
+         producer recorded exports, in FLAT's own column. *)
+      Batch.check b
+        ~msg:(Printf.sprintf "…names FLAT as the cause, not an out-of-date index:\n%s" out)
+        (contains ~needle:"FLAT-schema index" out) ;
+      Batch.check b
+        ~msg:(Printf.sprintf "…and says re-indexing will not help:\n%s" out)
+        (contains ~needle:"re-indexing will not help" out) ;
+      (* The outcome this whole test exists to exclude. *)
+      Batch.check b
+        ~msg:(Printf.sprintf "…and prints no coverage header, so nothing reads as empty:\n%s" out)
+        (not (contains ~needle:"coverage:" out))) ;
+  Lwt.return_unit
+
 let register () =
   register_roots_the_api_surface () ;
-  register_refuses_an_unmarked_index ()
+  register_refuses_an_unmarked_index () ;
+  register_refuses_a_flat_index ()
