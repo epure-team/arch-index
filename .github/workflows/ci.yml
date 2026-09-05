@@ -79,6 +79,17 @@ jobs:
       # infrastructure independent of any one other step's fate. Idempotent.
       - name: Install sqlite3
         run: sudo apt-get update -qq && sudo apt-get install -y -qq sqlite3
+      # tezt/tests/sarif_out.ml (roadmap 2.1) validates `arch-rules --format sarif` against the
+      # vendored SARIF 2.1.0 schema, which is JSON Schema draft-04. The opam package `jsonschema`
+      # (0.1.0) was tried and rejected: it silently accepted a SARIF document missing required
+      # top-level fields, so it cannot be relied on to make CHECK-4 fail when it should. python3's
+      # `jsonschema` correctly rejects the same document via its `Draft4Validator`, and that test
+      # shells out to it — declared here, explicitly, per this repo's own PR #69 lesson (a tool
+      # assumed present and declared nowhere is a bug waiting to happen). Pinned so a validator
+      # regression arrives as a deliberate version bump, not a mystery CI failure on an unrelated
+      # PR. ubuntu-latest ships python3 and pip already; this only adds the one library.
+      - name: Install SARIF schema validator (python3 jsonschema)
+        run: pip install --user 'jsonschema==4.26.0'
       - name: Build
         run: opam exec -- dune build --root .
       # `dune test` also runs the Tezt suite under tezt/, which covers the CMT

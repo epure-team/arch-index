@@ -31,7 +31,7 @@
 
 (test
  (name main)
- (libraries arch_tezt tezt arch_index sqlite3)
+ (libraries arch_tezt tezt arch_index arch_tools sqlite3)
  (deps
   %{exe:../../bin/arch_callgraph_ocaml/arch_callgraph_ocaml.exe}
   %{exe:../../bin/arch_query/arch_query.exe}

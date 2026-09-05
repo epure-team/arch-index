@@ -121,6 +121,7 @@ let () =
   Provenance.register () ;
   Coverage_matrix.register () ;
   Top_anchor_taxonomy.register () ;
+  Sarif_out.register () ;
   Recalibrate_self_test.register () ;
   Recalibrate_self_test.register_golden_sql_transcription () ;
   Tezt.Test.run ()
