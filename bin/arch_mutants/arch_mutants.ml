@@ -466,7 +466,7 @@ let () =
   let tests_sel = opt "--tests" "" in
   let test_keys, heuristic =
     if tests_sel <> "" then
-      match Arch_sel.parse ~allow:Arch_sel.[ File; Fn; Module ] tests_sel with
+      match Arch_sel.parse ~allow:Arch_sel.structural tests_sel with
       | Error e -> die ("arch-mutants: " ^ e)
       | Ok s ->
           let k = Arch_sel.select g s in

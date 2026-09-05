@@ -80,8 +80,15 @@ let kind_of = function
 (* Every call site names the selector kinds it can honestly answer. [ext:] appears in exactly
    one: the target of `forbid reach`. See Arch_sel.parse for why that is enforced by the type
    rather than by convention. *)
-let structural = Arch_sel.[ File; Fn; Module ]
+let structural = Arch_sel.structural
 let with_ext = Arch_sel.[ File; Fn; Module; Ext ]
+
+(* `forbid dep` never consults the graph: both operands are globbed straight against strings read
+   out of `module_deps` (see [Dep]'s evaluator below), so `file:`/`fn:` are just as unimplemented
+   there as `ext:` is — `Dep` throws the selector KIND away entirely and keeps only the pattern.
+   [Module] is the only kind whose reading of a `dep` operand matches what a rule author would
+   expect from the syntax; the other three would be silently reinterpreted as module-path globs. *)
+let dep_allow = Arch_sel.[ Module ]
 
 let sel ~allow tok line =
   match Arch_sel.parse ~allow tok with
@@ -136,10 +143,12 @@ let parse_rules path =
                         thing to forbid REACHING, and an illegitimate thing to start FROM. *)
                      Reach (sel ~allow:structural a !lineno, sel ~allow:with_ext c !lineno)
                  | [ "forbid"; "dep"; "from"; a; "to"; c ] ->
-                     (* `dep` never consults the graph: it globs against module_deps rows, so an
-                        `ext:` operand would be matched against module paths as though the kind
-                        did not exist. *)
-                     Dep (sel ~allow:structural a !lineno, sel ~allow:structural c !lineno)
+                     (* See [dep_allow]: `Module` only, on both sides. `ext:` on the TARGET side
+                        is not meaningless — `module_deps.target_module IS NULL` genuinely marks
+                        a dependency on an external module, there is just no code reading that
+                        column into a selectable population yet. It is UNIMPLEMENTED, not absurd;
+                        `file:`/`fn:` are refused for the unrelated reason above. *)
+                     Dep (sel ~allow:dep_allow a !lineno, sel ~allow:dep_allow c !lineno)
                  | [ "forbid"; "exported"; "outside"; a ] -> Exported (sel ~allow:structural a !lineno)
                  | [ "forbid"; "effect"; "from"; a; k ]
                    when String.length k > 5 && String.sub k 0 5 = "kind:" ->
@@ -223,24 +232,29 @@ let eval (t : Arch_db.t) (g : Arch_graph.t) ~sound r =
   let lbl k = Arch_graph.label g k in
   match r.body with
   | Reach (_, d) when fst d = Arch_sel.Ext && t.Arch_db.schema = Arch_db.Flat ->
-      (* The flat (NDJSON) schema cannot represent an external leaf: `arch-load` synthesises a
-         `functions` row for every callee it sees, so "a call towards something we do not hold" is
-         erased at write time — a stream declaring 2 functions and calling `Stdlib.+` writes 3.
-         An `ext:` selector here would match nothing, and "matched nothing" reads as a typo in the
-         pattern rather than as a property of the index.
+      (* This is a claim about `arch-load`, the one producer of this schema in this repo, not
+         about what the flat schema can hold: `calls.callee_name` with no matching `functions`
+         row is a perfectly representable external leaf, and a hand-built flat DB can carry one.
+         `arch-load` never writes that shape — it synthesises a `functions` row for every callee
+         it sees, so a stream declaring 2 functions and calling `Stdlib.+` writes 3 — so on every
+         index this tool's own pipeline produces, [ext_keys] is empty by construction, not empty
+         because nothing happened to match.
 
-         So this is NOT_COMPUTED, exactly as an `effect` rule is on an index carrying no effects
-         data: the question was never answered, and saying so is the only honest verdict. It fails
-         the gate by default. *)
+         So this is NOT_COMPUTED rather than a silent empty match: the population this selector
+         needs is known in advance to never exist on this producer's output, which is a property
+         of the index, not of the pattern. Once `arch-load` gives the callee a body, the same
+         reachability question is answerable as `fn:<name>` instead of `ext:<name>` — the callee
+         is no longer bodiless, just named. It fails the gate by default. *)
       { rule = r.name; kind = kind_of r.body; exact = false; verdict = "NOT_COMPUTED"; detail = [];
         detail_total = 0; sizes = None; witness = [];
         note =
           Some
             (Printf.sprintf
-               "%s cannot be answered on a flat (NDJSON) index: arch-load gives every callee a \
-                function row, so this index holds no external leaves to match — not zero of them, \
-                but no way to represent one. Re-index with the .cmt backend for this rule."
-               (Arch_sel.to_string d)) }
+               "%s cannot be answered on this flat (NDJSON) index: arch-load gives every callee a \
+                function row, so on this producer's output the population ext: needs is empty by \
+                construction — not zero external leaves found, but none ever written. The same \
+                callee is reachable as fn:%s instead."
+               (Arch_sel.to_string d) (snd d)) }
   | Reach (s, d) ->
       let src = Arch_sel.select g s and dst = Arch_sel.select g d in
       let v, hit = reach_verdict g ~sound src dst in
