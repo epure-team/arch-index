@@ -40,9 +40,16 @@ quint typecheck specs/mutation-campaign-313.qnt
 quint run specs/mutation-campaign-313.qnt --invariant=allInvariants --max-samples=20000 --max-steps=12
 ```
 
-`check-quint-red.sh` reports a `sed` that matches nothing as a **failure**, so a stale mutation
+`scripts/check-quint-red.sh` reports a `sed` that matches nothing as a **failure**, so a stale mutation
 cannot pass for a green check. If a new Quint invariant was added without its mutation, that is a
 defect: an invariant with no mutation has not been shown capable of failing.
+
+**Two of these four exist today and pass; the rest of the campaign's checks do not exist yet.**
+`scripts/check-quint-red.sh` and `scripts/check-binary-provenance.sh` are written and green.
+`scripts/check-status-provenance.sh`, `scripts/check-mutant-key.sh`,
+`scripts/check-mutaml-integration.sh` and `scripts/check-total-matches.sh` are named by the spec
+and are created by the slices that need them — if one is absent, that is the slice not being done,
+not a broken gate. Do not report an absent script as a failing check.
 
 ## Behaviours to validate
 
