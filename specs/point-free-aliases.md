@@ -344,6 +344,8 @@ and report the two counts beside the 248/87 source-syntax counts.
 
 ## Verification discipline (binding on every check)
 
+> **Superseded as of `6930d3c`+1 (2026-09-06).** The premise below — that a scoped build leaves the CLIs unbuilt — was removed by `tezt/lib/dune`'s `cli_paths.ml` rule: the executables are now `deps` of *compiling* `arch_tezt`. Measured after `dune clean`, a scoped `dune build --root . tezt/tests/main.exe` leaves 19 `.exe` under `_build/default/bin` and `_build/default/poc` (0 before). The demonstration recorded here was accurate for the tree it was run on. For how to scope a run now, see docs/mutation-testing.md, "Scoping a run to one test" — the recommended form is the test binary run directly, not `dune exec`.
+
 Run tests with `dune runtest`, **never** `dune exec tezt/tests/main.exe`. Verified
 in-session: with a mutation neutralising `value_arms`, `dune exec` reported SUCCESS
 with the producer hash **unchanged** (`b4c676af80fe`), while `runtest` reported

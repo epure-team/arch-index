@@ -30,16 +30,82 @@
     (run sh -c "v=$(dune --version 2>/dev/null); printf 'dune: %s\n' \"${v:-absent}\"")))))
 
 ; These `deps` attach to the `runtest` ALIAS, not to building `main.exe` as a file target --
-; that is dune's own semantics for a `(test)` stanza, not a bug here, and there is no
-; stanza-level fix (see docs/mutation-testing.md, "An all-green mutation run proves nothing on
-; its own"). Measured: after `dune clean`, `dune build tezt/tests/main.exe` builds `main.exe`
-; alone and leaves every exe below unbuilt, so it can silently run against a stale or absent
-; CLI. NEVER `dune exec tezt/tests/main.exe` or a scoped `dune build tezt/tests/main.exe` to
-; run this suite -- use `dune build --root=.` (full) then `dune runtest`, or `dune runtest`
-; alone.
+; that is dune's own semantics for a `(test)` stanza. Measured in this worktree (2026-09-06, base 6930d3c):
+; after `dune clean`, `dune build --root . tezt/tests/main.exe` produced `main.exe` and left
+; `_build/default/bin` with 0 `.exe` files.
+;
+; The executables are pulled in from elsewhere instead: `tezt/lib/dune`'s `cli_paths.ml` rule
+; lists them as its `deps`, and `arch_tezt.ml` references the generated module. Same
+; clean-then-scoped-build procedure after adding that rule: 19 of the 19 executables it lists
+; present. An earlier text here and in docs/mutation-testing.md said no stanza-level fix
+; existed; issue #77's second comment refuted it with the prototype that rule is built from.
+;
+; FOUND-VS-NAMED on that refuted premise. `git grep "dune exec tezt/tests/main.exe"` and
+; `git grep "does NOT rebuild a test"`, over ALL tracked files rather than just `.md`
+; (2026-09-06), find it at FIVE further live sites across four files. Each now carries a
+; superseding note. Four are fully superseded; the fifth only PARTLY, because for
+; `test/<t>.exe` nothing changed:
+;   specs/point-free-aliases.md:349
+;   specs/qualified-unit-resolution.md:314  (its `tezt/tests/dune:35-36` coordinate is stale)
+;   specs/qualified-unit-resolution.md:377
+;   specs/reexport-resolution.md:535
+;   scripts/mutate-check.sh:9-11  (the script's design rationale; PARTLY superseded only)
+; Their in-session demonstrations were accurate for the trees they ran on; the premise is what
+; changed. `briefs/` (8 lines, 7 files) was left alone as history. Line citations INTO the files
+; this commit edits were also left alone outside specs/: 10 in roster/, 5 in briefs/.
+;
+; INVOCATIONS.
+;
+; Whole suite: `dune build --root=.` (full) then `dune runtest`, or `dune runtest` alone. Both
+; work; at merge-base "`dune runtest` alone" was not true, and the rule above is what makes it so.
+;
+; One test, which is what a mutation run needs: run the binary directly. `dune runtest` cannot be
+; scoped -- `dune runtest -- --file X` is refused ("--file does not match any known test") and
+; `dune build @runtest -- --file X` is refused ("Don't know how to build --file").
+;   dune build --root=.
+;   ./_build/default/tezt/tests/main.exe --file <file>.ml --keep-going
+; Measured: `--file tezt/tests/helpers.ml --keep-going` gave `(1/2)`, `(2/2)`, exit 0. That form
+; reads no dune stanza, so nothing edited here can change it, and `--keep-going` is passed
+; explicitly because the `(action)` field below belongs to the `runtest` alias.
+;
+; The earlier text here read "NEVER `dune exec tezt/tests/main.exe` or a scoped
+; `dune build tezt/tests/main.exe`", on the ground that a scoped build leaves the CLIs unbuilt.
+; The rule above removes that ground: the executables are deps of COMPILING `arch_tezt`, so they
+; exist before `main.exe` is linked. Measured as a pair, neither half meaning much alone -- after
+; `dune clean`, a scoped `dune build --root . tezt/tests/main.exe` left 19 `.exe` under
+; `_build/default/bin` and `_build/default/poc` (0 at merge-base), and
+; `dune exec --root=. tezt/tests/main.exe -- --keep-going`
+; on that tree gave exit 0, `(227/227)`. Recorded as safe, not as recommended; the two forms above
+; are the recommended ones. One measured difference on that route:
+; `_build/default/tezt/tests/servers.version` is not produced by a scoped build and did not exist
+; during that run. No `.ml` under `tezt/` reads it; it is a `deps` entry of the stanza below.
+;
+; See docs/mutation-testing.md, "Scoping a run to one test", which carries the same three forms.
 (test
  (name main)
  (libraries arch_tezt tezt arch_index arch_tools sqlite3)
+ ; Without this field, `dune test` runs `main.exe` with no arguments and the suite stops at the
+ ; first failing case, so a red run reports a lower bound on the failure set. The played count
+ ; is carried in each line's `(N/M)` prefix; the runs recorded below print no summary line.
+ ;
+ ; A/B on one tree (2026-09-06, base 6930d3c), two deliberately failing cases registered ahead of
+ ; the other 227, the field being the only difference:
+ ;   field absent  -> `(1/229, 1 failed)`,   1 FAILURE line,  exit 1
+ ;   field present -> `(229/229, 2 failed)`, 2 FAILURE lines, exit 1
+ ;
+ ; Green run on this tree with the field: `(227/227)`, exit 0.
+ ;
+ ; The other side of the trade, three measurements: `main.exe --help` lists `--keep-going, -k`
+ ; and no `--no-keep-going`; `dune runtest -- <args>` is refused; `dune build @runtest -- <args>`
+ ; is refused. So for `dune runtest` this field is unconditional, and every red `dune runtest`
+ ; now plays all 227 cases rather than stopping at the first. Running the binary directly (see
+ ; INVOCATIONS above) reads no stanza and is the route that takes different flags.
+ ;
+ ; Positive control that the field is applied rather than silently ignored:
+ ; `dune runtest --display=verbose` printed
+ ; `Running[19]: (cd _build/default/tezt/tests && ./main.exe --keep-going)`.
+ (action
+  (run %{test} --keep-going))
  (deps
   %{exe:../../bin/arch_callgraph_ocaml/arch_callgraph_ocaml.exe}
   %{exe:../../bin/arch_query/arch_query.exe}
@@ -54,6 +120,8 @@
   %{exe:../../bin/arch_report/arch_report.exe}
   %{exe:../../bin/arch_sarif_load/arch_sarif_load.exe}
   %{exe:../../bin/arch_impact/arch_impact.exe}
+  %{exe:../../bin/arch_coverage_matrix/arch_coverage_matrix.exe}
+  %{exe:../../bin/arch_callgraph_rust_merge/arch_callgraph_rust_merge.exe}
   %{exe:../../bin/arch_effects_ocaml/arch_effects_ocaml.exe}
   %{exe:../../bin/arch_effects_load/main.exe}
   ../../effects-schema-migration.sql

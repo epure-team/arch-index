@@ -119,25 +119,159 @@ The md5 that matters is the CLI under test, e.g. `bin/arch_mutants/arch_mutants.
 CLI-only change never moves `tezt/tests/main.exe`'s own hash, so checking the wrong artefact's
 hash gives false confidence.
 
-**Build hazard, not (fully) fixable in the dune stanza.** `tezt/tests/dune`'s `(test main)`
-stanza lists every CLI under test in `(deps …)`, but on a `(test)` stanza `deps` attaches to the
-`runtest` **alias**, not to building `main.exe` as a file target — that is dune's own semantics,
-not a bug in this file, and there is no stanza-level way to make a scoped executable target pull
-in extra link-irrelevant deps. Confirmed: after `dune clean`, `dune build tezt/tests/main.exe`
-builds `main.exe` alone and leaves every CLI in `(deps …)` (e.g. `arch_mutants.exe`) unbuilt,
-while a full `dune build --root=.` builds them all (each directory's own `@default` alias
-builds its own executables, independent of the test stanza's deps). Consequences:
+**Build hazard, closed in `tezt/lib/dune`.** `tezt/tests/dune`'s `(test main)` stanza lists
+every CLI under test in `(deps …)`, but on a `(test)` stanza `deps` attaches to the `runtest`
+**alias**, not to building `main.exe` as a file target — that is dune's own semantics, not a bug
+in this file. Measured (2026-09-06, base 6930d3c, agent worktree, dune 3.24.2, `(lang dune 3.15)`): after
+`dune clean`, `dune build --root . tezt/tests/main.exe` produced `main.exe` and left
+`_build/default/bin` with **0** `.exe` files.
 
-- **Never** `dune exec tezt/tests/main.exe` or `dune build tezt/tests/main.exe` (or any other
-  scoped target under `tezt/tests/`) to run or check this suite — it silently tests whatever CLI
-  binaries happened to be built by something else, possibly stale ones.
-- Use `dune build --root=.` (full workspace build) followed by `dune runtest`, or `dune runtest`
-  alone (which builds its own deps correctly through the `runtest` alias).
-- A worktree whose CLIs were rebuilt piecemeal (e.g. only `main.exe` and `arch_rules.exe`) can
-  have other CLIs (e.g. `arch_mutants.exe`) still missing or stale from a previous build. See
-  `tezt/lib/arch_tezt.ml`'s `find_upwards`/`locate` for how a missing binary is now reported as a
-  build error naming the search, rather than resolved by silently walking up into a sibling
-  worktree or the parent checkout.
+An earlier version of this passage, and of the comment in `tezt/tests/dune`, said there was no
+stanza-level way to make a scoped executable target pull in extra link-irrelevant deps. Issue
+\#77's second comment refuted that with a prototype, reproduced here on the same procedure: a
+`(rule)`'s `deps` are ordinary build-graph edges with no alias/target split. `tezt/lib/dune`
+now carries such a rule — it generates `cli_paths.ml`, lists the 19 executables the suite drives
+as its `deps`, and `tezt/lib/arch_tezt.ml` references the generated module. Same
+clean-then-scoped-build procedure after that rule: **19** of 19 present.
+
+`git grep "dune exec tezt/tests/main.exe"` and `git grep "does NOT rebuild a test"` over all
+tracked files (2026-09-06) find the premise at **five** further live sites across four files,
+listed below; each now carries a superseding note pointing here. Four are fully superseded; the
+fifth only **partly**, because for `test/<t>.exe` nothing changed. The same search returns 8
+lines in 7 files under `briefs/`, left alone as history:
+
+| site | what it says |
+|---|---|
+| `specs/point-free-aliases.md:349` | "never `dune exec tezt/tests/main.exe`" |
+| `specs/qualified-unit-resolution.md:314` | same, and cites `tezt/tests/dune:35-36` — a coordinate this branch invalidates |
+| `specs/qualified-unit-resolution.md:377` | table row, marked superseded in place |
+| `specs/reexport-resolution.md:535` | "never `dune exec` … demonstrated" |
+| `scripts/mutate-check.sh:9-11` | states it as the script's *design rationale*, so it justifies the tool this document is about. **Partly** superseded only: for `test/<t>.exe` nothing changed |
+
+Their in-session demonstrations were accurate for the trees they ran on: the premise changed,
+not the observations. Separately, this branch's `+7` insertion in `arch_tezt.ml` invalidated
+line citations into it: `git grep -E "arch_tezt\.ml:[0-9]+|tezt/tests/dune:[0-9]+"` counts 10
+in `roster/` and 5 in `briefs/`, none of them corrected here — chasing them is unbounded and
+neither area is live guidance. The 4 in `specs/` are.
+
+### Scoping a run to one test
+
+A mutation run must execute the test under study. `dune runtest` cannot be scoped to one file:
+`dune runtest -- --file X` is refused (`"--file" does not match any known test`) and
+`dune build @runtest -- --file X` is refused (`Don't know how to build --file`). Scoping is done
+by running the test binary yourself. **This is the form to use.** `git grep "tezt/tests/main.exe"
+-- scripts/ lib/ bin/ checks/` returns one non-doc hit, and it runs it this way too:
+`checks/mid-caller-shadow-attribution.js:26` spawns `_build/default/tezt/tests/main.exe`
+directly, scoping with `--title`. That search finds callers of the *binary*: a script driving the
+suite through `dune runtest` need contain no `main.exe` at all and would not appear in it. That
+is how `scripts/mutate-check.sh` (below) was missed — it contained no `main.exe` before this
+commit added a note to it that mentions one, so the same command run today returns three hits in
+two files, two of them inside that note.
+
+```sh
+dune build --root=.                                          # full, not scoped
+./_build/default/tezt/tests/main.exe --file <file>.ml --keep-going
+```
+
+`scripts/mutate-check.sh` is the wrapper for a single mutant ("replaces a four-step manual
+ritual with one command", `:2`; `0 = KILLED / 1 = SURVIVED / 2 = setup refused`, `:60-62`). Its
+fifth argument is the test command, and **its default is the unscoped whole suite** —
+`DEFAULT_TEST_CMD="dune runtest --root <repo>"` at `:76`. Pass the scoped form explicitly to
+attribute the red to the test under study:
+
+```sh
+scripts/mutate-check.sh <file> <expected-count> <anchor> <replacement> \
+  './_build/default/tezt/tests/main.exe --file <f>.ml --keep-going'
+```
+
+Its green-baseline check (`:104-107`) rules out a *pre-existing* red. It does not attribute a new
+red to the right test: on the default command any red anywhere in the 227 returns KILLED.
+
+Measured: `--file tezt/tests/helpers.ml --keep-going` ran `(1/2)`, `(2/2)`, exit 0. This form
+reads no dune stanza, so no stanza edit can change it.
+
+`--keep-going` is explicit here. The `(action)` field that supplies it to `dune runtest` belongs
+to the `runtest` alias and is not consulted on this route.
+
+#### On `dune exec` and scoped builds
+
+`tezt/tests/dune` used to say "NEVER `dune exec tezt/tests/main.exe` or a scoped
+`dune build tezt/tests/main.exe`", and gave its reason: a scoped build leaves the CLIs unbuilt,
+so the suite runs against stale or absent binaries. **The `cli_paths.ml` rule removes that
+premise** — the executables are dependencies of *compiling* `arch_tezt`, so they exist before
+`main.exe` can be linked, let alone run.
+
+Measured as a pair, and neither number means much without the other: after `dune clean`, a
+scoped `dune build --root . tezt/tests/main.exe` left **19** `.exe` under
+`_build/default/bin` and `_build/default/poc` (0 at merge-base); `dune exec --root=. tezt/tests/main.exe -- --keep-going` on that tree then
+gave exit 0, `(227/227)`. The green is only evidence because the 19 says the binaries under it
+were freshly built — a green on a tree carrying stale binaries is the failure mode this whole
+section is about.
+
+The recommendation is unchanged all the same: use the direct-binary form above for a scoped run
+and `dune runtest` for the suite. `dune exec` is recorded as safe here rather than recommended,
+and one difference on it is measured: `_build/default/tezt/tests/servers.version` is not
+produced by a scoped build and did not exist during that run. No `.ml` under `tezt/` reads it;
+it is a `deps` entry of the stanza.
+
+`dune build --root=.` (full) followed by `dune runtest`, or `dune runtest` alone, remain the
+right invocations for a whole-suite run. "`dune runtest` alone" was itself false at merge-base;
+the rule above is what makes it true.
+
+### What the rule does not close
+
+- **It costs a compile, not a link.** `arch_tezt.ml` references the generated module, so
+  `cli_paths.ml` is needed to **compile** the library. Measured, clean tree each side:
+  `dune build --root . @tezt/lib/check` leaves **0** `.exe` under `_build/default/bin` and
+  `_build/default/poc` at merge-base and **19** with the rule. Opening
+  `tezt/lib` in an editor now builds every listed CLI. Accepted rather than fixed; moving the
+  rule to a leaf library that only `main.exe` depends on would keep the edges and drop the cost,
+  and is a direction, not a verified fix.
+- **The generated module holds a `bool`, not paths.** `%{exe:…}` does not produce absolute
+  paths — it expands to a **build-context-relative** one (`../../bin/arch_query/arch_query.exe`,
+  measured with a throwaway rule). Three forms were available:
+  - the relative expansion as-is. Byte-identical in every checkout of one commit, so it carries
+    no cache hazard, and it would resolve from the suite's cwd. **Not taken, and no measurement
+    argues against it**: it would bypass the runtime `locate` that reports a missing binary as a
+    build error naming the search (issue #77 / PR #78), and one resolution path was preferred to
+    two.
+  - absolute paths — the stronger form issue #77 names. Producing them takes a `realpath`/`pwd`
+    inside the action, and *that* is what makes the output checkout-dependent while the cache
+    key — action text plus dep digests — stays checkout-independent; this machine carries a
+    10 GB `~/.cache/dune`. Rejected on that reasoning, **not** on a measurement: no
+    cross-checkout cache hit was demonstrated, and the runs above had `DUNE_CACHE=disabled`.
+  - a constant. Chosen; the rule is wanted for its `deps`.
+- **Two binaries the suite reaches are still outside dune's graph**:
+  `callgraph-rust/target/release/arch-callgraph-rust` (cargo) and `bin/arch-callgraph-go` (go).
+  `tezt/tests/coverage_matrix.ml` fabricates a `#!/bin/sh\nexit 0` stub for the first when it is
+  absent, so that assertion exercises a real binary or a stub depending on prior build state.
+  `bin/arch_callgraph_rust_merge/arch_callgraph_rust_merge.exe` was in the same position and
+  **is** a dune target; it is now in the rule's `deps`, which is why the count above is 19.
+- **Five paths resolve out of the source tree, load-bearingly.** Measured absent from
+  `_build/default` after a clean scoped build and present in the source tree:
+  `effects-schema-migration.sql`, the `arch-impact` wrapper, `scripts/pcc/pcc-index`,
+  `callgraph-go/main.go`, `docs/curation-workflow.md`. `locate` finds them by climbing out of
+  `_build/default`, which holds no `dune-project`. `architecture-schema.sql` is present in
+  `_build/default` after the same build and does not rely on that climb.
+- A worktree whose CLIs were rebuilt piecemeal can still have other CLIs missing or stale — the
+  rule covers builds that go through `arch_tezt`, not every path by which a binary can end up on
+  disk. See `tezt/lib/arch_tezt.ml`'s `find_upwards`/`locate` for how a missing binary is
+  reported as a build error naming the search, rather than resolved by silently walking up into
+  a sibling worktree or the parent checkout.
+
+**A red run reports a lower bound unless the suite is told to keep going.** `tezt/tests/dune`'s
+`(test main)` stanza carries `(action (run %{test} --keep-going))`. A/B on one tree
+(2026-09-06, base 6930d3c) with two deliberately failing cases registered ahead of the other 227,
+that field being the only difference: without it the run reported `(1/229, 1 failed)` and one
+`FAILURE` line; with it, `(229/229, 2 failed)` and two. Both exited 1. The played count appears only in
+each line's `(N/M)` prefix.
+
+What this does and does not change for a mutation run. `scripts/mutate-check.sh` computes no
+survivor list: it runs `$TEST_CMD`, branches on `$?` (`:119-123` SURVIVED, `:125` KILLED), and a red
+suite exits 1 whether it truncated at case 1 or played all 229. So the flag moves no
+KILLED/SURVIVED bit that wrapper produces. What it changes is what a human reads from a red run,
+and any workflow that reads the failure set rather than the exit status: without it that set is a
+lower bound, with no count saying how many cases never played.
 
 ## Input formats
 

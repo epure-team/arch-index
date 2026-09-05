@@ -305,9 +305,15 @@ other**, never one scope against an expectation.
 Found by `arch-index-0e` while verifying the #62 fix, and it does not belong in the table above,
 because no scope comparison can detect it.
 
+> **Superseded as of `6930d3c`+1 (2026-09-06).** The premise below — that a scoped build leaves the CLIs unbuilt — was removed by `tezt/lib/dune`'s `cli_paths.ml` rule: the executables are now `deps` of *compiling* `arch_tezt`. Measured after `dune clean`, a scoped `dune build --root . tezt/tests/main.exe` leaves 19 `.exe` under `_build/default/bin` and `_build/default/poc` (0 before). The demonstration recorded here was accurate for the tree it was run on. For how to scope a run now, see docs/mutation-testing.md, "Scoping a run to one test" — the recommended form is the test binary run directly, not `dune exec`. Two coordinates cited below moved with it: `tezt/tests/dune:35-36` no longer
+> designates that `deps` entry — search for the `%{exe:...arch_callgraph_ocaml.exe}` line
+> instead, `:110` at the time of writing — and `arch_tezt.ml:51` became `:58`
+> (corrected in place) — a 7-line insertion at the top of that file. Citations into these files from `briefs/` and
+> `roster/` were left alone.
+
 `dune exec tezt/tests/main.exe` does **not** rebuild the producer. `tezt/tests/dune:35-36` declares
 `%{exe:../../bin/arch_callgraph_ocaml/arch_callgraph_ocaml.exe}` in `deps`, but `deps` applies to
-`dune runtest`, not to `dune exec` of an executable target — and `arch_tezt.ml:51` locates the
+`dune runtest`, not to `dune exec` of an executable target — and `arch_tezt.ml:58` locates the
 producer by PATH on disk, so it happily runs the previous build's stale `.exe`.
 
 **The boundary is exact, and both halves were measured** — the first attempt to check this tested
@@ -368,7 +374,7 @@ something other than the work you asked for**, so no comparison of numbers can e
 
 | where | what happened |
 |---|---|
-| `dune exec tezt/tests/main.exe` | `deps` applies to `runtest`, not `exec`, and the harness finds the producer by PATH — so a green test described the PREVIOUS build's binary |
+| `dune exec tezt/tests/main.exe` (superseded, see note above) | `deps` applies to `runtest`, not `exec`, and the harness finds the producer by PATH — so a green test described the PREVIOUS build's binary |
 | `scripts/recalibrate.sh` | `dune build … \| tail -20` exits with **tail's** status, always 0, so `\|\| { build failed; exit 2; }` was dead code and a tree that failed to compile was measured with the previous producer |
 | `scripts/callgraph-diff.sh` | `set -eu` but no `pipefail`, same `\| tail`; the baseline was safe (fresh worktree, no binary, `-x` guard fired) but the working tree normally HAS a stale `.exe`, so both binaries existed, both databases populated, and the tool emitted a plausible non-empty diff describing the wrong binary |
 
