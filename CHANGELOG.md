@@ -3,8 +3,15 @@
 ## [Unreleased]
 
 ### Fixed
-- **A column that arrived in a later schema refuses instead of crashing, and the refusal names
-  what is missing.** `Arch_db.ok` converts the driver's `no such column: …` / `no such table: …`
+- **A newer binary reading an older index refuses instead of crashing, and the refusal names what
+  is missing.** The class is *any* column or table a tool's query names that the index in front of
+  it does not have — not, as this work was first scoped, "the `channel` column that arrived at
+  schema 1.8". `channel` is where the class was found and five guarded sites is the right count
+  *for that column*; it is not the count for the class, and the class is not confined to 1.8. The
+  first unguarded column the backstop below actually catches is `functions.exposed`, read by
+  `Arch_graph.load` and far older than the error-channels work.
+
+  `Arch_db.ok` converts the driver's `no such column: …` / `no such table: …`
   into `Arch_db.Refused` rather than `Arch_db.Broken`, extracting the name and reporting "this
   index predates column *X*" — a backstop for every query site that has no `has_col` guard of its
   own, not a replacement for the two scoped guards (`raises`, `escaping-origins`) that give a
