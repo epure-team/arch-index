@@ -67,19 +67,24 @@ let strip_prefix p s = String.sub s (String.length p) (String.length s - String.
    [fn | file:line | form | exn]. [count] is the number of origins that identity
    is permitted to carry.
 
-   The count is not decoration. MEASURED on the full Octez exception population
-   (25 479 origins): the four fields alone collide 1 150 times, and adding the
-   column still leaves 139 — `Make_Module.mul` at poseidon_utils.ml:114 form
-   `index` appears EIGHT times (eight array accesses on one line), and
-   dal_common.ml:189:30 carries two `index` origins at the identical position,
-   which is what a nested `a.(i).(j)` produces. So no positional identity is
-   unique, and without a count an exemption is a SET exemption whose membership
-   can grow after review — a ninth access on an already-exempted line would be
-   covered silently by the decision taken about the first eight.
+   The count is not decoration. MEASURED (re-derived 2026-09-05) on a table that
+   carries no UNIQUE constraint over these columns, so the probe could have come
+   back empty and did not:
 
-   It would have looked correct on proto_alpha, where the 37 sites collide zero
-   times. A format that is a key on the demo corpus and not on the real one is
-   exactly the shape that survives review. *)
+     proto_alpha     30526 origins / 5305 distinct / 26901 rows (88%) colliding
+     octez-manager   18758        / 6367        / 15569      (83%)
+     whole src      265217        / 116684      / 169525     (64%)
+
+   Adding the COLUMN does not rescue it (26901 -> 26786 on proto_alpha): 139
+   origins can share a function, file, line, form and exception. So no positional
+   identity is unique, and without a count an exemption is a SET exemption whose
+   membership can grow after review — a 140th origin on an exempted line covered
+   silently by the decision taken about the first 139.
+
+   Filtered to what this gate polices the picture inverts: the 37 crash-surface
+   sites from proto_alpha's main.ml are ALL x1. A format that is a key on the
+   population you demo and not on the table it reads is exactly the shape that
+   survives review. *)
 type origin_allow = { al_path : string; al_entries : (string * int) list }
 
 (* The identity, built in ONE place so the allow-list reader and the site

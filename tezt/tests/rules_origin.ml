@@ -19,18 +19,32 @@
 
     {b The count is the load-bearing field, and it is here because a measurement
     said so.} The identity [fn | file:line | form | exn] was specified as a key
-    and then tested rather than assumed: on the full Octez population of 25 479
-    origins it collides {b 1 150 times}, and adding the column still leaves 139 —
-    [Make_Module.mul] at poseidon_utils.ml:114 form [index] appears eight times,
-    and a nested [a.(i).(j)] puts two [index] origins at one column. So no
-    positional identity is unique. Without a count, an allow-list entry is a SET
-    exemption whose membership can grow after review: a ninth array access on an
-    already-exempted line inherits the decision taken about the first eight.
+    and then tested rather than assumed. Re-derived 2026-09-05, on a table
+    carrying no [UNIQUE] constraint over these columns — so the probe could have
+    returned zero and did not:
 
-    It would have looked correct on proto_alpha, where the 37 sites collide
-    {b zero} times. A format that is a key on the demo corpus and not on the real
-    one is exactly the shape that survives review, which is why [register_count]
-    exists and why its fixture puts two origins on one line. *)
+    - proto_alpha: 30 526 origins, 5 305 distinct identities, {b 26 901 rows
+      (88 %) in colliding groups}, worst group 139.
+    - octez-manager: 18 758 / 6 367 / {b 15 569 (83 %)}, worst 118.
+    - whole [src]: 265 217 / 116 684 / {b 169 525 (64 %)}, worst 139.
+
+    Adding the column does {b not} rescue it — 26 901 → 26 786 on proto_alpha —
+    so 139 origins can share a function, file, line, form and exception. Without
+    a count an entry is a SET exemption whose membership can grow after review: a
+    140th origin on an exempted line inherits the decision taken about the first
+    139.
+
+    Filtered to the population this gate polices, the picture inverts: the 37
+    crash-surface sites reachable from proto_alpha's [main.ml] are {b all ×1}. A
+    format that is a key on the population you demo and not on the table it reads
+    is exactly the shape that survives review — which is why [register_count]
+    exists, and why its fixture deliberately puts two origins on one line.
+
+    (An earlier revision of this docstring cited "25 479 origins, 1 150
+    collisions"; those could not be reproduced on any available corpus, and 139
+    was the worst GROUP SIZE rather than a residual count. The correction runs
+    safe — the real rate is an order of magnitude worse — but a number nobody
+    re-derived is how a briefing becomes a fact.) *)
 
 open Arch_tezt
 

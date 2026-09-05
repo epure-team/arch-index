@@ -176,17 +176,39 @@ Full-line `#` comments only — a trailing-comment rule is what truncates a path
 and that failure is *by deletion*: the line still parses, just shorter. `×N` may also be written
 `xN`.
 
-**The count is load-bearing, and it is there because a measurement said so.** The four fields were
-specified as a site identity and then tested rather than assumed: on the full Octez population of
-25 479 origins they collide **1 150 times**, and adding the column still leaves 139 —
-`Make_Module.mul` at `poseidon_utils.ml:114` form `index` appears **eight** times (eight array
-accesses on one line), and a nested `a.(i).(j)` puts two `index` origins at one column. So no
-positional identity is unique. Without a count, an entry is a *set* exemption whose membership can
-grow after review: a ninth access on an already-exempted line would inherit the decision taken
-about the first eight.
+**The count is load-bearing, and a measurement put it there — a different one from the one this
+document first claimed.**
 
-It would have looked correct on proto_alpha, where the 37 sites collide **zero** times. A format
-that is a key on the demo corpus and not on the real one is exactly the shape that survives review.
+The four fields were specified as a site identity and then tested rather than assumed. Re-derived
+2026-09-05 with `GROUP BY … HAVING count(*) > 1`, on a table that carries **no** `UNIQUE`
+constraint over these columns — so the probe could legitimately have returned zero, and did not:
+
+| corpus | origins | distinct 4-field identities | rows in colliding groups | worst group |
+|---|---|---|---|---|
+| proto_alpha | 30 526 | 5 305 | **26 901 (88 %)** | 139 |
+| octez-manager | 18 758 | 6 367 | **15 569 (83 %)** | 118 |
+| whole `src` | 265 217 | 116 684 | **169 525 (64 %)** | 139 |
+
+**And the column does not rescue it**: 26 901 → 26 786 on proto_alpha, 169 525 → 166 584 on the
+whole tree. Under half a percent. A worst group of 139 origins shares one function, file, line,
+form and exception.
+
+So no positional identity is unique, by a wide margin. Without a count an entry is a *set*
+exemption whose membership can grow after review: a 140th origin on an already-exempted line would
+inherit the decision taken about the first 139.
+
+**An earlier revision of this document cited "25 479 origins, 1 150 collisions (4.5 %), 139
+remaining with the column".** Those figures could not be reproduced on any corpus available here,
+and the "139 remaining" appears to have fused two different quantities — 139 is the worst *group
+size*, not a residual count. The correction runs in the safe direction: the real collision rate is
+an order of magnitude worse and the column is nearly useless, so the decision to require a count is
+more strongly supported than the numbers that were used to argue for it. That does not make citing
+them acceptable, and they are corrected rather than quietly dropped.
+
+Filtering to the population this gate actually polices tells the other half of the story: the
+**37 crash-surface sites** reachable from proto_alpha's `main.ml` with forms `assert,division,index`
+are **all ×1**, verified with this tool. A format that is a key on the population you demo and not
+on the table it reads is exactly the shape that survives review.
 
 The count is brittle to reformatting — but so is the line number it accompanies, and both fail
 loud. Line-based identity is a known and accepted property of this class of gate.
