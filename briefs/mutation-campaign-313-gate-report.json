@@ -1,11 +1,11 @@
 {
   "mode": "full",
-  "no_go_round": 1,
+  "no_go_round": 2,
   "max_rounds": 5,
   "legacy_no_go_round": false,
-  "round": 1,
+  "round": 2,
   "legacy_round": false,
-  "current_round_strike": false,
+  "current_round_strike": true,
   "config": {
     "max_rounds": 5,
     "strikes": 2,
@@ -14,10 +14,235 @@
   "cause": null,
   "warnings": [],
   "violations": [],
-  "checks": [],
+  "checks": [
+    {
+      "check": "CHECK-21",
+      "fingerprint": "scripts/check-no-score.sh:57:correctness",
+      "fid": "scripts/check-no-score.sh:57:correctness#1944f498",
+      "inconclusive": true,
+      "reason": "check file not found in current tree: CHECK-21"
+    },
+    {
+      "check": "CHECK-22",
+      "fingerprint": "scripts/check-status-provenance.sh:80:correctness",
+      "fid": "scripts/check-status-provenance.sh:80:correctness#9a9d04c7",
+      "inconclusive": true,
+      "reason": "check file not found in current tree: CHECK-22"
+    },
+    {
+      "check": "CHECK-25",
+      "fingerprint": "bin/arch_mutants/arch_mutants.ml:1426:correctness",
+      "fid": "bin/arch_mutants/arch_mutants.ml:1426:correctness#0838769e",
+      "inconclusive": true,
+      "reason": "check file not found in current tree: CHECK-25"
+    },
+    {
+      "check": "CHECK-24",
+      "fingerprint": "scripts/mutaml-wrapper.sh:41:correctness",
+      "fid": "scripts/mutaml-wrapper.sh:41:correctness#ca786cfd",
+      "inconclusive": true,
+      "reason": "check file not found in current tree: CHECK-24"
+    },
+    {
+      "check": "CHECK-27",
+      "fingerprint": "bin/arch_mutants/arch_mutants.ml:1263:correctness",
+      "fid": "bin/arch_mutants/arch_mutants.ml:1263:correctness#db12bd63",
+      "inconclusive": true,
+      "reason": "check file not found in current tree: CHECK-27"
+    },
+    {
+      "check": "CHECK-26",
+      "fingerprint": "bin/arch_mutants/arch_mutants.ml:887:spec",
+      "fid": "bin/arch_mutants/arch_mutants.ml:887:spec#056adf21",
+      "inconclusive": true,
+      "reason": "check file not found in current tree: CHECK-26"
+    },
+    {
+      "check": "CHECK-SCOPE-GATE (scripts/check-scope-diff.sh)",
+      "fingerprint": ".claude/commands/roster-spec.md:0:scope",
+      "fid": null,
+      "inconclusive": true,
+      "reason": "check file not found in current tree: CHECK-SCOPE-GATE (scripts/check-scope-diff.sh)"
+    },
+    {
+      "check": "CHECK-SCOPE-GATE (scripts/check-scope-diff.sh)",
+      "fingerprint": ".claude/commands/roster-triage-critical.md:0:scope",
+      "fid": null,
+      "inconclusive": true,
+      "reason": "check file not found in current tree: CHECK-SCOPE-GATE (scripts/check-scope-diff.sh)"
+    },
+    {
+      "check": "CHECK-SCOPE-GATE (scripts/check-scope-diff.sh)",
+      "fingerprint": ".claude/commands/roster-research.md:0:scope",
+      "fid": null,
+      "inconclusive": true,
+      "reason": "check file not found in current tree: CHECK-SCOPE-GATE (scripts/check-scope-diff.sh)"
+    },
+    {
+      "check": "CHECK-SCOPE-GATE (scripts/check-scope-diff.sh)",
+      "fingerprint": ".claude/commands/roster-ship.md:0:scope",
+      "fid": null,
+      "inconclusive": true,
+      "reason": "check file not found in current tree: CHECK-SCOPE-GATE (scripts/check-scope-diff.sh)"
+    },
+    {
+      "check": "CHECK-SCOPE-GATE (scripts/check-scope-diff.sh)",
+      "fingerprint": ".claude/commands/roster-workflow-build.md:0:scope",
+      "fid": null,
+      "inconclusive": true,
+      "reason": "check file not found in current tree: CHECK-SCOPE-GATE (scripts/check-scope-diff.sh)"
+    },
+    {
+      "check": "CHECK-SCOPE-GATE (scripts/check-scope-diff.sh)",
+      "fingerprint": ".claude/commands/roster-upgrade.md:0:scope",
+      "fid": null,
+      "inconclusive": true,
+      "reason": "check file not found in current tree: CHECK-SCOPE-GATE (scripts/check-scope-diff.sh)"
+    },
+    {
+      "check": "CHECK-SCOPE-GATE (scripts/check-scope-diff.sh)",
+      "fingerprint": ".claude/commands/roster-qa.md:0:scope",
+      "fid": null,
+      "inconclusive": true,
+      "reason": "check file not found in current tree: CHECK-SCOPE-GATE (scripts/check-scope-diff.sh)"
+    },
+    {
+      "check": "CHECK-SCOPE-GATE (scripts/check-scope-diff.sh)",
+      "fingerprint": ".claude/commands/roster-skill-health.md:0:scope",
+      "fid": null,
+      "inconclusive": true,
+      "reason": "check file not found in current tree: CHECK-SCOPE-GATE (scripts/check-scope-diff.sh)"
+    },
+    {
+      "check": "CHECK-SCOPE-GATE (scripts/check-scope-diff.sh)",
+      "fingerprint": ".claude/commands/roster-spec-formal.md:0:scope",
+      "fid": null,
+      "inconclusive": true,
+      "reason": "check file not found in current tree: CHECK-SCOPE-GATE (scripts/check-scope-diff.sh)"
+    },
+    {
+      "check": "CHECK-SCOPE-GATE (scripts/check-scope-diff.sh)",
+      "fingerprint": ".claude/commands/roster-audit.md:0:scope",
+      "fid": null,
+      "inconclusive": true,
+      "reason": "check file not found in current tree: CHECK-SCOPE-GATE (scripts/check-scope-diff.sh)"
+    },
+    {
+      "check": "CHECK-SCOPE-GATE (scripts/check-scope-diff.sh)",
+      "fingerprint": ".claude/commands/roster-formal-verify.md:0:scope",
+      "fid": null,
+      "inconclusive": true,
+      "reason": "check file not found in current tree: CHECK-SCOPE-GATE (scripts/check-scope-diff.sh)"
+    },
+    {
+      "check": "CHECK-SCOPE-GATE (scripts/check-scope-diff.sh)",
+      "fingerprint": ".claude/commands/roster-implement.md:0:scope",
+      "fid": null,
+      "inconclusive": true,
+      "reason": "check file not found in current tree: CHECK-SCOPE-GATE (scripts/check-scope-diff.sh)"
+    },
+    {
+      "check": "CHECK-SCOPE-GATE (scripts/check-scope-diff.sh)",
+      "fingerprint": ".claude/commands/roster-question.md:0:scope",
+      "fid": null,
+      "inconclusive": true,
+      "reason": "check file not found in current tree: CHECK-SCOPE-GATE (scripts/check-scope-diff.sh)"
+    },
+    {
+      "check": "CHECK-SCOPE-GATE (scripts/check-scope-diff.sh)",
+      "fingerprint": "specs/itf/mutation-campaign-313.itf.json:0:scope",
+      "fid": null,
+      "inconclusive": true,
+      "reason": "check file not found in current tree: CHECK-SCOPE-GATE (scripts/check-scope-diff.sh)"
+    },
+    {
+      "check": "CHECK-SCOPE-GATE (scripts/check-scope-diff.sh)",
+      "fingerprint": ".claude/.roster-channel:0:scope",
+      "fid": null,
+      "inconclusive": true,
+      "reason": "check file not found in current tree: CHECK-SCOPE-GATE (scripts/check-scope-diff.sh)"
+    },
+    {
+      "check": "CHECK-SCOPE-GATE (scripts/check-scope-diff.sh)",
+      "fingerprint": ".claude/commands/roster-investigate.md:0:scope",
+      "fid": null,
+      "inconclusive": true,
+      "reason": "check file not found in current tree: CHECK-SCOPE-GATE (scripts/check-scope-diff.sh)"
+    },
+    {
+      "check": "CHECK-SCOPE-GATE (scripts/check-scope-diff.sh)",
+      "fingerprint": "scripts/check-binary-provenance.sh:0:scope",
+      "fid": null,
+      "inconclusive": true,
+      "reason": "check file not found in current tree: CHECK-SCOPE-GATE (scripts/check-scope-diff.sh)"
+    },
+    {
+      "check": "CHECK-SCOPE-GATE (scripts/check-scope-diff.sh)",
+      "fingerprint": ".claude/commands/roster-review.md:0:scope",
+      "fid": null,
+      "inconclusive": true,
+      "reason": "check file not found in current tree: CHECK-SCOPE-GATE (scripts/check-scope-diff.sh)"
+    },
+    {
+      "check": "CHECK-SCOPE-GATE (scripts/check-scope-diff.sh)",
+      "fingerprint": ".gitignore:0:scope",
+      "fid": null,
+      "inconclusive": true,
+      "reason": "check file not found in current tree: CHECK-SCOPE-GATE (scripts/check-scope-diff.sh)"
+    },
+    {
+      "check": "CHECK-SCOPE-GATE (scripts/check-scope-diff.sh)",
+      "fingerprint": ".claude/commands/roster-skill-evolve.md:0:scope",
+      "fid": null,
+      "inconclusive": true,
+      "reason": "check file not found in current tree: CHECK-SCOPE-GATE (scripts/check-scope-diff.sh)"
+    },
+    {
+      "check": "CHECK-SCOPE-GATE (scripts/check-scope-diff.sh)",
+      "fingerprint": ".claude/commands/roster-init.md:0:scope",
+      "fid": null,
+      "inconclusive": true,
+      "reason": "check file not found in current tree: CHECK-SCOPE-GATE (scripts/check-scope-diff.sh)"
+    },
+    {
+      "check": "CHECK-SCOPE-GATE (scripts/check-scope-diff.sh)",
+      "fingerprint": "scripts/check-quint-red.sh:0:scope",
+      "fid": null,
+      "inconclusive": true,
+      "reason": "check file not found in current tree: CHECK-SCOPE-GATE (scripts/check-scope-diff.sh)"
+    },
+    {
+      "check": "CHECK-SCOPE-GATE (scripts/check-scope-diff.sh)",
+      "fingerprint": ".claude/commands/roster-intake.md:0:scope",
+      "fid": null,
+      "inconclusive": true,
+      "reason": "check file not found in current tree: CHECK-SCOPE-GATE (scripts/check-scope-diff.sh)"
+    },
+    {
+      "check": "CHECK-SCOPE-GATE (scripts/check-scope-diff.sh)",
+      "fingerprint": ".claude/commands/roster-plan.md:0:scope",
+      "fid": null,
+      "inconclusive": true,
+      "reason": "check file not found in current tree: CHECK-SCOPE-GATE (scripts/check-scope-diff.sh)"
+    },
+    {
+      "check": "CHECK-SCOPE-GATE (scripts/check-scope-diff.sh)",
+      "fingerprint": ".claude/commands/roster-run.md:0:scope",
+      "fid": null,
+      "inconclusive": true,
+      "reason": "check file not found in current tree: CHECK-SCOPE-GATE (scripts/check-scope-diff.sh)"
+    },
+    {
+      "check": "CHECK-SCOPE-GATE (scripts/check-scope-diff.sh)",
+      "fingerprint": ".claude/commands/roster-doctor.md:0:scope",
+      "fid": null,
+      "inconclusive": true,
+      "reason": "check file not found in current tree: CHECK-SCOPE-GATE (scripts/check-scope-diff.sh)"
+    }
+  ],
   "trace": {
     "obligated": true,
-    "lines_seen": 7,
+    "lines_seen": 16,
     "schema_version": "1.0",
     "skipped": false
   }
