@@ -58,6 +58,7 @@ let () =
   Rules.register_summary_partitions () ;
   Rules.register_two_unknowns_are_two_states () ;
   Rules.register_vacuity_covers_every_rule_form () ;
+  Rules.register_ext_selector () ;
   Pcc.register_index () ;
   Pcc.register_index_infra_failure () ;
   Pcc.register_dossier () ;

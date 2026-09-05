@@ -824,3 +824,161 @@ let register_vacuity_covers_every_rule_form () =
         "1 violation" ;
       Batch.contains b ~msg:"that control is not counted vacuous" ~haystack:out_c "0 vacuous") ;
   Lwt.return_unit
+
+(** Roadmap 2.4 — the [ext:] selector.
+
+    An external leaf is a call whose callee has no indexed body: the edge is asserted to happen,
+    towards something the index does not hold. On Octez that is 58.3% of all MUST edges, and it is
+    where the raw-arithmetic gate has to aim — [Stdlib.+] is not a node, so no other selector kind
+    can name it.
+
+    Four things are asserted, and only the first is about the happy path:
+
+    - it selects, and the population is exactly the external leaves, not every callee;
+    - it is REFUSED in the five positions where it could only be inert, and refused loudly
+      (exit 2) — an inert selector yields a green verdict the rule never earned;
+    - it is NOT_COMPUTED on a flat index. [arch-load] synthesises a [functions] row for every
+      callee it sees, so that schema {b cannot represent an external leaf at all}: a stream
+      declaring two functions and calling [Stdlib.+] writes three. "Matched nothing" there would
+      read as a typo in the pattern rather than as a property of the index;
+    - and a cone reaching no external still PASSes, which is the control proving the VIOLATION
+      came from the edge rather than from a selector matching everything. *)
+
+(* Main schema, because it is the only one that can hold an external leaf: `calls.callee_id IS
+   NULL` is the representation, and it has no flat equivalent.
+
+   calc.add   --MUST--> (NULL) Stdlib.+          an asserted call we cannot follow
+   calc.add   --MUST--> (NULL) Stdlib.List.iter  a second, so a glob can over-match
+   calc.pure  --MUST--> calc.inner               a closed cone: no external reachable *)
+let ext_seed =
+  "INSERT INTO modules(path,lines) VALUES ('src/calc/add.ml',10),('src/calc/pure.ml',10),\
+   ('src/calc/inner.ml',10); \
+   INSERT INTO functions(id,module_id,name) VALUES (1,1,'calc.add'),(2,2,'calc.pure'),\
+   (3,3,'calc.inner'); \
+   INSERT INTO calls(caller_id,callee_id,callee_name,kind) VALUES \
+   (1,NULL,'Stdlib.+','MUST'),(1,NULL,'Stdlib.List.iter','MUST'),(2,3,'calc.inner','MUST'); \
+   INSERT OR REPLACE INTO comment_db_meta(key,value) VALUES ('callgraph_contract','v1');"
+
+let register_ext_selector () =
+  Test.register ~__FILE__ ~title:"rules: ext: names external leaves, and is refused where it would be inert"
+    ~tags:["rules"; "selectors"; "ext"]
+  @@ fun () ->
+  let db = Fixture.main ~name:"rules_ext" ~seed:ext_seed () in
+  Batch.run (fun b ->
+      (* The gate the roadmap names: forbid reaching raw arithmetic. *)
+      let rf =
+        rule_file "ext_arith"
+          "rule \"no raw arithmetic\"\n  forbid reach from file:src/calc/** to ext:Stdlib.+\n"
+      in
+      (match rules_json b ~what:"ext_arith" [db; rf; "--format"; "json"] with
+      | None -> ()
+      | Some j -> (
+          Batch.eq_string_opt b ~msg:"ext: must find the MUST edge into the external leaf"
+            (verdict_of j ~prefix:"no raw arithmetic") (Some "VIOLATION") ;
+          match Json.list ~what:"ext_arith" "results" j with
+          | Ok (`Assoc f :: _) ->
+              (* target_size = 1, not 2: `Stdlib.+` and not `Stdlib.List.iter`. A selector that
+                 swept up every external would produce the same VIOLATION, so the verdict alone
+                 does not discriminate — the size is what does. *)
+              Batch.eq_string_opt b
+                ~msg:"ext:Stdlib.+ must match that one leaf, not every external"
+                (match List.assoc_opt "target_size" f with
+                | Some (`Int n) -> Some (string_of_int n)
+                | _ -> None)
+                (Some "1")
+          | _ -> Batch.note b "the ext: rule produced no result row")) ;
+
+      (* A glob over externals, pinning that the population is the external leaves and NOT every
+         callee: `calc.inner` is a call target too, and it HAS a body, so it must not appear. *)
+      let gf =
+        rule_file "ext_glob"
+          "rule \"no stdlib at all\"\n  forbid reach from file:src/calc/** to ext:Stdlib.**\n"
+      in
+      (match rules_json b ~what:"ext_glob" [db; gf; "--format"; "json"] with
+      | None -> ()
+      | Some j -> (
+          match Json.list ~what:"ext_glob" "results" j with
+          | Ok (`Assoc f :: _) ->
+              Batch.eq_string_opt b
+                ~msg:"ext:Stdlib.** must match both externals and nothing with a body"
+                (match List.assoc_opt "target_size" f with
+                | Some (`Int n) -> Some (string_of_int n)
+                | _ -> None)
+                (Some "2")
+          | _ -> Batch.note b "the ext: glob rule produced no result row")) ;
+
+      (* The population itself, asserted where the GLOB cannot do the work.
+
+         `ext:Stdlib.**` above does not discriminate how ext_keys is defined: a definition that
+         wrongly included indexed nodes would still be filtered by that pattern, since a Main
+         node's key is `#<id>` and never begins with "Stdlib.". Verified by mutation — widening
+         ext_keys to every bwd key left every other assertion here green.
+
+         `ext:**` is the pattern that cannot be filtered. There are exactly two external leaves;
+         `calc.inner` is also a call target but HAS a body, so a third match means the definition
+         has stopped meaning "no indexed body". *)
+      let af =
+        rule_file "ext_any"
+          "rule \"nothing unresolved at all\"\n  forbid reach from file:src/calc/** to ext:**\n"
+      in
+      (match rules_json b ~what:"ext_any" [db; af; "--format"; "json"] with
+      | None -> ()
+      | Some j -> (
+          match Json.list ~what:"ext_any" "results" j with
+          | Ok (`Assoc f :: _) ->
+              Batch.eq_string_opt b
+                ~msg:"ext:** must match the external leaves ONLY — not indexed callees"
+                (match List.assoc_opt "target_size" f with
+                | Some (`Int n) -> Some (string_of_int n)
+                | _ -> None)
+                (Some "2")
+          | _ -> Batch.note b "the ext:** rule produced no result row")) ;
+
+      (* The control. `calc.pure` reaches only `calc.inner`, which has a body, so no external is
+         reachable and PASS is earned. Without this, a selector matching every key would produce
+         the VIOLATION above and look correct. *)
+      let pf =
+        rule_file "ext_pass"
+          "rule \"pure code touches no external\"\n  forbid reach from file:src/calc/pure.ml to ext:Stdlib.**\n"
+      in
+      (match rules_json b ~what:"ext_pass" [db; pf; "--format"; "json"] with
+      | None -> ()
+      | Some j ->
+          Batch.eq_string_opt b ~msg:"a cone that reaches no external must PASS, not VIOLATION"
+            (verdict_of j ~prefix:"pure code") (Some "PASS")) ;
+
+      (* A flat index cannot represent an external leaf, so the question is unanswerable rather
+         than answered "none" — NOT_COMPUTED, which fails the gate by default. This is the case a
+         prefix-based implementation got wrong by returning the empty set. *)
+      let flat_db = Fixture.flat ~name:"rules_ext_flat" layered_stream in
+      (match rules_json b ~what:"ext_flat" [flat_db; rf; "--format"; "json"] with
+      | None -> ()
+      | Some j ->
+          Batch.eq_string_opt b
+            ~msg:"ext: on a flat index is NOT_COMPUTED — the schema cannot hold an external leaf"
+            (verdict_of j ~prefix:"no raw arithmetic") (Some "NOT_COMPUTED")) ;
+      Batch.exit_code b
+        ~msg:"and that unanswerable rule fails the gate rather than passing quietly"
+        ~expected:1 (rules [flat_db; rf]) ;
+
+      (* The five refusals. Each position consults a population an external leaf can never join,
+         so the selector would match nothing and the rule would report a green verdict it never
+         earned. Exit 2 = the parse aborted, which is how this tool refuses. *)
+      List.iter
+        (fun (what, body) ->
+          let f = rule_file ("ext_bad_" ^ what) (Printf.sprintf "rule \"r\"\n  %s\n" body) in
+          Batch.exit_code b
+            ~msg:(Printf.sprintf "ext: as %s must abort, not silently match nothing" what)
+            ~expected:2 (rules [db; f]) ;
+          let _, out = rules [db; f] in
+          Batch.contains b
+            ~msg:(Printf.sprintf "the %s refusal must name the kind, not read as a typo" what)
+            ~haystack:out "not valid in this position")
+        [
+          ("reach-source", "forbid reach from ext:Stdlib.+ to file:src/**");
+          ("dep-source", "forbid dep from ext:Stdlib.+ to module:Web.**");
+          ("dep-target", "forbid dep from module:src/** to ext:Stdlib.+");
+          ("exported", "forbid exported outside ext:Stdlib.+");
+          ("effect", "forbid effect from ext:Stdlib.+ kind:GlobalVar");
+        ]) ;
+  Lwt.return_unit
