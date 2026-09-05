@@ -1,7 +1,7 @@
 {
   "task": "mutation-campaign-313",
   "mode": "full",
-  "current_phase": "intake",
+  "current_phase": "spec",
   "events": [
     {
       "phase": "question",
@@ -19,6 +19,12 @@
       "phase": "intake",
       "outcome": "VALIDATED",
       "at": "2026-09-05T12:50:00+02:00",
+      "by": "human-gate"
+    },
+    {
+      "phase": "spec",
+      "outcome": "VALIDATED",
+      "at": "2026-09-05T13:05:00+02:00",
       "by": "human-gate"
     }
   ]
