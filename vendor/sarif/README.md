@@ -10,9 +10,23 @@ which is the load-bearing constraint on `tezt/tests/sarif_out.ml`'s validator ch
 file's header comment).
 
 Vendored rather than fetched at test time: a test that needs the network is a test that fails for
-the wrong reason. The OASIS TC's SARIF specification artifacts (including this schema) are
-published for unrestricted reuse; redistributing this file alongside the tool that emits SARIF
-against it is exactly the intended use.
+the wrong reason.
+
+## Provenance and license
+
+This file is not released under an OSI open-source license; it is a specification artifact of the
+OASIS SARIF Technical Committee, governed by OASIS's own IPR framework rather than a project
+LICENSE file. Per the sarif-spec repository's own
+[LICENSE.md](https://github.com/oasis-tcs/sarif-spec/blob/master/LICENSE.md): content in that
+repository is produced under the OASIS TC Process and OASIS IPR Policy, with the SARIF TC
+operating in **RF on RAND Terms Mode** (royalty-free on reasonable-and-non-discriminatory terms)
+for TC-member contributions, and the **OASIS Feedback License** for non-member contributions. The
+repository states its content is "intended to be part of the SARIF TC's permanent record of
+activity, visible and freely available for all to use, subject to applicable OASIS policies" —
+which is the basis for vendoring this schema alongside a tool that emits SARIF against it, rather
+than a claim of public-domain or MIT-equivalent rights. Consult the linked LICENSE.md and OASIS's
+own IPR Policy/TC Process/Bylaws for the authoritative terms; this note is a citation, not a
+substitute for them.
 
 Do not hand-edit this file. To refresh it, re-fetch the URL above and update the date and byte
 count here.

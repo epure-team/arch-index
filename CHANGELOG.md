@@ -3,6 +3,23 @@
 ## [Unreleased]
 
 ### Added
+- **`arch-rules --format sarif` — SARIF 2.1.0 output (roadmap 2.1).** `arch-rules` can now emit
+  its verdicts as a SARIF 2.1.0 log, one `run` per invocation, for upload to GitHub code scanning
+  or any other SARIF consumer. `VIOLATION`/`POSSIBLE` map to `error`/`warning`; the five
+  "nothing proved" verdicts (`UNKNOWN`, `UNKNOWN_NO_CONTRACT`, `NOT_COMPUTED`, `NO_SOURCE`,
+  `NO_TARGET`) map to `note` but carry the exact verdict string in `results[].properties.verdict`
+  and the ADR-002 soundness-gap vocabulary (`unknown_top` vs. `no_contract` — two different
+  causes) in `properties.soundness`, so a machine consumer never has to re-parse `message.text`
+  to tell them apart. A `PASS` verdict is a proof, never a result. `run.properties` mirrors
+  `--format json`'s own `contract_ok`/`computed`/`proved`, plus the roadmap 1.3 coverage matrix
+  and the roadmap 1.4/1.5 ⊤-frontier count and witness `codeFlows`. `Arch_sarif.log` refuses two
+  runs sharing `(producer, category)`, since GitHub overwrites a run sharing tool+category with a
+  later one rather than merging — ahead of roadmap 2.2 (`arch-report`), the caller that will
+  actually emit several runs per log. New vendored schema at `vendor/sarif/` (OASIS SARIF
+  spec, draft-04, unrestricted reuse) and a new CI dependency (`pip install jsonschema`, probed
+  before use) to validate output against it.
+
+### Added
 - **`scripts/recalibrate.sh` — attribution-gated recalibration of the pinned constants**, and it
   is now wired to something. The two constants this repository pins (the self-index golden in
   `test/fixtures/self-index-stats.txt`, and `must_null_ceiling.ml`'s `clean_measured` ratchet)
