@@ -576,10 +576,18 @@ restated. What moves is *why* the rest are unbounded: `may_top_edge` falls while
 
 ### A rewritten edge is not guaranteed to resolve
 
-| corpus | rewrites | acquire a `callee_id` |
+| corpus (and build state) | rewrites | acquire a `callee_id` |
 |---|---|---|
-| whole `src` | 41 622 | 32 664 (**78.5 %**) |
-| dune-wrapped corpus (reviewer's) | 27 479 | 1 823 (**6.7 %**) |
+| whole `src`, 8 615 modules, this branch against `tezos/_build/default/src` as built 2026-09-05 | 41 622 | 32 664 (**78.5 %**) |
+| a reviewer's independent build, 4 992 `.cmt`, callers compiled but `saturation_repr.cmt` absent | 27 479 | 1 823 (**6.7 %**) |
+| a third independent measurement | — | **3.1 %** |
+
+**A factor of 25 between three measurements of the same quantity, and none of
+them is wrong.** The ratio measures which compilation units happened to be
+built: `module S = Saturation_repr` resolves only if that unit's `.cmt` is in
+the index. So a figure here names its corpus **and its build state** — a number
+that names only its tree can be neither reproduced nor contradicted, which is
+how this table came to hold two irreconcilable numbers in the first place.
 
 The ratio inverts with wrapping, because `module S = Saturation_repr` inside a
 wrapped library renders a name the resolver cannot bind. **An unresolved rewrite
