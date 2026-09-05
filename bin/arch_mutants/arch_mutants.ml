@@ -35,6 +35,13 @@ UNKNOWN under `top_bounded` and UNKNOWN_NO_CONTRACT under `no_contract`; and a
 catalogued mutant with NO run row in a campaign whose completion is NULL is
 PENDING, by that absence.
 
+That last derivation needs a universe of catalogued sites, and no table records
+which sites a campaign catalogued. So `verdict` REFUSES (exit 3) when it is asked
+for an OPEN campaign in a database holding MORE THAN ONE campaign: there the only
+derivable universe is the whole database's site table, which would report another
+campaign's sites as this one's PENDING. One campaign, or a completed campaign, is
+answered normally.
+
 `run` invokes the ENGINE once. The engine loops over its own mutants and calls
 scripts/mutaml-wrapper.sh once per mutant; the wrapper reads MUTAML_MUTANT, resolves it
 through the plan, and runs only the tests that reach the mutated function. The per-mutant
@@ -1908,6 +1915,62 @@ let verdict_cmd (t : Arch_db.t) ~only_campaign ~fmt ~maxlist =
       "arch-mutants: no campaign %sto report on. What would have made this non-zero: one \
        `arch-mutants run` that got as far as resolving its engine.\n"
       (match only_campaign with Some n -> Printf.sprintf "with id %d " n | None -> "") ;
+    exit 3) ;
+  (* FR-034 / AC-28. PENDING is the absence of a `mutant_runs` row over a universe of
+     mutant sites — and NO TABLE records which sites a given campaign catalogued. The only
+     universe this schema can derive is the global `mutants` table, which is the whole
+     site set of the database rather than of the campaign.
+
+     On a database holding one campaign those two sets coincide, so the derivation is
+     exactly right. On a database holding two campaigns over DIFFERENT mutant sets it is
+     not merely imprecise: an open campaign reports the OTHER campaign's sites as PENDING,
+     which is a wrong answer rather than a missing one, and it looks identical to a correct
+     one to every reader.
+
+     So the surface refuses — exit 3, refused rather than failed — instead of answering a
+     question it cannot answer correctly. The refusal is deliberately narrow, because a
+     refusal that fires where the answer IS derivable is its own kind of wrong:
+
+       * open campaign requested (completed_at IS NULL) — a completed campaign has no
+         pending set to get wrong, so it is answered normally;
+       * AND the database holds more than one campaign — with one campaign the global site
+         table IS that campaign's catalogue, so it is answered normally.
+
+     Closing this properly needs a `campaign_id` on a catalogue table, or a
+     `mutant_campaign_sites` join. That is a schema change and therefore a version bump,
+     which this slice does not own. Until then, refusing is the honest surface. *)
+  let campaigns_in_db = Arch_db.count t "SELECT count(*) FROM mutant_campaigns" in
+  let sites_in_db = Arch_db.count t "SELECT count(*) FROM mutants" in
+  let open_requested =
+    List.filter_map
+      (fun (id, completed, _, _, _) -> if completed = None then Some id else None)
+      campaigns
+  in
+  if campaigns_in_db > 1 && open_requested <> [] then (
+    Printf.eprintf
+      "arch-mutants: REFUSED (exit 3) — the verdict surface cannot scope the PENDING set \
+       of an open campaign in this database.\n\
+      \  asked_for=%s\n\
+      \  campaigns_in_db=%d\n\
+      \  open_campaigns_requested=%d (ids: %s)\n\
+      \  mutant_sites_in_db=%d\n\
+       PENDING is derived as \"a catalogued mutant site with no `mutant_runs` row in this \
+       campaign\", but no table records which sites a campaign catalogued, so the only \
+       derivable universe is the %d site(s) of the whole database. With %d campaigns over \
+       possibly different mutant sets, that universe would report another campaign's sites \
+       as this campaign's PENDING — a wrong answer, not a missing one. Refusing rather \
+       than answering it.\n\
+       What would make this answerable: a catalogue link in the schema (a `campaign_id` on \
+       a catalogue table, or a `mutant_campaign_sites` join), which is a schema change and \
+       a version bump. Meanwhile: `--campaign N` on a COMPLETED campaign is reported \
+       normally, since a completed campaign has no pending set.\n"
+      (match only_campaign with
+      | Some n -> Printf.sprintf "campaign %d" n
+      | None -> "every campaign (no --campaign given)")
+      campaigns_in_db
+      (List.length open_requested)
+      (String.concat "," (List.map string_of_int open_requested))
+      sites_in_db sites_in_db campaigns_in_db ;
     exit 3) ;
   let per_campaign =
     List.map

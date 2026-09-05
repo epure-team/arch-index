@@ -1415,3 +1415,184 @@ let register_diff_impact_refuses () =
                 0))
         [("a refusal (3) stays a refusal", refused); ("a failure (1) is not a refusal", failed)]) ;
   Lwt.return_unit
+
+(* ------------------------------------------------------------------------ *)
+(* FR-034 / AC-28 / CHECK-19 — the verdict surface REFUSES what it cannot    *)
+(* scope.                                                                   *)
+(*                                                                          *)
+(* PENDING is "a catalogued mutant site with no run row in this campaign",   *)
+(* and NO TABLE records which sites a campaign catalogued. The only universe *)
+(* the schema can derive is the global `mutants` site table — the database's *)
+(* sites, not the campaign's. One campaign: the two coincide, the answer is  *)
+(* right. Two campaigns over different sets: an open campaign reports the    *)
+(* OTHER campaign's sites as PENDING, which is a WRONG answer, not a missing *)
+(* one, and it is indistinguishable from a right one to its reader.          *)
+(*                                                                          *)
+(* So the fixture holds TWO campaigns over DISJOINT mutant sets, one of them *)
+(* open. A single-campaign fixture would pass whether or not the refusal     *)
+(* exists, because there the derivation is correct. And the single-campaign  *)
+(* control below is what stops an implementation that refuses               *)
+(* UNCONDITIONALLY from passing, together with the completed-campaign arm on *)
+(* the two-campaign database itself.                                        *)
+(* ------------------------------------------------------------------------ *)
+
+(* Seed campaigns directly. The driver cannot produce this shape: `run` always
+   catalogues the whole index, so two campaigns it writes share one site set and
+   the ambiguity never arises. The mis-scoping is a property of the SCHEMA, so
+   the fixture is written at the schema. *)
+let seed_campaign_scoping ~name ~two_campaigns =
+  let db = load_fixture name campaign_stream in
+  let migration = read_file (Filename.concat (repo_root ()) "mutants-schema-migration.sql") in
+  Db.with_db_rw db (fun conn ->
+      Db.exec conn migration ;
+      (* Set A — lib/x.ml, lib/y.ml — is campaign 1's. Set B — lib/z.ml, lib/d.ml —
+         exists only when there is a second campaign to own it, so the one-campaign
+         control really does have ONE site set and not a truncated two. *)
+      Db.exec conn
+        {|INSERT INTO mutants(file_path,line,col_start,col_end,replacement,source_hash,function_name)
+            VALUES ('lib/x.ml',15,3,9,'true','hash-x','covered'),
+                   ('lib/y.ml',35,1,4,'false','hash-y','shared');|} ;
+      if two_campaigns then
+        Db.exec conn
+          {|INSERT INTO mutants(file_path,line,col_start,col_end,replacement,source_hash,function_name)
+              VALUES ('lib/z.ml',55,2,6,'0','hash-z','orphan'),
+                     ('lib/d.ml',3,1,2,'()','hash-d','dyn');|} ;
+      let run campaign file status =
+        Db.exec conn
+          (Printf.sprintf
+             "INSERT INTO mutant_runs(campaign_id,mutant_id,engine_mutant_id,engine_status,\
+              selection_provenance,intended_tests,executed_tests) SELECT %d, id, 'e-'||id, \
+              '%s', 'proved_superset', 1, 1 FROM mutants WHERE file_path = '%s'"
+             campaign status file)
+      in
+      if two_campaigns then (
+        (* Campaign 1 — COMPLETED, and it attempted BOTH of its own sites, so it has
+           no pending set of its own to be wrong about. *)
+        Db.exec conn
+          {|INSERT INTO mutant_campaigns(engine,engine_path,test_runner_path,granularity,completed_at)
+              VALUES ('stub','/bin/true','/bin/true','case','2026-09-05T00:00:00Z');|} ;
+        run 1 "lib/x.ml" "KILLED" ;
+        run 1 "lib/y.ml" "SURVIVED" ;
+        (* Campaign 2 — OPEN, over the OTHER site set, one of its two sites attempted.
+           Its true pending set is lib/d.ml alone: ONE site. Derived from the global
+           site table it would be THREE — lib/d.ml plus both of campaign 1's. *)
+        Db.exec conn
+          {|INSERT INTO mutant_campaigns(engine,engine_path,test_runner_path,granularity,completed_at)
+              VALUES ('stub','/bin/true','/bin/true','case',NULL);|} ;
+        run 2 "lib/z.ml" "SURVIVED")
+      else (
+        (* The control: ONE campaign, OPEN, over the only site set there is. Here the
+           global site table IS the campaign's catalogue, so PENDING is derivable and
+           must be answered — lib/y.ml, one site. *)
+        Db.exec conn
+          {|INSERT INTO mutant_campaigns(engine,engine_path,test_runner_path,granularity,completed_at)
+              VALUES ('stub','/bin/true','/bin/true','case',NULL);|} ;
+        run 1 "lib/x.ml" "SURVIVED")) ;
+  db
+
+(* The refusal's own numbers, read back out of it. Asserting on a COUNT rather than
+   on a word: "REFUSED" and "campaign" survive a great many wrong refusals — a
+   refusal that fired for the wrong reason, or on the wrong campaign, still prints
+   both — while `campaigns_in_db=2` is produced by the query whose answer decides
+   the branch, so it cannot be right by accident. *)
+let tagged_int output key =
+  let key = key ^ "=" in
+  let n = String.length output and k = String.length key in
+  let rec find i =
+    if i + k > n then None
+    else if String.sub output i k = key then (
+      let j = ref (i + k) in
+      while !j < n && output.[!j] >= '0' && output.[!j] <= '9' do
+        incr j
+      done ;
+      if !j = i + k then None else Some (int_of_string (String.sub output (i + k) (!j - i - k))))
+    else find (i + 1)
+  in
+  find 0
+
+let register_verdict_refuses_unscopable_pending () =
+  Test.register ~__FILE__ ~title:"mutants: the verdict refuses an open campaign it cannot scope"
+    ~tags:["mutants"; "verdict"]
+  @@ fun () ->
+  let two = seed_campaign_scoping ~name:"mutants_fr034_two" ~two_campaigns:true in
+  let one = seed_campaign_scoping ~name:"mutants_fr034_one" ~two_campaigns:false in
+  Batch.run (fun b ->
+      (* The fixture is really the ambiguous one — asserted at the schema, not
+         assumed. Without this, every assertion below could hold on a database that
+         never had two campaigns or two site sets. *)
+      Db.with_db two (fun conn ->
+          Batch.eq_int b ~msg:"the fixture must hold two campaigns"
+            (Db.int conn "SELECT count(*) FROM mutant_campaigns") 2 ;
+          Batch.eq_int b ~msg:"exactly one of them must be open"
+            (Db.int conn "SELECT count(*) FROM mutant_campaigns WHERE completed_at IS NULL") 1 ;
+          (* Disjoint: no mutant site carries a run row from both campaigns. A shared
+             site would make the two campaigns' universes coincide and the ambiguity
+             disappear. *)
+          Batch.eq_int b ~msg:"the two campaigns must cover DIFFERENT mutant sets"
+            (Db.int conn
+               "SELECT count(*) FROM mutants m WHERE EXISTS (SELECT 1 FROM mutant_runs r \
+                WHERE r.mutant_id = m.id AND r.campaign_id = 1) AND EXISTS (SELECT 1 FROM \
+                mutant_runs r WHERE r.mutant_id = m.id AND r.campaign_id = 2)")
+            0) ;
+
+      (* 1. The open campaign in the two-campaign database: REFUSED, exit 3. *)
+      let code, output = mutants ["verdict"; two; "--campaign"; "2"; "--format"; "json"] in
+      Batch.exit_code b
+        ~msg:"an open campaign in a two-campaign database must be REFUSED (3), not answered"
+        ~expected:3 (code, output) ;
+      (* Refused, not failed: 2 is this tool's failure code and would be a different
+         fact about the same run. *)
+      Batch.check b ~msg:"the refusal must not be reported as a failure (2)" (code <> 2) ;
+      Batch.eq_int b ~msg:"the refusal must name how many campaigns the database holds"
+        (Option.value ~default:(-1) (tagged_int output "campaigns_in_db"))
+        2 ;
+      Batch.eq_int b ~msg:"the refusal must name how many requested campaigns are open"
+        (Option.value ~default:(-1) (tagged_int output "open_campaigns_requested"))
+        1 ;
+      (* The unscopable universe itself: four sites in the database, of which only
+         two are campaign 2's. This number is the whole reason for the refusal. *)
+      Batch.eq_int b ~msg:"the refusal must name the site universe it could not scope"
+        (Option.value ~default:(-1) (tagged_int output "mutant_sites_in_db"))
+        4 ;
+
+      (* And with no --campaign at all, the open campaign is still in the requested
+         set, so the same refusal applies. *)
+      let code_all, out_all = mutants ["verdict"; two; "--format"; "json"] in
+      Batch.exit_code b ~msg:"no --campaign still includes the open one, so it still refuses"
+        ~expected:3 (code_all, out_all) ;
+      Batch.eq_int b ~msg:"the unscoped request names the same open-campaign count"
+        (Option.value ~default:(-1) (tagged_int out_all "open_campaigns_requested"))
+        1 ;
+
+      (* 2. The COMPLETED campaign in the SAME database answers normally: it has no
+         pending set to get wrong. This is half of what stops an unconditional
+         refusal passing — it fires on a two-campaign database and must not. *)
+      (match verdict_of b ~what:"completed campaign" ~args:["--campaign"; "1"] two with
+      | None -> Batch.note b "the completed campaign in a two-campaign database must be answered"
+      | Some (c, fs) ->
+          Batch.eq_int b ~msg:"the completed campaign reports its own two runs and nothing else"
+            (List.length fs) 2 ;
+          verdict_count b ~what:"completed campaign" c "PENDING" 0 ;
+          verdict_count b ~what:"completed campaign" c "KILLED" 1 ;
+          verdict_count b ~what:"completed campaign" c "SURVIVED" 1 ;
+          (* Campaign 2's sites must not appear at all — neither as findings nor,
+             above, as PENDING. *)
+          Batch.eq_string_opt b ~msg:"the other campaign's site is absent, not PENDING"
+            (finding_field fs ~file:"lib/z.ml" "published_verdict")
+            None) ;
+
+      (* 3. The single-campaign control: an OPEN campaign, and it is answered. The
+         other half of the negative arm — a refusal that fired here would be refusing
+         a question it can answer correctly. *)
+      match verdict_of b ~what:"single campaign" ~args:["--campaign"; "1"] one with
+      | None -> Batch.note b "a single-campaign database with an open campaign must be answered"
+      | Some (c, fs) ->
+          Batch.eq_int b ~msg:"one attempted site and one pending, both reported"
+            (List.length fs) 2 ;
+          (* Hand-counted from the fixture: lib/x.ml ran, lib/y.ml did not. *)
+          verdict_count b ~what:"single campaign" c "PENDING" 1 ;
+          verdict_count b ~what:"single campaign" c "SURVIVED" 1 ;
+          Batch.eq_string_opt b ~msg:"the unattempted site is PENDING on a scopable database"
+            (finding_field fs ~file:"lib/y.ml" "published_verdict")
+            (Some "PENDING")) ;
+  Lwt.return_unit

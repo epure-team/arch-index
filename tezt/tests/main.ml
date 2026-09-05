@@ -43,6 +43,7 @@ let () =
   Mutants.register_verdict_killed_under_top () ;
   Mutants.register_verdict_pending () ;
   Mutants.register_verdict_provenance_follows_run () ;
+  Mutants.register_verdict_refuses_unscopable_pending () ;
   Mutants.register_diff_touched_function () ;
   Mutants.register_diff_test_helper () ;
   Mutants.register_diff_deleted_test () ;
