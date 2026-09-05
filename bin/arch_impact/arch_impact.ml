@@ -177,7 +177,7 @@ let findings (t : Arch_db.t) changed repo =
 
 (* ------------------------------------------------------------------ *)
 
-let () =
+let main () =
   let args = List.tl (Array.to_list Sys.argv) in
   let opt name default =
     let rec go = function a :: v :: _ when a = name -> v | _ :: tl -> go tl | [] -> default in
@@ -466,3 +466,16 @@ let () =
       Printf.eprintf "arch-impact: FAIL — %d finding(s) on lines this diff touches\n"
         (List.length decs) ;
       exit 1)
+
+(* The [open_ro] handler above covers exactly one call. A {!Arch_tools.Arch_db.Refused}
+   raised by a LATER query — the schema-drift backstop in [Arch_db.ok] fires at any of
+   them — escaped this binary altogether and was reported by OCaml's uncaught-exception
+   path: [Fatal error: exception Arch_tools.Arch_db.Refused("this index predates column
+   exposed …")], exit 2. The diagnostic was in there, wrapped in a crash.
+
+   Exit 2 is kept ON PURPOSE. This tool's exit 3 is reserved for the
+   [--fail-on-new-findings] refusal and docs/change-impact.md pins it in lockstep with
+   the JSON [verdict] field, on the stated ground that exit 2 is the code that prints no
+   stdout to parse. A schema-drift exit 3 with no JSON would be precisely the
+   misreading that section forbids. Only the rendering changes here. *)
+let () = try main () with Arch_db.Refused m | Arch_db.Broken m -> die ("arch-impact: " ^ m)

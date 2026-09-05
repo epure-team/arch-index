@@ -196,7 +196,64 @@ let register_ok_backstop_refuses_unguarded_missing_column () =
       | exception e -> Batch.note b "unexpected exception: %s" (Printexc.to_string e)) ;
   Lwt.return_unit
 
+(* The OTHER half of the backstop. {!Arch_tools.Arch_db.missing_schema_ref} has two
+   branches — [no such column:] and [no such table:] — and until this test the second one
+   had no coverage anywhere in tezt/ or test/ (a grep matched only its own doc comment).
+   The two branches are not the same code path: a table name is extracted with a different
+   prefix and, unlike a column, sqlite can qualify it with a SCHEMA rather than an alias,
+   so [bare_name] is doing something different on each. A whole table arriving in a later
+   schema is also the commoner drift than a column — [exn_scopes], [exn_origins] and
+   [decisions] each arrived that way — so this is not a hypothetical branch. *)
+let register_ok_backstop_refuses_unguarded_missing_table () =
+  Test.register ~__FILE__
+    ~title:"Arch_db.ok: converts a raw 'no such table' error into Refused, naming the table, for ANY site with no guard"
+    ~tags:["arch_db"; "schema"; "regression"; "backstop"]
+  @@ fun () ->
+  let db =
+    Fixture.raw ~name:"ok_backstop_missing_table"
+      "CREATE TABLE functions(id INTEGER PRIMARY KEY, module_id INTEGER, name TEXT); \
+       CREATE TABLE widgets(id INTEGER PRIMARY KEY, label TEXT);"
+  in
+  let t = Arch_tools.Arch_db.open_ro db in
+  (* Assert the fixture actually lacks the table, before the CLI/library call — the same
+     invariant guard the column tests above carry, for the same reason: a fixture that
+     happens to HAVE the table would make this test pass by never reaching the branch. *)
+  Db.with_db db (fun conn ->
+      let n =
+        Db.int conn "SELECT count(*) FROM sqlite_master WHERE name='gizmos'"
+      in
+      if n <> 0 then Test.fail "fixture invariant violated: table gizmos exists after all") ;
+  let query_gizmos () =
+    Arch_tools.Arch_db.rows t ~params_ty:Arch_tools.Arch_db.Ty.unit
+      ~shape:Arch_tools.Arch_db.Rows.s
+      ~to_cells:(fun a -> [Arch_tools.Arch_db.text_cell a])
+      "SELECT label FROM gizmos" ()
+  in
+  Batch.run (fun b ->
+      match query_gizmos () with
+      | (_ : Arch_tools.Arch_db.cell list list) ->
+          Batch.note b "expected Arch_db.Refused, got a successful result — the table exists?"
+      | exception Arch_tools.Arch_db.Refused msg ->
+          (* The EXTRACTED name, not a constant and not the raw driver text. The
+             not_contains below is what stops "no such table: gizmos" from satisfying
+             the contains above by accident — with the raw message suppressed, the only
+             way "gizmos" can appear is if the table branch really extracted it. *)
+          Batch.contains b ~msg:"the Refused message must name the missing TABLE"
+            ~haystack:msg "table gizmos" ;
+          Batch.contains b ~msg:"the Refused message must say the index predates it"
+            ~haystack:msg "predates" ;
+          Batch.not_contains b ~msg:"must not leak the raw sqlite error" ~haystack:msg
+            "no such table" ;
+          Batch.not_contains b ~msg:"must not carry a trailing sentence period from the \
+                                     driver's message onto the extracted name"
+            ~haystack:msg "gizmos."
+      | exception Arch_tools.Arch_db.Broken msg ->
+          Batch.note b "a missing table must raise Refused (exit 3), not Broken (exit 2): %s" msg
+      | exception e -> Batch.note b "unexpected exception: %s" (Printexc.to_string e)) ;
+  Lwt.return_unit
+
 let register () =
   register_raises_refuses_on_pre_channel_index () ;
   register_escaping_origins_refuses_on_pre_channel_index () ;
-  register_ok_backstop_refuses_unguarded_missing_column ()
+  register_ok_backstop_refuses_unguarded_missing_column () ;
+  register_ok_backstop_refuses_unguarded_missing_table ()

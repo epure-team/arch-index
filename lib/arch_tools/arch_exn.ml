@@ -213,11 +213,48 @@ let not_analysed_channel channel error_contract =
    populated [exn_origins] table that "this index has no exception sites", which they
    could (and did, per the review) disprove with a one-line COUNT query. Re-indexing is
    still the fix, but the reason is a stale schema, not an unanalysed index. *)
-let predates_channel_col channel =
-  Printf.sprintf
-    "REFUSED: this index's exn_scopes/exn_origins tables predate the error-channels \
-     column (channel, schema 1.8) — channel %s needs it. Re-index with a newer producer."
-    channel
+(* MEDIUM-3: name what is ACTUALLY missing, per table.
+
+   The previous message hardcoded "this index's exn_scopes/exn_origins tables predate …"
+   because its only input was a conjunction ([has_col exn_scopes] && [has_col
+   exn_origins]) — which loses two distinctions the reader needs:
+
+   - an index where only ONE of the two lacks the column was told both did, which sends
+     someone reading it to a pragma on the wrong table;
+   - [Arch_db.has_col] answers [false] for a table that does not EXIST at all (its
+     [pragma_table_info] returns no rows), so an absent [exn_scopes] was reported as a
+     column that "predates" schema 1.8. Those are different repairs — a re-index that
+     adds a column, versus a producer that never wrote the table — so they get different
+     words. *)
+type channel_gap = Absent_table | Absent_col
+
+let channel_col_gaps t =
+  List.filter_map
+    (fun tbl ->
+      if not (Arch_db.has_table t tbl) then Some (tbl, Absent_table)
+      else if Arch_db.has_col t tbl "channel" then None
+      else Some (tbl, Absent_col))
+    [ "exn_scopes"; "exn_origins" ]
+
+(* [gaps] is never empty at a call site: every caller reaches here only after
+   [channel_col_gaps] came back non-empty, which is the fact being reported. *)
+let predates_channel_col channel gaps =
+  let named kind = List.filter_map (fun (tbl, k) -> if k = kind then Some tbl else None) gaps in
+  let clause (kind, singular, plural) =
+    match named kind with
+    | [] -> None
+    | [ tbl ] -> Some (Printf.sprintf "%s %s" tbl singular)
+    | tbls -> Some (Printf.sprintf "%s %s" (String.concat " and " tbls) plural)
+  in
+  let clauses =
+    List.filter_map clause
+      [ ( Absent_col,
+          "predates the error-channels column (channel, schema 1.8)",
+          "predate the error-channels column (channel, schema 1.8)" );
+        (Absent_table, "is absent from this index altogether", "are absent from this index altogether") ]
+  in
+  Printf.sprintf "REFUSED: %s — channel %s cannot be answered. Re-index with a newer producer."
+    (String.concat "; " clauses) channel
 
 let load ?(channel = "exception") ?(use_builtin_summaries = false) (t : Arch_db.t) =
   (* FIX (review round 1, MEDIUM): {!not_analysed} is worded for the
@@ -236,10 +273,11 @@ let load ?(channel = "exception") ?(use_builtin_summaries = false) (t : Arch_db.
      [has_table] passes) but querying [channel] on either table raises a bare
      [Sqlite3.prepare: no such column]. Guard on the column itself, not on [exn_contract]
      or a schema-version number, either of which can be set (or absent) independently of
-     whether the column was ever added. *)
-  let has_channel_col () =
-    Arch_db.has_col t "exn_scopes" "channel" && Arch_db.has_col t "exn_origins" "channel"
-  in
+     whether the column was ever added. [gaps] is lazy so a load that never reaches the
+     guard does not pay for the pragmas. *)
+  let gaps = lazy (channel_col_gaps t) in
+  let has_channel_col () = Lazy.force gaps = [] in
+  let refuse_gaps () = Arch_db.refuse "%s" (predates_channel_col channel (Lazy.force gaps)) in
   let table_exists = Arch_db.has_table t "exn_origins" in
   if t.schema = Arch_db.Flat then refuse_not_analysed () ;
   if channel = "exception" then
@@ -247,7 +285,7 @@ let load ?(channel = "exception") ?(use_builtin_summaries = false) (t : Arch_db.
     | Some _ when table_exists && has_channel_col () -> ()
     (* the producer DID emit exception sites ([exn_contract] set, [exn_origins]
        present) — the only thing missing is the column an older schema predates. *)
-    | Some _ when table_exists -> Arch_db.refuse "%s" (predates_channel_col channel)
+    | Some _ when table_exists -> refuse_gaps ()
     | _ -> Arch_db.refuse "%s" not_analysed
   else (
     (* A value channel's contract lives in [error_contract]
@@ -257,7 +295,7 @@ let load ?(channel = "exception") ?(use_builtin_summaries = false) (t : Arch_db.
        [exn_origins] table at all is a genuine "never analysed"; the table present but
        missing [channel] is a stale schema, not an unanalysed index. *)
     if not table_exists then refuse_not_analysed ()
-    else if not (has_channel_col ()) then Arch_db.refuse "%s" (predates_channel_col channel) ;
+    else if not (has_channel_col ()) then refuse_gaps () ;
     let ec = Arch_db.meta t "error_contract" in
     let emitted =
       match ec with

@@ -1231,7 +1231,7 @@ let coverage_rows (t : Arch_db.t) : Arch_sarif.coverage_row list =
                    status = Arch_db.string_of_cell status; detail = opt detail }
            | _ -> None)
 
-let () =
+let main () =
   let args = List.tl (Array.to_list Sys.argv) in
   let opt name default =
     let rec go = function
@@ -1571,3 +1571,19 @@ let () =
          ( not_computed,
            "not-computed: the index carries no data for that rule form — it was never checked." ) ]) ;
   exit (if List.exists (fun r -> failing r.verdict) results then 1 else 0)
+
+(* The [open_ro] handler inside [main] covers exactly one call. A
+   {!Arch_tools.Arch_db.Refused} raised by a LATER query — the schema-drift backstop in
+   [Arch_db.ok] fires at any of them — escaped this binary altogether and was reported by
+   OCaml's uncaught-exception path: [Fatal error: exception
+   Arch_tools.Arch_db.Refused("this index predates column exposed …")], exit 2.
+
+   Exit 2 is kept ON PURPOSE, and this is the one place it would be tempting to change.
+   docs/fitness-functions.md states that arch-rules has no process-level sound-refusal
+   path (no exit 3), and this tool already aborts at 2 for its own refusal-shaped
+   conditions — the [Origin] evaluator's two vocabulary checks ([channel:] naming a
+   channel this index does not contain, [form:] naming a form its schema does not
+   declare) both reach [die], which exits 2. Giving ONE refusal cause exit 3 while its
+   siblings keep 2 would make this tool's exit vocabulary incoherent and break that
+   documented contract. Only the rendering changes here. *)
+let () = try main () with Arch_db.Refused m | Arch_db.Broken m -> die ("arch-rules: " ^ m)
