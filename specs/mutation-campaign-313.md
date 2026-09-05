@@ -201,6 +201,15 @@ node; a language with no profile yields `not_analysed` rather than an empty camp
 - **FR-025** [US-6]: A language with no profile MUST report `mutation: not_analysed` and MUST NOT produce an empty campaign result.
 - **FR-026** [US-6]: The mutation layer MUST NOT write to `analysis_coverage`, whose rows are owned and replaced wholesale by `arch-coverage-matrix`.
 
+#### Campaign self-certification (US-1, US-3)
+
+- **FR-027** [US-1]: A campaign in which **no** mutant was killed MUST be reported as
+  **self-uncertified**, and the report MUST state that such a campaign cannot distinguish a weak
+  test suite from a stale or wrong binary. A campaign containing at least one kill is
+  self-certifying, because a stale binary is unmutated and therefore cannot produce a kill.
+- **FR-028** [US-1]: The campaign record MUST carry the resolved engine binary path and the
+  resolved test-runner binary path, so a reader can tell which artefact actually ran.
+
 ## Acceptance Criteria
 
 - AC-1 [US-1 happy path]: a two-mutant plan drives exactly two stub invocations, each carrying the declared executed set → recorded argv matches.
@@ -223,6 +232,8 @@ node; a language with no profile yields `not_analysed` rather than an empty camp
 - AC-18 [US-6, FR-025]: a language with no profile yields `not_analysed`, not an empty result.
 - AC-19 [P4]: the `mutants` uniqueness key is probed on the largest available population, and the probe counts rejected rows because the key is a UNIQUE constraint.
 - AC-20 [C-22]: the mutaml integration is exercised against a real mutaml, or the report states it is unverified — never silently assumed.
+- AC-21 [FR-027]: an all-survivor campaign prints "self-uncertified" and names the reason → an entirely green campaign never reads as evidence.
+- AC-22 [FR-028]: the campaign record names the resolved engine and runner paths → a reader can tell which binary ran.
 
 ## Edge Cases
 
@@ -254,6 +265,7 @@ and the shared `Fixture.flat` / `Fixture.malformed_contract` helpers.
 - CHECK-7 [AC-10]: `scripts/check-status-provenance.sh` — greps every emitter in `bin/arch_mutants/` for a status field written without a provenance field in the same record; exit 1 on any hit. Self-contained, no test runner.
 - CHECK-8 [AC-20]: `scripts/check-mutaml-integration.sh` — runs a real `mutaml-runner` over a two-function fixture and asserts a per-mutant test command was honoured. Exit 3 (not 1) when mutaml is absent, so an unverified integration is distinguishable from a failed one.
 - CHECK-9 [AC-19]: `scripts/check-mutant-key.sh <db>` — inserts the campaign's mutants and reports the count of rows **rejected** by the UNIQUE constraint, not a `GROUP BY` count, because under a constraint a duplicate never becomes a group. Run against the largest population available and print the population size and the working tree with the count.
+- CHECK-14 [AC-21, AC-22]: `dune test --force` — `mutants: an all-survivor campaign is reported self-uncertified and names the binaries it resolved`. This closes the failure mode issue #77 describes: `tezt/lib/arch_tezt.ml`'s `locate` walks ancestors from the working directory, so an incomplete `_build` silently runs the parent checkout's binary. That binary is unmutated, every mutant survives, and the report becomes a page of false test gaps that looks exactly like a real finding.
 - CHECK-11 [P1, P2, P3]: `quint typecheck specs/mutation-campaign-313.qnt && quint run specs/mutation-campaign-313.qnt --invariant=allInvariants --max-samples=20000 --max-steps=12` → no violation. Executed on quint 0.32.0; the ITF trace is committed so `ocaml-quint-connect` can replay without quint present at CI time.
 - CHECK-12 [P2]: `yes | quint verify specs/mutation-campaign-313.qnt --temporal=p2ExecutedIsMonotoneOverTime --max-steps=6` → no violation. **Bounded and caveated**: Apalache documents its temporal support as experimental, and TLC rejects this shape because a `[]` over an action requires the `[A]_v` subscripted form, which Quint does not emit here.
 - CHECK-13 [P1, P2, P3]: `scripts/check-quint-red.sh` → 6/6 injected defects must turn a NAMED invariant red. A `sed` that matches nothing counts as a failure, so a stale mutation cannot pass as a green check. **This check is why the others are trustworthy**: on its first run it exposed one invariant as vacuous.
