@@ -58,6 +58,8 @@ let g n = n + 1
 module Sub = struct
   let g n = n + 1
 end
+
+let ( let* ) o f = match o with None -> None | Some v -> f v
 |});
     ("ma_stub.ml", {|exception Stub_boom
 let f n = if n > 0 then raise Stub_boom else n
@@ -99,6 +101,29 @@ let deep_call a b = D.Syntax.plus a b
    [edge_form='module_alias'] assertion below would pass just as well if the
    producer marked every qualified edge. *)
 let direct n = Ma_real.g n
+
+(* A SECOND caller reaching Ma_real.f through the alias, so that its fan-in is 2
+   rather than 1. Without it, every count in the report is 1 and a mutant that
+   swaps fan-in's [count(DISTINCT caller_id)] for [count(DISTINCT callee_id)] --
+   collapsing every count to 1 -- is indistinguishable from the correct code. *)
+let via_alias_2 n = S.f (n + 1)
+
+(* THE ARGUMENT-ESCAPE SITE (add_arg_escapes). A function-typed value spelled
+   through a module alias, passed as an ARGUMENT rather than applied. Nothing
+   exercised this emission site at all: replacing its alias_rewrite with
+   (fun _ -> None) left the suite green while removing 72 rewrites and 18
+   resolutions on octez. *)
+let arg_escape xs = List.map S.f xs
+
+(* THE add_path_call SITE. A bind operator is applied but is not a Texp_apply, so
+   it is emitted by add_path_call rather than by the head recogniser -- and the
+   N6 precedence line is reachable ONLY through this site, so under the mutant
+   that disables it the very line N6 pins becomes dead code with the suite still
+   green. *)
+let bind_via_alias x =
+  let open S in
+  let* v = x in
+  Some (v + 1)
 
 (* A POINT-FREE binding whose right-hand side is qualified THROUGH a module
    alias. Both facts are true of this site at once, and they demote for opposite
@@ -266,8 +291,36 @@ let register_rewrite () =
       Batch.eq_string b
         ~msg:"the rewritten head set is exactly the alias-rooted calls, each to its own target"
         (String.concat ", " (List.map (fun (a, c, _, _) -> a ^ "->" ^ c) rows))
-        "Internal_for_tests.nested_stub->Ma_stub.f, via_alias->Ma_other.f, \
-         via_alias->Ma_real.f" ;
+        "Internal_for_tests.nested_stub->Ma_stub.f, arg_escape->Ma_real.f, \
+         bind_via_alias->Ma_real.let*, via_alias->Ma_other.f, via_alias->Ma_real.f, \
+         via_alias_2->Ma_real.f" ;
+      (* THE THREE EMISSION SITES, each asserted to RESOLVE and not merely to be
+         marked. Two of them had no coverage at all: replacing alias_rewrite with
+         (fun _ -> None) at the argument-escape site removed 72 rewrites and 18
+         resolutions on octez with the suite still green, and at add_path_call
+         removed 48 and 6 — while making the N6 precedence line, which is
+         reachable ONLY through that site, dead code that N6 still "pins".
+
+         Marking is the cheap half. A site that emits a marked edge which never
+         acquires a callee_id has done nothing a consumer can use, so the
+         assertion is on the callee_id. *)
+      List.iter
+        (fun (caller, callee, site) ->
+          Batch.eq_int b
+            ~msg:(Printf.sprintf "%s (%s) rewrites AND resolves" caller site)
+            (Db.with_db db (fun c ->
+                 Db.int c
+                   (Printf.sprintf
+                      "SELECT count(*) FROM calls c JOIN functions cf ON c.caller_id=cf.id \
+                       WHERE cf.name='%s' AND c.callee_name='%s' \
+                       AND c.edge_form='module_alias' AND c.callee_id IS NOT NULL"
+                      caller callee)))
+            1)
+        [
+          ("via_alias", "Ma_real.f", "record_head, the applied-head site");
+          ("arg_escape", "Ma_real.f", "add_arg_escapes, a function passed as an argument");
+          ("bind_via_alias", "Ma_real.let*", "add_path_call, an applied non-Texp_apply");
+        ] ;
       (* An alias to a UNIT-LOCAL module ([module D = Deep]) is DECLINED, and
          the ⊤ stands. An earlier revision rewrote it and shipped the result as
          a "declared limitation" — an edge that rewrote but could not resolve,
@@ -286,12 +339,22 @@ let register_rewrite () =
         0 ;
       (* Every rewritten edge in THIS FIXTURE resolves — and the scope is the
          point, because an earlier revision stated it as a property of the
-         FEATURE. It is not. Measured on the whole Tezos `src` tree: 41 622
-         rewritten edges, 8 958 of them (21.5 %) with no callee_id; on a
-         dune-WRAPPED corpus the reviewer measured the inverse, only 6.7 %
-         acquiring one, because `module S = Saturation_repr` inside a wrapped
-         library renders a name the resolver cannot bind. A three-module
-         unwrapped fixture cannot produce that shape.
+         FEATURE. It is not, and the spread is enormous:
+
+           78.5 %  whole Tezos `src`, 8615 modules, indexed from this branch
+                   against /home/mathias/dev/tezos/tezos/_build/default/src as
+                   built on 2026-09-05 — 41 622 rewrites, 32 664 with a callee
+            6.7 %  a reviewer's independent build (4 992 .cmt), where the
+                   CALLERS compiled but saturation_repr.cmt did not
+            3.1 %  a third independent measurement
+
+         A factor of 25, and it is not a disagreement about code: it is corpus
+         COVERAGE. `module S = Saturation_repr` resolves only if that unit's
+         .cmt is in the index, so the ratio measures which units happened to be
+         built. That is why each figure here names its corpus AND its build
+         state — a number that names only its tree can be neither reproduced nor
+         contradicted. A three-module unwrapped fixture cannot produce the
+         unresolved shape at all.
 
          The doctrine survives the correction but had to be restated. An
          unresolved rewrite is NOT less honest than the ⊤ it replaced: the guard
@@ -544,27 +607,39 @@ let register_consumers_count_it () =
          `god-modules` both SURVIVED. Two of the three fixes this branch exists
          for could have been undone in silence. *)
       let fi = query ["fan-in"] in
-      Batch.check b
-        ~msg:("fan-in counts a call reached through a module alias (output:\n" ^ fi ^ ")")
-        (Arch_tezt.contains ~needle:"Ma_real.f" fi || Arch_tezt.contains ~needle:"\tf" fi
-       || Arch_tezt.contains ~needle:"f " fi) ;
       (* The numeric form of the same claim, derived by hand from the fixture
          BEFORE running: [Ma_real.f] is called by ma_a's [via_alias] (through
          the alias) and by nothing else. A "contains" assertion would pass on a
          report that listed the name with a count of zero. *)
-      let fan_in_of name =
-        Db.with_db db (fun c ->
-            Db.int c
-              (Printf.sprintf
-                 "SELECT count(*) FROM calls c JOIN functions f ON c.callee_id=f.id \
-                  JOIN modules m ON f.module_id=m.id \
-                  WHERE f.name='f' AND m.path LIKE '%%%s' \
-                  AND COALESCE(c.edge_form,'') <> 'value_alias'"
-                 name))
+      (* Parsed from fan-in's OWN OUTPUT. The previous version of this assertion
+         was a direct SQL query joining callee_id -> functions -> modules, while
+         fan-in groups by callee_NAME and does not resolve — two different
+         computations, so the "numeric form" this comment once claimed never
+         observed the CLI at all. Proved: mutating fan-in's
+         count(DISTINCT caller_id) to count(DISTINCT callee_id), which collapses
+         every printed count to 1, left the suite green.
+
+         Derived by hand from the fixture BEFORE running: Ma_real.f is reached
+         through the alias by via_alias, via_alias_2 and arg_escape — THREE
+         distinct callers. point_free_via_alias is NOT among them, because it is
+         value_alias, which is the N6 consequence asserted from the consumer's
+         side. A count above 1 is what distinguishes the caller-counting query
+         from the collapsed one; every count being 1 would make them
+         indistinguishable, which is why the extra callers exist. *)
+      let fan_in_of callee =
+        String.split_on_char '\n' fi
+        |> List.filter_map (fun l ->
+               match String.split_on_char '|' (String.trim l) with
+               | [ n; c ] when String.trim n = callee -> int_of_string_opt (String.trim c)
+               | _ -> None)
+        |> function
+        | [ n ] -> n
+        | _ -> -1
       in
       Batch.eq_int b
-        ~msg:"the alias-mediated edge into Ma_real.f is counted, not excluded"
-        (fan_in_of "ma_real.ml") 1 ;
+        ~msg:("fan-in counts all THREE alias-mediated callers of Ma_real.f, and not the \
+               point-free binding (output:\n" ^ fi ^ ")")
+        (fan_in_of "Ma_real.f") 3 ;
       (* god-modules states in its own preamble that it REUSES fan-in's measure;
          if only one of the two counts alias-mediated edges that claim is false.
          Nothing invoked it on this fixture before. *)
@@ -594,9 +669,9 @@ let register_consumers_count_it () =
         | _ -> 0
       in
       Batch.eq_int b
-        ~msg:("god-modules counts BOTH of ma_real's in-edges, the alias-mediated one \
-               included (output:\n" ^ gm ^ ")")
-        (gm_of "ma_real.ml") 2 ;
+        ~msg:("god-modules counts every in-edge of ma_real, the alias-mediated ones \
+               included: 3 into f, 1 into g, 1 into let* (output:\n" ^ gm ^ ")")
+        (gm_of "ma_real.ml") 5 ;
       Batch.eq_int b
         ~msg:"a module whose ONLY in-edge is alias-mediated still appears (ma_stub)"
         (gm_of "ma_stub.ml") 1 ;
