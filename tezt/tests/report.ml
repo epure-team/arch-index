@@ -144,13 +144,18 @@ let register_not_analysed () =
          them apart is what FR-003 asks for. *)
       let status () =
         let json, _, html = run_report db in
+        (* Scoped to the section under test rather than concatenating every status. The first
+           version joined them all, so adding a SECOND analysis broke three assertions that had
+           nothing to do with it — an assertion coupled to the section LIST rather than to the
+           section it is about. *)
         let s =
           match Json.strict_object ~what:"report.json" json with
           | Error e -> Test.fail "%s" e
           | Ok j ->
               (match Json.member "sections" j with Some (`List l) -> l | _ -> [])
-              |> List.filter_map (str "status")
-              |> String.concat ","
+              |> List.find_opt (fun sec -> str "analysis" sec = Some "dead_code")
+              |> (function Some sec -> Option.value ~default:"<no status>" (str "status" sec)
+                         | None -> "<no dead_code section>")
         in
         (s, html)
       in
@@ -178,6 +183,107 @@ let register_not_analysed () =
         (Arch_tezt.contains ~needle:"dead_code" html_absent)) ;
   Lwt.return_unit
 
+(* THE INTERACTION, and it was found by running one slice's binary against the other's database
+   rather than by reviewing either. Roadmap 2.3 imports foreign findings; this report renders
+   findings. Neither is wrong alone, and together they produced a FALSE CLEAN: the header listed
+   `semgrep` and `gosec` as heuristic producers while every section showed nothing, so a reader
+   saw two third-party tools having run and a clean report.
+
+   An analysis present in the provenance and absent from the results is not a missing feature. It
+   is the exact reading FR-024 exists to prevent, reached through composition. *)
+let register_imported_section () =
+  Test.register ~__FILE__
+    ~title:"arch-report: imported heuristic findings are rendered, with their own provenance"
+    ~tags:["report"; "imported"; "heuristic"; "adr002"]
+  @@ fun () ->
+  with_fixture ~name:"rep_imp" ~files:fixture_files @@ fun fixture ->
+  let db = Arch_tezt.temp_db "rep_imp" in
+  let code, output = Arch_tezt.index_raw_into ~db fixture in
+  if code <> 0 then Test.fail "index failed (exit %d):\n%s" code output ;
+  Batch.run (fun b ->
+      (* An index without the table is the shape `main` has today, and the honest answer is
+         `not_analysed` — the analysis is not available here, which is a different statement from
+         "it found nothing". *)
+      let sections () =
+        let json, _, html = run_report db in
+        let st =
+          match Json.strict_object ~what:"report.json" json with
+          | Error e -> Test.fail "%s" e
+          | Ok j ->
+              (match Json.member "sections" j with Some (`List l) -> l | _ -> [])
+              |> List.filter_map (fun s ->
+                     match (str "analysis" s, str "status" s) with
+                     | Some a, Some st -> Some (a ^ "=" ^ st)
+                     | _ -> None)
+              |> String.concat ","
+        in
+        (st, html)
+      in
+      let before, _ = sections () in
+      Batch.check b
+        ~msg:("without the table, the section is present and not_analysed (got " ^ before ^ ")")
+        (Arch_tezt.contains ~needle:"imported=not_analysed" before) ;
+      (* Now the 2.3 shape: the table, a heuristic producer run, and a finding attributed to it.
+         Created here rather than by invoking the adapter, so this test does not depend on a
+         binary from another branch — it depends on the SHAPE that branch writes. *)
+      Db.with_db_rw db (fun c ->
+          List.iter
+            (fun sql -> ignore (Db.exec_result c sql))
+            [
+              "CREATE TABLE IF NOT EXISTS imported_findings (id INTEGER PRIMARY KEY \
+               AUTOINCREMENT, producer_run_id INTEGER NOT NULL, rule_id TEXT NOT NULL, level \
+               TEXT NOT NULL, message TEXT NOT NULL, uri TEXT, start_line INTEGER, module_id \
+               INTEGER, resolution TEXT NOT NULL, created_at TEXT DEFAULT CURRENT_TIMESTAMP)";
+              "INSERT INTO producer_runs (producer, producer_version, soundness_class) VALUES \
+               ('semgrep', '1.2.3', 'heuristic')";
+              "INSERT INTO imported_findings (producer_run_id, rule_id, level, message, uri, \
+               start_line, resolution) SELECT id, 'ocaml.taint', 'error', 'tainted input', \
+               'rep_a.ml', 2, 'resolved' FROM producer_runs WHERE producer='semgrep'";
+            ]) ;
+      let after, html = sections () in
+      Batch.check b
+        ~msg:("with the table and a row, the section is covered (got " ^ after ^ ")")
+        (Arch_tezt.contains ~needle:"imported=covered" after) ;
+      (* THE PROVENANCE, and it is the point rather than a detail. A heuristic finding rendered
+         with the SOUND producer's class would be an ADR-002 mislabel — the class must come from
+         the finding's OWN run, since several producers coexist in one database. *)
+      (* ASSERTED ON THE FINDING'S OWN FIELDS, not on the presence of a word in the page. The
+         first version used [contains "heuristic"] and [contains "sound_with_top"], and BOTH
+         strings are already in the producers table whatever the finding carries — so a mutant
+         taking the class from the FIRST producer (the sound indexer) instead of from the
+         finding's own run SURVIVED. The needle was in the haystack before the search began. *)
+      let imported_findings =
+        let json, _, _ = run_report db in
+        match Json.strict_object ~what:"report.json" json with
+        | Error e -> Test.fail "%s" e
+        | Ok j ->
+            (match Json.member "sections" j with Some (`List l) -> l | _ -> [])
+            |> List.filter (fun sec -> str "analysis" sec = Some "imported")
+            |> List.concat_map (fun sec ->
+                   match Json.member "findings" sec with Some (`List l) -> l | _ -> [])
+      in
+      Batch.eq_int b ~msg:"premise: exactly one imported finding to reason about"
+        (List.length imported_findings) 1 ;
+      List.iter
+        (fun f ->
+          Batch.eq_string b ~msg:"the finding names its OWN producer, not the indexer"
+            (Option.value ~default:"<none>" (str "producer" f))
+            "semgrep" ;
+          (* THE ADR-002 LABEL. A heuristic finding carrying the sound producer's class is the
+             mislabel the whole soundness_class design exists to prevent, and it is invisible to
+             any assertion that only checks the word appears on the page. *)
+          Batch.eq_string b ~msg:"and its OWN soundness class — 'heuristic', never the indexer's"
+            (Option.value ~default:"<none>" (str "soundness_class" f))
+            "heuristic")
+        imported_findings ;
+      (* And the indexer keeps its own class in the header, so the two are not merged in the
+         other direction either. *)
+      Batch.check b
+        ~msg:"the sound producer is still shown as sound in the header"
+        (Arch_tezt.contains ~needle:"sound_with_top" html)) ;
+  Lwt.return_unit
+
 let register () =
   register_round_trip () ;
-  register_not_analysed ()
+  register_not_analysed () ;
+  register_imported_section ()

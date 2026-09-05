@@ -117,7 +117,7 @@ let opt = function "" -> None | s -> Some s
 (* Every analysis this tool knows how to look for. An analysis absent from the index still gets a
    section, because FR-024's whole point is that a reader must be able to tell "we looked and found
    none" from "we never looked" — and an absent section says neither. *)
-let known_analyses = [ ("dead_code", "dead_code_sites") ]
+let known_analyses = [ ("dead_code", "dead_code_sites"); ("imported", "imported_findings") ]
 
 let collect ~db_path (t : Arch_db.t) : t =
   let schema_version =
@@ -212,12 +212,56 @@ let collect ~db_path (t : Arch_db.t) : t =
           | [ _ ] -> "covered"
           | _ -> "unknown")
   in
+  (* Findings imported from a FOREIGN analyser (roadmap 2.3). Rendered here because the
+     alternative was measured and is worse than absence: with imports present, the header listed
+     `semgrep` and `gosec` as heuristic producers and every section showed no findings, so a
+     reader saw two third-party tools having run and a clean report. An analysis that appears in
+     the provenance and nowhere in the results is not a missing feature, it is a false clean --
+     which is the exact reading FR-024 exists to prevent, arrived at through the INTERACTION of
+     two slices neither of which is wrong alone.
+
+     The soundness class comes from the finding's own producer run, not from the first one:
+     several importers can coexist and a heuristic finding attributed to the sound producer would
+     be the ADR-002 mislabel this table's design exists to make impossible. *)
+  let imported =
+    if not (Arch_db.has_table t "imported_findings") then []
+    else
+      q t ~shape:Arch_db.Rows.t6' ~to_cells:Arch_db.Rows.c6
+        "SELECT f.rule_id, COALESCE(f.uri,''), COALESCE(CAST(f.start_line AS TEXT),''), \
+         f.message, COALESCE(r.producer,'?'), COALESCE(r.soundness_class,'heuristic') \
+         FROM imported_findings f LEFT JOIN producer_runs r ON f.producer_run_id = r.id \
+         ORDER BY f.id"
+      |> List.filter_map (function
+           | [ rid; uri; line; msg; producer; sc ] ->
+               let loc =
+                 match (opt uri, opt line) with
+                 | Some u, Some l -> Some (u ^ ":" ^ l)
+                 | Some u, None -> Some u
+                 | None, _ -> None
+               in
+               Some
+                 { f_id =
+                     Printf.sprintf "imported|%s|%s|%s" producer rid
+                       (Option.value ~default:"-" loc);
+                   f_kind = "imported";
+                   f_message = msg;
+                   f_location = loc;
+                   f_subject = Some rid;
+                   f_producer = producer;
+                   f_soundness_class = sc;
+                   f_verdict = None }
+           | _ -> None)
+  in
   let sections =
     List.map
       (fun (analysis, table) ->
         { s_analysis = analysis;
           s_status = status_of analysis table;
-          s_findings = (if analysis = "dead_code" then dead_code else []) })
+          s_findings =
+            (match analysis with
+            | "dead_code" -> dead_code
+            | "imported" -> imported
+            | _ -> []) })
       known_analyses
   in
   { db_path; schema_version; producers; coverage; top_frontier; verdicts; sections }
