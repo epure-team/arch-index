@@ -207,6 +207,14 @@ node; a language with no profile yields `not_analysed` rather than an empty camp
   **self-uncertified**, and the report MUST state that such a campaign cannot distinguish a weak
   test suite from a stale or wrong binary. A campaign containing at least one kill is
   self-certifying, because a stale binary is unmutated and therefore cannot produce a kill.
+- **FR-033** [US-3]: A published verdict MUST carry the `selection_provenance` **of the run row that
+  produced it**, joined by identity, never the first provenance available in any collection. Where
+  the schema carries no link between a reported finding and the run that produced it, the honest
+  answer is `null` — never the first row. Measured precedent in this repository the same day: a
+  `match producers with p :: _` labelled every finding with the **first** run's soundness class, so
+  a heuristic finding carried `sound_with_top` merely because the sound run happened to sort first.
+  Positional attribution is indistinguishable from correct attribution on any fixture whose
+  collection has one element, which is every fixture anyone writes first.
 - **FR-031** [US-2, US-3]: Wherever the campaign consumes a closed vocabulary that a schema `CHECK`
   constraint declares — `selection_provenance`, the engine status set, `top_reason`, edge `kind` —
   the OCaml consumer MUST use a **total** match with no `| _ ->` catch-all, so the compiler fails
@@ -258,6 +266,7 @@ node; a language with no profile yields `not_analysed` rather than an empty camp
 - AC-20 [C-22]: the mutaml integration is exercised against a real mutaml, or the report states it is unverified — never silently assumed.
 - AC-21 [FR-027]: an all-survivor campaign prints "self-uncertified" and names the reason → an entirely green campaign never reads as evidence.
 - AC-22 [FR-028]: the campaign record names the resolved engine and runner paths → a reader can tell which binary ran.
+- AC-27 [FR-033]: a report over two runs of differing provenance labels each finding with its own run's provenance → swapping the collection order changes no label.
 - AC-25 [FR-031]: adding a member to a CHECK-declared vocabulary without updating its consumer fails the build → the next addition cannot be dropped silently.
 - AC-26 [FR-032]: a subprocess exiting 3 is reported as refused, distinctly from a failure and from an empty result → "did not really run" survives the process boundary.
 - AC-24 [FR-030]: a binary resolved through an ancestor directory outside the tree makes the campaign refuse, exit 1 → the stale-parent-binary case cannot silently produce a page of survivors.
@@ -293,6 +302,7 @@ and the shared `Fixture.flat` / `Fixture.malformed_contract` helpers.
 - CHECK-7 [AC-10]: `scripts/check-status-provenance.sh` — greps every emitter in `bin/arch_mutants/` for a status field written without a provenance field in the same record; exit 1 on any hit. Self-contained, no test runner.
 - CHECK-8 [AC-20]: `scripts/check-mutaml-integration.sh` — runs a real `mutaml-runner` over a two-function fixture and asserts the wrapper resolved `MUTAML_MUTANT` to the right test set. Exit 3 (not 1) when mutaml is absent, so an unverified integration stays distinguishable from a failed one. **The mechanism itself is no longer in doubt** — it was established by reading `src/runner/runner.ml:123-130` and `src/ppx/mutaml_ppx.ml:40`; this check confirms the runtime behaviour, not the premise.
 - CHECK-9 [AC-19]: `scripts/check-mutant-key.sh <db>` — inserts the campaign's mutants and reports the count of rows **rejected** by the UNIQUE constraint, not a `GROUP BY` count, because under a constraint a duplicate never becomes a group. Run against the largest population available and print the population size and the working tree with the count.
+- CHECK-18 [AC-27]: `dune test --force` — `mutants: provenance follows the run, not the collection order`. The fixture MUST contain **at least two** runs of differing provenance, and the test MUST assert that reversing their order changes no published label. A single-run fixture cannot distinguish positional attribution from correct attribution.
 - CHECK-17 [AC-25]: `scripts/check-total-matches.sh` — greps the campaign's consumers for a `| _ ->` arm on any vocabulary a schema `CHECK` declares, and fails naming the site. Self-contained. This is a lint, not a proof: the real defence is the total match itself, which the compiler enforces.
 - CHECK-16 [AC-12, AC-13]: `dune test --force` — `mutants: a diff touching only a test helper selects mutants in the code that helper's tests reach`. Added because the runnable-check table had no entry for US-4 at all: the story had acceptance criteria and no automated check, which the architect voice caught. A story whose only verification is an AC read by a human is a story that ships unverified.
 - CHECK-15 [AC-24]: `scripts/check-binary-provenance.sh` → exit 0 when every resolved binary is inside the tree, exit 1 otherwise. **Already implemented and red-verified on both detection branches**: an environment override pointing outside the tree, and a nested tree whose ancestor walk reaches the parent's `_build`, which reproduces issue #77's exact mechanism. Self-contained, no test runner.
