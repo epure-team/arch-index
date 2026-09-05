@@ -191,6 +191,92 @@ let register_refused_in_dep () =
         (not (contains ~needle:"rule(s):" out))) ;
   Lwt.return_unit
 
+(* EVERY POSITION THE PARSER HAS, not just the one that works and the one I thought of.
+
+   A review pointed out that the refusal evidence covered ONE direction. [ext:] is answerable
+   only as a TARGET and proves nothing as a source; [exported:] has the mirror symmetry, so a
+   TARGET-position [exported:] is the same hazard on the side nobody was watching. "I only
+   granted it in one place" is a statement about the code I wrote, not about the parser — six
+   other operand positions exist and each reads its own allow-list.
+
+   Each row carries a CONTROL: the same rule body with [fn:] substituted. Without it an exit 2
+   is not evidence about the selector at all. Measured while writing this: my first sweep
+   scored [forbid origin from exported:**] as a refusal, and the control showed BOTH spellings
+   failing with "unrecognised rule body" — the probe had omitted the mandatory [allow-file:]
+   clause, so the rule never reached selector parsing. An exit code for the wrong reason looks
+   exactly like an exit code for the right one. *)
+let positions =
+  [
+    ("reach TARGET", "forbid reach from fn:** to %s");
+    ("dep source", "forbid dep from %s to module:Es_vuln");
+    ("dep TARGET", "forbid dep from module:Es_api to %s");
+    ("exported-outside operand", "forbid exported outside %s");
+    ("effect source", "forbid effect from %s kind:GlobalVar");
+  ]
+
+let register_position_sweep () =
+  Test.register ~__FILE__
+    ~title:"exported selector: accepted in exactly ONE position, refused in every other"
+    ~tags:["rules"; "reach"; "selector"; "exported"; "vacuity"]
+  @@ fun () ->
+  with_indexed "es_sweep" @@ fun db ->
+  let allow = Temp.file "es_sweep.allow" in
+  write_file allow "" ;
+  let origin_body sel =
+    Printf.sprintf "forbid origin from %s form:division allow-file:%s" sel allow
+  in
+  let run body =
+    rules [ db; rule_file "es_sweep" (Printf.sprintf "rule \"p\"\n  %s\n" body) ]
+  in
+  Batch.run (fun b ->
+      let check_position (label, tmpl) =
+        let body sel = Printf.sprintf (Scanf.format_from_string tmpl "%s") sel in
+        (* CONTROL FIRST. If the `fn:` spelling does not parse, the rule FORM is malformed and
+           the refusal below says nothing about the selector kind. *)
+        let _, ctrl = run (body "fn:**") in
+        Batch.check b
+          ~msg:
+            (Printf.sprintf "control [%s]: the same body with fn: must parse, or the refusal \
+                             below is about the rule form:\n%s" label ctrl)
+          (not (contains ~needle:"unrecognised rule body" ctrl)) ;
+        let code, out = run (body "exported:**") in
+        Batch.eq_int b
+          ~msg:(Printf.sprintf "[%s] must ABORT on exported:\n%s" label out) code 2 ;
+        Batch.check b
+          ~msg:
+            (Printf.sprintf "[%s] must refuse for the POSITION, not as an unknown kind or a \
+                             malformed body:\n%s" label out)
+          (contains ~needle:"not valid in this position" out) ;
+        Batch.check b
+          ~msg:(Printf.sprintf "[%s] must print no verdict summary:\n%s" label out)
+          (not (contains ~needle:"rule(s):" out))
+      in
+      List.iter check_position positions ;
+      (* `forbid origin` is spelled out rather than templated because its body carries a
+         mandatory allow-file: clause — the very thing whose omission made my first probe
+         wrong. *)
+      let _, octrl = run (origin_body "fn:**") in
+      Batch.check b
+        ~msg:(Printf.sprintf "control [origin source]: the fn: spelling must parse:\n%s" octrl)
+        (not (contains ~needle:"unrecognised rule body" octrl)) ;
+      let ocode, oout = run (origin_body "exported:**") in
+      Batch.eq_int b ~msg:(Printf.sprintf "[origin source] must ABORT:\n%s" oout) ocode 2 ;
+      Batch.check b
+        ~msg:(Printf.sprintf "[origin source] must refuse for the POSITION:\n%s" oout)
+        (contains ~needle:"not valid in this position" oout) ;
+      (* THE OTHER HALF, and the reason this is one test rather than six: the sweep must also
+         show that SOME position accepts the kind. Six refusals alone are equally consistent
+         with a selector nothing accepts anywhere — which would refuse in every position and
+         pass this test while being useless. *)
+      let acode, aout = run "forbid reach from exported:** to fn:danger" in
+      Batch.eq_int b
+        ~msg:(Printf.sprintf "the granted position must still work — exit 0:\n%s" aout) acode 0 ;
+      Batch.check b
+        ~msg:(Printf.sprintf "…and produce a real verdict, not a refusal:\n%s" aout)
+        (contains ~needle:"rule(s):" aout)) ;
+  Lwt.return_unit
+
 let register () =
   register_filters () ;
-  register_refused_in_dep ()
+  register_refused_in_dep () ;
+  register_position_sweep ()
