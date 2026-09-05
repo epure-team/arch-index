@@ -35,8 +35,8 @@ Add the layer that **executes** a mutation campaign, on top of the static target
 shipped (`arch-mutants plan` / `report`, `arch-impact --diff`, `arch-coverage`). Today nothing runs
 a campaign, nothing is persisted, and arch-index emits no verdict of its own about mutants.
 
-The contract is `specs/mutation-campaign-313.md`: 30 functional requirements, 24 acceptance
-criteria, 16 runnable checks. Read it in full before writing code. The plan and its reasoning are
+The contract is `specs/mutation-campaign-313.md`. Read its counts from the file itself rather than
+from this sentence — it has grown during planning and will grow again. Read it in full before writing code. The plan and its reasoning are
 in `briefs/mutation-campaign-313-plan.md`; the operational facts inherited from the roadmap
 guardian are in `roster/mutation-campaign-313/task.md`.
 
