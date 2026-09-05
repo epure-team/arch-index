@@ -997,9 +997,7 @@ let eval (t : Arch_db.t) (g : Arch_graph.t) ~sound r =
         else
           { rule = r.name; kind = kind_of r.body; exact = false;
             verdict = (if sound then "PASS" else "UNKNOWN_NO_CONTRACT");
-            detail = []; detail_total = 0; sizes = None; witness = []; top_reasons = []; note = Some coverage }
-
-            detail = []; detail_total = 0; sizes = None; witness = [];
+            detail = []; detail_total = 0; sizes = None; witness = []; top_reasons = [];
             (* Says the same thing the UNKNOWN branch says, minus the caveat it
                has earned the right to drop: here the cone is closed, so "no new
                fatal origin among those in view" IS "no new fatal origin". Both
