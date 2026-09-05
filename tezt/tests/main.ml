@@ -61,6 +61,7 @@ let () =
   Rules.register_vacuity_covers_every_rule_form () ;
   Rules.register_ext_selector () ;
   Rules.register_ext_join_hazard () ;
+  Rules_origin.register () ;
   Pcc.register_index () ;
   Pcc.register_index_infra_failure () ;
   Pcc.register_dossier () ;
