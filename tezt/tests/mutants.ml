@@ -425,7 +425,7 @@ let wrapper_path () = Filename.concat (repo_root ()) "scripts/mutaml-wrapper.sh"
    soundness contract at all — and the whole claim is that the same report publishes three
    different verdicts. A harness that could only build one index would make two of those
    three arms unreachable while the assertions still read as if they covered them. *)
-let campaign_setup_on ~db ~tests ~name ~engine_body ~report =
+let campaign_setup_on ?(extra_env = []) ~db ~tests ~name ~engine_body ~report () =
   let dir = Temp.dir (name ^ "_campaign") in
   let plan_file = Filename.concat dir "plan.json" in
   let _, plan_out = mutants ["plan"; db; "--tests"; tests; "--format"; "json"] in
@@ -438,7 +438,7 @@ let campaign_setup_on ~db ~tests ~name ~engine_body ~report =
   write_exec engine engine_body ;
   let work = Filename.concat dir "work" in
   let env =
-    [("ARCH_MUTANTS_WORKDIR", work); ("ARCH_MUTANTS_WRAPPER", wrapper_path ())]
+    [("ARCH_MUTANTS_WORKDIR", work); ("ARCH_MUTANTS_WRAPPER", wrapper_path ())] @ extra_env
   in
   let argv extra =
     ["run"; db; "--plan"; plan_file; "--engine"; engine; "--test-cmd"; "true";
@@ -455,7 +455,7 @@ let campaign_setup_on ~db ~tests ~name ~engine_body ~report =
 
 let campaign_setup ~name ~engine_body ~report =
   campaign_setup_on ~db:(load_fixture name campaign_stream) ~tests:"file:test/**" ~name
-    ~engine_body ~report
+    ~engine_body ~report ()
 
 (* The wrapper's trace: one line per invocation, "<id>\t<n>\t<executed,…>\t<rc>". *)
 let trace_rows work =
@@ -825,13 +825,13 @@ let register_verdict_three_indexes () =
     campaign_setup_on
       ~db:(load_fixture "mutants_verdict_closed" campaign_stream)
       ~tests:"file:test/**" ~name:"mutants_verdict_closed"
-      ~engine_body:(stub_engine ["m1"; "m2"; "m3"]) ~report:all_survived
+      ~engine_body:(stub_engine ["m1"; "m2"; "m3"]) ~report:all_survived ()
   in
   let bounded =
     campaign_setup_on
       ~db:(load_fixture "mutants_verdict_top" campaign_stream_top)
       ~tests:"file:test/**" ~name:"mutants_verdict_top"
-      ~engine_body:(stub_engine ["m1"; "m2"; "m3"]) ~report:all_survived
+      ~engine_body:(stub_engine ["m1"; "m2"; "m3"]) ~report:all_survived ()
   in
   (* The shared malformed-contract fixture, not a copy: arch-mutants must reach
      the same "no contract" verdict the other four tools reach on the same
@@ -840,7 +840,7 @@ let register_verdict_three_indexes () =
     campaign_setup_on
       ~db:(Fixture.malformed_contract ~name:"mutants_verdict_nocontract")
       ~tests:"fn:A" ~name:"mutants_verdict_nocontract"
-      ~engine_body:(stub_engine ["m1"; "m2"; "m3"]) ~report:all_survived
+      ~engine_body:(stub_engine ["m1"; "m2"; "m3"]) ~report:all_survived ()
   in
   Batch.run (fun b ->
       let arm ~what (db, _, run, _) ~provenance ~verdict =
@@ -898,6 +898,7 @@ let register_verdict_killed_under_top () =
 {"file":"lib/y.ml","line":35,"status":"TIMEOUT","id":"m2"}
 {"file":"lib/z.ml","line":55,"status":"SURVIVED","id":"m3"}
 |}
+      ()
   in
   Batch.run (fun b ->
       Batch.exit_code b ~msg:"the campaign must run" ~expected:0 (run []) ;
@@ -1062,4 +1063,355 @@ let register_verdict_provenance_follows_run () =
               ("y-first: lib/x.ml still carries its own provenance", px2, "top_bounded");
               ("y-first: lib/y.ml still carries its own provenance", py2, "proved_superset") ]
       | _ -> Batch.note b "one of the two orderings produced no verdict output") ;
+  Lwt.return_unit
+
+(* ------------------------------------------------------------------------ *)
+(* SLICE 3 — `--diff`: DIFF-SCOPED SELECTION.                                *)
+(*                                                                          *)
+(* The selected set is the UNION of three rules, and each fixture below is   *)
+(* built so that exactly ONE of them can produce the answer being asserted.  *)
+(* A fixture in which two rules would both select the same mutant proves     *)
+(* nothing about either.                                                     *)
+(*                                                                          *)
+(* Every count here is worked out by hand from the fixture, never read back  *)
+(* from the tool, and none of them is a `contains` on prose: a word survives *)
+(* a great many wrong implementations because it can be present for a reason *)
+(* unrelated to the branch that should have produced it. A count cannot.     *)
+(* ------------------------------------------------------------------------ *)
+
+(* Real files, long enough that every span in the index fixture exists in them:
+   covered is lib/x.ml:10-20, other lib/y.ml:30-40, shared lib/z.ml:50-60,
+   t_helper test/alpha_test.ml:11-13. The diff under test is produced by git
+   from an edit to one of these lines, never written by the test. *)
+let numbered n =
+  String.concat "" (List.init n (fun i -> Printf.sprintf "line %d\n" (i + 1)))
+
+let diff_files =
+  [ ("lib/x.ml", numbered 25); ("lib/y.ml", numbered 45); ("lib/z.ml", numbered 65);
+    ("test/alpha_test.ml", numbered 15); ("test/beta_test.ml", numbered 8);
+    ("README.md", "readme\n") ]
+
+let edit_line root rel n replacement =
+  let path = Filename.concat root rel in
+  let ls = String.split_on_char '\n' (read_file path) in
+  write_file path
+    (String.concat "\n" (List.mapi (fun i l -> if i = n - 1 then replacement else l) ls))
+
+(* campaign_stream plus a SHARED TEST HELPER that both t_alpha and t_gamma call
+   and that calls NOTHING. That leafness is the whole point of the fixture: a
+   selection computed as "everything the touched helper reaches" would come out
+   EMPTY, while the rule under test — "every case that traverses the helper, then
+   everything those cases reach" — comes out as {covered, other}. The two are
+   indistinguishable on any fixture whose helper calls production code. *)
+let campaign_stream_helper =
+  campaign_stream
+  ^ {|{"type":"function","name":"t_helper","file_path":"test/alpha_test.ml","line_start":11,"line_end":13}
+{"type":"call","caller_name":"t_alpha","caller_file":"test/alpha_test.ml","callee_name":"t_helper","callee_file":"test/alpha_test.ml","call_site":"test/alpha_test.ml:3","kind":"MUST"}
+{"type":"call","caller_name":"t_gamma","caller_file":"test/alpha_test.ml","callee_name":"t_helper","callee_file":"test/alpha_test.ml","call_site":"test/alpha_test.ml:8","kind":"MUST"}
+|}
+
+let impact_env () = [("ARCH_IMPACT", arch_impact ())]
+
+(* The `diff_scope` sub-object of `run --format json`. Returned as a pair with
+   the whole document so a test can assert on both the scope and the run rows. *)
+let scope_of b ~what run_json args =
+  let _, out, _ = run_json (["--format"; "json"] @ args) in
+  match Batch.expect b (Json.parse ~what out) with
+  | None -> None
+  | Some j -> (
+      match Json.member "diff_scope" j with
+      | Some ds -> Some (j, ds)
+      | None ->
+          Batch.note b "%s: the run output carries no diff_scope object" what ;
+          None)
+
+let run_files j =
+  match Json.member "runs" j with
+  | Some (`List l) ->
+      String.concat ","
+        (List.sort compare (Json.field_of_objects ~field:"file" l))
+  | _ -> "<no runs>"
+
+let joined b ~what k ds =
+  match Json.strings ~what k ds with
+  | Ok l -> String.concat "," (List.sort compare l)
+  | Error e ->
+      Batch.note b "%s" e ;
+      "<unreadable>"
+
+let sites b ~what k ds =
+  match Json.list ~what k ds with
+  | Ok l ->
+      String.concat ","
+        (List.sort compare
+           (List.filter_map
+              (function
+                | `Assoc f -> (
+                    match (List.assoc_opt "file" f, List.assoc_opt "line" f) with
+                    | Some (`String p), Some (`Int n) -> Some (Printf.sprintf "%s:%d" p n)
+                    | _ -> None)
+                | _ -> None)
+              l))
+  | Error e ->
+      Batch.note b "%s" e ;
+      "<unreadable>"
+
+let int_of b ~what k j expected =
+  match Json.int ~what k j with
+  | Ok n -> Batch.eq_int b ~msg:(what ^ ": " ^ k) n expected
+  | Error e -> Batch.note b "%s" e
+
+(* AC-13 / FR-016 rule 1. Selection is by FUNCTION, and the fixture proves it is
+   not by line: the edited line is 12 and the only mutant in that function sits
+   at line 15, so a line-granular selection would select NOTHING. The edit is a
+   comment, so a change-intent heuristic would also select nothing. *)
+let register_diff_touched_function () =
+  Test.register ~__FILE__
+    ~title:"mutants: --diff selects a touched function's mutants, by function and not by line"
+    ~tags:["mutants"; "run"; "diff"]
+  @@ fun () ->
+  Fixture.git_project ~name:"mutants_diff_fn" ~files:diff_files @@ fun root ->
+  let db, work, _, run_json =
+    campaign_setup_on ~extra_env:(impact_env ())
+      ~db:(load_fixture "mutants_diff_fn" campaign_stream)
+      ~tests:"file:test/**" ~name:"mutants_diff_fn"
+      ~engine_body:(stub_engine ["m1"; "m2"; "m3"]) ~report:all_survived ()
+  in
+  (* Line 12 is inside covered (10-20) and is NOT the mutant's line (15). *)
+  edit_line root "lib/x.ml" 12 "(* a comment, and nothing else *)" ;
+  Fixture.git_commit ~cwd:root "comment inside covered" ;
+  let scoped = ["--repo"; root; "--diff"; "HEAD~1..HEAD"] in
+  Batch.run (fun b ->
+      (match scope_of b ~what:"diff by function" run_json scoped with
+      | None -> ()
+      | Some (j, ds) ->
+          Batch.eq_string b ~msg:"a hunk on line 12 must touch exactly 'covered'"
+            (joined b ~what:"scope" "touched_functions" ds) "covered" ;
+          (* Three catalogued, one selected: the two counts together cannot be
+             satisfied by selecting everything nor by selecting nothing. *)
+          int_of b ~what:"diff by function" "mutants_catalogued_before_scoping" j 3 ;
+          int_of b ~what:"diff by function" "mutants_excluded_by_scope" j 2 ;
+          Batch.eq_string b ~msg:"only the touched function's mutant may run" (run_files j)
+            "lib/x.ml" ;
+          (match Json.bool ~what:"scope" "whole_index" ds with
+          | Ok v ->
+              Batch.check b ~msg:"a scoped campaign must not report itself whole-index" (not v)
+          | Error e -> Batch.note b "%s" e)) ;
+      (* The wrapper was invoked for the selected mutant and refused for the other
+         two, which never reach the trace. 1, not 3. *)
+      Batch.eq_int b ~msg:"the wrapper must run only for the selected mutant"
+        (List.length (trace_rows work)) 1 ;
+      Db.with_db db (fun conn ->
+          Batch.eq_int b ~msg:"only the selected mutant is persisted as a site"
+            (Db.int conn "SELECT count(*) FROM mutants") 1 ;
+          Batch.eq_int b ~msg:"only the selected mutant gets a run row"
+            (Db.int conn "SELECT count(*) FROM mutant_runs") 1) ;
+      (* The same catalogue with NO --diff is whole-index selection, said so. The
+         second campaign adds the two sites the scope had excluded: 1 -> 3 sites
+         and 1 -> 4 runs, both hand-counted, and neither reachable if the first
+         campaign had quietly catalogued all three. *)
+      (* The SAME repo argument, so the only difference between the two campaigns
+         is the --diff flag itself. *)
+      (match scope_of b ~what:"whole index" run_json ["--repo"; root] with
+      | None -> ()
+      | Some (j, ds) -> (
+          int_of b ~what:"whole index" "mutants_excluded_by_scope" j 0 ;
+          Batch.eq_string b ~msg:"the whole-index run must publish no range"
+            (match Json.member "range" ds with Some `Null -> "null" | other -> Json.show other)
+            "null" ;
+          match Json.bool ~what:"scope" "whole_index" ds with
+          | Ok v ->
+              Batch.check b ~msg:"an absent --diff must be reported as whole-index selection" v
+          | Error e -> Batch.note b "%s" e)) ;
+      Db.with_db db (fun conn ->
+          Batch.eq_int b ~msg:"the unscoped re-run catalogues the two sites the scope excluded"
+            (Db.int conn "SELECT count(*) FROM mutants") 3 ;
+          Batch.eq_int b ~msg:"one run row from the scoped campaign, three from the unscoped one"
+            (Db.int conn "SELECT count(*) FROM mutant_runs") 4)) ;
+  Lwt.return_unit
+
+(* CHECK-16 / AC-12 / FR-016 rule 2. A diff touching ONLY a test helper selects
+   mutants in the code that helper's tests reach. t_helper calls nothing, so the
+   answer can only come from walking BACKWARD to the cases that traverse it and
+   then forward from those. m3 (shared, reached only by t_beta) must stay out. *)
+let register_diff_test_helper () =
+  Test.register ~__FILE__
+    ~title:
+      "mutants: a diff touching only a test helper selects mutants in the code that helper's \
+       tests reach"
+    ~tags:["mutants"; "run"; "diff"]
+  @@ fun () ->
+  Fixture.git_project ~name:"mutants_diff_helper" ~files:diff_files @@ fun root ->
+  let db, work, _, run_json =
+    campaign_setup_on ~extra_env:(impact_env ())
+      ~db:(load_fixture "mutants_diff_helper" campaign_stream_helper)
+      ~tests:"file:test/**" ~name:"mutants_diff_helper"
+      ~engine_body:(stub_engine ["m1"; "m2"; "m3"]) ~report:all_survived ()
+  in
+  (* Line 12 is inside t_helper (11-13) and inside no production function. *)
+  edit_line root "test/alpha_test.ml" 12 "  assert_shared_thing ()" ;
+  Fixture.git_commit ~cwd:root "change the shared helper" ;
+  Batch.run (fun b ->
+      (match
+         scope_of b ~what:"diff helper" run_json ["--repo"; root; "--diff"; "HEAD~1..HEAD"]
+       with
+      | None -> ()
+      | Some (j, ds) ->
+          Batch.eq_string b ~msg:"the diff must touch exactly the helper"
+            (joined b ~what:"scope" "touched_functions" ds) "t_helper" ;
+          Batch.eq_string b ~msg:"the helper must be recognised as a test, not as product code"
+            (joined b ~what:"scope" "touched_tests" ds) "t_helper" ;
+          (* The discriminating assertion. Forward from the helper alone is EMPTY
+             because it calls nothing; the two cases that traverse it reach
+             covered and other, and nothing reaches shared. *)
+          Batch.eq_string b
+            ~msg:"every case traversing the helper must contribute what IT reaches"
+            (joined b ~what:"scope" "functions_reached_by_touched_tests" ds) "covered,other" ;
+          Batch.eq_string b ~msg:"the mutants of both reached functions run, and no other"
+            (run_files j) "lib/x.ml,lib/y.ml" ;
+          int_of b ~what:"diff helper" "mutants_excluded_by_scope" j 1) ;
+      Batch.eq_int b ~msg:"the wrapper runs for the two selected mutants and no more"
+        (List.length (trace_rows work)) 2 ;
+      Db.with_db db (fun conn ->
+          Batch.eq_int b ~msg:"two run rows, one per selected mutant"
+            (Db.int conn "SELECT count(*) FROM mutant_runs") 2 ;
+          Batch.eq_int b
+            ~msg:"the mutant of the function no traversing case reaches must not run"
+            (Db.int conn
+               "SELECT count(*) FROM mutant_runs r JOIN mutants m ON m.id = r.mutant_id \
+                WHERE m.file_path = 'lib/z.ml'")
+            0)) ;
+  Lwt.return_unit
+
+(* A prior campaign, seeded so that the deleted-test rule has BOTH arms present:
+     lib/z.ml:55 — killed, exactly ONE kill row, naming a test the index no
+                   longer carries. Re-selectable.
+     lib/y.ml:35 — killed, NO kill row at all. Attribution was never known, so
+                   nothing can say whether the deleted test was the only one
+                   catching it: UN-RECHECKABLE.
+     lib/x.ml:15 — killed, one kill row naming t_alpha, which is STILL in the
+                   index. Not deleted, therefore not re-selected.
+   Without the second row the un-recheckable half is asserted against nothing;
+   without the third, "selects what a deleted test killed alone" is
+   indistinguishable from "selects everything a prior campaign killed alone". *)
+let seed_prior_campaign ~name =
+  let db = load_fixture name campaign_stream in
+  let migration = read_file (Filename.concat (repo_root ()) "mutants-schema-migration.sql") in
+  Db.with_db_rw db (fun conn ->
+      Db.exec conn migration ;
+      Db.exec conn
+        {|INSERT INTO mutants(file_path,line,col_start,col_end,replacement,source_hash,function_name)
+            VALUES ('lib/x.ml',15,3,9,'true','prior-x','covered'),
+                   ('lib/y.ml',35,1,4,'false','prior-y','other'),
+                   ('lib/z.ml',55,2,7,'0','prior-z','shared');
+          INSERT INTO mutant_campaigns(engine,engine_path,test_runner_path,granularity,completed_at)
+            VALUES ('stub','/bin/true','/bin/true','case','2026-09-05T00:00:00Z');
+          INSERT INTO mutant_runs(campaign_id,mutant_id,engine_status,selection_provenance,
+                                  intended_tests,executed_tests)
+            SELECT 1, id, 'KILLED', 'proved_superset', 1, 1 FROM mutants;
+          INSERT INTO mutant_kills(campaign_id,mutant_id,test_name,attribution)
+            SELECT 1, id, 't_alpha', 'singleton_executed_set' FROM mutants
+             WHERE file_path = 'lib/x.ml';
+          INSERT INTO mutant_kills(campaign_id,mutant_id,test_name,attribution)
+            SELECT 1, id, 't_deleted', 'singleton_executed_set' FROM mutants
+             WHERE file_path = 'lib/z.ml';|}) ;
+  db
+
+(* FR-017 / EC-8. The range edits only README.md, so rules 1 and 2 select
+   NOTHING and every mutant that runs got there through the deleted-test rule
+   alone. That isolation is what makes the assertion mean something. *)
+let register_diff_deleted_test () =
+  Test.register ~__FILE__
+    ~title:
+      "mutants: a deleted test re-selects what it alone killed and names what cannot be \
+       re-checked"
+    ~tags:["mutants"; "run"; "diff"]
+  @@ fun () ->
+  Fixture.git_project ~name:"mutants_diff_deleted" ~files:diff_files @@ fun root ->
+  let db, _, _, run_json =
+    campaign_setup_on ~extra_env:(impact_env ())
+      ~db:(seed_prior_campaign ~name:"mutants_diff_deleted")
+      ~tests:"file:test/**" ~name:"mutants_diff_deleted"
+      ~engine_body:(stub_engine ["m1"; "m2"; "m3"]) ~report:all_survived ()
+  in
+  write_file (Filename.concat root "README.md") "readme, revised\n" ;
+  Fixture.git_commit ~cwd:root "documentation only" ;
+  Batch.run (fun b ->
+      (match
+         scope_of b ~what:"deleted test" run_json ["--repo"; root; "--diff"; "HEAD~1..HEAD"]
+       with
+      | None -> ()
+      | Some (j, ds) ->
+          (* Rules 1 and 2 contribute nothing, so nothing below can come from them. *)
+          Batch.eq_string b ~msg:"a documentation-only range must touch no indexed function"
+            (joined b ~what:"scope" "touched_functions" ds) "" ;
+          Batch.eq_string b
+            ~msg:"only the test absent from the current index counts as deleted"
+            (joined b ~what:"scope" "deleted_tests" ds) "t_deleted" ;
+          Batch.eq_string b ~msg:"the mutant the deleted test killed ALONE is re-selected"
+            (sites b ~what:"scope" "rechecked_for_deleted_tests" ds) "lib/z.ml:55" ;
+          (* The honest half. The killed mutant with no kill row cannot be shown
+             safe from the deletion, so it is named rather than skipped. *)
+          Batch.eq_string b
+            ~msg:"a killed mutant whose attribution was never known is UN-RECHECKABLE"
+            (sites b ~what:"scope" "unrecheckable" ds) "lib/y.ml:35" ;
+          Batch.eq_string b ~msg:"only the re-checked mutant runs" (run_files j) "lib/z.ml" ;
+          int_of b ~what:"deleted test" "mutants_excluded_by_scope" j 2) ;
+      Db.with_db db (fun conn ->
+          Batch.eq_int b ~msg:"the new campaign holds exactly the one re-checked mutant"
+            (Db.int conn "SELECT count(*) FROM mutant_runs WHERE campaign_id = 2") 1 ;
+          Batch.eq_int b
+            ~msg:"the mutant attributed to a test that still exists must not be re-checked"
+            (Db.int conn
+               "SELECT count(*) FROM mutant_runs r JOIN mutants m ON m.id = r.mutant_id \
+                WHERE r.campaign_id = 2 AND m.file_path = 'lib/x.ml'")
+            0)) ;
+  Lwt.return_unit
+
+(* FR-032. Exit 3 from the scoping subprocess means REFUSED — the callee declined
+   to answer — and must not be folded into a failure or into an empty result. An
+   empty touched set selects nothing and reads as "nothing to test", which is the
+   single worst way for this distinction to be lost.
+   Asserted on the EXIT CODE together with a fact no wording can simulate: the
+   database must carry no campaign table at all. *)
+let register_diff_impact_refuses () =
+  Test.register ~__FILE__
+    ~title:"mutants: arch-impact exiting 3 is REFUSED, distinct from a failure and from an \
+            empty scope"
+    ~tags:["mutants"; "run"; "diff"]
+  @@ fun () ->
+  Fixture.git_project ~name:"mutants_diff_refuse" ~files:diff_files @@ fun root ->
+  edit_line root "lib/x.ml" 12 "(* a comment *)" ;
+  Fixture.git_commit ~cwd:root "comment inside covered" ;
+  let dir = Temp.dir "mutants_diff_refuse_stubs" in
+  let stub code =
+    let p = Filename.concat dir (Printf.sprintf "impact-%d.sh" code) in
+    write_exec p (Printf.sprintf "#!/bin/sh\nexit %d\n" code) ;
+    p
+  in
+  let case ~name ~impact_exit ~expected =
+    let db, _, run, _ =
+      campaign_setup_on
+        ~extra_env:[("ARCH_IMPACT", stub impact_exit)]
+        ~db:(load_fixture name campaign_stream) ~tests:"file:test/**" ~name
+        ~engine_body:(stub_engine ["m1"; "m2"; "m3"]) ~report:all_survived ()
+    in
+    (db, expected, run ["--repo"; root; "--diff"; "HEAD~1..HEAD"])
+  in
+  let refused = case ~name:"mutants_diff_refused" ~impact_exit:3 ~expected:3 in
+  let failed = case ~name:"mutants_diff_failed" ~impact_exit:1 ~expected:2 in
+  Batch.run (fun b ->
+      List.iter
+        (fun (what, (db, expected, outcome)) ->
+          Batch.exit_code b ~msg:(what ^ ": the driver's own exit code") ~expected outcome ;
+          (* The verifiable half: the driver opens the database for writing only
+             after scoping succeeds, so neither path may leave a campaign table —
+             an empty campaign would read as "no survivors". *)
+          Db.with_db db (fun conn ->
+              Batch.eq_int b ~msg:(what ^ ": no campaign table may exist")
+                (Db.int conn
+                   "SELECT count(*) FROM sqlite_master WHERE type='table' AND \
+                    name='mutant_campaigns'")
+                0))
+        [("a refusal (3) stays a refusal", refused); ("a failure (1) is not a refusal", failed)]) ;
   Lwt.return_unit

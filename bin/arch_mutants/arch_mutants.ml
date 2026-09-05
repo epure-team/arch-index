@@ -24,6 +24,7 @@ Usage: arch-mutants plan   <db> [--tests <selector>] [--format text|json|lines] 
                                  [--tests <selector>] [--profile <name>]
                                  [--catalogue <file>] [--report <file>]
                                  [--from generic|mutaml] [--seed S] [--engine-version V]
+                                 [--diff <git-range>]
                                  [--repo DIR] [--format text|json] [--max-list N]
        arch-mutants verdict <db> [--campaign N] [--format text|json] [--max-list N]
 
@@ -38,6 +39,17 @@ PENDING, by that absence.
 scripts/mutaml-wrapper.sh once per mutant; the wrapper reads MUTAML_MUTANT, resolves it
 through the plan, and runs only the tests that reach the mutated function. The per-mutant
 executed set is always a SUPERSET of that reaching set, never a subset.
+
+`run --diff <range>` scopes the campaign to what the range put at risk: mutants
+inside functions the range TOUCHED, mutants of everything reached by a test the
+range MODIFIED or ADDED (helpers included, so a shared helper selects every case
+that traverses it), and mutants a prior campaign attributed to a DELETED test
+ALONE. A mutant whose attribution was never known is reported UN-RECHECKABLE,
+never silently skipped. Selection is by FUNCTION, so a comment-only change inside
+a function still selects it — over-selection is sound, under-selection is not.
+Without --diff the selection is the WHOLE INDEX, said so in the report; there is
+no implicit default range. The diff -> function mapping comes from
+`arch-impact --format json`, and its exit 3 means REFUSED, not failed.
 
 Generic mutant format (NDJSON, one object per line):
   {"file":"lib/x.ml","line":42,"status":"SURVIVED"|"KILLED"|"TIMEOUT"|"ERROR",
@@ -819,9 +831,329 @@ type selection = {
   sel_hash : string;
 }
 
+(* ------------------------------------------------------------------ *)
+(* --diff — DIFF-SCOPED SELECTION (FR-016, FR-017, FR-018)             *)
+(*                                                                    *)
+(* The selected set is the UNION of three things, and each is a        *)
+(* different kind of claim:                                            *)
+(*                                                                    *)
+(*   1. mutants whose site falls inside a function the range TOUCHED;  *)
+(*   2. mutants of every function reached by a test the range MODIFIED *)
+(*      or ADDED — test helpers included, so a change to a shared      *)
+(*      helper selects every case that traverses it and then           *)
+(*      everything those cases reach;                                  *)
+(*   3. for a test the range DELETED, every mutant a prior campaign    *)
+(*      attributed to that test ALONE.                                 *)
+(*                                                                    *)
+(* Selection is BY FUNCTION, never by file and never by line. A        *)
+(* comment-only change inside a production function still selects that *)
+(* function's mutants. That over-selection is deliberate and sound:    *)
+(* the alternative is parsing intent, and a selection that is too      *)
+(* small turns a mutant an excluded test would have killed into a      *)
+(* survivor — a false accusation against a real test. The report says  *)
+(* so rather than presenting the selection as precise.                 *)
+(*                                                                    *)
+(* Rule 3's honest half is the un-recheckable list. A mutant whose     *)
+(* attribution was NEVER known cannot be shown to be safe from the     *)
+(* deletion, so it is reported separately rather than silently         *)
+(* skipped — a rule that answers half a question must say which half.  *)
+(* ------------------------------------------------------------------ *)
+
+(** Where `arch-impact` is. [ARCH_IMPACT] overrides — the same variable
+    `scripts/check-binary-provenance.sh` probes and the same convention
+    `tezt/lib/arch_tezt.ml`'s `locate` uses — otherwise it is found by walking up from the
+    working directory, and only then on PATH. An override naming a path that does not exist
+    is REFUSED rather than falling back: a silent fallback is how a campaign comes to scope
+    itself with another checkout's answer, which is issue #77's mechanism one tool over. *)
+let locate_impact () =
+  match Sys.getenv_opt "ARCH_IMPACT" with
+  | Some p when Sys.file_exists p -> Some p
+  | Some p -> die (Printf.sprintf "arch-mutants: ARCH_IMPACT=%s does not exist" p)
+  | None -> (
+      let rec up d =
+        let c = Filename.concat d "_build/default/bin/arch_impact/arch_impact.exe" in
+        if Sys.file_exists c then Some c
+        else
+          let parent = Filename.dirname d in
+          if parent = d then None else up parent
+      in
+      match up (Sys.getcwd ()) with Some p -> Some p | None -> resolve_binary "arch-impact")
+
+(** One entry of `arch-impact --format json`'s [touched] array. [how] is carried because it
+    says at what granularity the mapping was made — ["line"] is a span hit, anything else is
+    a whole-file fallback the reader must be able to see. *)
+type touched_fn = { i_name : string; i_how : string }
+
+(** What the subprocess said, kept as three distinct outcomes.
+
+    FR-032: exit 3 means REFUSED — the callee declined to answer. It is neither a failure
+    nor an empty result, and an empty touched set would select nothing and read as
+    "nothing to test", which is the single worst way to lose the distinction. *)
+type impact_outcome =
+  | Impact_ok of touched_fn list
+  | Impact_refused
+  | Impact_failed of int
+
+(** Shelled out on purpose, rather than extracting `arch-impact`'s diff→function mapping
+    into a library. The logic is binary-local (bin/arch_impact/arch_impact.ml's [analyse])
+    and extracting it is shared-library surgery this campaign does not own. The JSON shape
+    was confirmed by running the command, not read off a document. *)
+let run_impact ~impact ~db_path ~repo ~range =
+  let out = Filename.temp_file "arch-mutants-impact" ".json" in
+  (* stdout to the file, stderr left alone: arch-impact's warnings (a file with no line
+     spans, a changed file absent from the index) are exactly what an operator needs to see
+     when a selection comes out surprising. *)
+  let code =
+    Sys.command
+      (Printf.sprintf "%s %s --diff %s --repo %s --format json > %s"
+         (Filename.quote impact) (Filename.quote db_path) (Filename.quote range)
+         (Filename.quote repo) (Filename.quote out))
+  in
+  let cleanup () = try Sys.remove out with Sys_error _ -> () in
+  if code = 3 then (cleanup () ; Impact_refused)
+  else if code <> 0 then (cleanup () ; Impact_failed code)
+  else
+    let json = try Yojson.Safe.from_file out with _ -> `Null in
+    cleanup () ;
+    match json with
+    | `Assoc a -> (
+        match List.assoc_opt "touched" a with
+        | Some (`List l) ->
+            Impact_ok
+              (List.filter_map
+                 (function
+                   | `Assoc f -> (
+                       let str k =
+                         match List.assoc_opt k f with Some (`String s) -> Some s | _ -> None
+                       in
+                       match str "name" with
+                       | Some n -> Some { i_name = n; i_how = Option.value ~default:"?" (str "how") }
+                       | None -> None)
+                   | _ -> None)
+                 l)
+        | _ ->
+            die
+              (Printf.sprintf
+                 "arch-mutants: %s --format json produced no `touched` array. The diff→function \
+                  mapping is read from that key; refusing to continue on an empty set, which \
+                  would select nothing and read as 'nothing to test'."
+                 impact))
+    | _ ->
+        die
+          (Printf.sprintf
+             "arch-mutants: %s --format json did not produce a JSON object. Refusing to scope a \
+              campaign on output it cannot read."
+             impact)
+
+(** One mutant as a PRIOR campaign left it: the latest campaign that ran it, that run's
+    engine status, and how many `mutant_kills` rows that campaign holds for it.
+
+    "Alone" is [pk_kills = 1] together with [pk_sole_test]. Attribution "never known" is
+    [pk_kills = 0] on a mutant that was killed — the executed set was larger than one and
+    no engine named the killer, so nothing can say whether the deleted test was the only
+    one catching it. *)
+type prior_mutant = {
+  pk_file : string;
+  pk_line : int;
+  pk_killed : bool;
+  pk_kills : int;
+  pk_sole_test : string option;
+}
+
+module Prior_shape = struct
+  open Arch_db
+
+  let s = Rows.s
+  let i = Rows.i
+
+  (* file_path, line, engine_status, one kill row's test_name, kill count *)
+  let row = Ty.(t2 (t3 s i s) (t2 s i))
+
+  let cells ((file, line, status), (test, kills)) =
+    [ text_cell file; int_cell line; text_cell status; text_cell test; int_cell kills ]
+end
+
+let prior_mutants (t : Arch_db.t) =
+  if not (Arch_db.has_table t "mutant_runs" && Arch_db.has_table t "mutant_kills") then None
+  else
+    Some
+      (List.filter_map
+         (fun row ->
+           match row with
+           | [ file_c; line_c; status_c; test_c; kills_c ] ->
+               let text = function
+                 | Arch_db.Text s -> Some s
+                 | Arch_db.Nul | Arch_db.Int _ | Arch_db.Real _ -> None
+               in
+               let int_of = function
+                 | Arch_db.Int i -> Some i
+                 | Arch_db.Nul | Arch_db.Text _ | Arch_db.Real _ -> None
+               in
+               let kills = Option.value ~default:0 (int_of kills_c) in
+               let killed =
+                 match Option.map MDb.status_of_string (text status_c) with
+                 | Some (Some MDb.Killed) | Some (Some MDb.Timeout) -> true
+                 | Some (Some MDb.Survived) | Some (Some MDb.Errored) -> false
+                 | Some None | None ->
+                     die
+                       (Printf.sprintf
+                          "arch-mutants: a prior mutant_runs row holds engine_status %S, which \
+                           is not one of KILLED|SURVIVED|TIMEOUT|ERROR. Refusing to guess: a \
+                           status added to the CHECK and dropped here would silently shrink the \
+                           re-check set."
+                          (Option.value ~default:"NULL" (text status_c)))
+               in
+               Some
+                 { pk_file = Option.value ~default:"" (text file_c);
+                   pk_line = Option.value ~default:0 (int_of line_c);
+                   pk_killed = killed;
+                   pk_kills = kills;
+                   pk_sole_test = (if kills = 1 then text test_c else None) }
+           | _ -> None)
+         (Arch_db.rows t ~params_ty:Arch_db.Ty.unit ~shape:Prior_shape.row
+            ~to_cells:Prior_shape.cells
+            "SELECT m.file_path, m.line, r.engine_status, (SELECT k.test_name FROM \
+             mutant_kills k WHERE k.mutant_id = m.id AND k.campaign_id = l.cid ORDER BY \
+             k.test_name LIMIT 1), (SELECT count(*) FROM mutant_kills k WHERE k.mutant_id = \
+             m.id AND k.campaign_id = l.cid) FROM mutants m JOIN (SELECT mutant_id AS mid, \
+             MAX(campaign_id) AS cid FROM mutant_runs GROUP BY mutant_id) l ON l.mid = m.id \
+             JOIN mutant_runs r ON r.mutant_id = m.id AND r.campaign_id = l.cid ORDER BY m.id"
+            ()))
+
+(** Every test name any prior campaign attributed a kill to. Only these can be found to
+    have been DELETED, because `mutant_kills` is the only place a campaign records a test
+    name at all. *)
+let prior_kill_tests (t : Arch_db.t) =
+  if not (Arch_db.has_table t "mutant_kills") then []
+  else
+    List.filter_map
+      (fun row -> match row with [ Arch_db.Text s ] -> Some s | _ -> None)
+      (Arch_db.rows t ~params_ty:Arch_db.Ty.unit ~shape:Arch_db.Rows.t1
+         ~to_cells:Arch_db.Rows.c1 "SELECT DISTINCT test_name FROM mutant_kills ORDER BY 1" ())
+
+type diff_scope = {
+  ds_range : string;
+  ds_impact_path : string;
+  ds_touched : string list;
+  ds_touched_tests : string list;
+  ds_reached : string list;
+  ds_by_function : SS.t;  (** the union of rules 1 and 2, as function NAMES *)
+  ds_prior_known : bool;
+  ds_deleted_tests : string list;
+  ds_recheck : (string * int) list;
+  ds_unrecheckable : (string * int) list;
+  ds_file_granular : int;
+}
+
+let same_site (file, line) (s : site) =
+  line = s.s_line
+  && (file = s.s_file || Filename.basename file = Filename.basename s.s_file)
+
+let in_scope ds (sel : selection) =
+  (match sel.sel_fn with Some fn -> SS.mem fn ds.ds_by_function | None -> false)
+  || List.exists (fun site -> same_site site sel.sel_site) ds.ds_recheck
+
+(** Build the scope. Nothing here writes: this runs BEFORE the campaign row exists, so a
+    refusal leaves no campaign behind to be misread as "no survivors". *)
+let compute_diff_scope (t : Arch_db.t) (g : Arch_graph.t) test_keys ~db_path ~repo ~range =
+  let impact =
+    match locate_impact () with
+    | Some p -> p
+    | None ->
+        prerr_endline
+          "arch-mutants: --diff needs arch-impact, which could not be found. It supplies the \
+           diff → touched-function mapping; without it the touched set would be empty and an \
+           empty set selects nothing, which reads as \"nothing to test\". Set ARCH_IMPACT." ;
+        exit 2
+  in
+  let touched =
+    match run_impact ~impact ~db_path ~repo ~range with
+    | Impact_ok l -> l
+    | Impact_refused ->
+        Printf.eprintf
+          "arch-mutants: %s REFUSED (exit 3) for range %s — it declined to answer rather than \
+           failing. The campaign is NOT scoped and NOT run: an empty touched-function set \
+           would select nothing and read as \"nothing to test\". No campaign row was written.\n"
+          impact range ;
+        exit 3
+    | Impact_failed code ->
+        Printf.eprintf
+          "arch-mutants: %s exited %d for range %s. That is a FAILURE, distinct from the \
+           refusal exit 3 carries. No campaign row was written.\n"
+          impact code range ;
+        exit 2
+  in
+  let touched_names = List.sort_uniq compare (List.map (fun x -> x.i_name) touched) in
+  let file_granular =
+    List.length (List.filter (fun x -> x.i_how <> "line") touched)
+  in
+  let want = List.fold_left (fun a n -> SS.add n a) SS.empty touched_names in
+  let touched_keys =
+    SM.fold
+      (fun k (n : Arch_graph.node) acc -> if SS.mem n.name want then SS.add k acc else acc)
+      g.nodes SS.empty
+  in
+  (* Rule 2. A touched TEST-side function may be a helper rather than a case, so the cases
+     that traverse it are found by going BACKWARD to the test roots first, and only then
+     forward. Forward from the helper alone would miss everything its callers reach, which
+     is most of what a shared helper's change puts at risk. *)
+  let touched_tests = SS.inter touched_keys test_keys in
+  let cases =
+    if SS.is_empty touched_tests then SS.empty
+    else SS.union touched_tests (SS.inter (Arch_graph.closure touched_tests g.bwd) test_keys)
+  in
+  let reached_keys =
+    if SS.is_empty cases then SS.empty else Arch_graph.closure cases g.fwd
+  in
+  let names_of keys =
+    SS.fold
+      (fun k acc ->
+        match SM.find_opt k g.nodes with
+        | Some (n : Arch_graph.node) -> SS.add n.name acc
+        | None -> acc)
+      keys SS.empty
+  in
+  let reached = names_of reached_keys in
+  (* Rule 3. A deleted test is a name a prior campaign recorded that the CURRENT index no
+     longer carries — the spec's own definition, and the only one available: `mutant_kills`
+     holds a test NAME and no file, so the range cannot be intersected with it. *)
+  let indexed_names = names_of (SM.fold (fun k _ acc -> SS.add k acc) g.nodes SS.empty) in
+  let prior = prior_mutants t in
+  let deleted_tests =
+    List.filter (fun name -> not (SS.mem name indexed_names)) (prior_kill_tests t)
+  in
+  let deleted_set = List.fold_left (fun a n -> SS.add n a) SS.empty deleted_tests in
+  let recheck, unrecheckable =
+    match prior with
+    | None -> ([], [])
+    | Some rows ->
+        if deleted_tests = [] then ([], [])
+        else
+          ( List.filter_map
+              (fun p ->
+                match p.pk_sole_test with
+                | Some tn when SS.mem tn deleted_set -> Some (p.pk_file, p.pk_line)
+                | Some _ | None -> None)
+              rows,
+            List.filter_map
+              (fun p -> if p.pk_killed && p.pk_kills = 0 then Some (p.pk_file, p.pk_line) else None)
+              rows )
+  in
+  { ds_range = range;
+    ds_impact_path = impact;
+    ds_touched = touched_names;
+    ds_touched_tests = SS.elements (names_of touched_tests);
+    ds_reached = SS.elements reached;
+    ds_by_function = SS.union want reached;
+    ds_prior_known = prior <> None;
+    ds_deleted_tests = deleted_tests;
+    ds_recheck = recheck;
+    ds_unrecheckable = unrecheckable;
+    ds_file_granular = file_granular }
+
 let run_campaign (t : Arch_db.t) (g : Arch_graph.t) test_keys ~db_path ~plan_path ~engine
     ~engine_version ~seed ~profile_name ~granularity ~from ~catalogue_path ~report_path
-    ~test_cmd ~repo ~fmt ~maxlist =
+    ~test_cmd ~diff_range ~repo ~fmt ~maxlist =
   (* 1. Resolve what will actually run, BEFORE writing anything. *)
   let wrapper =
     match locate_wrapper () with
@@ -930,6 +1262,24 @@ let run_campaign (t : Arch_db.t) (g : Arch_graph.t) test_keys ~db_path ~plan_pat
           sel_superset = List.length executed > List.length intended;
           sel_hash = source_hash ~repo s })
       sites
+  in
+  (* 3b. --diff: narrow the catalogue to what the range put at risk. Done BEFORE anything
+     is written, so a refusal from arch-impact leaves no campaign row behind. An absent
+     --diff means WHOLE-INDEX selection, stated in the report; there is no implicit
+     default range, because a guessed range scopes a campaign the operator never asked
+     for and the result is indistinguishable from a correct one. *)
+  let scope =
+    Option.map
+      (fun range -> compute_diff_scope t g test_keys ~db_path ~repo ~range)
+      diff_range
+  in
+  let catalogued_total = List.length selections in
+  let selections, excluded, excluded_unmapped =
+    match scope with
+    | None -> (selections, [], 0)
+    | Some ds ->
+        let keep, drop = List.partition (in_scope ds) selections in
+        (keep, drop, List.length (List.filter (fun s -> s.sel_fn = None) drop))
   in
   (* 4. The work directory: the selection the wrapper reads, and the trace it writes. *)
   let work =
@@ -1144,11 +1494,48 @@ let run_campaign (t : Arch_db.t) (g : Arch_graph.t) test_keys ~db_path ~plan_pat
          executed test set actually fails under the mutation is what would have made this \
          non-zero"
   in
+  let site_json (f, l) = `Assoc [ ("file", `String f); ("line", `Int l) ] in
+  let strings l = `List (List.map (fun s -> `String s) l) in
+  (* The scope, published in full. A selection nobody can inspect is a selection nobody can
+     contradict, and this one deliberately over-selects: it is by FUNCTION, so a
+     comment-only edit inside a production function still selects that function's mutants. *)
+  let diff_scope_json =
+    match scope with
+    | None ->
+        `Assoc
+          [ ("range", `Null); ("whole_index", `Bool true);
+            ("note",
+             `String
+               "no --diff was given, so every catalogued mutant is in scope. There is no \
+                implicit default range: a guessed one would scope a campaign the operator \
+                never asked for, and the result would be indistinguishable from a correct \
+                one") ]
+    | Some ds ->
+        `Assoc
+          [ ("range", `String ds.ds_range); ("whole_index", `Bool false);
+            ("impact_path", `String ds.ds_impact_path);
+            ("selection_granularity", `String "function");
+            ("over_selects_by_design", `Bool true);
+            ("touched_functions", strings ds.ds_touched);
+            ("touched_functions_matched_at_file_granularity", `Int ds.ds_file_granular);
+            ("touched_tests", strings ds.ds_touched_tests);
+            ("functions_reached_by_touched_tests", strings ds.ds_reached);
+            ("prior_attribution_available", `Bool ds.ds_prior_known);
+            ("deleted_tests", strings ds.ds_deleted_tests);
+            ("rechecked_for_deleted_tests", `List (List.map site_json ds.ds_recheck));
+            (* The honest half of rule 3. A mutant nobody could attribute cannot be shown
+               to be safe from the deletion, so it is named rather than skipped. *)
+            ("unrecheckable", `List (List.map site_json ds.ds_unrecheckable)) ]
+  in
   if fmt = "json" then
     print_endline
       (Yojson.Safe.pretty_to_string
          (`Assoc
            [ ("campaign_id", `Int campaign_id); ("db", `String db_path);
+             ("diff_scope", diff_scope_json);
+             ("mutants_catalogued_before_scoping", `Int catalogued_total);
+             ("mutants_excluded_by_scope", `Int (List.length excluded));
+             ("mutants_excluded_unmapped", `Int excluded_unmapped);
              ("engine", `String engine); ("engine_path", `String engine_path);
              ("engine_version", match engine_version with Some v -> `String v | None -> `Null);
              ("test_runner_path", `String runner_path);
@@ -1210,8 +1597,77 @@ let run_campaign (t : Arch_db.t) (g : Arch_graph.t) test_keys ~db_path ~plan_pat
     Printf.printf "  • selection provenance: %s — %s\n"
       (MDb.provenance_to_string provenance)
       (MDb.provenance_caveat provenance) ;
+    (match scope with
+    | None ->
+        print_endline
+          "  • no --diff: WHOLE-INDEX selection. Every catalogued mutant is in scope. There \
+           is no implicit default range" ;
+        Printf.printf "  • %d mutant site(s) catalogued, none excluded by a scope\n"
+          catalogued_total
+    | Some ds ->
+        Printf.printf "  • --diff %s, scoped through %s\n" ds.ds_range ds.ds_impact_path ;
+        print_endline
+          "  • selection is by FUNCTION, not by file and not by line. A comment-only change \
+           inside a production function still selects that function's mutants. That \
+           OVER-selection is deliberate: a selection that is too small turns a mutant an \
+           excluded test would have killed into a survivor, which is a false accusation \
+           against a real test" ;
+        Printf.printf "  • %d function(s) touched by the range%s: %s%s\n"
+          (List.length ds.ds_touched)
+          (if ds.ds_file_granular > 0 then
+             Printf.sprintf " (%d matched at WHOLE-FILE granularity, so every function in \
+                             those files counts as touched)"
+               ds.ds_file_granular
+           else "")
+          (if ds.ds_touched = [] then
+             "none — the range touches no indexed function (config, docs, or a file outside \
+              the index). What would have made this non-zero: a changed line inside the span \
+              of an indexed function"
+           else String.concat ", " (take maxlist ds.ds_touched))
+          (if maxlist > 0 && List.length ds.ds_touched > maxlist then
+             Printf.sprintf " … +%d" (List.length ds.ds_touched - maxlist)
+           else "") ;
+        Printf.printf
+          "  • %d touched function(s) are tests; through the cases that traverse them, %d \
+           function(s) are reached and in scope\n"
+          (List.length ds.ds_touched_tests) (List.length ds.ds_reached) ;
+        if not ds.ds_prior_known then
+          print_endline
+            "  • no prior campaign tables in this database, so no test can be shown to have \
+             been deleted and nothing can be re-checked for one. What would have made this \
+             non-zero: one earlier `arch-mutants run` against this index"
+        else if ds.ds_deleted_tests = [] then
+          print_endline
+            "  • 0 deleted test(s): every test a prior campaign attributed a kill to is still \
+             in this index. What would have made this non-zero: a test name recorded in \
+             `mutant_kills` that the current index no longer carries"
+        else (
+          Printf.printf "  • %d deleted test(s): %s\n" (List.length ds.ds_deleted_tests)
+            (String.concat ", " (take maxlist ds.ds_deleted_tests)) ;
+          Printf.printf
+            "  • %d mutant(s) re-selected because a prior campaign attributed them to a \
+             deleted test ALONE (exactly one kill row in that mutant's latest campaign)\n"
+            (List.length ds.ds_recheck) ;
+          if ds.ds_unrecheckable = [] then
+            print_endline
+              "  • 0 UN-RECHECKABLE mutant(s). What would have made this non-zero: a mutant \
+               killed in its latest campaign with NO kill row — an executed set larger than \
+               one, so nothing can say whether the deleted test was the only one catching it"
+          else (
+            Printf.printf
+              "  • %d UN-RECHECKABLE mutant(s): killed in their latest campaign with no \
+               attribution recorded, so nothing can say whether a deleted test was the only \
+               one catching them. Reported, never silently skipped:\n"
+              (List.length ds.ds_unrecheckable) ;
+            List.iter
+              (fun (f, l) -> Printf.printf "      %s:%d\n" f l)
+              (take maxlist ds.ds_unrecheckable))) ;
+        Printf.printf
+          "  • %d of %d catalogued mutant(s) excluded by the scope, %d of them because the \
+           index maps them to no function at all\n"
+          (List.length excluded) catalogued_total excluded_unmapped) ;
     Printf.printf
-      "  • %d mutant site(s) catalogued, %d attempted, %d PENDING (no run row in a \
+      "  • %d mutant site(s) in scope, %d attempted, %d PENDING (no run row in a \
        campaign whose completion is %s)\n"
       catalogued n_attempted pending
       (if complete then "recorded" else "NULL") ;
@@ -1544,7 +2000,7 @@ let main () =
          through into [positional] and the subcommand's database argument becomes whichever
          one came first. *)
       "--plan"; "--engine"; "--engine-version"; "--seed"; "--profile"; "--catalogue";
-      "--report"; "--test-cmd";
+      "--report"; "--test-cmd"; "--diff";
       (* `verdict`'s own value-taking flag, same reason. *)
       "--campaign" ]
   in
@@ -1650,6 +2106,7 @@ let main () =
         ~engine_version:(match opt "--engine-version" "" with "" -> None | v -> Some v)
         ~seed:(match opt "--seed" "" with "" -> None | s -> Some s)
         ~profile_name ~granularity ~from ~catalogue_path ~report_path ~test_cmd
+        ~diff_range:(match opt "--diff" "" with "" -> None | r -> Some r)
         ~repo:(opt "--repo" ".") ~fmt ~maxlist
   | "verdict" ->
       if fmt = "lines" then die "arch-mutants: --format lines is only meaningful for `plan`" ;

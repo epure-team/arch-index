@@ -315,6 +315,62 @@ KILLED/SURVIVED bit that wrapper produces. What it changes is what a human reads
 and any workflow that reads the failure set rather than the exit status: without it that set is a
 lower bound, with no count saying how many cases never played.
 
+## `run --diff <range>` — scoping a campaign to a change
+
+Without `--diff` the selection is the **whole index**, and the report says so. There is no
+implicit default range: a guessed range scopes a campaign the operator never asked for, and its
+output is indistinguishable from a correct one.
+
+With `--diff`, the selected mutant set is the **union** of three rules, each a different kind of
+claim:
+
+1. **Touched functions.** Mutants whose site falls inside a function the range touched. The
+   diff → function mapping is not computed here — `arch-mutants` shells out to
+   `arch-impact --format json` and reads its `touched` array, so the two tools cannot come to
+   disagree about the same diff.
+2. **Modified or added tests.** Mutants of every function reached by a test the range changed.
+   Test **helpers** are included: a touched test-side function is walked *backward* to the cases
+   that traverse it and only then forward, so a change to a shared helper selects everything
+   those cases reach. Walking forward from the helper alone would select nothing at all when the
+   helper is a leaf, which is what an assertion helper usually is.
+3. **Deleted tests.** For a test a prior campaign attributed a kill to and which the current
+   index no longer carries, every mutant that campaign attributed to it **alone** — exactly one
+   `mutant_kills` row in that mutant's latest campaign, naming that test.
+
+**Selection is by FUNCTION, never by file and never by line.** A comment-only change inside a
+production function still selects that function's mutants. That over-selection is deliberate: the
+alternative is parsing intent, and a selection that is too small turns a mutant an excluded test
+would have killed into a survivor — a false accusation against a real test. The report states the
+over-selection rather than presenting the selection as precise.
+
+**The un-recheckable list is the honest half of rule 3.** A mutant killed in its latest campaign
+with **no** kill row had an executed set larger than one and no engine naming the killer, so
+nothing can say whether the deleted test was the only one catching it. Those mutants are reported
+by name — never silently skipped, and never quietly re-run as if the question had been answered.
+
+Mutants selected through a bounded test reach carry the **same** `selection_provenance` rules as
+any other mutant. There is no separate accounting for them: a bound of a bound is still a bound,
+and it is already labelled.
+
+### Exit 3 from `arch-impact` means REFUSED, not failed
+
+If the scoping subprocess exits 3 it declined to answer. `arch-mutants` propagates 3 and writes
+**no campaign row**. It does not fall back to an empty touched-function set: an empty set selects
+nothing and reads as *"nothing to test"*, which is the single worst way to lose the distinction
+between "did not really run" and "ran and found nothing". Any other non-zero exit is a **failure**
+and produces exit 2 — a different code for a different fact.
+
+### What the scope does NOT constrain
+
+The scope narrows the **driver's** accounting and the selection file the wrapper reads; it does
+not narrow the **engine's** own loop, because `run` does not drive mutant generation. An engine
+handed its full catalogue will still call the wrapper for an out-of-scope mutant, and the wrapper
+refuses it (exit 2) rather than running the whole suite. No `mutant_runs` row is written for such
+a mutant — the driver only records outcomes for mutants it selected — but the *engine's own*
+report file will record its refusal in whatever terms that engine uses for a non-zero exit. Pass
+the scoped allowlist (`arch-mutants plan --format lines`) to the engine's generation phase when
+that matters.
+
 ## Input formats
 
 **Generic** (NDJSON, one object per line) — the contract any engine adapter targets:

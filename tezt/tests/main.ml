@@ -43,6 +43,10 @@ let () =
   Mutants.register_verdict_killed_under_top () ;
   Mutants.register_verdict_pending () ;
   Mutants.register_verdict_provenance_follows_run () ;
+  Mutants.register_diff_touched_function () ;
+  Mutants.register_diff_test_helper () ;
+  Mutants.register_diff_deleted_test () ;
+  Mutants.register_diff_impact_refuses () ;
   Decision_lint.register_aliases () ;
   Decision_lint.register_smt_noise () ;
   Decision_lint.register_smt_mute () ;
