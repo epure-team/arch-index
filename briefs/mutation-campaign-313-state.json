@@ -1,8 +1,19 @@
 {
   "task": "mutation-campaign-313",
   "mode": "full",
-  "current_phase": "question",
+  "current_phase": "research",
   "events": [
-    { "phase": "question", "outcome": "COMPLETED", "at": "2026-09-05T12:08:00+02:00", "by": "roster-question" }
+    {
+      "phase": "question",
+      "outcome": "COMPLETED",
+      "at": "2026-09-05T12:08:00+02:00",
+      "by": "roster-question"
+    },
+    {
+      "phase": "research",
+      "outcome": "COMPLETED",
+      "at": "2026-09-05T12:38:00+02:00",
+      "by": "roster-research"
+    }
   ]
 }
