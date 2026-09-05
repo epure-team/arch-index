@@ -59,22 +59,19 @@ let schema_path =
    needs modifying — but it IS a change to the declared schema text, and a
    database created under 1.10 would reject the new value on insert. That is
    exactly what the version is for. The flat schema is deliberately NOT bumped:
-   it carries no CHECK on this column, so nothing about its structure changed. *)
-let current_schema_version = "1.11"
+   it carries no CHECK on this column, so nothing about its structure changed.
 
-   splits on '.' and compares [(major, minor)] as ints, so 1.10 > 1.9. *)
-(* Bumped 1.10 -> 1.12 for [imported_findings] (roadmap 2.3,
+   Bumped 1.11 -> 1.12 for [imported_findings] (roadmap 2.3,
    specs/reporting-and-integration.md FR-010): findings imported from a foreign
    analyser, carrying their soundness class by reference to their producer_run
    rather than by a column of their own.
-   NOT 1.11, and the gap is deliberate rather than an accident: 1.11 is claimed
-   by the module-alias slice (specs/reexport-resolution.md), which is open and
-   ahead of this one. Two branches numbering the same version would produce two
-   incompatible schemas both calling themselves 1.11, and docs/schema.md's own
-   history records why that is worse than a hole — a version LOWER than main's
-   while carrying strictly more schema breaks every >= comparison. So this slice
-   takes 1.12 and DEPENDS on 1.11 landing first; if that branch is dropped, this
-   one renumbers rather than silently filling the gap.
+   The number was contended while this slice was written, and the history is kept
+   because the hazard it exposes has not been fixed. 1.11 was claimed by the
+   module-alias slice, then open; two branches numbering one version would
+   produce two incompatible schemas both calling themselves 1.11, and
+   docs/schema.md records why that is worse than a hole — a version LOWER than
+   main's while carrying strictly more schema breaks every >= comparison. That
+   branch has since landed, so 1.11 is on main and this follows it directly.
 
    AND 1.12 WAS CONTENDED TOO, BY A BRANCH NO GIT COMMAND CAN SEE. A third slice
    had written 1.12 into its working tree an hour before this one, on a branch it
