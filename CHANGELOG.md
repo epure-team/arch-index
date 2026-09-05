@@ -40,6 +40,38 @@
   named both tables even when only one lacked `channel`, and — because `has_col` also answers
   `false` for a table that does not exist — reported an absent `exn_scopes` as a column that
   "predates" schema 1.8. Those are different repairs, and the message now distinguishes them.
+- **An omitted optional argument is no longer recorded as a returned `None`** (roadmap 3.14).
+  `Typecore.option_none` synthesises a `None` constructor for every optional argument a call
+  leaves out, and the walker recorded each as an origin of the `option` error channel — so
+  `f x`, where `f` takes `?title` and `?description`, produced **two** origins claiming the
+  function can return `None`.
+
+  These were not position-less rows needing a position. They were rows about something that never
+  happened. Measured on proto_alpha (`lib_protocol`, 500 `.cmt`, indexed from `origin/main`
+  `8e48ec7` with `--errors-profile=tezos`): **30 526 → 3 344 origins**, every one of the 27 182
+  `line = 0` rows gone and nothing else — the `exception` (1 219) and `tzresult` (763) channels are
+  byte-identical across the change, and `option` falls 28 532 → 1 350.
+
+  **Sound before and after, which is why it survived.** The class only ever *added* `None`
+  origins, so no downstream answer was ever unsound — it was a precision loss that drowned the
+  real signal twenty to one. And it moved no test: the suite was 197/0 before and after, because
+  nothing asserted on the table's shape. A table can lose 89 % of its rows with every assertion
+  still green.
+
+  Guarded on `pos_lnum > 0`, **not** on `loc_ghost`: ghost is also set on legitimately desugared
+  nodes and on ppx output that carry a usable position, so it would drop real origins. A zero line
+  is the compiler saying the node has no source.
+
+  `note_seen_value_path` deliberately stays **outside** the guard. It answers *is this declared
+  path plausible for this corpus* — a question about the config, not about the program — and a
+  synthetic `None` is still a `None` node in the tree. Skipping it would make `--errors-strict`
+  report a correctly-declared channel as never observed on a corpus whose only `None`s are
+  synthetic.
+
+  **Known residual, not closed here:** `exn_origins.line` is `NOT NULL`, so an origin with no
+  position remains indistinguishable from one at line 0. That set is now empty, but the invariant
+  holds by absence of counter-example rather than by the schema. Making the columns nullable is a
+  separate slice with its own version bump.
 
 ### Added
 - **`arch-report <db> --out <dir>` — one query pass, three artifacts** (roadmap 2.2,

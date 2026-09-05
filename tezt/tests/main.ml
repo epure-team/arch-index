@@ -100,6 +100,7 @@ let () =
   Completion_markers.register () ;
   Escaping_origins.register () ;
   Point_free_aliases.register () ;
+  Phantom_option_origins.register () ;
   Module_alias_heads.register () ;
   Report.register () ;
 
