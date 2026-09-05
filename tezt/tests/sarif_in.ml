@@ -177,9 +177,22 @@ let register_failure_states () =
           ignore
             (Db.exec_result c
                "INSERT INTO modules (path, lines) VALUES ('vendor/si_a.ml', 1)")) ;
+      (* Spelled with substr, NOT with LIKE. This is an assertion about how many modules exist,
+         and writing it as [LIKE '%si_a.ml'] would have made it lean on the very wildcard whose
+         mishandling this file exists to catch — [_] unescaped, so the pattern also matches
+         [siXa.ml]. It happens to return 2 either way in THIS database, which is precisely why it
+         survived a round of review: a premise that is accidentally right reads exactly like one
+         that is right on purpose. One inserted decoy and it would have asserted 3 while claiming
+         the uri was ambiguous between two.
+
+         The probe in the underscore test below is the opposite case and deliberately keeps LIKE:
+         there the point IS to show the wildcard misfiring. Vehicle versus subject. *)
       Batch.eq_int b
         ~msg:"premise: two modules now share the basename, so the uri really is ambiguous"
-        (count "SELECT count(*) FROM modules WHERE path LIKE '%si_a.ml'") 2 ;
+        (count
+           "SELECT count(*) FROM modules WHERE path='si_a.ml' \
+            OR substr(path, length(path) - 7) = '/si_a.ml'")
+        2 ;
       let ambiguous =
         write (Temp.file "ambiguous.sarif")
           {|{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"gosec"}},"results":[
@@ -216,22 +229,39 @@ let register_foreign_input_hazards () =
           ignore (Db.exec_result c "INSERT INTO modules (path, lines) VALUES ('vendor/siXa.ml', 1)")) ;
       Batch.eq_int b ~msg:"premise: the decoy is in the index, and the real target is NOT"
         (count "SELECT count(*) FROM modules WHERE path='vendor/siXa.ml'") 1 ;
-      (* PREMISE THAT MAKES THE PROBE DISCRIMINATE: the SQL the old code ran must actually match
-         the decoy here, or this test would pass against the buggy version too. *)
+      (* THE CONTROL for the probe below: a basename whose wildcard expansion matches nothing must
+         come back empty, or a probe returning 2 would prove only that the query matches
+         everything. This asserts ZERO, and its message used to claim the opposite — it read "really
+         does match the decoy" over an assertion of 0, so if it ever fired the diagnostic pointed
+         at the wrong hypothesis. *)
       Batch.eq_int b
-        ~msg:"premise: a LIKE without ESCAPE really does match the decoy — the hazard is live"
+        ~msg:"control: a basename with no decoy matches nothing, so a hit below is not vacuous"
         (count
            "SELECT count(*) FROM modules WHERE 'si_zz.ml' = path OR 'si_zz.ml' LIKE '%/' || path \
             OR path LIKE '%/' || 'si_zz.ml'")
         0 ;
-      (* This premise USED to be spelled with LIKE, in the file whose subject is that LIKE's
-         wildcard — so it asserted through the very mechanism under test. It was not wrong today,
-         because the decoy lives in another database, but it was one fixture edit from measuring
-         itself. Written with substr, like the decoy-only premise below.
+      (* THE PAIR THAT MAKES THIS BLOCK DISCRIMINATE, and the reason both spellings are here.
+         The same uri is counted twice, once through each matcher, and the DELTA is the hazard:
 
-         Two modules end in the segment, and that is what makes the uri ambiguous. *)
+           LIKE   '%/' || 'si_a.ml'  -> 2   the real file AND vendor/siXa.ml, because [_] is a
+                                            single-character wildcard with no ESCAPE
+           substr on a '/'-boundary  -> 1   the real file alone
+
+         A round-2 edit replaced the LIKE half with the substr half and reported it as a fix. It
+         was not: the LIKE here is not an assertion leaning on the buggy mechanism, it is a PROBE
+         whose whole job is to demonstrate that mechanism still misfires on this fixture. Deleting
+         it left the block asserting only that substr is correct — which no longer distinguishes
+         the fixed code from the broken code, because the broken code was never wrong about substr.
+         Restored, with the contrast made explicit so the next reader cannot mistake the probe for
+         the defect. See the ambiguity test above for the premise that genuinely had the defect. *)
       Batch.eq_int b
-        ~msg:"premise: two modules end in the si_a.ml segment, so the uri really is ambiguous"
+        ~msg:"premise: LIKE without ESCAPE matches the decoy TOO — the hazard is live here"
+        (count
+           "SELECT count(*) FROM modules WHERE 'si_a.ml' = path OR 'si_a.ml' LIKE '%/' || path \
+            OR path LIKE '%/' || 'si_a.ml'")
+        2 ;
+      Batch.eq_int b
+        ~msg:"premise: on a real segment boundary only ONE module is si_a.ml — the decoy is not one"
         (count
            "SELECT count(*) FROM modules WHERE path='si_a.ml' \
             OR substr(path, length(path) - 7) = '/si_a.ml'")
