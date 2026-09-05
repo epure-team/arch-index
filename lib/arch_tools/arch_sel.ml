@@ -45,10 +45,14 @@ let structural = [ File; Fn; Module ]
     widen it.
 
     Deliberately a separate name rather than an addition to [structural], which
-    [arch-mutants --tests] still passes: that flag's population is TEST ROOTS, not a cone, so
-    widening [structural] in place would have handed it a kind by omission — the "silent
-    reinterpretation by omission" the #73 review found in [Dep]. A kind is granted, never
-    inherited.
+    [arch-mutants --tests] still passes. The reason is SEMANTIC, not structural, and an earlier
+    revision of this comment got that wrong: [--tests] does build a cone —
+    [arch_mutants.ml:47] takes [Arch_graph.closure test_keys g.fwd] — so "its population is not
+    a cone" was false. What is true is that its roots are meant to be the TEST SUITE, and
+    "reachable from the API surface" is a different set: admitting the kind there would silently
+    change what the mutation plan measures, rather than make it unanswerable. Widening
+    [structural] in place would have handed it that by omission — the "silent reinterpretation
+    by omission" the #73 review found in [Dep]. A kind is granted, never inherited.
 
     (An earlier revision of this comment said [structural] is "the list [arch-coverage] and
     [arch-mutants] pass, and neither ranges over a call cone". Both halves stopped being true
@@ -93,7 +97,7 @@ let parse ~allow tok =
                (String.concat ", " (List.map kind_name allow))
                (match c with
                 | Ext -> "`ext:` matches external leaves, which have no body, no outgoing edge and no file, so it is answerable only as the target of `forbid reach`. Here it would select keys that cannot serve this position."
-                | Exported -> "`exported:` matches FUNCTIONS on the API surface, so it is answerable where a cone STARTS from them: the source of `forbid reach`, and `arch-coverage --roots`. Here it would select keys this position cannot serve."
+                | Exported -> "`exported:` matches FUNCTIONS on the API surface. It is granted at the source of `forbid reach` and at `arch-coverage --roots`, and nowhere else — every position grants selector kinds deliberately."
                 | File | Fn | Module -> "This position reads a different population."))
       | Some c -> Ok (c, pat))
 
