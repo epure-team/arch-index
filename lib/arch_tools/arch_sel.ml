@@ -67,6 +67,19 @@ let cone_source = [ File; Fn; Module; Exported ]
     leaf has no body, hence no outgoing edge and no file, so everywhere else it selects keys that
     cannot serve that position, and the two failure modes are not the same failure:
 
+    {b [Exported]'s arm deliberately enumerates and explains nothing, and that is not
+    laziness.} [Ext]'s clauses are earned by a STRUCTURAL property of its keys — no body, no
+    outgoing edge, no file — which is what entitles it to say "keys that cannot serve this
+    position". Exported nodes are ordinary nodes with bodies, edges and files, so there is no
+    such property to carry, and three attempts to write one produced three claims that measure
+    FALSE: that the refusing position does not range over a cone ([arch-coverage --roots] prints
+    "API cone"); that an empty match there reads as a proof (a [reach] target matching nothing
+    reports [1 vacuous], exit 1); that it would "select keys this position cannot serve"
+    ([forbid dep] selects no keys at all — its evaluator never calls {!select}, it globs the
+    pattern against [module_deps] rows — and admitting the kind there returns [1 proved],
+    exit 0). Any "because" here must discriminate [forbid effect], which IS a cone start and is
+    refused anyway. A list of the granted positions has nothing in it to be wrong about.
+
     - as a [reach] SOURCE, or (in principle) an [effect] cone, the selector still matches
       something real — the leaf itself — so no vacuity check fires. The cone then starts at a
       node with no outgoing edges, so it can never reach anything, and the rule reports a PASS it
@@ -97,7 +110,7 @@ let parse ~allow tok =
                (String.concat ", " (List.map kind_name allow))
                (match c with
                 | Ext -> "`ext:` matches external leaves, which have no body, no outgoing edge and no file, so it is answerable only as the target of `forbid reach`. Here it would select keys that cannot serve this position."
-                | Exported -> "`exported:` matches FUNCTIONS on the API surface. It is granted at the source of `forbid reach` and at `arch-coverage --roots`, and nowhere else — every position grants selector kinds deliberately."
+                | Exported -> "`exported:` is granted at exactly two positions: the SOURCE of `forbid reach`, and `arch-coverage --roots`. It is not granted here. Widening a position is a deliberate change with its own test."
                 | File | Fn | Module -> "This position reads a different population."))
       | Some c -> Ok (c, pat))
 

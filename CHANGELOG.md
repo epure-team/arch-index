@@ -96,7 +96,8 @@
 
 - **`exported:<glob>` — a selector for the API surface, so `forbid reach` has a `from` that can
   be written at repository scale.** `fn:` restricted to nodes flagged exported; valid only as the
-  SOURCE of `forbid reach`. `forbid reach from exported:** to fn:Vuln.parse` is now expressible,
+  SOURCE of `forbid reach` and at `arch-coverage --roots`. `forbid reach from exported:** to
+  fn:Vuln.parse` is now expressible,
   which is the shape a reachability gate is for — the question vulnerability triage asks of a CVE
   symbol, and a blast-radius review asks of a refactor.
 
