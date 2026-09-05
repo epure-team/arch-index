@@ -1,3 +1,96 @@
 (library
  (name arch_tezt)
  (libraries tezt sqlite3 unix yojson))
+
+; cli_paths.ml exists for its `deps`, not for its contents.
+;
+; The problem it closes: on a `(test)` stanza, `deps` attach to the `runtest`
+; alias, so `dune build tezt/tests/main.exe` builds main.exe without building
+; the CLIs the suite drives. Measured in this worktree (2026-09-06, base 6930d3c): after
+; `dune clean`, `dune build --root . tezt/tests/main.exe` left
+; `_build/default/bin` with 0 `.exe` files.
+;
+; A `(rule)` has no such split -- its `deps` are ordinary build-graph edges.
+; This rule sits in the library rather than in tezt/tests, so the edges are
+; carried by `arch_tezt` itself rather than by one test stanza. Measured with
+; the same clean-then-scoped-build procedure after adding it: 19 of the 19
+; `.exe` targets listed below present.
+;
+; THE COST, measured on clean trees: `arch_tezt.ml` references the generated
+; module, so `cli_paths.ml` is needed to COMPILE this library, not only to link
+; `main.exe`. Measured, clean tree each side: `dune build --root . @tezt/lib/check`
+; leaves 0 `.exe` under `_build/default/bin` and `_build/default/poc` at
+; merge-base and 19 here. Opening this
+; library in an editor now builds every CLI listed below. Accepted rather than fixed: moving the rule to a leaf library that
+; only `main.exe` depends on would keep the edges and drop the cost, and is a
+; direction, not something verified here.
+;
+; The generated module holds a constant, not paths. Three forms were possible:
+;   - `%{exe:...}` as it expands: a BUILD-CONTEXT-RELATIVE path
+;     (`../../bin/arch_query/arch_query.exe`). Byte-identical in every checkout
+;     of one commit, so it carries no cache hazard, and it would resolve from
+;     the suite's cwd. Not taken, and no measurement argues against it: the
+;     runtime `locate` it would bypass is also what reports a missing binary as
+;     a build error naming the search (issue #77 / PR #78), and keeping one
+;     resolution path was preferred to having two.
+;   - absolute paths. `%{exe:...}` does not produce these; it takes a
+;     `realpath`/`pwd` inside the action, and THAT is what makes the output
+;     checkout-dependent while the cache key -- action text plus dep digests --
+;     stays checkout-independent. This machine has a 10 GB `~/.cache/dune`.
+;     Rejected on that reasoning, not on a measurement: no cross-checkout cache
+;     hit was demonstrated, and the runs above had DUNE_CACHE=disabled.
+;   - a constant. Chosen; the rule is wanted for its `deps`.
+;
+; FOUND-VS-NAMED, over every `bin/`, `poc/` and `scripts/` path reachable from
+; `tezt/` (2026-09-06, base 6930d3c). Two dune executables exist that are not listed below:
+;   - `bin/arch_sidecar_load/main.exe` -- no reference under `tezt/`.
+;   - `bin/arch_callgraph_rust_merge/arch_callgraph_rust_merge.exe` -- reached
+;     by `tezt/tests/coverage_matrix.ml:212-213`, which composes the path from
+;     `repo_root ()` rather than writing it as one literal, which is why it was
+;     missed when the two lists were first compared. That test fabricates a
+;     `#!/bin/sh\nexit 0` stub when the file is absent, so the assertion
+;     exercised a real binary or a stub depending on prior build state. Now
+;     listed below.
+; `bin/arch_coverage_matrix/arch_coverage_matrix.exe` was the first gap found:
+; resolved by `arch_coverage_matrix ()`, absent from `tezt/tests/dune`'s `deps`.
+; Scope of that one: from a COLD tree at merge-base it failed loudly, naming the
+; absent exe (measured in review, not reproduced here). A silently stale binary
+; needs a WARM tree whose `.exe` predates a source change.
+;
+; NOT closed by this rule, recorded rather than fixed:
+;   - `callgraph-rust/target/release/arch-callgraph-rust` and
+;     `bin/arch-callgraph-go` are built by cargo and go, not by dune, so they
+;     cannot be `deps` here. `coverage_matrix.ml` stubs the first of these too.
+;   - Measured after a clean scoped build: `effects-schema-migration.sql`,
+;     the `arch-impact` wrapper, `scripts/pcc/pcc-index`, `callgraph-go/main.go`
+;     and `docs/curation-workflow.md` are absent from `_build/default` and
+;     present in the source tree, so `locate` resolves them by climbing out of
+;     `_build/default`, which holds no `dune-project`. That climb is
+;     load-bearing for all five. `architecture-schema.sql` is present in
+;     `_build/default` after the same build and does not rely on it.
+(rule
+ (target cli_paths.ml)
+ (deps
+  %{exe:../../bin/arch_body_compare/arch_body_compare.exe}
+  %{exe:../../bin/arch_callgraph_ocaml/arch_callgraph_ocaml.exe}
+  %{exe:../../bin/arch_callgraph_rust_merge/arch_callgraph_rust_merge.exe}
+  %{exe:../../bin/arch_coverage/arch_coverage.exe}
+  %{exe:../../bin/arch_coverage_load/arch_coverage_load.exe}
+  %{exe:../../bin/arch_coverage_matrix/arch_coverage_matrix.exe}
+  %{exe:../../bin/arch_curate/arch_curate.exe}
+  %{exe:../../bin/arch_effects_load/main.exe}
+  %{exe:../../bin/arch_effects_ocaml/arch_effects_ocaml.exe}
+  %{exe:../../bin/arch_impact/arch_impact.exe}
+  %{exe:../../bin/arch_index_cli/arch_index_cli.exe}
+  %{exe:../../bin/arch_load/arch_load.exe}
+  %{exe:../../bin/arch_mutants/arch_mutants.exe}
+  %{exe:../../bin/arch_query/arch_query.exe}
+  %{exe:../../bin/arch_report/arch_report.exe}
+  %{exe:../../bin/arch_rules/arch_rules.exe}
+  %{exe:../../bin/arch_sarif_load/arch_sarif_load.exe}
+  %{exe:../../bin/arch_serve/arch_serve.exe}
+  %{exe:../../poc/decision-lint/bin/decision_lint.exe})
+ (action
+  (with-stdout-to
+   %{target}
+   (echo "(* Generated by tezt/lib/dune. See the rule's comment. *)\nlet built = true\n"))))

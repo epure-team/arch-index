@@ -9,6 +9,21 @@
 #   build   `dune build test/<t>.exe` does NOT rebuild a test's
 #           (deps %{exe:...}) dependency, so the test ran a STALE binary and
 #           the mutant survived for a reason that had nothing to do with the test
+#
+#           PARTLY SUPERSEDED (2026-09-06, base 6930d3c). Three facts, because
+#           the change is narrower than the sentence above:
+#             - dune's `(test)` semantics are unchanged: `deps` still attach to
+#               the runtest alias, not to building the .exe as a file target.
+#             - For tezt/tests/main.exe the hazard is closed by tezt/lib/dune's
+#               `cli_paths.ml` rule: the CLIs are deps of COMPILING arch_tezt,
+#               which main.exe links. Measured after `dune clean`, a scoped
+#               `dune build --root . tezt/tests/main.exe` leaves 19 .exe under
+#               _build/default/bin and _build/default/poc; before the rule, 0.
+#             - For test/<t>.exe NOTHING changed. No stanza in test/dune links
+#               arch_tezt, and none declares `%{exe:...}` deps today, so there
+#               is nothing there for the rule to pull -- but if such a dep were
+#               added, the semantics in the line above would apply again.
+#           See docs/mutation-testing.md, "Scoping a run to one test".
 #   run     an assertion checked a sentinel appeared *somewhere*; a second site
 #           produced it
 #   restore left to hand, so a failed run could leave the tree mutated
