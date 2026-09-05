@@ -282,3 +282,80 @@ independently written documents do not share a commit second. That is the third 
 task to return a plausible answer while measuring something adjacent to the question — after a
 registration count blind to suffixed forms, and a whole-file deletion check blind to deletions
 inside surviving files. **A value too uniform for its population is the signature.**
+
+---
+
+# Round 3 — dispatched from the finding list, not from a theme
+
+**Date:** 2026-09-06T01:28:11+02:00
+**Status: IN PROGRESS**  ·  Base `6930d3c`, HEAD `3d37021`.
+
+Round 2 returned NO-GO on 33 open findings. **This section is generated from
+`briefs/mutation-campaign-313-review.json`, not written from a theme** — that is the whole
+correction. Round 2's third block was scoped as "the remaining MEDIUMs", enumerated seven of
+them, and silently skipped three HIGHs; nothing compared the dispatch to its source list.
+`checks/dispatch-covers-open-findings.js` now refuses a COMPLETED whose brief leaves any open
+finding unnamed, at every severity.
+
+**Four findings appear twice below, and the duplication is real rather than an error in this
+list.** The outcome join is cited at `:1393` by round 1 and `:1726` by round 2; the zero-narrowed
+`--diff` at `:1456` and `:1836`; the arch-impact boundary at `:938` and `:1168`; the tree
+boundary at `:967` and `:984`. They are the same four defects, re-found after the line numbers
+moved, and the normalizer did not merge them because it fingerprints on `path:line:category`. A
+fingerprint keyed on a coordinate cannot recognise the same defect across a rebase — which is
+this task's own recurring class, in the identity function of its finding ledger.
+
+## Group A — the guards and the ratchet
+
+| Severity | Finding | Summary |
+|---|---|---|
+| HIGH | `scripts/check-status-provenance.sh:161:correctness` | THE REPAIRED GUARD REINTRODUCED ITS OWN VACUITY IN A NEW FORM. The replacement scanner has no end-of-file guard for an unterminated string or unclosed |
+| HIGH | `scripts/check-mutant-key.sh:84:spec` | CHECK-9 / AC-19 IS VACUOUS: the script still writes the function_id column round 2 DELETED, so sqlite3 aborts each INSERT with 'no column named functi |
+| HIGH | `checks/no-score-scans-sql-strings.sh:1:correctness` | THE NINE RATCHET CHECKS ARE NOT IN A FORM THE CONVERGENCE GATE CAN EXECUTE. They are bash scripts; the gate invokes a linked check as `node <path>`, w |
+| LOW | `scripts/check-mutaml-integration.sh:1:spec` | CHECK-8's exit-3 arm is reachable only while the real engine is invisible: with the installed mutaml 0.3 actually named, the script exits 2 (harness e |
+| INFO | `scripts/check-mutaml-integration.sh:100:spec` | CHECK-8's UNVERIFIED is a ONE-FLAG FIX, not a fixture limitation. mutaml-runner 0.3 resolves --muts relative to --build-context, which defaults to _bu |
+
+## Group B — the driver and the wrapper
+
+| Severity | Finding | Summary |
+|---|---|---|
+| CRITICAL | `bin/arch_mutants/arch_mutants.ml:1726:architecture` | ROUND-1 FINDING NOT CLOSED — never dispatched. Outcomes are still joined to catalogued sites by (basename, line) alone, consuming duplicates in list o |
+| HIGH | `bin/arch_mutants/arch_mutants.ml:1393:architecture` | Engine outcomes are joined to catalogued mutant sites by (basename, line) only, discarding the columns and replacement text the mutants UNIQUE key is  |
+| HIGH | `bin/arch_mutants/arch_mutants.ml:1456:architecture` | A --diff scope that narrows the catalogue to zero mutants produces a COMPLETED campaign with zero run rows, which verdict publishes as all-zero counts |
+| HIGH | `bin/arch_mutants/arch_mutants.ml:938:architecture` | The process boundary to arch-impact refuses only a MISSING touched key; a present-but-empty array, or entries whose name field is renamed, silently yi |
+| HIGH | `bin/arch_mutants/arch_mutants.ml:588:correctness` | A survivor that cannot be mapped to an indexed function still publishes a bare SURVIVED with no verdict and no provenance, under top_bounded. The roun |
+| HIGH | `bin/arch_mutants/arch_mutants.ml:984:correctness` | guard_inside_tree does not fire when the inner checkout is not itself a git repository: git rev-parse then returns the ENCLOSING repo's root, the boun |
+| HIGH | `bin/arch_mutants/arch_mutants.ml:1168:architecture` | ROUND-1 FINDING NOT CLOSED — never dispatched. The arch-impact boundary still refuses only a MISSING or non-list touched key; a present-but-empty arra |
+| HIGH | `bin/arch_mutants/arch_mutants.ml:1836:architecture` | ROUND-1 FINDING NOT CLOSED — never dispatched. A --diff narrowing to zero still produces a COMPLETED all-zero campaign. report_entries_unmatched was 2 |
+| HIGH | `scripts/mutaml-wrapper.sh:120:architecture` | Reserving 99 in a third-party tool's exit-code space is unsound, and the driver already holds the discriminator it needs. The wrapper forwards the tes |
+| HIGH | `bin/arch_mutants/arch_mutants.ml:967:spec` | FR-030's boundary is the enclosing GIT REPOSITORY, not the working tree. A checkout that is not itself a repo but is nested inside one — a tarball cop |
+| MEDIUM | `bin/arch_mutants/arch_mutants.ml:1614:ux` | The shell-injection allowlist excludes the apostrophe, an ordinary OCaml identifier character (aux', loop', test_foo'). One such name anywhere in the  |
+| MEDIUM | `mutants-schema-migration.sql:19:architecture` | The deletion of producer_run_id is the wrong half of a correct probe. Dropping only the REFERENCES clause and keeping a plain INTEGER works on both sc |
+| MEDIUM | `lib/arch_index/arch_index_db.ml:103:architecture` | Schema version 1.13 still gates nothing it claims: it is stamped by the main-schema indexer, whose architecture-schema.sql creates none of the four mu |
+| MEDIUM | `bin/arch_mutants/arch_mutants.ml:478:architecture` | report's widened signature bought a shared INGREDIENT, not a shared RULE: the three-arm provenance decision is a verbatim second copy — the duplicate- |
+| MEDIUM | `bin/arch_mutants/arch_mutants.ml:1002:architecture` | The tree-boundary fallback hard-refuses an ordinary non-git source tree and prints a diagnosis false in that case: outside a repository the boundary b |
+| MEDIUM | `bin/arch_mutants/arch_mutants.ml:1568:spec` | FR-003 — MUST NOT invoke the engine with a SUBSET of the intended set under any circumstances — has no acceptance criterion, no CHECK-N, and no code t |
+| LOW | `bin/arch_mutants/arch_mutants.ml:599:ux` | report's headline count excludes unmapped survivors from every bucket, so a report containing one SURVIVED mutant prints '1 mutant(s) in the report: 0 |
+| LOW | `bin/arch_mutants/arch_mutants.ml:1350:architecture` | same_site, used for the --diff deleted-test recheck, carries the same basename-plus-line identity as the outcome join, so the recheck set inherits the |
+
+## Group C — the spec, its traceability, and CI
+
+| Severity | Finding | Summary |
+|---|---|---|
+| HIGH | `.github/workflows/ci.yml:105:architecture` | The nine ratchet checks are wired into nothing. CI runs only dune build and dune test; no dune rule, no workflow step and no script references checks/ |
+| MEDIUM | `specs/mutation-campaign-313.md:335:spec` | CHECK-15's rewritten row retracts one false claim and installs another: it says the guard falls back to the working directory 'where there is no repos |
+| MEDIUM | `specs/mutation-campaign-313.md:363:spec` | The claims block covers two thirds of the spec and carries four dangling references. Absent: FR-027..FR-034, AC-21..AC-28, CHECK-11..CHECK-19. Danglin |
+| MEDIUM | `specs/mutation-campaign-313.md:22:spec` | The Clarifications table states DEFERRED FR-021 behaviour in the present indicative with no marker, in a status: live spec, and that table PRECEDES ev |
+| MEDIUM | `specs/mutation-campaign-313.md:167:spec` | FR-002 is asserted unqualified while the implementer's own out-of-scope note records that it does not hold as written: executed_tests records what the |
+| LOW | `specs/mutation-campaign-313.md:212:spec` | FR-026 is correctly NOT deferred — the prohibition holds — but it is asserted with no acceptance criterion and no CHECK-N, precisely the structural ga |
+| LOW | `specs/mutation-campaign-313.md:322:spec` | Nine CHECK rows prescribe `dune test --force` as their runnable command — the command this branch's own brief documents as aborting at the first failu |
+| LOW | `specs/mutation-campaign-313.md:4:spec` | The front matter declares status: live while the claims header declares spec_lifecycle draft — the human-readable and machine-readable answers to the  |
+| LOW | `specs/mutation-campaign-313.md:288:spec` | Five acceptance criteria have no CHECK row at all — AC-4, AC-5, AC-6 (the whole of US-2's happy path), AC-23 and AC-26. They ARE asserted in tezt case |
+| LOW | `specs/mutation-campaign-313.md:180:spec` | FR-012 cites arch_mutants.ml:122 for the proof binding; it is now at :177. The row self-caveats that a line number moves under a rebase and then suppl |
+
+## Deferred to a later slice
+
+Nothing is deferred yet. When a finding is deferred it is named under this heading with its
+reason, and `dispatch-covers-open-findings.js` counts it as DEFERRED rather than DISPATCHED —
+the state that could not be written down before round 2, and the reason three findings could not
+be told apart from an oversight.
