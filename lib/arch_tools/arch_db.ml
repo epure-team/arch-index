@@ -97,7 +97,53 @@ let string_of_cell = function
 module Ty = Caqti_type.Std
 open Caqti_request.Infix
 
-let ok = function Ok v -> v | Error e -> broken "%s" (Caqti_error.show e)
+(* [Sqlite3.prepare: no such column: s.channel] / [no such table: exn_origins] are the
+   driver's verdict on a query that names something an OLDER index simply does not have
+   yet — every consumer that skips a [has_col]/[has_table] guard and gets it wrong hits
+   this. Left as {!Broken} (exit 2) it is indistinguishable from a locked file or a
+   corrupt database: a crash, not an answer. Matching it here converts EVERY such site —
+   including the ones no guard has been written for yet — into a {!Refused} (exit 3)
+   that names the missing column/table and says the index predates it, which is a verdict
+   the CI gates already know how to report. This does not replace a targeted [has_col]
+   guard (which can give a better-scoped message and let the caller answer something else
+   instead of refusing outright) — it is the backstop for what a guard was not written
+   for. *)
+let missing_schema_ref msg =
+  let find_substring ~needle hay =
+    let nlen = String.length needle and hlen = String.length hay in
+    let rec loop i = if i + nlen > hlen then None else if String.sub hay i nlen = needle then Some i else loop (i + 1) in
+    loop 0
+  in
+  let token_after prefix =
+    match find_substring ~needle:prefix msg with
+    | None -> None
+    | Some idx ->
+        let start = idx + String.length prefix in
+        let rest = String.sub msg start (String.length msg - start) in
+        let is_stop c = c = '"' || c = '\'' || c = ' ' || c = ')' || c = '\n' in
+        let len = String.length rest in
+        let j = ref 0 in
+        while !j < len && not (is_stop rest.[!j]) do
+          incr j
+        done ;
+        Some (String.sub rest 0 !j)
+  in
+  (* sqlite qualifies a column with its table alias ("s.channel"); report the bare name. *)
+  let bare_name s = match String.rindex_opt s '.' with Some i -> String.sub s (i + 1) (String.length s - i - 1) | None -> s in
+  match token_after "no such column: " with
+  | Some col -> Some (Printf.sprintf "column %s" (bare_name col))
+  | None -> ( match token_after "no such table: " with Some tbl -> Some (Printf.sprintf "table %s" tbl) | None -> None)
+
+let ok = function
+  | Ok v -> v
+  | Error e -> (
+      let msg = Caqti_error.show e in
+      match missing_schema_ref msg with
+      | Some what ->
+          refuse
+            "this index predates %s and should be re-indexed with a newer producer (%s)"
+            what msg
+      | None -> broken "%s" msg)
 
 let collect t req p =
   let module Db = (val t.conn : C.CONNECTION) in
