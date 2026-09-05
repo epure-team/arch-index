@@ -268,12 +268,62 @@ let dep_allow = Arch_sel.[ Module ]
    from here, and `ext:` names a leaf with no body, hence no origin to hold. *)
 let origin_sel_allow = Arch_sel.[ File; Fn ]
 
-(* The `form` vocabulary is exn_origins.form's CHECK constraint, verbatim. Kept as data rather
-   than accepted as free text: a typo like `form:asserts` would otherwise select nothing and the
-   rule would report a PASS it never earned — the same vacuous green this tool exists to refuse. *)
-let origin_forms =
+(* The `form` vocabulary is refused when unknown, because a typo like `form:asserts` would select
+   nothing and the rule would report a PASS it never earned.
+
+   It is READ FROM THE DATABASE'S OWN CHECK CONSTRAINT, not held as a literal here. An earlier
+   revision hardcoded the eleven members, which is the quieter cousin of the missing-column bug:
+   {b a column added to a table crashes loudly; a VALUE added to an existing column's vocabulary is
+   dropped in silence.} `top_reason` gained 'ambiguous_unit' at schema 1.9 and `form` gained
+   'inferred_bind' at 1.8 — a consumer holding a closed list from before either would refuse a
+   legal form with a message insisting it is not one, and no gate anywhere would notice, because
+   `has_col` and a capability probe both see a column that is present and a value they never look
+   at.
+
+   So the rule is one step further than the column guard: a version is what a database CLAIMS, a
+   column is what it HAS, and {b a vocabulary is what the schema DECLARES} — never what a consumer
+   remembers. [origin_forms_fallback] is used only when the DDL cannot be read at all. *)
+let origin_forms_fallback =
   [ "raise"; "reraise"; "unknown"; "failwith"; "invalid_arg"; "assert"; "partial_match";
     "compare"; "division"; "index"; "inferred_bind" ]
+
+let origin_forms_of_db t =
+  match
+    Arch_db.rows t ~params_ty:Arch_db.Ty.unit ~shape:Arch_db.Rows.t1 ~to_cells:Arch_db.Rows.c1
+      "SELECT sql FROM sqlite_master WHERE type='table' AND name='exn_origins'" ()
+    |> List.filter_map (function [ c ] -> Some (Arch_db.string_of_cell c) | _ -> None)
+  with
+  | [ ddl ] -> (
+      (* Extract the members of `CHECK(form IN ('a','b',...))` — the quoted words between the
+         marker and the first closing paren after it. Falls back rather than guessing if the
+         constraint is absent or spelled differently: a vocabulary we cannot read is not a
+         vocabulary we may invent. *)
+      match String.index_opt ddl 'f' with
+      | _ -> (
+          let marker = "CHECK(form IN (" in
+          let rec find i =
+            if i + String.length marker > String.length ddl then None
+            else if String.sub ddl i (String.length marker) = marker then Some (i + String.length marker)
+            else find (i + 1)
+          in
+          match find 0 with
+          | None -> origin_forms_fallback
+          | Some start -> (
+              match String.index_from_opt ddl start ')' with
+              | None -> origin_forms_fallback
+              | Some stop ->
+                  let inner = String.sub ddl start (stop - start) in
+                  let members =
+                    String.split_on_char ',' inner
+                    |> List.filter_map (fun tok ->
+                           let tok = String.trim tok in
+                           let n = String.length tok in
+                           if n >= 2 && tok.[0] = '\'' && tok.[n - 1] = '\'' then
+                             Some (String.sub tok 1 (n - 2))
+                           else None)
+                  in
+                  if members = [] then origin_forms_fallback else members)))
+  | _ -> origin_forms_fallback
 
 (* And [channel:] is closed for exactly the same reason, which had to be pointed
    out to me: I refused an unknown [form:] on the ground that it "would select
@@ -402,17 +452,13 @@ let parse_rules path =
                        String.split_on_char ',' (strip_prefix "form:" f)
                        |> List.filter (fun x -> x <> "")
                      in
-                     (* An unknown form selects nothing, so it would make the rule PASS while
-                        policing an empty population. Refused at PARSE time, where the author is
-                        looking, rather than surfacing later as a green. *)
-                     List.iter
-                       (fun x ->
-                         if not (List.mem x origin_forms) then
-                           die
-                             (Printf.sprintf
-                                "arch-rules: line %d: unknown origin form %S. Known forms: %s"
-                                !lineno x (String.concat ", " origin_forms)))
-                       forms ;
+                     (* An unknown form is refused at EVALUATION time, not here, because the
+                        vocabulary is read from the database's own CHECK constraint and no
+                        database is open yet. An earlier revision validated here against a
+                        hardcoded list, which is what made the list drift-prone in the first
+                        place — see [origin_forms_of_db].
+
+                        An EMPTY list is refused here, because that needs no vocabulary. *)
                      if forms = [] then
                        die
                          (Printf.sprintf
@@ -830,6 +876,22 @@ let eval (t : Arch_db.t) (g : Arch_graph.t) ~sound r =
             Some
               "exn_origins exists but holds no rows — the exception pass produced nothing, so \
                this rule was never evaluated against anything." }
+      else if
+        List.exists (fun f -> not (List.mem f (origin_forms_of_db t))) forms
+      then
+        (* Same argument as the channel refusal below, and the same place, because
+           both vocabularies live in the database rather than in this file. A form
+           the index cannot contain selects nothing, so every downstream verdict
+           would be a PASS earned by policing an empty population. *)
+        die
+          (Printf.sprintf
+             "arch-rules: rule %S names origin form(s) %s that this index's schema does not \
+              declare. Forms declared by this database: %s. A form that selects nothing would \
+              make this rule report a PASS it never earned."
+             r.name
+             (String.concat ", "
+                (List.filter (fun f -> not (List.mem f (origin_forms_of_db t))) forms))
+             (String.concat ", " (origin_forms_of_db t)))
       else if not (List.mem channel (channels_in_index t)) then
         (* Refused, not reported as clean. An unknown channel selects nothing, so
            every downstream verdict would be a PASS earned by policing an empty

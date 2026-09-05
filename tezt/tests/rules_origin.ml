@@ -402,7 +402,74 @@ let register_refusals () =
       in
       Batch.eq_int b ~msg:"an allow-file entry missing its count aborts" code_four 2 ;
       Batch.check b ~msg:"and says how many fields it expected"
-        (Arch_tezt.contains ~needle:"five" out_four)) ;
+        (Arch_tezt.contains ~needle:"five" out_four) ;
+      (* THE FORM VOCABULARY COMES FROM THE DATABASE'S OWN CHECK, not from a
+         literal in arch_rules.ml, and this is the only probe that can tell the
+         two apart: it widens the constraint to declare a form the fallback list
+         does NOT contain, so a refusal here means the vocabulary is hardcoded.
+
+         Why it matters — the quieter cousin of the missing-column bug: a column
+         added to a table CRASHES; a VALUE added to an existing column's
+         vocabulary is dropped in SILENCE. [form] gained 'inferred_bind' at
+         schema 1.8 and [top_reason] gained 'ambiguous_unit' at 1.9. A consumer
+         holding a list from before either would refuse a legal member while
+         insisting it is not one, and neither [has_col] nor a capability probe
+         would see it: the column is present, the value is the thing they never
+         look at.
+
+         Written LAST in this batch, and IN PLACE, for the reason
+         point_free_aliases gives about its own constraint probe: it mutates the
+         database, so anything reading rows afterwards would read a half-updated
+         one. An earlier revision copied the index first; the copy silently did
+         not happen, and the DDL below CREATED the table on the empty file and
+         renamed it, so the schema assertion passed against a database the probe
+         had built from nothing. Hence the row-count premise. *)
+      Db.with_db_rw db (fun c ->
+          List.iter
+            (fun sql -> ignore (Db.exec_result c sql))
+            [
+              "CREATE TABLE eo_wide (id INTEGER PRIMARY KEY AUTOINCREMENT, function_id INTEGER \
+               NOT NULL, scope_id INTEGER, form TEXT NOT NULL CHECK(form IN \
+               ('raise','reraise','unknown','failwith','invalid_arg','assert','partial_match',\
+               'compare','division','index','inferred_bind','freshly_declared')), exn_path TEXT, \
+               escapes BOOLEAN NOT NULL DEFAULT 1, line INTEGER NOT NULL, col INTEGER NOT NULL, \
+               channel TEXT NOT NULL DEFAULT 'exception')";
+              "INSERT INTO eo_wide SELECT id, function_id, scope_id, form, exn_path, escapes, \
+               line, col, channel FROM exn_origins";
+              "DROP TABLE exn_origins";
+              "ALTER TABLE eo_wide RENAME TO exn_origins";
+            ]) ;
+      Batch.eq_int b
+        ~msg:"premise: the widened schema really declares the new form"
+        (Db.with_db db (fun c ->
+             Db.int c
+               "SELECT count(*) FROM sqlite_master WHERE name='exn_origins' \
+                AND sql LIKE '%freshly_declared%'"))
+        1 ;
+      Batch.check b
+        ~msg:"premise: and it is still a real index, not an empty file the DDL created"
+        (Db.with_db db (fun c -> Db.int c "SELECT count(*) FROM exn_origins") > 0) ;
+      let code_w, out_w =
+        run "ror_widened"
+          (Printf.sprintf
+             "forbid origin from file:**/ro_main.ml form:freshly_declared allow-file:%s" ok_allow)
+      in
+      Batch.check b
+        ~msg:
+          ("a form the DATABASE declares but this binary's fallback list does not is ACCEPTED \
+            — the vocabulary is read, not remembered (exit " ^ string_of_int code_w
+         ^ ", output:\n" ^ out_w ^ ")")
+        (code_w <> 2) ;
+      (* The control: on that same widened schema a genuine typo is still
+         refused. Without it, "accepted" would also be satisfied by a build that
+         had stopped checking forms altogether. *)
+      let code_wt, _ =
+        run "ror_widened_typo"
+          (Printf.sprintf
+             "forbid origin from file:**/ro_main.ml form:asserts allow-file:%s" ok_allow)
+      in
+      Batch.eq_int b
+        ~msg:"and a real typo is still refused on that same widened schema" code_wt 2) ;
   Lwt.return_unit
 
 (* NOT_COMPUTED must not read as PASS, and the two ways of having no origins must
