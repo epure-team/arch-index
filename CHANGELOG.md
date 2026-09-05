@@ -112,38 +112,58 @@
   FLAT spells it `exported`, and `Arch_graph` reads both into `node.exported`, so the selector
   goes through the node and never through SQL.
 
-  **Granted per position, never inherited.** It is absent from `Arch_sel.structural` — the list
-  `arch-coverage` and `arch-mutants` pass — and lives in a new `Arch_sel.cone_source` that only
-  `forbid reach`'s source uses. The hazard is the mirror of `ext:`'s, which `Arch_sel` documents
-  against itself: a selector answerable in one position, accepted in another, matches a
-  population that position never ranges over, comes back empty, and the empty result is reported
-  as a **proof rather than as vacuity**. That false green was measured on this repository before
-  (`forbid dep from module:src/** to file:bar` printed "1 proved"), so `forbid dep` refuses
-  `exported:` at parse time with exit 2 and a message naming the POSITION rather than claiming
-  the kind is unknown.
+  **Granted per position, never inherited.** It is absent from `Arch_sel.structural` and lives in
+  a new `Arch_sel.cone_source`, granted at `forbid reach`'s source and at `arch-coverage --roots`.
+  Every other position refuses it at parse time with exit 2 and a message naming the POSITION
+  rather than claiming the kind is unknown.
 
-  **Accepted in exactly one position, and that is pinned across all seven the parser has.**
-  A review noted the first evidence covered one direction only. Measured: `exported:` is taken
-  at `forbid reach`'s source and refused — exit 2, naming the position — at `reach`'s target,
-  both `dep` operands, `exported outside`, `effect`'s source and `origin`'s source. Each row
-  carries a control (the same body with `fn:`), because an exit 2 for the wrong reason looks
-  identical to one for the right reason: the first sweep scored `forbid origin` as a refusal
-  when both spellings were failing on a missing `allow-file:` clause and neither had reached
-  selector parsing.
+  **The reason is scoping, not soundness, and the difference was measured rather than assumed.**
+  An earlier draft called this "the mirror of `ext:`'s hazard". It is not. `ext:` in *source*
+  position is always-PASS **structurally** — an external leaf has no outgoing edge, so nothing is
+  reachable and the proof is unearned by construction. `exported:` in *target* position selects
+  real nodes: admitted there, `forbid reach from fn:hidden to exported:**` returns `1 proved` and
+  that proof is *earned*, while an `exported:` target matching nothing returns `1 vacuous`,
+  exit 1 — the framework already declines to call it a proof. A kind is granted deliberately,
+  per position, with tests; widening one later is additive.
 
-  **The target-position hazard is not the mirror it looks like, and the honest measurement says
-  so.** `ext:` as a *source* is structurally always-PASS — an external leaf has no outgoing edge,
-  so the cone can never reach anything. `exported:` as a *target* selects real nodes and asks a
-  meaningful question ("does this reach the API surface?"); with the kind admitted there,
-  `forbid reach from fn:hidden to exported:**` reports `1 proved` and that PASS is **earned** on
-  the fixture. It is refused because a kind must be granted deliberately, with tests, at each
-  position — not because it was measured to lie there.
+  `forbid dep` is the position where a real false green was measured before
+  (`forbid dep from module:src/** to file:bar` printed "1 proved"), and admitting `exported:`
+  there reproduces it: `forbid dep from exported:** to module:Es_vuln` reports `1 proved`,
+  exit 0.
 
-  Both halves are red-verified with distinct binaries rather than argued. Widening `dep_allow`
-  to accept `Exported` (`ecc35d3b7bb4`) makes the refusal test fail; dropping the exported filter
-  so the kind aliases `fn:` (`6de7538ef672`) makes the filter test fail. The fixture is built to
-  discriminate: the UNEXPORTED function is the one that reaches the target, so a selector that
-  quietly matched every node would report a violation identically to the control.
+  **Pinned across all nine positions the parser has**, enumerated from the parser rather than
+  from a hand-written list: `arch-rules`' seven operand positions plus `arch-coverage --roots`
+  and `arch-mutants --tests`, which call `Arch_sel.parse` with their own allow-lists. An earlier
+  sweep listed seven, and a sweep that omits a position looks exactly like one that covers it.
+
+  Each rules-file row carries a **control** — the same body with `fn:` — because an exit 2 for
+  the wrong reason is indistinguishable from one for the right reason. That control earned its
+  place twice: `forbid origin` was first scored a refusal when both spellings were dying on a
+  missing `allow-file:` clause before selector parsing, and `arch-mutants` was first scored a
+  refusal when the invocation omitted its mandatory `plan` subcommand and got a usage banner.
+
+  **`arch-coverage --roots` grants the kind, and that is the coherence half of this change.**
+  The flag already computes exactly this set under the bare keyword `exported`, by the same fold
+  over `node.exported`. Accepting `--roots exported` while refusing `--roots exported:**` would
+  have been two spellings of one set disagreeing inside one flag — the defect this kind is named
+  to avoid, shipped by the change that names it. Both spellings now answer, and the test asserts
+  they **agree with each other** rather than matching a hard-coded cone size.
+
+  Red-verified rather than argued, each mutation named by its binding so a reader can reproduce
+  it (a bare build hash is a coordinate nobody else can check):
+
+  - `bin/arch_rules/arch_rules.ml`'s `dep_allow`, widened from `[Module]` to `[Module; Exported]`
+    → the refusal test fails, and `forbid dep from exported:** to module:Es_vuln` reports
+    `1 proved`, exit 0.
+  - `lib/arch_tools/arch_sel.ml`'s `select`, with the `Exported` arm changed from
+    `if n.exported then Some n.name else None` to `Some n.name` → the filter test fails.
+  - `bin/arch_rules/arch_rules.ml`'s `with_ext`, gaining `Exported` → the position sweep fails
+    on its `reach` TARGET row.
+
+  The fixture discriminates in both directions: the UNEXPORTED `hidden` is the only route to
+  `danger`, so a selector quietly matching every node reports a violation identically to the
+  control; and the EXPORTED `entry_bad` reaches `danger2`, so there is one case where
+  `exported:` **catches** something through a real call path rather than only failing to.
 - **`arch-report <db> --out <dir>` — one query pass, three artifacts** (roadmap 2.2,
   `specs/reporting-and-integration.md`). Writes `report.json` (the machine contract),
   `report.sarif` (SARIF 2.1.0, one run per analysis with distinct categories) and `report.html`

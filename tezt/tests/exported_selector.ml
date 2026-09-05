@@ -24,9 +24,16 @@
     {!module:Arch_sel} documents this against itself, and it was MEASURED on this repository:
     [forbid dep from module:src/** to file:bar] printed "1 proved".
 
-    [exported:] carries the mirror of that hazard, so the tests below assert the REFUSAL as
-    well as the result. A test that only exercises the position where a kind works cannot
-    distinguish a granted kind from a kind granted everywhere.
+    [exported:] does NOT carry the mirror of that hazard, and saying so precisely is half of
+    what this file is for. Measured: admitted as a [forbid reach] TARGET, an [exported:] that
+    matches something returns an EARNED proof, and one that matches nothing returns
+    [1 vacuous], exit 1 — the framework already refuses to call it a proof. The refusal is a
+    SCOPING decision: a kind is granted deliberately, per position, with tests, never inherited
+    and never on borrowed soundness cover.
+
+    The tests below therefore assert the REFUSAL as well as the result. A test that only
+    exercises the position where a kind works cannot distinguish a granted kind from a kind
+    granted everywhere.
 
     {1 Red-capability, verified by hand rather than asserted here}
 
@@ -60,13 +67,20 @@ let fixture_files =
       \ (wrapped false)\n\
       \ (modules es_api es_vuln)\n\
       \ (flags (:standard -w -8-11-21-26-27-32-33-37-39)))\n" );
-    ("es_vuln.ml", "let danger n = n + 1\n");
+    ("es_vuln.ml", "let danger n = n + 1\n\nlet danger2 n = n + 2\n");
     ( "es_api.ml",
-      {|let hidden n = Es_vuln.danger n
+      {|(* UNEXPORTED, and the only route to [danger]. *)
+let hidden n = Es_vuln.danger n
 
+(* EXPORTED and reaches nothing — the negative case. *)
 let entry n = n * 2
+
+(* EXPORTED and reaches [danger2] — the positive case. Without it every assertion about
+   [exported:] in this file reads "0 violation", and a selector that matched the empty set
+   would satisfy all of them. A feature needs one test where it CATCHES something. *)
+let entry_bad n = Es_vuln.danger2 n
 |} );
-    ("es_api.mli", "val entry : int -> int\n");
+    ("es_api.mli", "val entry : int -> int\nval entry_bad : int -> int\n");
   ]
 
 let with_indexed name f =
@@ -106,18 +120,23 @@ let register_filters () =
         Db.with_db db (fun c ->
             Db.int c "SELECT count(*) FROM functions WHERE COALESCE(exposed,0) = 0")
       in
-      Batch.eq_int b ~msg:"premise: exactly one function is on the API surface" exposed_n 1 ;
+      Batch.eq_int b ~msg:"premise: exactly two functions are on the API surface" exposed_n 2 ;
       Batch.check b
         ~msg:(Printf.sprintf "premise: at least one function is NOT (got %d)" unexposed_n)
         (unexposed_n >= 1) ;
-      (* PREMISE 2 — the target is reachable AT ALL. This is what stops the assertion below
-         from being the vacuous kind: a rule reporting "not reached" over a graph where
-         nothing reaches anything is a statement about the fixture, not about the filter. *)
+      (* PREMISE 2 — the target is reachable AT ALL, through a real CALL PATH.
+
+         This used to read [from fn:** to fn:danger], and a review showed the violation came
+         from SELECTOR OVERLAP rather than from any edge: [fn:**] contains [danger] itself, and
+         [reach_verdict] unions [SS.inter src dst] into the MUST set, so the rule reports a
+         violation on a graph with zero edges — precisely the situation this premise exists to
+         rule out. [fn:hidden] is disjoint from the target, so the only way to a violation is
+         the call [hidden] really makes. *)
       let _, wide =
         rules
           [ db;
             rule_file "es_wide"
-              "rule \"reaches danger\"\n  forbid reach from fn:** to fn:danger\n" ]
+              "rule \"reaches danger\"\n  forbid reach from fn:hidden to fn:danger\n" ]
       in
       Batch.check b
         ~msg:(Printf.sprintf "premise: SOME function reaches danger — from fn:**:\n%s" wide)
@@ -147,6 +166,23 @@ let register_filters () =
       Batch.check b
         ~msg:(Printf.sprintf "…and it is not vacuous — the source cone is non-empty:\n%s" narrow)
         (contains ~needle:"0 vacuous" (summary narrow)) ;
+      (* THE POSITIVE CASE, and the file had none. Every other assertion here is "0 violation":
+         a selector matching the empty set satisfies all of them, so nothing showed the feature
+         doing its job. [entry_bad] is exported and reaches [danger2] through a real call, so
+         [exported:] must CATCH it. Green-to-red for the stated purpose, not only for the
+         filter. *)
+      let _, caught =
+        rules
+          [ db;
+            rule_file "es_caught"
+              "rule \"reaches danger\"\n  forbid reach from exported:** to fn:danger2\n" ]
+      in
+      Batch.check b
+        ~msg:
+          (Printf.sprintf
+             "an ENTRY POINT that really reaches the target must be caught through exported::\n%s"
+             caught)
+        (contains ~needle:"1 violation" (summary caught)) ;
       (* No unconditional [Batch.note] here. It is not an informational logger: it appends to
          the SAME failure list [check] does, so a note that always runs fails the test with its
          own text. It is for adding context inside an [if] that has already failed. Both
@@ -193,13 +229,19 @@ let register_refused_in_dep () =
 
 (* EVERY POSITION THE PARSER HAS, not just the one that works and the one I thought of.
 
-   A review pointed out that the refusal evidence covered ONE direction. [ext:] is answerable
-   only as a TARGET and proves nothing as a source; [exported:] has the mirror symmetry, so a
-   TARGET-position [exported:] is the same hazard on the side nobody was watching. "I only
-   granted it in one place" is a statement about the code I wrote, not about the parser — six
-   other operand positions exist and each reads its own allow-list.
+   A review pointed out that the refusal evidence covered ONE direction, and the sweep it
+   prompted refuted the reason it was asked for: a TARGET-position [exported:] is NOT the
+   mirror of [ext:]'s source hazard (see this file's header). What survives is the reason that
+   does not depend on it — "I only granted it in one place" is a statement about the code I
+   wrote, not about the parser, and eight other operand positions exist, each reading its own
+   allow-list.
 
-   Each row carries a CONTROL: the same rule body with [fn:] substituted. Without it an exit 2
+   NINE positions, enumerated from the parser rather than from my own table — [arch-rules]'s
+   seven operand positions plus [arch-coverage --roots] and [arch-mutants --tests], which call
+   {!Arch_sel.parse} with their own allow-lists. The first version of this sweep listed seven,
+   and a sweep that omits a position looks exactly like one that covers it.
+
+   Each rules-file row carries a CONTROL: the same rule body with [fn:] substituted. Without it an exit 2
    is not evidence about the selector at all. Measured while writing this: my first sweep
    scored [forbid origin from exported:**] as a refusal, and the control showed BOTH spellings
    failing with "unrecognised rule body" — the probe had omitted the mandatory [allow-file:]
@@ -222,6 +264,8 @@ let register_position_sweep () =
   with_indexed "es_sweep" @@ fun db ->
   let allow = Temp.file "es_sweep.allow" in
   write_file allow "" ;
+  let lcov = Temp.file "es_sweep.lcov" in
+  write_file lcov "SF:es_api.ml\nDA:1,1\nDA:3,1\nend_of_record\n" ;
   let origin_body sel =
     Printf.sprintf "forbid origin from %s form:division allow-file:%s" sel allow
   in
@@ -264,8 +308,74 @@ let register_position_sweep () =
       Batch.check b
         ~msg:(Printf.sprintf "[origin source] must refuse for the POSITION:\n%s" oout)
         (contains ~needle:"not valid in this position" oout) ;
-      (* THE OTHER HALF, and the reason this is one test rather than six: the sweep must also
-         show that SOME position accepts the kind. Six refusals alone are equally consistent
+      (* TWO POSITIONS LIVE OUTSIDE arch-rules, and the first version of this sweep missed them
+         because it enumerated from my own table instead of from the parser: `arch-mutants
+         --tests` and `arch-coverage --roots` both call Arch_sel.parse with their own
+         allow-list. A sweep that omits a position looks exactly like one that covers it.
+
+         They land differently, and the difference is the point. `--roots` GRANTS the kind: the
+         flag already computes this very set under the bare keyword `exported`, so refusing the
+         selector spelling would have been two names for one set disagreeing inside one flag.
+         `--tests` refuses it: that flag's population is test roots, not the API surface, and a
+         kind is granted deliberately. *)
+      let cov = run_command (arch_coverage ()) [ db; lcov; "--roots"; "exported:**" ] in
+      let cov_code, cov_out = cov in
+      Batch.eq_int b
+        ~msg:(Printf.sprintf "arch-coverage --roots accepts exported: (it computes that set already):\n%s" cov_out)
+        cov_code 0 ;
+      let kw_code, kw_out = run_command (arch_coverage ()) [ db; lcov; "--roots"; "exported" ] in
+      Batch.eq_int b ~msg:"the bare keyword still works" kw_code 0 ;
+      (* Compare the two spellings to EACH OTHER rather than to a literal. A hard-coded cone
+         size would have to be re-derived whenever the fixture grows — and the property under
+         test is agreement, not any particular number. The non-vacuity check is separate: a
+         cone of zero would make the two agree trivially. *)
+      (* Extract the TAIL from "function(s)" onward, not "everything after the arrow": the
+         arrow is U+2192, three bytes, and [String.index_opt l '>'] finds no ASCII '>' at all —
+         so the first version compared whole lines that legitimately differ in their `roots:`
+         label while agreeing on the number. It failed against correct behaviour. *)
+      let cone_count out =
+        let line =
+          String.split_on_char '\n' out
+          |> List.find_opt (fun l -> contains ~needle:"in the API cone" l)
+          |> Option.value ~default:"(no cone line)"
+        in
+        let rec find i =
+          if i + 11 > String.length line then line
+          else if String.sub line i 11 = "function(s)" then
+            (* walk back over the count's digits and the space before them *)
+            let rec back j = if j > 0 && line.[j - 1] <> ' ' then back (j - 1) else j in
+            String.trim (String.sub line (back (i - 1)) (String.length line - back (i - 1)))
+          else find (i + 1)
+        in
+        find 0
+      in
+      Batch.eq_string b
+        ~msg:"the two spellings of one set must not disagree"
+        (cone_count cov_out) (cone_count kw_out) ;
+      Batch.check b
+        ~msg:(Printf.sprintf "…on a non-empty cone, or they agree vacuously: %s" (cone_count kw_out))
+        (not (contains ~needle:"0 function(s)" (cone_count kw_out))) ;
+      (* `plan` is mandatory. The first version omitted it and got exit 2 with a usage banner —
+         a refusal for the wrong reason, which is the third time today this exact trap has
+         caught me. Hence the control below: if the `fn:` spelling does not run, the refusal
+         says nothing about the selector kind. *)
+      let mctrl_code, mctrl_out =
+        run_command (arch_mutants ()) [ "plan"; db; "--tests"; "fn:**" ]
+      in
+      Batch.eq_int b
+        ~msg:(Printf.sprintf "control: arch-mutants plan --tests fn:** must RUN:\n%s" mctrl_out)
+        mctrl_code 0 ;
+      let mut_code, mut_out =
+        run_command (arch_mutants ()) [ "plan"; db; "--tests"; "exported:**" ]
+      in
+      Batch.eq_int b
+        ~msg:(Printf.sprintf "arch-mutants --tests refuses exported: (test roots, not the API surface):\n%s" mut_out)
+        mut_code 2 ;
+      Batch.check b
+        ~msg:(Printf.sprintf "…and names the position, not the usage banner:\n%s" mut_out)
+        (contains ~needle:"not valid in this position" mut_out) ;
+      (* THE OTHER HALF, and the reason this is one test rather than nine: the sweep must also
+         show that SOME position accepts the kind. Refusals alone are equally consistent
          with a selector nothing accepts anywhere — which would refuse in every position and
          pass this test while being useless. *)
       let acode, aout = run "forbid reach from exported:** to fn:danger" in

@@ -145,10 +145,21 @@ keeps that normalisation in one place.
 
 **`exported:` is granted per position, never inherited.** It is absent from `Arch_sel.structural`
 — the list `arch-coverage` and `arch-mutants` pass — and lives in `Arch_sel.cone_source`, which
-only `forbid reach`'s source uses. The hazard is the mirror of `ext:`'s, and `ext:` documents it
-against itself: a selector answerable in one position only, accepted in another, matches a
-population that position never ranges over, and the empty result is then reported as a **proof
-rather than as vacuity** — a green nobody earned. A kind must be granted at each call site.
+only `forbid reach`'s source and `arch-coverage --roots` use.
+
+**The reason is scoping, not soundness — and the difference was measured.** An earlier draft of
+this section called it "the mirror of `ext:`'s hazard". It is not. `ext:` in *source* position is
+always-PASS **structurally**: an external leaf has no outgoing edge, so the cone reaches nothing
+and the proof is unearned by construction. `exported:` in *target* position selects real nodes and
+asks a question with content — admitted there, `forbid reach from fn:hidden to exported:**`
+returns `1 proved` and that proof is *earned*, while an `exported:` target matching nothing
+returns **`1 vacuous`, exit 1**: the framework already refuses to call it a proof.
+
+So a kind is granted **deliberately, per position, with tests** — never inherited, and never on
+borrowed soundness cover. Widening a position later is additive. `arch-coverage --roots` was
+granted for exactly this reason: it already computes that set under the bare keyword `exported`,
+so refusing the selector spelling would have been two names for one set disagreeing inside one
+flag. `arch-mutants --tests` is refused: its population is test roots, not the API surface.
 
 Globs: `*` stops at `/`, `**` crosses it, and `**/` matches **whole directory components** — so
 `**/parser.ml` matches `lib/parser.ml` and `parser.ml`, but never `lib/my_parser.ml`. That
