@@ -1,0 +1,4 @@
+(executable
+ (name arch_report)
+ (public_name arch_report)
+ (libraries arch_tools yojson cmdliner))

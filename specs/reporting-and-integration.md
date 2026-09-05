@@ -17,8 +17,11 @@ visible on its face.
 ## Current surface (measured, not assumed)
 
 Output formats today are `box | csv | json | line | markdown` (`ARCH_QUERY_FORMAT`), plus the
-machine-output contract on `arch-impact --format json` and `arch-rules --format json`. There is
-**no SARIF and no HTML** anywhere in the tree. Server surfaces are `arch-serve` (SPA over HTTP)
+machine-output contract on `arch-impact --format json` and `arch-rules --format json`.
+~~There is **no SARIF and no HTML** anywhere in the tree.~~ **Stale as of roadmap 2.1
+(amended 2026-09-05):** `lib/arch_tools/arch_sarif.ml` exists and `arch-rules --format sarif`
+ships. HTML is still absent, and 2.2 adds it. Corrected because this section is titled *measured,
+not assumed* and had stopped being either — the same drift the three clauses below carried. Server surfaces are `arch-serve` (SPA over HTTP)
 and `arch-mcp` (stdio JSON-RPC for agents). Ingest is `arch-load` / `arch-coverage-load` /
 `arch-effects-load` / `arch-sidecar-load`.
 
