@@ -122,7 +122,44 @@ let must_null_query =
 
    Measured on the whole repo _build/default, which is what this test indexes —
    not lib/arch_index alone, which reads 142 and is a different metric. *)
-let clean_measured = 347
+(* Recalibrated 2026-09-05 (fix/coverage-matrix-root-boundary, PR #83): 347 ->
+   367, in three separately-sourced parts. Three, not one total: a single
+   number here would make this branch look like a 20-row change, and the
+   largest part of it is not this branch's at all.
+
+   +11 is DRIFT ALREADY ON MAIN, and this is the SECOND documented occurrence
+   — see the 2026-09-04 entry directly above, which caught the same miss and
+   said in its own words why it must not be absorbed: "a ratchet that swallows
+   one change's drift into the next one's baseline has stopped ratcheting".
+   Main at ba2804a measures 358 against a constant of 347. Measured twice
+   independently: once by the roadmap session on a clean detached worktree with
+   a completed full build, and once here, where scripts/recalibrate.sh --check
+   reports 358 in BOTH base-source cells (A = base bin/base src, B = new
+   bin/base src) of its 2x2. The gate passed throughout, which is again exactly
+   why it went unnoticed: the intervening work spent 11 of the 25 headroom and
+   left 14. Recorded as MAIN's, not as this PR's.
+
+   +6 is this branch's production change: the dune-project sentinel added to
+   find_upwards and find_repo_root_from in lib/arch_index/coverage_matrix.ml
+   (358 -> 364, measured at 77ff462). Two Filename.concat + Sys.file_exists
+   pairs, external leaves of the same class as every other row here, not a new
+   unsound edge kind.
+
+   +3 is this branch's new tezt test
+   (register_find_sibling_tool_stops_at_dune_project_build_candidate, 364 ->
+   367): Arch_tezt/Sys calls from one more boundary fixture.
+
+   367 is what main will measure once this PR lands, which is the only value
+   this constant is allowed to take — it is main's measured count by this
+   file's own opening sentence, so it may not include work that is not in this
+   branch. It deliberately does NOT account for dev-13's in-flight
+   feat/mutation-campaign-313, which measures 373 on its own tree; that branch
+   is inside 367 + 25 = 392 and needs no adjustment here, but a later reader
+   comparing the two numbers should not have to re-derive why they differ.
+
+   Measured on the whole repo _build/default, the same corpus as every entry
+   above. *)
+let clean_measured = 367
 
 let headroom = 25
 
