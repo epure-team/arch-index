@@ -29,6 +29,14 @@
     (run sh -c "v=$(typescript-language-server --version 2>/dev/null); printf 'typescript-language-server: %s\n' \"${v:-absent}\"")
     (run sh -c "v=$(dune --version 2>/dev/null); printf 'dune: %s\n' \"${v:-absent}\"")))))
 
+; These `deps` attach to the `runtest` ALIAS, not to building `main.exe` as a file target --
+; that is dune's own semantics for a `(test)` stanza, not a bug here, and there is no
+; stanza-level fix (see docs/mutation-testing.md, "An all-green mutation run proves nothing on
+; its own"). Measured: after `dune clean`, `dune build tezt/tests/main.exe` builds `main.exe`
+; alone and leaves every exe below unbuilt, so it can silently run against a stale or absent
+; CLI. NEVER `dune exec tezt/tests/main.exe` or a scoped `dune build tezt/tests/main.exe` to
+; run this suite -- use `dune build --root=.` (full) then `dune runtest`, or `dune runtest`
+; alone.
 (test
  (name main)
  (libraries arch_tezt tezt arch_index arch_tools sqlite3)

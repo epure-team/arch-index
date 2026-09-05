@@ -23,16 +23,39 @@ include Tezt.Base
 (* Under [dune runtest] the cwd is _build/default/tezt/tests and the artefacts
    sit next to it, already inside _build; run by hand from a source directory
    they sit under _build/default.  Trying both at every ancestor covers the two
-   without the test having to know which way it was started. *)
+   without the test having to know which way it was started.
+
+   The search MUST stop at the first ancestor holding a [dune-project] --
+   the enclosing workspace root -- rather than walking past it. An agent
+   worktree (e.g. [.claude/worktrees/agent-*]) lives INSIDE the main
+   checkout and carries its own [dune-project], and a worktree whose own
+   [_build/default] is missing a binary would otherwise silently climb into
+   the parent checkout and run *its* binary instead: a stale-but-working
+   sibling produces plausible, wrong output, and every mutant then reports
+   as a survivor because the mutated binary was never the one executed. A
+   missing binary is a build error, not an invitation to look elsewhere, so
+   reaching the workspace root without finding [rel] is reported as a
+   failure that names the search, not resolved by escaping it.
+
+   [_build/default/dune-project] does NOT exist in this repository -- which
+   matters, because under [dune runtest] the cwd is
+   [_build/default/tezt/tests]: had [_build/default] carried a
+   [dune-project], the search would stop there and the ordinary runtest path
+   would break. It does not, so the search reaches the real worktree root,
+   which is the correct place to stop. *)
 let rec find_upwards ~from rel =
   let candidates =
     [Filename.concat from rel; Filename.concat from (Filename.concat "_build/default" rel)]
   in
   match List.find_opt Sys.file_exists candidates with
-  | Some _ as found -> found
+  | Some p -> Ok p
   | None ->
-      let parent = Filename.dirname from in
-      if parent = from then None else find_upwards ~from:parent rel
+      if Sys.file_exists (Filename.concat from "dune-project") then
+        Error from (* workspace root reached; do not climb past it *)
+      else
+        let parent = Filename.dirname from in
+        if parent = from then Error from (* filesystem root; nothing left to try *)
+        else find_upwards ~from:parent rel
 
 (* An override that points nowhere is a typo, not a request to fall back: the
    search below would quietly find a different binary and the run would look
@@ -42,11 +65,15 @@ let locate ~env_var rel =
   | Some p when Sys.file_exists p -> p
   | Some p -> Test.fail "%s is set to %s, which does not exist" env_var p
   | None -> (
-      match find_upwards ~from:(Sys.getcwd ()) rel with
-      | Some p -> p
-      | None ->
-          Test.fail "%s not found (looked for %s upwards from %s; set %s to override)"
-            env_var rel (Sys.getcwd ()) env_var)
+      let start = Sys.getcwd () in
+      match find_upwards ~from:start rel with
+      | Ok p -> p
+      | Error stopped_at ->
+          Test.fail
+            "%s not found: looked for %s upwards from %s, stopped at workspace root %s (no \
+             further ancestor searched -- a missing binary is a build error, not a signal to \
+             use a sibling worktree's; run `dune build --root=.` there, or set %s to override)"
+            env_var rel start stopped_at env_var)
 
 let callgraph_ocaml () =
   locate ~env_var:"ARCH_CALLGRAPH_OCAML"

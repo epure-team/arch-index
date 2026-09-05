@@ -7,6 +7,7 @@
 
 let () =
   Helpers.register () ;
+  Helpers.register_find_upwards () ;
   Registry_gaps.register () ;
   Ocaml_shapes.register () ;
   Multilang.register () ;

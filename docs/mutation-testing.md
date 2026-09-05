@@ -104,6 +104,41 @@ line of work argued against gating on either. This tool reports surviving mutant
 the tests that should have killed them, and will never print a ratio. `--fail-on-survivors` is a
 defect list being non-empty — not a threshold to tune.
 
+### An all-green mutation run proves nothing on its own (issue #77)
+
+**A mutation run containing at least one RED self-certifies its greens.** A stale or wrong
+binary cannot go red — it just answers plausibly. So if any mutant killed an assertion, that run
+really did execute *that* binary, and the assertions that stayed green **in the same run** are
+green under the mutant, not under a phantom. The corollary inverts the usual reading: **an
+all-green mutation run proves nothing at all, whatever md5 you checked** — the first suspicion
+should be "the experiment did not happen," not "the tests are weak." This matters most for
+assertions that are *expected* to stay green for a structural reason unrelated to the mutant —
+a stale binary imitates that result perfectly, and only a red in the same run dates it.
+
+The md5 that matters is the CLI under test, e.g. `bin/arch_mutants/arch_mutants.exe` — a
+CLI-only change never moves `tezt/tests/main.exe`'s own hash, so checking the wrong artefact's
+hash gives false confidence.
+
+**Build hazard, not (fully) fixable in the dune stanza.** `tezt/tests/dune`'s `(test main)`
+stanza lists every CLI under test in `(deps …)`, but on a `(test)` stanza `deps` attaches to the
+`runtest` **alias**, not to building `main.exe` as a file target — that is dune's own semantics,
+not a bug in this file, and there is no stanza-level way to make a scoped executable target pull
+in extra link-irrelevant deps. Confirmed: after `dune clean`, `dune build tezt/tests/main.exe`
+builds `main.exe` alone and leaves every CLI in `(deps …)` (e.g. `arch_mutants.exe`) unbuilt,
+while a full `dune build --root=.` builds them all (each directory's own `@default` alias
+builds its own executables, independent of the test stanza's deps). Consequences:
+
+- **Never** `dune exec tezt/tests/main.exe` or `dune build tezt/tests/main.exe` (or any other
+  scoped target under `tezt/tests/`) to run or check this suite — it silently tests whatever CLI
+  binaries happened to be built by something else, possibly stale ones.
+- Use `dune build --root=.` (full workspace build) followed by `dune runtest`, or `dune runtest`
+  alone (which builds its own deps correctly through the `runtest` alias).
+- A worktree whose CLIs were rebuilt piecemeal (e.g. only `main.exe` and `arch_rules.exe`) can
+  have other CLIs (e.g. `arch_mutants.exe`) still missing or stale from a previous build. See
+  `tezt/lib/arch_tezt.ml`'s `find_upwards`/`locate` for how a missing binary is now reported as a
+  build error naming the search, rather than resolved by silently walking up into a sibling
+  worktree or the parent checkout.
+
 ## Input formats
 
 **Generic** (NDJSON, one object per line) — the contract any engine adapter targets:
