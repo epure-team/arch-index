@@ -120,7 +120,7 @@ the "0 ambiguous in 8318 chases" figure was taken *downstream* of it and could
 not see the alias side at all; under this key there is no alias side left to
 measure.
 
-### D1-ter — the splice point is `Head_unknown (_, Module_param)`
+### D1-ter — the splice point is `Head_unknown (_, Module_param)` **(RETIRED 2026-09-05 — superseded by D1-quater; kept for the measurement that justified moving the splice at all)**
 
 **New (2026-09-05). Replaces the `Head_qualified`/`Not_found` splice, which was
 measured to observe ZERO of its own cases.**
@@ -146,6 +146,103 @@ had:
   are not paths at all. The producer MUST carry the split. Recovering structure
   by parsing your own rendered output is how the `top_reason` string/constructor
   divergence happened.
+
+### D1-quater — the PRODUCER rewrites the head; there is no resolver splice
+
+**Amends D1-ter (2026-09-05), which is hereby retired. This is a
+simplification: it deletes a code path rather than adding one.**
+
+D1-ter placed the fallback in the resolver, at the `Head_unknown (_,
+Module_param)` arm, and paid for that position with two obligations —
+re-establishing `dropped_qualified` ordering, and carrying a `(module, name)`
+split so the resolver would not have to re-parse a rendered display string.
+Both obligations exist only because the resolver is the wrong place to stand.
+
+**The measurement that inverts it.** `qualified_is_dynamic` is
+
+```ocaml
+match path_root path with Some id -> not (Ident.persistent id) | None -> false
+```
+
+so the root `Ident` — and therefore `Ident.unique_name id`, the binder identity
+D1-bis requires — is **already in hand at the exact site where the
+`Module_param` ⊤ is decided**. Nothing needs to travel to the resolver.
+
+**The decision.** At each site that classifies a dynamic-rooted path, the
+producer looks the root binder's stamp up in a module-alias table and, on a
+hit, **rewrites the head**: `S.safe_int` is emitted as
+`Head_qualified (Some "Tezos_raw_protocol_alpha.Saturation_repr", "safe_int")`
+instead of `Head_unknown ("S.safe_int", Module_param)`. On a miss the ⊤ is
+emitted exactly as today. The rewritten head then flows through **1.6's
+ordinary qualified resolution, ambiguity rule included** — no new resolver tier
+exists.
+
+**Measured on proto_alpha**, with a stamp-keyed table including nested binders:
+
+| emission site | HIT | MISS |
+|---|---|---|
+| `record_head` (applied heads) | 3 224 | 1 847 |
+| argument escape | 23 | 137 |
+| **total** | **3 247** | |
+
+against the **3 203** the name-keyed resolver design reached. The stamp table
+covers everything the name key did **and more**: the `prefix = ""` gate on
+`pending_deps` had excluded nested binders — the very binders SA-1 attacks.
+Top rewrites are the flagship cases: `S.safe_int → Saturation_repr` (1 323),
+`S.Syntax.+` (594), `S.Syntax.lsr` (393).
+
+**What this closes by construction rather than by filter.**
+
+- **SA-1 and SA-2 stop being attacks.** Two binders spelled `S` are two stamps,
+  hence two keys. A nested `module S = Test_stub` beside a toplevel
+  `module S = Saturation_repr` cannot collide, and there is no join in which to
+  lose the precision. D1-bis's requirement is satisfied by the key's identity,
+  not by a rule applied to it.
+- **D1-ter's two obligations evaporate.** There is no rendered display string to
+  re-split, so the `"F.( *. )"` empty-callee-name hazard disappears; and
+  `dropped_qualified` ordering is **inherited**, because the edge now arrives at
+  the `Head_qualified` arm that already performs that check. FR-005 is satisfied
+  structurally rather than restated.
+- **`module_deps` is not read at all**, so ADR 003 residual 4 (the
+  `target_module` basename erasure) cannot bite this task. FR-001 and FR-003 are
+  satisfied a fortiori: the chase reads neither the table nor `target_module`,
+  because the producer never leaves the typedtree.
+- **Per-file scoping (FR-002) still holds and is still required.** `Ident`
+  stamps are allocated per compilation unit, so a stamp value is unique within a
+  unit and **not** across units. The table is therefore built per `.cmt` and
+  consumed within that same walk — the scoping is the table's lifetime, not a
+  key field.
+
+**Precedent in the tree, deliberately followed.** `build_local_alias_stamps`
+(`arch_index_cmt.ml:1004`) already does exactly this shape for *value* aliases:
+stamp-keyed, built with `iter_structure_items ~f:(fun ~prefix …)` so nested
+binders are included, and handed to `collect_calls_from_expr` as an optional
+argument. The module-alias table is its sibling and MUST mirror it, so that the
+two alias mechanisms are read as one pattern rather than two inventions.
+
+**What does NOT change: D2-bis still holds, and is still the reason.** Emitting
+`Head_qualified` would land **MUST** wherever the call is neither `cond` nor
+`partial`, and that is exactly what D2-bis forbids — the rewrite discharges the
+**naming** conjunct of MUST and leaves uniqueness and saturation standing. The
+landing kind must therefore be forced to `MAY_ENUMERATED`, and the mechanism
+already exists: #69's demotion in the kind matrix, keyed on `edge_form`
+
+```ocaml
+demoted = call.cond || call.partial || call.edge_form = Some "value_alias"
+```
+
+extends to a **second member**, `'module_alias'`. Same mechanism, one more
+value, **no new vocabulary in `kind`** — a test asserts the `kind` vocabulary is
+closed, and `edge_form` is precisely the column added so that a demotion reason
+need not become a kind.
+
+**Why this is recorded as an amendment rather than edited in silently.** This
+spec has now changed shape twice: D1-ter moved the splice because the specified
+one observed zero of its own cases, and D1-quater removes the splice entirely
+because the evidence it needed was available upstream all along. A spec that
+moves twice owes the reader both reasons, and the second one is the more useful:
+**the first design searched for the binder identity in the place where the
+symptom appeared, not in the place where the fact was known.**
 
 ### D2 — resolution sets `callee_id` and MUST NOT change `kind`
 
@@ -357,7 +454,11 @@ each file's `S.f` resolves to its own target and neither resolves to the other's
 - **FR-004** [US-1/D2]: Resolution MUST set `callee_id` and MUST NOT alter `kind`,
   `top_reason` or `top_anchor`.
 - **FR-005** [D2/C-15]: The chase MUST run after the existing `dropped_qualified` check;
-  a target dropped this run MUST keep the dropped-node verdict.
+  a target dropped this run MUST keep the dropped-node verdict. **(Satisfied
+  structurally under D1-quater: the rewritten head arrives at the
+  `Head_qualified` arm, which already performs that check. Nothing is
+  re-established; the requirement is inherited, and a test MUST prove the
+  inheritance rather than assume it.)**
 - **FR-006** [US-2]: Two or more distinct resolved ids MUST leave the edge unresolved.
 - **FR-007** [US-2] **(RETIRED 2026-09-05 — contradicted the frozen design)**: this
   required 4 hops with cycle detection while D4 freezes the chase at 1 hop, so
@@ -379,6 +480,14 @@ each file's `S.f` resolves to its own target and neither resolves to the other's
 - **FR-009** [D5]: A `local_open` row MUST be ignored by the chase.
 - **FR-010** [US-4]: Every changed edge target MUST be listed individually; an
   unexplained retarget MUST block the merge.
+- **FR-011** [D1-quater/D2-bis] **(new 2026-09-05)**: A head rewritten through a
+  module alias MUST carry `edge_form = 'module_alias'`, and the kind matrix MUST
+  demote on it. No rewritten edge may be `MUST`, however its head classifies —
+  the same structural guarantee FR-005b gives value aliases.
+- **FR-012** [D1-quater/D1-bis] **(new 2026-09-05)**: The module-alias table MUST
+  be keyed on `Ident.unique_name` of the binder and MUST be built and consumed
+  within a single compilation unit's walk. A name key, or a table shared across
+  units, is forbidden — stamps are unique per unit and not across them.
 
 ## Runnable checks
 
