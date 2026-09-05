@@ -388,11 +388,27 @@ each file's `S.f` resolves to its own target and neither resolves to the other's
   NULL`; red-verify by making the chase pick the first candidate.
 - **CHECK-3-bis** [AC-3] (replaces CHECK-3, which the amendment is defined to
   fail): every edge whose `kind` moved between the before and after runs MUST be
-  a chase that resolved — matched per edge on `(caller_id, callee_name,
-  call_site)`, not per total. The old check asserted a byte-identical kind
-  histogram; the honest successor asserts that the histogram moved **only where
-  a resolution explains it**. A count-level check cannot distinguish a resolved
-  edge from an unrelated regression that happens to balance it.
+  a chase that resolved — asserted **only where a resolution explains it**, never
+  per total, because a count-level check cannot distinguish a resolved edge from
+  an unrelated regression that happens to balance it.
+
+  **CORRECTED 2026-09-05 — `(caller_id, callee_name, call_site)` is NOT an edge
+  identity.** I wrote it as one. Measured on Octez: 1 445 080 edges,
+  **1 407 032 distinct triples, 26 206 collisions (1.8 %)**. The worst is ×55 —
+  fifty-five edges from one caller to `Brassaia.Type.|~` at one call site, which
+  is what a chain of combinators on a single line produces.
+
+  So the match must carry a **multiplicity per triple**, and the assertion is
+  that the multiset of kinds at each triple changed only where a chase resolved.
+  Matching on the bare triple would let one edge of a 55-way group move kind
+  while another moved back, and report nothing.
+
+  Found by applying the gesture this defect earned: run
+  `GROUP BY <key> HAVING count(*) > 1` on the **largest** population the key will
+  ever see, before shipping it. The same check clears two production keys —
+  `(module_id, name)`, the resolver's own, is **0 collisions on 354 928
+  functions**, and `modules.path` is 0 on 10 033 — so the failure is mine and
+  specific, not endemic.
 - **CHECK-3-old** (retired): `SELECT count(*) FROM calls WHERE callee_id IS NOT NULL AND kind
   IS NULL` → 0, and the kind histogram is byte-identical before/after on both corpora
   (FR-004).
