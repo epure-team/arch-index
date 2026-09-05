@@ -78,11 +78,26 @@ let fixture_files =
 let one_assert n =
   assert (n > 0) ;
   n
+
+(* An OPERATOR whose name contains '|'. Not exotic: [|+|] already exists in this
+   repository's own scenario_dsl.ml. Its origin's identity therefore contains the
+   allow-file's own field separator. *)
+let ( |/| ) a b = a / b
+
+let piped_div a b = a |/| b
+
+(* An origin that does NOT escape: the division is inside a handler that catches
+   what it raises. Without this the escapes = 1 filter is unobservable — a
+   fixture where everything escapes cannot tell a filter that works from one
+   that was deleted. *)
+let caught_div a b = try a / b with Division_by_zero -> 0
 |} );
     ( "ro_main.ml",
       {|let entry a b c =
   let x = Ro_leaf.two_on_one_line a b c in
-  Ro_leaf.one_assert x
+  let y = Ro_leaf.piped_div x a in
+  let z = Ro_leaf.caught_div y b in
+  Ro_leaf.one_assert (x + y + z)
 |} );
   ]
 
@@ -269,7 +284,122 @@ let register_not_computed () =
         (Arch_tezt.contains ~needle:"never evaluated" out)) ;
   Lwt.return_unit
 
+(* THE FLOW DEFECTS. Each of these is a way the gate misbehaves for a person
+   USING it rather than a way it computes a wrong answer, and each was found by a
+   reviewer rather than by this file. *)
+let register_flow () =
+  Test.register ~__FILE__
+    ~title:"rules origin: the allow-file survives a '|' in a name, and refuses a duplicate"
+    ~tags:["rules"; "origin"; "allow"; "flow"]
+  @@ fun () ->
+  with_indexed "ro_flow" @@ fun db ->
+  Batch.run (fun b ->
+      (* A '|' IN A FUNCTION NAME. OCaml operator names legitimately contain one.
+         A left split requiring exactly five fields made such a site permanently
+         un-exemptable — and because a malformed allow-file ABORTS, one such line
+         copied verbatim from the tool's own output took EVERY OTHER RULE in the
+         file down with it. *)
+      let _, out =
+        rules [db; rule_file "rof_e" (origin_rule ~forms:"division" ~allow:(allow_file "rof_e" ""))]
+      in
+      let piped =
+        String.split_on_char '\n' out
+        |> List.find_opt (fun l -> Arch_tezt.contains ~needle:"|/|" l)
+      in
+      match piped with
+      | None ->
+          Batch.check b
+            ~msg:("premise: the operator's own division site is listed (output:\n" ^ out ^ ")")
+            false
+      | Some l ->
+          let l = String.trim l in
+          let entry =
+            match String.index_opt l ']' with
+            | Some i -> String.trim (String.sub l (i + 1) (String.length l - i - 1))
+            | None -> l
+          in
+          Batch.check b ~msg:"premise: the listed identity really contains a '|'"
+            (Arch_tezt.contains ~needle:"|/|" entry) ;
+          (* Copied VERBATIM, the way a reviewer would. *)
+          let af = allow_file "rof_pipe" (entry ^ "\n") in
+          let code, out2 =
+            rules [db; rule_file "rof_pipe" (origin_rule ~forms:"division" ~allow:af)]
+          in
+          Batch.check b
+            ~msg:("an entry whose name contains '|' is accepted, not an abort (output:\n" ^ out2 ^ ")")
+            (code <> 2) ;
+          Batch.check b ~msg:"and it actually exempts its own site"
+            (not (Arch_tezt.contains ~needle:"[new]" out2 && Arch_tezt.contains ~needle:"|/|" out2)) ;
+          (* A DUPLICATE identity. Previously accepted in silence with FIRST-wins,
+             so the ORDER OF LINES decided the verdict — and in an append-only
+             workflow, which is the one this design imposes, a corrected
+             allowance appended at the end was silently ignored. *)
+          let dup = allow_file "rof_dup" (entry ^ "\n" ^ entry ^ "\n") in
+          let code_d, out_d =
+            rules [db; rule_file "rof_dup" (origin_rule ~forms:"division" ~allow:dup)]
+          in
+          Batch.eq_int b ~msg:"a duplicate allow-list entry aborts instead of silently first-winning"
+            code_d 2 ;
+          Batch.check b ~msg:"and the refusal names both counts"
+            (Arch_tezt.contains ~needle:"duplicate" out_d)) ;
+  Lwt.return_unit
+
+(* THE COVERAGE DELTA — the condition this design named for its own survival, and
+   which had no test at all: deleting it left the suite green. A widened-coverage
+   failure that reads as a regression is how a gate gets disabled. *)
+let register_coverage_and_scope () =
+  Test.register ~__FILE__
+    ~title:"rules origin: the coverage figure, the channel scope, and the escapes filter"
+    ~tags:["rules"; "origin"; "coverage"; "channel"]
+  @@ fun () ->
+  with_indexed "ro_cov" @@ fun db ->
+  Batch.run (fun b ->
+      let empty = allow_file "roc_cov" "" in
+      let _, out = rules [db; rule_file "roc_cov" (origin_rule ~forms:"division" ~allow:empty)] in
+      Batch.check b
+        ~msg:("the verdict reports a coverage figure, not only the sites (output:\n" ^ out ^ ")")
+        (Arch_tezt.contains ~needle:"coverage:" out) ;
+      Batch.check b ~msg:"it states the cone size, so a widened cone is visible as such"
+        (Arch_tezt.contains ~needle:"node(s) in cone" out) ;
+      Batch.check b ~msg:"and how many allow-entries matched nothing"
+        (Arch_tezt.contains ~needle:"matching nothing" out) ;
+      (* THE CHANNEL SCOPE. exn_origins holds every error channel, not just
+         exceptions: on proto_alpha, `form:raise` finds 1 origin on the
+         `exception` channel and 128 on `option`, where "raising" means
+         RETURNING None. Without scoping, this gate reported an option-typed
+         return as a crash site. Default is `exception`. *)
+      Batch.check b ~msg:"the coverage line names the channel it polices"
+        (Arch_tezt.contains ~needle:"on channel 'exception'" out) ;
+      let _, out_o =
+        rules
+          [ db;
+            rule_file "roc_opt"
+              (Printf.sprintf
+                 "rule \"opt\"\n  forbid origin from file:**/ro_main.ml form:raise \
+                  channel:option allow-file:%s\n"
+                 empty) ]
+      in
+      Batch.check b ~msg:"an explicit channel is honoured"
+        (Arch_tezt.contains ~needle:"on channel 'option'" out_o) ;
+      (* THE escapes = 1 FILTER. [caught_div] divides inside a handler that
+         catches Division_by_zero, so its origin does not escape and must not be
+         policed. A fixture with no handler cannot tell a working filter from a
+         deleted one. *)
+      Batch.eq_int b
+        ~msg:"premise: the fixture really contains a non-escaping division origin"
+        (Db.with_db db (fun c ->
+             Db.int c
+               "SELECT count(*) FROM exn_origins o JOIN functions f ON o.function_id=f.id \
+                WHERE f.name='caught_div' AND o.form='division' AND o.escapes=0"))
+        1 ;
+      Batch.check b
+        ~msg:("a caught origin is not reported as a site (output:\n" ^ out ^ ")")
+        (not (Arch_tezt.contains ~needle:"caught_div" out))) ;
+  Lwt.return_unit
+
 let register () =
   register_count () ;
   register_refusals () ;
-  register_not_computed ()
+  register_not_computed () ;
+  register_flow () ;
+  register_coverage_and_scope ()

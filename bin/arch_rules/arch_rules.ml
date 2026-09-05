@@ -119,7 +119,32 @@ let read_origin_allow path lineno =
           read by humans in review, so it gets comments; it does not get the
           failure mode. *)
        if line <> "" && line.[0] <> '#' then
-         match String.split_on_char '|' line |> List.map String.trim with
+         (* Split from the RIGHT, keeping the last four fields and letting the
+            FUNCTION NAME absorb everything before them.
+
+            A left split on '|' requiring exactly five fields makes any site
+            whose function name contains '|' permanently un-exemptable — and
+            OCaml operator names legitimately contain one: [|+|] already exists
+            in this repository's own scenario_dsl.ml, and [|/|], [|>] and their
+            relatives are ordinary. Worse than un-exemptable: a malformed
+            allow-file ABORTS, so one such line copied verbatim from the tool's
+            own output took down EVERY OTHER RULE in the file with it.
+
+            The last four fields cannot contain '|' by construction — a
+            file:line, a form drawn from a closed vocabulary, an exception path,
+            and a count. So the remainder is the name, whatever it contains. *)
+         match
+           let parts = String.split_on_char '|' line in
+           let n = List.length parts in
+           if n < 5 then List.map String.trim parts
+           else
+             let rec split i acc = function
+               | rest when i = n - 4 -> String.concat "|" (List.rev acc) :: rest
+               | x :: tl -> split (i + 1) (x :: acc) tl
+               | [] -> List.rev acc
+             in
+             split 0 [] parts |> List.map String.trim
+         with
          | [ fn; loc; form; exn; count ] ->
              let c =
                let d =
@@ -139,9 +164,28 @@ let read_origin_allow path lineno =
                          got %S"
                         path !n count)
              in
-             entries :=
-               (Printf.sprintf "%s | %s | %s | %s" fn loc form (if exn = "" then "-" else exn), c)
-               :: !entries
+             let ident =
+               Printf.sprintf "%s | %s | %s | %s" fn loc form (if exn = "" then "-" else exn)
+             in
+             (* A duplicate identity was previously accepted in silence and the
+                FIRST occurrence won, so the ORDER OF LINES decided the verdict:
+                the same file with two lines swapped exited 1 or 0, with no
+                diagnostic either way and `stale` reporting 0 in both. In an
+                append-only workflow — the one this design imposes, since there
+                is no --regenerate — a corrected allowance appended at the end of
+                the file was silently ignored in favour of the stale one above
+                it. Refused, naming both counts, because the author's intent is
+                genuinely ambiguous and guessing it is what produced the bug. *)
+             (match List.assoc_opt ident !entries with
+             | Some prev ->
+                 die
+                   (Printf.sprintf
+                      "arch-rules: %s line %d: duplicate allow-list entry for %s (already \
+                       allowed \xc3\x97%d, this line says \xc3\x97%d). Merge them into one line \
+                       with the intended count — line order must not decide which wins."
+                      path !n ident prev c)
+             | None -> ()) ;
+             entries := (ident, c) :: !entries
          | _ ->
              die
                (Printf.sprintf
@@ -167,7 +211,7 @@ type body =
      for three different reasons (a real regression, widened coverage, a proof that
      strengthened MAY→MUST) and only a human can tell them apart, so the gate must
      force the human rather than automate an excuse. *)
-  | Origin of Arch_sel.t * string list * origin_allow
+  | Origin of Arch_sel.t * string list * string * origin_allow
 
 type rule = { name : string; body : body }
 
@@ -256,6 +300,36 @@ let parse_rules path =
                  (Printf.sprintf "arch-rules: line %d: rule already has a body; one statement per rule"
                     !lineno)
            | Some (n, None, ln) ->
+               (* THE '#' TRAP, refused for EVERY verb rather than for one.
+
+                  Comment stripping above is [String.index_opt raw '#'] — the
+                  FIRST '#', wherever it sits — so any token containing one is
+                  silently shortened and the line still parses, just against
+                  something else. It fails BY DELETION.
+
+                  An earlier revision guarded only `forbid origin`, on the
+                  grounds that a file path was the motivating case. That is the
+                  partial fix that is worse than none: the class gets named, one
+                  member gets closed, and the remaining four become LESS likely
+                  to be looked at. Verified on a sibling: `forbid reach ... to
+                  fn:plain#variant2` truncates to `fn:plain` and reports a
+                  VIOLATION against a population the author never wrote — a
+                  false finding, not merely a missed one.
+
+                  A '#' preceded by whitespace is an ordinary trailing comment
+                  and stays legal; only a GLUED one indicates a truncated
+                  token. *)
+               (match String.index_opt raw '#' with
+               | Some i when i > 0 && raw.[i - 1] <> ' ' && raw.[i - 1] <> '\t' ->
+                   die
+                     (Printf.sprintf
+                        "arch-rules: line %d: this line contains a '#' with no space before \
+                         it, and comment stripping removes everything from the FIRST '#' \
+                         onwards — so the rule would be parsed with a TRUNCATED token. A '#' \
+                         cannot appear inside a selector pattern or a path. Rename the target, \
+                         or put a space before the '#' if it was meant as a comment."
+                        !lineno)
+               | _ -> ()) ;
                let toks = String.split_on_char ' ' line |> List.filter (fun s -> s <> "") in
                let b =
                  match toks with
@@ -274,8 +348,19 @@ let parse_rules path =
                  | [ "forbid"; "effect"; "from"; a; k ]
                    when String.length k > 5 && String.sub k 0 5 = "kind:" ->
                      Effect (sel ~allow:structural a !lineno, String.sub k 5 (String.length k - 5))
-                 | [ "forbid"; "origin"; "from"; a; f; al ]
-                   when has_prefix "form:" f && has_prefix "allow-file:" al ->
+                 | ("forbid" :: "origin" :: "from" :: a :: rest) as _all
+                   when (match rest with
+                        | [ f; al ] -> has_prefix "form:" f && has_prefix "allow-file:" al
+                        | [ f; ch; al ] ->
+                            has_prefix "form:" f && has_prefix "channel:" ch
+                            && has_prefix "allow-file:" al
+                        | _ -> false) ->
+                     let f, channel, al =
+                       match rest with
+                       | [ f; al ] -> (f, "exception", al)
+                       | [ f; ch; al ] -> (f, strip_prefix "channel:" ch, al)
+                       | _ -> assert false
+                     in
                      let forms =
                        String.split_on_char ',' (strip_prefix "form:" f)
                        |> List.filter (fun x -> x <> "")
@@ -297,33 +382,10 @@ let parse_rules path =
                             "arch-rules: line %d: form: lists no form — the rule would police \
                              nothing and report a PASS it never earned"
                             !lineno) ;
-                     (* THE '#' TRAP, refused rather than documented. Comment
-                        stripping above is [String.index_opt raw '#'] — the
-                        FIRST '#', wherever it sits — so [allow-file:sites#1.txt]
-                        arrives here as [allow-file:sites] and the rule loads a
-                        file that does not exist, or worse, one that does. It
-                        fails BY DELETION: the line still parses, just shorter.
-                        A documented impossibility is still a silent truncation
-                        for whoever did not read the doc.
-
-                        Detected on the RAW line, since by this point the
-                        evidence has been stripped away. A '#' preceded by
-                        whitespace is an ordinary trailing comment and stays
-                        legal; only a GLUED one indicates a truncated token. *)
-                     (match String.index_opt raw '#' with
-                     | Some i when i > 0 && raw.[i - 1] <> ' ' && raw.[i - 1] <> '\t' ->
-                         die
-                           (Printf.sprintf
-                              "arch-rules: line %d: this line contains a '#' with no space \
-                               before it, and comment stripping removes everything from the \
-                               FIRST '#' onwards — so the rule was parsed with a TRUNCATED \
-                               token. A '#' cannot appear in an allow-file path. Rename the \
-                               file, or put a space before the '#' if it was meant as a comment."
-                              !lineno)
-                     | _ -> ()) ;
                      Origin
                        ( sel ~allow:origin_sel_allow a !lineno,
                          forms,
+                         channel,
                          read_origin_allow (strip_prefix "allow-file:" al) !lineno )
                  | _ ->
                      die
@@ -682,7 +744,7 @@ let eval (t : Arch_db.t) (g : Arch_graph.t) ~sound r =
           { rule = r.name; kind = kind_of r.body; exact = false;
             verdict = (if sound then "PASS" else "UNKNOWN_NO_CONTRACT");
             detail = []; detail_total = 0; note = None; sizes = None; witness = []; top_reasons = [] }
-  | Origin (s, forms, allow) ->
+  | Origin (s, forms, channel, allow) ->
       (* Selected once and reused, for the reason [Effect] gives: the vacuity guard and the cone
          must read the SAME set, or the guard passes on one selection and the cone is built from
          another. *)
@@ -736,15 +798,16 @@ let eval (t : Arch_db.t) (g : Arch_graph.t) ~sound r =
         let forms_json = Yojson.Safe.to_string (`List (List.map (fun f -> `String f) forms)) in
         let hits =
           Arch_db.rows t
-            ~params_ty:Arch_db.Ty.(t2 string string)
+            ~params_ty:Arch_db.Ty.(t2 string (t2 string string))
             ~shape:Arch_db.Rows.t5' ~to_cells:Arch_db.Rows.c5
             "SELECT f.name, COALESCE(m.path,'?'), o.form, COALESCE(o.exn_path,''), \
              CAST(o.line AS TEXT) \
              FROM exn_origins o JOIN functions f ON o.function_id = f.id \
              LEFT JOIN modules m ON f.module_id = m.id \
-             WHERE o.escapes = 1 AND o.form IN (SELECT value FROM json_each(?)) \
+             WHERE o.escapes = 1 AND o.channel = ? \
+             AND o.form IN (SELECT value FROM json_each(?)) \
              AND o.function_id IN (SELECT value FROM json_each(?))"
-            (forms_json, ids_json)
+            (channel, (forms_json, ids_json))
         in
         (* Group into site identities and COUNT. The count is the whole reason this is not a
            plain set difference — see [origin_allow]: a ninth array access on an
@@ -794,9 +857,9 @@ let eval (t : Arch_db.t) (g : Arch_graph.t) ~sound r =
            proof strengthened — and a failure message that shows only the new sites reads as
            the first cause, whichever it was. Someone then disables the rule. *)
         let coverage =
-          Printf.sprintf "coverage: %d node(s) in cone, %d origin(s) of form %s, %d site(s); \
-                          allow-file %s has %d entr%s (%d matching nothing)"
-            (SS.cardinal cone) (List.length hits) (String.concat "," forms)
+          Printf.sprintf "coverage: %d node(s) in cone, %d origin(s) of form %s on channel \
+                          '%s', %d site(s); allow-file %s has %d entr%s (%d matching nothing)"
+            (SS.cardinal cone) (List.length hits) (String.concat "," forms) channel
             (List.length sites) allow.al_path
             (List.length allow.al_entries)
             (if List.length allow.al_entries = 1 then "y" else "ies")
