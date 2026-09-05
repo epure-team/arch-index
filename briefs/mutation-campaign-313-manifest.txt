@@ -1,4 +1,4 @@
-base=7c10af873399666b8ab46ee1a2ca7e1d7ba35cd8
+base=de293288d10f28da18dbf076af289453f2a707db
 ---
 bin/arch_mutants/arch_mutants.ml
 lib/arch_index/arch_index_db.ml
@@ -21,3 +21,8 @@ tezt/tests/main.ml
 scripts/check-status-provenance.sh
 scripts/check-total-matches.sh
 scripts/check-no-score.sh
+specs/itf/mutation-campaign-313.itf.json
+scripts/check-binary-provenance.sh
+scripts/check-quint-red.sh
+.gitignore
+checks/

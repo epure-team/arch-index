@@ -44,23 +44,56 @@ done
 
 hits=0
 lines=0
+phys=0
 
 for f in $FILES; do
   out=$(awk '
     # OCaml comments nest. Strip them, keeping the line numbering intact so a hit still
     # names the line a reader can open.
-    BEGIN { depth = 0; nline = 0 }
+    #
+    # A comment delimiter INSIDE A STRING LITERAL is not a delimiter. This scanner used to
+    # ignore that, and the cost was total: `count(*)` inside a SQL string in
+    # arch_mutants.ml opened a phantom comment that never closed, leaving end-of-file depth
+    # 3 and only 789 of the 2215 lines in that file with any code left to scan. A
+    # `Printf.printf "  score %d%% ..."` injected past that point — the two exact hits this
+    # file names in its own header — produced PASS. So string state is tracked FIRST, the
+    # way scripts/check-status-provenance.sh strips strings before counting brackets, and
+    # only then are (* and *) recognised. String literals are KEPT in the scanned text,
+    # because they are precisely what the patterns below have to match.
+    BEGIN { depth = 0; nline = 0; nphys = 0; instr = 0; inraw = 0 }
     {
       raw = $0; out = ""; i = 1; n = length(raw)
       while (i <= n) {
-        two = substr(raw, i, 2)
-        if (depth == 0 && two == "(*") { depth = 1; i += 2; continue }
-        if (depth > 0 && two == "(*") { depth++; i += 2; continue }
+        c = substr(raw, i, 1); two = substr(raw, i, 2)
+        # {| ... |} raw string: no escapes, and no comment delimiters inside it either.
+        if (inraw) {
+          if (two == "|}") { inraw = 0; if (depth == 0) out = out two; i += 2; continue }
+          if (depth == 0) out = out c
+          i++; continue
+        }
+        # "..." with backslash escapes. A trailing backslash is the OCaml line
+        # continuation, so the string state deliberately survives to the next line —
+        # which is what the multi-line SQL literal needs.
+        if (instr) {
+          if (c == "\\") { if (depth == 0) out = out substr(raw, i, 2); i += 2; continue }
+          if (c == "\"") { instr = 0; if (depth == 0) out = out c; i++; continue }
+          if (depth == 0) out = out c
+          i++; continue
+        }
+        if (c == "\"") { instr = 1; if (depth == 0) out = out c; i++; continue }
+        if (two == "{|") { inraw = 1; if (depth == 0) out = out two; i += 2; continue }
+        if (two == "(*") { depth++; i += 2; continue }
         if (depth > 0 && two == "*)") { depth--; i += 2; continue }
-        if (depth == 0) out = out substr(raw, i, 1)
+        if (depth == 0) out = out c
         i++
       }
-      nline++
+      nphys++
+      # Count the lines actually SCANNED — the ones that contributed code at depth 0 —
+      # not the physical lines read. A line swallowed whole by a comment (phantom or
+      # real) contributes nothing, and reporting it as inspected is reporting coverage
+      # this check did not have. That number was the only visible symptom of the bug
+      # above, and it lied.
+      if (out ~ /[^ \t]/) nline++
 
       if (out ~ /%%/)
         printf "%s:%d: a literal percent sign in a format string\n", FILENAME, NR
@@ -74,18 +107,25 @@ for f in $FILES; do
       if (out ~ /[ \t]\/\.[ \t]|[ \t]\*\.[ \t]|float_of_int|Float\./)
         printf "%s:%d: float arithmetic on a path that should only ever count\n", FILENAME, NR
     }
-    END { printf "#lines\t%d\n", nline }
+    END {
+      if (depth != 0)
+        printf "%s:%d: UNBALANCED comment depth %d at end of file — the scanner lost its place\n", FILENAME, NR, depth
+      if (instr || inraw)
+        printf "%s:%d: UNTERMINATED string literal at end of file — the scanner lost its place\n", FILENAME, NR
+      printf "#lines\t%d\t%d\n", nline, nphys
+    }
   ' "$f")
 
   bad=$(printf '%s\n' "$out" | grep -v '^#lines' | grep -v '^$' || true)
   lines=$((lines + $(printf '%s\n' "$out" | grep '^#lines' | cut -f2)))
+  phys=$((phys + $(printf '%s\n' "$out" | grep '^#lines' | cut -f3)))
   if [ -n "$bad" ]; then
     printf '%s\n' "$bad"
     hits=$((hits + $(printf '%s\n' "$bad" | wc -l)))
   fi
 done
 
-echo "check-no-score: inspected $lines line(s) of code (comments stripped) across ${DIRS[*]}"
+echo "check-no-score: scanned $lines line(s) of code at comment depth 0, out of $phys physical line(s), across ${DIRS[*]}"
 if [ "$hits" -gt 0 ]; then
   echo "check-no-score: FAIL — $hits site(s) could emit a score, ratio, percentage or threshold" >&2
   exit 1

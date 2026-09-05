@@ -51,10 +51,15 @@ statements=0
 
 for f in $FILES; do
   out=$(awk '
-    # Strip OCaml string literals before counting brackets, so a "[" inside a message
-    # cannot unbalance a record. Comments are left alone: a status key inside a comment
-    # is not an emitter, and the key regexes below require the OCaml tuple syntax.
-    function strip(l,   r) { r = l; gsub(/"[^"]*"/, "\"\"", r); return r }
+    # Judge one record: the keys that appear inside ITS OWN brackets, at its own nesting
+    # level. Nested records are their own frames and their keys are theirs alone, which is
+    # the whole point of the stack below.
+    function judge_record(   b) {
+      b = rbuf[top]
+      nrec++
+      if ((b ~ /\("engine_status"/ || b ~ /\("published_verdict"/) && b !~ /"selection_provenance"/)
+        printf "%s:%d: a JSON record carries a status without selection_provenance\n", FILENAME, rstart[top]
+    }
 
     function indent_of(l,   r) { r = l; sub(/[^ \t].*$/, "", r); return length(r) }
 
@@ -70,30 +75,65 @@ for f in $FILES; do
       instmt = 0; sbuf = ""
     }
 
-    BEGIN { depth = 0; start = 0; buf = ""; nrec = 0; nstmt = 0 }
+    BEGIN { top = 0; brdepth = 0; pending = 0; instr = 0; cdepth = 0; nrec = 0; nstmt = 0 }
 
     {
       raw = $0
-      s = strip(raw)
 
       # ---- (a) JSON records -------------------------------------------------
-      if (depth == 0 && raw ~ /`Assoc/) {
-        depth = 0; start = NR; buf = ""
-        inrec = 1
-      }
-      if (inrec) {
-        buf = buf "\n" raw
-        n = gsub(/\[/, "[", s); m = gsub(/\]/, "]", s)
-        depth += n - m
-        if (depth <= 0 && raw ~ /\]/) {
-          nrec++
-          has_status = (buf ~ /\("engine_status"/ || buf ~ /\("published_verdict"/)
-          has_prov   = (buf ~ /"selection_provenance"/)
-          if (has_status && !has_prov)
-            printf "%s:%d: a JSON record carries a status without selection_provenance\n", FILENAME, start
-          inrec = 0; depth = 0; buf = ""
+      # A STACK, not a single record. The previous version opened a record only at bracket
+      # depth 0, so a nested `Assoc never became a record of its own and the whole outermost
+      # blob was judged as ONE. An inner record therefore inherited any selection_provenance
+      # key appearing anywhere in the outer one — and deleting the provenance key from the
+      # per-run record, the row a reader copies into a bug report and the exact case FR-013
+      # exists for, still produced PASS. So: open a frame at EVERY `Assoc, and judge each
+      # frame against the keys between its own brackets, at its own level. Keys inside a
+      # nested record belong to that record and to no other.
+      #
+      # Strings and comments are consumed by the same scan, so a "[" in a message and a
+      # "[" in a doc comment cannot unbalance the stack, and a status key written in prose
+      # is not an emitter.
+      i = 1; n = length(raw)
+      while (i <= n) {
+        c = substr(raw, i, 1); two = substr(raw, i, 2)
+        if (instr) {
+          if (cdepth == 0 && top > 0) rbuf[top] = rbuf[top] c
+          if (c == "\\") {
+            if (cdepth == 0 && top > 0) rbuf[top] = rbuf[top] substr(raw, i + 1, 1)
+            i += 2; continue
+          }
+          if (c == "\"") instr = 0
+          i++; continue
         }
+        if (cdepth > 0) {
+          if (two == "(*") { cdepth++; i += 2; continue }
+          if (two == "*)") { cdepth--; i += 2; continue }
+          if (c == "\"") { instr = 1; i++; continue }
+          i++; continue
+        }
+        if (two == "(*") { cdepth = 1; i += 2; continue }
+        if (c == "\"") { instr = 1; if (top > 0) rbuf[top] = rbuf[top] c; i++; continue }
+        if (substr(raw, i, 6) == "`Assoc") {
+          pending = 1; pstart = NR
+          if (top > 0) rbuf[top] = rbuf[top] "`Assoc"
+          i += 6; continue
+        }
+        if (c == "[") {
+          if (pending) { top++; rstart[top] = pstart; rbuf[top] = ""; rlevel[top] = brdepth; pending = 0 }
+          else if (top > 0) rbuf[top] = rbuf[top] c
+          brdepth++
+          i++; continue
+        }
+        if (c == "]") {
+          brdepth--
+          if (top > 0 && rlevel[top] == brdepth) { judge_record(); top-- }
+          else if (top > 0) rbuf[top] = rbuf[top] c
+          i++; continue
+        }
+        if (top > 0) rbuf[top] = rbuf[top] c
+        i++
       }
+      if (top > 0) rbuf[top] = rbuf[top] "\n"
 
       # ---- (b) stdout text emitters -----------------------------------------
       # The extent of a statement is INDENTATION, not paren balance. A printf whose
@@ -114,7 +154,16 @@ for f in $FILES; do
         instmt = 1; sstart = NR; sindent = indent_of(raw); sbuf = raw
       }
     }
-    END { flush(); printf "#counts\t%d\t%d\n", nrec, nstmt }
+    END {
+      flush()
+      # An unclosed record means the scanner lost its place; it must not be reported as
+      # coverage. Judge what is left and say so, rather than dropping it silently.
+      while (top > 0) {
+        printf "%s:%d: UNCLOSED `Assoc record at end of file — the record scanner lost its place\n", FILENAME, rstart[top]
+        judge_record(); top--
+      }
+      printf "#counts\t%d\t%d\n", nrec, nstmt
+    }
   ' "$f")
 
   counts=$(printf '%s\n' "$out" | grep '^#counts' || true)
