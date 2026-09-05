@@ -1421,13 +1421,26 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels
             else add_call (Head_qualified (callee_module, callee_name)) loc
   in
   (* SLICE 3 (specs/error-channels.md "Binds"/"Transforms"/"Converters"):
-     classify an application's head the same way [record_head] eventually
-     will, but WITHOUT emitting anything — used only to look the head up
-     against declared [binds]/[transforms]/[converters]/[handlers] paths and
-     against [Arch_index_errch.bind_shape_channel]'s undeclared-bind check.
-     Mirrors [record_head]'s [Texp_ident] cases (a lambda-stamp head never
-     names a declared config path, so that branch is folded into
-     [Head_unknown] here — harmless, it just never matches). *)
+     classify an application's head WITHOUT emitting anything — used only to
+     look the head up against declared
+     [binds]/[transforms]/[converters]/[handlers] paths and against
+     [Arch_index_errch.bind_shape_channel]'s undeclared-bind check.
+
+     It mirrors [record_head]'s [Texp_ident] cases with TWO stated divergences,
+     and this comment used to claim it classified "the same way", which stopped
+     being true and is worse than the divergence it hid:
+
+     - a lambda-stamp head is folded into [Head_unknown] here. Harmless: such a
+       head never names a declared config path, so the branch just never
+       matches.
+     - {b it does NOT apply [alias_rewrite]} (specs/reexport-resolution.md
+       D1-quater, declared residual). [record_head] rewrites [S.f] to the
+       module the alias denotes; this does not, so a config that declares
+       [Saturation_repr.f] still will not match a call written [S.f]. That is
+       deliberate: rewriting here would change which calls match paths declared
+       in USER-WRITTEN config files, and this task has no measurement of that
+       effect. A symmetry argued from a comment is not a reason to change an
+       observable behaviour. *)
   let classify_head_path (fn_expr : Typedtree.expression) : call_head option =
     match fn_expr.exp_desc with
     | Texp_ident (Path.Pident id, _, _) when ident_is_local_fn id ->
