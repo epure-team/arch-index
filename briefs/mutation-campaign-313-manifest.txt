@@ -21,4 +21,3 @@ tezt/tests/main.ml
 scripts/check-status-provenance.sh
 scripts/check-total-matches.sh
 scripts/check-no-score.sh
-tezt/tests/must_null_ceiling.ml
