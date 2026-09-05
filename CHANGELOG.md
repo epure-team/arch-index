@@ -60,6 +60,26 @@ disagreement — which is why a number here names its build state and not just i
   ATTRIBUTES the movement across a 2x2 (base vs new binary, base vs new corpus) and writes only
   the part it can prove is source-only, never a ratchet loosening.
 
+  `--self-test` runs in the Tezt suite (`tezt/tests/recalibrate_self_test.ml`) and `--check` runs
+  in CI. Before this it was invoked by nothing at all: no CI step, no dune rule, no Makefile
+  target.
+  The CI step separates the two non-zero exits. A **refusal** (exit 2 — a degraded cell, a corpus
+  below the adequacy floor, a component collapsed below half its pin, an unreadable or
+  doubly-defined constant) fails the build, because a gate that cannot measure must not report
+  success. But those causes are *not* alike, and the step says so rather than lumping them:
+  three of them mean the gate itself is broken, while **implausibility may genuinely be a
+  property of the branch** — a real >50% resolution gain has exactly the same shape as a query
+  that stopped matching, and this repository has recorded a MAY_TOP move of 79% → 3.9%. Telling
+  the author of such a branch that the gate is broken is both wrong and unactionable, so the
+  script prints a machine-readable `refusal-class=` line for every exit-2 cause and CI takes the
+  "this may be your branch, recalibrate by hand and say why" arm only when **every** class line
+  in the run is `implausible`. With no class line at all it falls to the "the gate is broken"
+  arm — fail-closed. A
+  **stale** constant (exit 1) is a warning here only because it is already hard-gated twice over —
+  the self-index smoke test diffs the golden, and `must_null_ceiling` fails the suite on a breach.
+  So the step adds no new way for an ordinary PR to fail, and one new way for a broken measurement
+  to be caught.
+
 - **A head spelled through a module alias is resolved instead of going to ⊤.** `S.safe_int`, where
   the file declares `module S = Saturation_repr`, had a path rooted at a local binder;
   `qualified_is_dynamic` judged it dynamic and the edge became `MAY_TOP` with
@@ -117,9 +137,121 @@ disagreement — which is why a number here names its build state and not just i
   An alias whose target is **not a real compilation unit** — a functor parameter (`module M = X`
   inside `module Make (X : S)`) or a unit-local module — is deliberately **not** rewritten: its ⊤
   was honest, and rewriting it would point a resolved edge at whatever unit happened to share the
-  parameter's name.
+  parameter's name. **That is not hypothetical**: without the guard, the whole `src` tree acquires
+  **73 forged resolved edges** — `List.map` ×18, `Context.Tree.*`, `E.Tree.find`, `P.Tree.*` —
+  functor parameters resolved to unrelated same-named modules.
+
+  **A rewritten edge is not guaranteed to resolve, and the release note says so.** On the whole
+  `src` tree 41 622 rewrites yield 32 664 with a `callee_id` (78.5 %); on a dune-**wrapped** corpus
+  the ratio inverts, because `module S = Saturation_repr` inside a wrapped library renders a name
+  the resolver cannot bind. An unresolved rewrite is still an improvement on the ⊤ it replaces —
+  the persistent-root guard guarantees the new head names a real compilation unit, so the edge is
+  bounded by a named target that merely sits outside the index, the same standing as any external
+  leaf.
+
+### Added
+- **`ext:<glob>` — a selector that names external leaves.** `arch-rules` can now write
+  `forbid reach from <sel> to ext:<glob>` to forbid reaching a callee with no body in the index
+  (an unresolved external, such as `Stdlib.+`), valid only as the target of `forbid reach`. On a
+  flat (NDJSON) index it is `NOT_COMPUTED`: `arch-load`, this repo's one producer of that schema,
+  synthesises a `functions` row for every callee it writes, so the population `ext:` needs is
+  never populated on that producer's actual output — a property of what `arch-load` writes, not
+  of what the flat schema can hold. `docs/fitness-functions.md`'s selector table now lists it.
+
+  **Observable gate change for consumers.** `forbid dep` now only accepts `module:` on either
+  side; `file:` and `fn:` operands, previously accepted, now **abort with exit 2**. Before this,
+  `forbid dep` threw the selector kind away and globbed every operand straight against
+  `module_deps` strings regardless of what prefix was written, so a rule written as
+  `forbid dep from file:lib/core/** to module:Web.**` looked like a file-path check but was
+  silently re-run as a module-path glob — `forbid dep from module:src/** to file:bar` printed
+  `[ pass ]`, "1 proved", against a target that could never match anything real. That was a false
+  green, not a working check, so the fix is a refusal, not a relaxation: a rule file using
+  `file:`/`fn:` on a `dep` operand now fails fast at parse time instead of silently passing.
+  `docs/fitness-functions.md` documents the restriction and why.
 
 ### Fixed
+- **`arch-rules` reports the verdict and the gate as two different numbers, and `--on-vacuous`
+  now covers every rule form.** The summary line collapsed a seven-state verdict into
+  `N rule(s), M failing`, which reads as a pass for a run that proved almost nothing: on this
+  repo's own four-rule file, `4 rules, 0 failing` was really *1 proved / 0 violations /
+  3 UNKNOWN*. It is now two lines — a census that partitions the rules (every state printed even
+  at zero) and a separate `gate:` line carrying `failing` plus the policy flag values actually in
+  force, since `failing` overlaps six of the seven census counts and must never be added to them.
+  `--format json` gains `possible`, `unknown_escaping`, `unknown_no_contract` and
+  `not_computed`; every pre-existing field is unchanged.
+
+  **Observable gate change for consumers.** `forbid dep`, `forbid exported` and `forbid effect`
+  previously had no vacuity check at all — only `forbid reach` did — so they emitted `PASS` for a
+  rule whose selector had stopped matching, and `--on-vacuous fail` (the default) covered one
+  rule form in four. They now emit `NO_SOURCE` over the population each actually quantifies over.
+  For `reach`-only rule sets, including this repository's own `arch-rules.txt`, nothing moves and
+  the exit code is identical. A rule set containing `dep` / `exported` / `effect` rules can now go
+  from exit 0 to exit 1 — for instance a single `forbid exported` rule against an index whose
+  producer does not record export status. That is the fix working, not a regression: the old
+  exit 0 was a rule that could not fail. `--on-vacuous warn` restores the previous behaviour while
+  the selector or the producer is corrected. `forbid dep` deliberately gains no target-side check
+  — a `dep` target ranges over modules *already depended on*, so "nothing matches `Web.**`" is the
+  preventive rule succeeding, and calling it vacuous would fail the build precisely when the
+  codebase is clean.
+
+- **The recalibration gate would write a degenerate measurement over a pinned constant.** A query
+  that succeeds but matches nothing returns `0`, not an error: sqlite3 writes nothing to stderr,
+  `0` passes an is-it-an-integer check, and `A=B=C=D=0` is the cleanest possible "attributable to
+  source change only". Simulating a column rename in the ceiling predicate made
+  `--write --only ceiling` report `TIGHTENED clean_measured 347 -> 0 (installed file re-read and
+  confirmed)` and exit 0; the same hole left the golden — the *change detector* — reading
+  `modules: 0 / functions: 0 / calls: 0`, "verified byte-identical", exit 0.
+
+  Two adequacy floors now stand between a measurement and a write, and every cell of the 2x2 is
+  gated, not just the one that gets written. A *relative* floor refuses any component that has
+  collapsed below half the pinned value; an *absolute* floor requires each cell's database to
+  hold at least `min_total_calls` rows in `calls` — read out of `must_null_ceiling.ml` rather
+  than copied, so the two cannot drift apart. `--check` now exits 2 on these inputs.
+
+  This is also a correction to the "a ratchet may always be TIGHTENED automatically" axiom the
+  script was built on. That axiom is about DIRECTION and says nothing about MAGNITUDE, but every
+  way a measurement can silently break moves the number DOWN — into the direction it calls
+  always-safe. A tighten is safe for the invariant and destructive for the constant:
+  `clean_measured = 0` cannot fail CI, and it can never catch anything again either.
+- **An unanchored read of `let headroom` truncated a legal OCaml literal.** `let headroom = 1_000`
+  means 1000 and was read as **1**, with no refusal and no diagnostic, because the pattern ended
+  in `.*` and the result was passed through a plain integer check. Measured: with the pin at 400
+  and `headroom = 1_000`, `--write --only ceiling` rewrote 400 -> 340 and reported success, when
+  340 is inside the real band and nothing should have been written. Read-only, the same misread
+  reported a healthy tree as `STALE`, exit 1. Every read of a pinned integer now goes through one
+  anchored reader, which also refuses a constant that is defined twice rather than silently
+  taking the first with `head -1`.
+- `is_int` accepted values `$(( ))` cannot evaluate. `08` passed, then made the band comparison
+  abort with "value too great for base" — so no arm of the `if/elif/else` ran, the currency
+  verdict silently kept its previous value, and a bash error went to stderr. The self-test had
+  pinned the wrong half of this by asserting `00` as a pass.
+- The refusal message for an unreadable pinned CONSTANT blamed sqlite3 and told the reader to
+  "check the column names against the current schema", when no query is involved. Cell failures
+  and pin failures now print separate diagnostics; the pin one names the file, the anchored
+  regex, and the candidate lines.
+- Each metric's four cell databases now get per-metric paths. They were four fixed names reused
+  across metrics, so correctness depended on an unstated (and untested) assumption that the
+  producer truncates rather than appends.
+
+- **A completion marker can no longer outlive its evidence.** `comment_db_meta`'s
+  `error_contract` / `exn_contract` / `callgraph_contract` keys claim that an analysis RAN; they
+  are now cleared twice — once before the schema is demolished, once after it is rebuilt — so a
+  producer killed mid-analysis cannot leave the previous run's marker answering for work that
+  never happened. Previously `INSERT OR REPLACE` was relied on to keep them current, which is
+  true only of a run that REACHES the write.
+
+  **Observable contract change for consumers:** a re-index over a tree that is temporarily
+  un-built now leaves a database with no markers, so `arch-query`'s exception/error-channel
+  entry points and `arch-coverage-matrix` REFUSE (`NOT_ANALYSED`, exit 3 / `not_analysed`,
+  exit 1) where they previously answered. That is the intended direction — the old answer was
+  produced from a marker with no rows behind it — but it is a behaviour change, not a silent
+  internal fix. Re-index to restore the markers.
+
+  Measured: a SIGKILL sweep across the demolition window found 21 torn states in 60 attempts
+  before the fix and 0 in 60 after. The marker list is now one exported value
+  (`Arch_index_support.completion_marker_keys`), and `tezt/tests/completion_markers.ml` fails if
+  a new `comment_db_meta` key is neither a declared marker nor declared non-load-bearing.
+
 - **`fan-in`, `god-modules` and `callers-of` excluded a real call site.** They tested
   `edge_form IS NULL`, i.e. every non-NULL value rather than the one value that is not a call site.
   That was correct only while `'value_alias'` was the vocabulary's sole member. The predicate is now
