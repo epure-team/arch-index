@@ -84,7 +84,7 @@ same mould. Confirmed in the source.
 My reason was the `top_reason` string/constructor divergence. The parsing-area
 owner supplied a better one, measured an hour before: **the rendering is pinned
 by no test.** `Arch_graph.label` strips the `ext:` prefix at
-`arch_graph.ml:206-207`; disabling that strip leaves the whole suite green at
+`Arch_graph.label`'s `ext:` strip (cited by BINDING: the line number it carried, 206-207, had already drifted); disabling that strip leaves the whole suite green at
 164/164, and the only occurrence of `ext:` anywhere in `tezt/tests/` is a
 *comment* in `must_null_ceiling.ml`. Verified here independently.
 
