@@ -281,6 +281,13 @@ let extract_calls_from_cmts ~project_dir fn_rows =
                     let local_alias_stamps =
                       Arch_index_cmt.build_local_alias_stamps structure
                     in
+                    (* Threaded for the same reason as [local_alias_stamps]
+                       above: this is the FOURTH [calls] producer, and a
+                       producer that silently lacks the feature is how a
+                       measured result becomes unreproducible on one path. *)
+                    let module_alias_stamps =
+                      Arch_index_cmt.build_module_alias_stamps structure
+                    in
                     (* Issue #41's row-collapse (INSERT OR REPLACE on
                        UNIQUE(module_id, name)) never applies on this path:
                        this schema's `functions` rows come from LSP document
@@ -309,6 +316,7 @@ let extract_calls_from_cmts ~project_dir fn_rows =
                                         ~caller_name
                                         ~local_fn_stamps
                                         ~local_alias_stamps
+                                        ~module_alias_stamps
                                         vb.vb_expr
                                     in
                                     (* Flat path: lambda-attributed calls flow

@@ -51,8 +51,16 @@ let schema_path =
    [current_flat_schema_version] below, which runner.ml now uses instead. *)
 (* Bumped 1.9 -> 1.10 for [calls.edge_form] (specs/point-free-aliases.md).
    NOT a decimal: the minor component is an integer, [parse_schema_version]
-   splits on '.' and compares [(major, minor)] as ints, so 1.10 > 1.9. *)
-let current_schema_version = "1.10"
+   splits on '.' and compares [(major, minor)] as ints, so 1.10 > 1.9.
+
+   Bumped 1.10 -> 1.11 for [calls.edge_form]'s widened CHECK, which now admits
+   'module_alias' (specs/reexport-resolution.md D1-quater). Additive by the rule
+   above — the constraint accepts strictly more, so no existing consumer's query
+   needs modifying — but it IS a change to the declared schema text, and a
+   database created under 1.10 would reject the new value on insert. That is
+   exactly what the version is for. The flat schema is deliberately NOT bumped:
+   it carries no CHECK on this column, so nothing about its structure changed. *)
+let current_schema_version = "1.11"
 
 (* The flat schema (runner.ml's own inline 3-table [schema_sql]) — distinct
    version identity from [current_schema_version] above: the two schemas are

@@ -1024,6 +1024,46 @@ let build_local_alias_stamps (structure : Typedtree.structure) =
       | _ -> ()) ;
   local_alias_stamps
 
+(** Module aliases, keyed on BINDER IDENTITY: [Ident.unique_name] of the bound
+    module identifier maps to the aliased target's path string.
+
+    The sibling of {!build_local_alias_stamps} — same shape, same reason.  A
+    path rooted at a local module binder ([S.safe_int] where the file declares
+    [module S = Saturation_repr]) is judged dynamic by [qualified_is_dynamic]
+    and sent to ⊤ for "I cannot tell what this module is".  This table answers
+    exactly that question, at the site where the ⊤ is decided, so the head can
+    be rewritten to the qualified name it denotes before any classification
+    happens (specs/reexport-resolution.md D1-quater).
+
+    Keyed on the stamp and NOT on the alias name (D1-bis, FR-012): a nested
+    [module S = Test_stub] beside a toplevel [module S = Saturation_repr] would
+    be one key under a name and is two keys here, so a production call cannot be
+    pointed at a test stub by shadowing.  {b Stamps are unique within a
+    compilation unit and not across them}, which is why this table is built per
+    [.cmt] and consumed inside that same walk — its scope IS the per-file
+    scoping the spec requires, rather than a field that could be forgotten in a
+    join.
+
+    Nested binders are included deliberately: [iter_structure_items] descends,
+    and the [prefix = ""] gate that (correctly) keeps nested aliases out of
+    [module_deps] — a dependency is a property of the FILE — has no business
+    here, where the question is what one identifier denotes. *)
+let build_module_alias_stamps (structure : Typedtree.structure) =
+  let module_alias_stamps = Hashtbl.create 16 in
+  iter_structure_items structure ~f:(fun ~prefix:_ (it : Typedtree.structure_item) ->
+      match it.str_desc with
+      | Tstr_module {mb_id = Some id; mb_expr; _} -> (
+          match module_path_of_expr mb_expr with
+          | Some target -> Hashtbl.replace module_alias_stamps (Ident.unique_name id) target
+          | None ->
+              (* A functor application, a literal structure, an unpack: these
+                 do not NAME a module defined elsewhere, so there is nothing to
+                 rewrite a head to.  The ⊤ stands, which is the honest answer —
+                 not a miss to be recovered later. *)
+              ())
+      | _ -> ()) ;
+  module_alias_stamps
+
 (** Walk a value binding expression to collect all function calls.
     [local_fn_stamps] is the set of [Ident.stamp]s of same-module top-level
     function-body bindings; an applied unqualified identifier counts as a
@@ -1031,7 +1071,8 @@ let build_local_alias_stamps (structure : Typedtree.structure) =
     otherwise it is a parameter / local binding / closure and is MAY_TOP.
     Returns a list of pending calls. *)
 let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels = [])
-    ?(local_alias_stamps = Hashtbl.create 0) ~src_path ~caller_module ~caller_name
+    ?(local_alias_stamps = Hashtbl.create 0) ?(module_alias_stamps = Hashtbl.create 0)
+    ~src_path ~caller_module ~caller_name
     ~local_fn_stamps (expr : Typedtree.expression) =
   (* Per-node CFG: every function — the top-level binding AND each nested
      lambda node — gets its own lowering context with its own graph, current
@@ -1253,6 +1294,56 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels
   let qualified_is_dynamic path =
     match path_root path with Some id -> not (Ident.persistent id) | None -> false
   in
+  (* [S.safe_int] where this file declares [module S = Saturation_repr] is
+     dynamic by the test above — the root binder is not persistent — and would
+     go to ⊤ with reason [Module_param] for "I cannot tell what this module is".
+     But the binder's stamp is in hand RIGHT HERE, and
+     {!build_module_alias_stamps} answers exactly that question, so the head can
+     be rewritten to the qualified name it denotes and classified normally
+     (specs/reexport-resolution.md D1-quater).
+
+     Returns the rewritten [(module, name)] pair, or [None] to leave the ⊤
+     standing.  [None] is the answer whenever anything is not certain:
+     - the root binder is not an alias (a genuine functor parameter — the
+       conflation [qualified_is_dynamic] makes is sound, and this only splits
+       off the half we now have evidence for);
+     - the path contains a functor application or an extra-type node, which
+       name no module this table could denote.
+
+     The rewritten edge carries [edge_form = "module_alias"] at every emission
+     site, which the kind matrix demotes (FR-011): the rewrite discharges the
+     NAMING conjunct of MUST and leaves uniqueness and saturation standing, so
+     no rewritten edge may be MUST however its head classifies. *)
+  let segments_below_root path =
+    let rec go = function
+      | Path.Pident _ -> Some []
+      | Path.Pdot (p, seg) -> (
+          match go p with Some segs -> Some (segs @ [seg]) | None -> None)
+      | Path.Papply _ | Path.Pextra_ty _ -> None
+    in
+    go path
+  in
+  let alias_rewrite path =
+    match path_root path with
+    | Some id when not (Ident.persistent id) -> (
+        match Hashtbl.find_opt module_alias_stamps (Ident.unique_name id) with
+        | None -> None
+        | Some target -> (
+            match segments_below_root path with
+            | Some (_ :: _ as segs) ->
+                (* The last segment is the value name; any segments between the
+                   root and it extend the target's module path — [S.Syntax.+]
+                   becomes [<target>.Syntax] / [+]. *)
+                let rec split_last acc = function
+                  | [last] -> (List.rev acc, last)
+                  | seg :: tl -> split_last (seg :: acc) tl
+                  | [] -> assert false
+                in
+                let mods, name = split_last [] segs in
+                Some (String.concat "." (target :: mods), name)
+            | _ -> None))
+    | _ -> None
+  in
   (* A function-typed argument may be invoked by the callee. A named local
      function → bounded candidate (Head_enumerated); a parameter / external /
      computed function value → unknowable (Head_unknown). Conditionality is a
@@ -1285,8 +1376,15 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels
                    it. *)
                 let m, n = path_to_module_name p in
                 let disp = match m with Some m -> m ^ "." ^ n | None -> n in
-                let reason = if qualified_is_dynamic p then Module_param else Callback_param in
-                add_call ~callee_ty:ae.exp_type (Head_unknown (disp, reason)) loc
+                (match alias_rewrite p with
+                | Some (m, n) ->
+                    add_call ~callee_ty:ae.exp_type ~edge_form:"module_alias"
+                      (Head_qualified (Some m, n)) loc
+                | None ->
+                    let reason =
+                      if qualified_is_dynamic p then Module_param else Callback_param
+                    in
+                    add_call ~callee_ty:ae.exp_type (Head_unknown (disp, reason)) loc)
             | _ -> add_call ~callee_ty:ae.exp_type (Head_unknown ("*TOP*", Callback_param)) loc
             (* computed function value *))
         | _ -> ())
@@ -1295,6 +1393,13 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels
   (* Emit a call to a function named by a resolved [Path.t] — e.g. a let*/and*
      bind operator, which is applied but is not a [Texp_apply] node. *)
   let add_path_call ?edge_form (path : Path.t) loc =
+    (* An alias-rewritten head must be demoted (FR-011), but a caller that
+       already named a form has said something narrower about the SITE — a
+       point-free [let f = S.g] is a [value_alias] whether or not [S] is an
+       alias — so the caller's form wins.  Both values demote identically, so
+       precedence changes the recorded reason, never the kind. *)
+    let alias_form = match edge_form with Some _ -> edge_form | None -> Some "module_alias" in
+    let add_call_aliased head loc = add_call ?edge_form:alias_form head loc in
     let add_call = add_call ?edge_form in
     note_seen_value_path (Path.name path) ;
     match path with
@@ -1303,14 +1408,17 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels
     | Path.Pident id -> add_call (Head_unknown (Ident.name id, Callback_param)) loc
     | _ ->
         let callee_module, callee_name = path_to_module_name path in
-        if qualified_is_dynamic path then
-          let disp =
-            match callee_module with
-            | Some m -> m ^ "." ^ callee_name
-            | None -> callee_name
-          in
-          add_call (Head_unknown (disp, Module_param)) loc
-        else add_call (Head_qualified (callee_module, callee_name)) loc
+        match alias_rewrite path with
+        | Some (m, n) -> add_call_aliased (Head_qualified (Some m, n)) loc
+        | None ->
+            if qualified_is_dynamic path then
+              let disp =
+                match callee_module with
+                | Some m -> m ^ "." ^ callee_name
+                | None -> callee_name
+              in
+              add_call (Head_unknown (disp, Module_param)) loc
+            else add_call (Head_qualified (callee_module, callee_name)) loc
   in
   (* SLICE 3 (specs/error-channels.md "Binds"/"Transforms"/"Converters"):
      classify an application's head the same way [record_head] eventually
@@ -1919,6 +2027,13 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels
                 | Texp_ident (path, _, _) ->
                     note_seen_value_path (Path.name path) ;
                     let callee_module, callee_name = path_to_module_name path in
+                    (match alias_rewrite path with
+                    | Some (m, n) ->
+                        add_call ~partial ~is_head_of:expr.exp_loc
+                          ?callee_ty:!callee_ty_for_channel ~edge_form:"module_alias"
+                          (Head_qualified (Some m, n))
+                          expr.exp_loc
+                    | None ->
                     if qualified_is_dynamic path then
                       let disp =
                         match callee_module with
@@ -1933,7 +2048,7 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels
                         ~is_head_of:expr.exp_loc
                         ?callee_ty:!callee_ty_for_channel
                         (Head_qualified (callee_module, callee_name))
-                        expr.exp_loc
+                        expr.exp_loc)
                 | Texp_function _ -> (
                     (* Immediately-applied literal (beta-redex): the head IS
                        the lambda node named during the descent — a resolved
@@ -2610,6 +2725,7 @@ let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
                   let pending_type_usages = ref [] in
                   let local_fn_stamps = build_local_fn_stamps structure in
                   let local_alias_stamps = build_local_alias_stamps structure in
+                  let module_alias_stamps = build_module_alias_stamps structure in
                   let binding_names = build_binding_names structure in
                   (* Exception identity (specs/exn-raise-sets.md): the idents a
                      structure item of THIS unit declares — exceptions,
@@ -3004,6 +3120,7 @@ let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
                                           ~caller_name:name
                                           ~local_fn_stamps
                                           ~local_alias_stamps
+                                          ~module_alias_stamps
                                           vb.vb_expr
                                       in
                                       (* Insert a synthetic functions row per nested

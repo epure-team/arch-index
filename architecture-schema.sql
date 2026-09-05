@@ -229,7 +229,16 @@ CREATE TABLE IF NOT EXISTS calls (
     -- it says something about how the edge came to exist, which is what a
     -- caller-count consumer needs to know. And the bare word 'alias' is taken:
     -- module_deps.dep_kind='alias' already means a MODULE alias.
-    edge_form TEXT CHECK(edge_form IS NULL OR edge_form = 'value_alias'),
+    --
+    -- 'module_alias' (schema 1.11, specs/reexport-resolution.md D1-quater): the
+    -- head was spelled through a module alias — [S.safe_int] where the file
+    -- declares [module S = Saturation_repr] — and the producer rewrote it to
+    -- the qualified name before classifying. It demotes for a DIFFERENT reason
+    -- than 'value_alias' does, and the difference is worth keeping: there, no
+    -- call happens at the site at all; here a real Texp_apply happens and the
+    -- rewrite discharges only the NAMING conjunct of MUST, leaving uniqueness
+    -- and saturation standing. Same column, same demotion, two distinct facts.
+    edge_form TEXT CHECK(edge_form IS NULL OR edge_form IN ('value_alias', 'module_alias')),
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
