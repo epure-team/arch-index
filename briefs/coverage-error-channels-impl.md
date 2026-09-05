@@ -48,6 +48,6 @@ for any language. That is the honest-absence guarantee failing in the one place 
 ## Gates
 
 Build; `GOFLAGS=-buildvcs=false dune test --root . --force` (126/126 before this change);
-`arch-rules` 4/0; golden regenerated last with every delta attributed; the exception channel on
+`arch-rules` **1 proved / 0 violations / 3 UNKNOWN** (recorded here as `4/0`; that was the tool's own summary collapsing a three-state verdict into one number — corrected in PR #70, see specs/qualified-unit-resolution.md §10.5); golden regenerated last with every delta attributed; the exception channel on
 both external corpora unchanged — this change touches no producer, so any movement there would be
 a red flag, not an expected delta.

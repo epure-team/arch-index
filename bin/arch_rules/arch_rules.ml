@@ -12,9 +12,26 @@
     - [UNKNOWN] the source cone reaches a ⊤ edge, so the analysis lost track. NOT a pass.
     - [PASS] proved unreachable in a closed universe. A real proof.
 
-    On an index that is not ⊤-marked, PASS is never emitted — it degrades to
-    [UNKNOWN_NO_CONTRACT], because "no path found" in a graph that silently drops dynamic edges
-    is not a proof of anything. *)
+    For the two rule forms that ask a REACHABILITY question — [forbid reach] and [forbid effect] —
+    an index that is not ⊤-marked can never yield PASS: it degrades to [UNKNOWN_NO_CONTRACT],
+    because "no path found" in a graph that silently drops dynamic edges is not a proof of
+    anything.
+
+    [forbid dep] and [forbid exported] are NOT reachability questions. They read a declared fact
+    (a module's own [open]/[include]/alias list; a function's [exported] flag) straight out of the
+    index, so their PASS is exact on any backend and does not consult the ⊤ contract at all. That
+    is why they are marked [exact] in the result. The price is that their PASS is only as complete
+    as the FACTS the producer wrote: it says "no such declaration was recorded", which is a proof
+    about the index, not about a call graph. A selector that matches nothing therefore has to be
+    caught explicitly — see [NO_SOURCE] below — or an [exact] PASS would be indistinguishable from
+    a rule aimed at a module that does not exist.
+
+    Orthogonally to all of the above, any rule form can report:
+
+    - [NO_SOURCE] / [NO_TARGET] the rule quantifies over nothing. VACUOUS: it cannot fail, so a
+      green result establishes nothing. Governed by [--on-vacuous], which fails by default.
+    - [NOT_COMPUTED] the index carries no data of the kind the rule needs, so it was never
+      evaluated at all. Governed by [--on-not-computed]. *)
 
 open Arch_tools
 module SS = Arch_graph.SS
@@ -272,13 +289,35 @@ let eval (t : Arch_db.t) (g : Arch_graph.t) ~sound r =
           (Arch_graph.nodes g)
         |> List.sort (fun (a : Arch_graph.node) b -> compare a.name b.name)
       in
+      (* The population this rule quantifies over is the EXPORTED functions, not the selector.
+         With none in the index there is nothing to check, and "no offender found" is a fact about
+         an empty set, not a proof about the code — the same vacuity `reach` reports as NO_SOURCE.
+         It used to print `pass`, and since the summary now calls a PASS *proved*, that vacuity was
+         being promoted to the word "proved" in the one line humans read.
+
+         Note the case split: if the selector matched nothing while exported functions DO exist,
+         every one of them is an offender and the verdict is VIOLATION — loud, and never
+         downgraded to VACUOUS. So `offenders = []` with an empty selector is exactly the
+         "nothing is exported at all" case. *)
+      let exported_total =
+        List.length (List.filter (fun (n : Arch_graph.node) -> n.exported) (Arch_graph.nodes g))
+      in
       { rule = r.name; kind = kind_of r.body; exact = true; witness = [];
-        sizes = Some (SS.cardinal allowed, 0);
-        verdict = (if offenders = [] then "PASS" else "VIOLATION");
+        sizes = Some (SS.cardinal allowed, exported_total);
+        verdict =
+          (if exported_total = 0 then "NO_SOURCE"
+           else if offenders = [] then "PASS"
+           else "VIOLATION");
         detail = List.map (fun (n : Arch_graph.node) -> lbl n.key) (take 20 offenders);
         detail_total = List.length offenders;
         note =
-          (if SS.is_empty allowed then
+          (if exported_total = 0 then
+             Some
+               "no function in this index is marked exported, so this rule quantifies over the \
+                empty set — the rule is VACUOUS. Either the producer does not record export \
+                status, or there is genuinely nothing to check; a green result means nothing \
+                either way."
+           else if SS.is_empty allowed then
              Some
                (Printf.sprintf
                   "selector %s matched nothing, so EVERY exported function is an offender — check \
@@ -286,6 +325,9 @@ let eval (t : Arch_db.t) (g : Arch_graph.t) ~sound r =
                   (Arch_sel.to_string s))
            else None) }
   | Effect (s, kind) ->
+      (* Selected once and reused: the vacuity guard and the cone below must be reading the SAME
+         set, or the guard could pass on one selection and the cone be built from another. *)
+      let effect_src = lazy (Arch_sel.select g s) in
       if not (Arch_db.nonempty t "function_effects") then
         { rule = r.name; kind = kind_of r.body; exact = false; verdict = "NOT_COMPUTED"; detail = [];
           detail_total = 0; sizes = None; witness = [];
@@ -293,8 +335,23 @@ let eval (t : Arch_db.t) (g : Arch_graph.t) ~sound r =
             Some
               "this index has no effects data — 'no effect found' would be a lie. Effects are \
                produced by the OCaml .cmt backend (effects-schema-migration.sql + arch-effects-load)." }
+      else if SS.is_empty (Lazy.force effect_src) then
+        (* An empty source selector makes the cone empty, so no effect can ever be found and the
+           rule reports a proof it never performed. Same vacuity as `reach`'s NO_SOURCE, and it
+           reached the summary as "proved". *)
+        { rule = r.name; kind = kind_of r.body; exact = false; verdict = "NO_SOURCE"; detail = [];
+          (* `sizes = None` like every other Effect branch: an effect rule's JSON row has never
+             carried source_size/target_size, and making one verdict the exception would be a
+             schema a consumer cannot rely on. The note carries the evidence instead. *)
+          detail_total = 0; sizes = None; witness = [];
+          note =
+            Some
+              (Printf.sprintf
+                 "selector %s matched nothing — the rule is VACUOUS. An empty source cone contains \
+                  no effects by construction, which is not a result about your code."
+                 (Arch_sel.to_string s)) }
       else
-        let src = Arch_sel.select g s in
+        let src = Lazy.force effect_src in
         let cone = SS.union src (Arch_graph.closure src g.fwd) in
         let names =
           SS.fold
@@ -361,13 +418,53 @@ let eval (t : Arch_db.t) (g : Arch_graph.t) ~sound r =
               | _ -> None)
             rows
         in
+        (* The SOURCE side is checkable for vacuity and the target side is not, and the asymmetry
+           is not an oversight.
+
+           A `dep` rule quantifies over the modules matched by [s]. If the index knows no module of
+           that name the rule can never fire — a typo'd path, or a directory that was renamed —
+           and "no forbidden dep found" is a statement about the empty set. That is NO_SOURCE, and
+           it is exactly what `reach` already reports.
+
+           The target side gets NO analogous check, unlike `reach`'s NO_TARGET. `reach`'s target
+           selector ranges over functions that EXIST in the index; a `dep` target ranges over
+           module paths that are ALREADY DEPENDED ON (external targets appear only as
+           module_deps.target_path — there is no independent universe of them to match against).
+           So "nothing matches `Web.**`" is not evidence of a typo, it is the rule succeeding:
+           `forbid dep ... to module:Web.**` is a preventive rule whose whole purpose is to hold
+           while nothing depends on Web. Reporting that as VACUOUS would fail the gate — by
+           default, since --on-vacuous is fail-closed — precisely when the codebase is clean. *)
+        let module_paths =
+          Arch_db.rows t ~params_ty:Arch_db.Ty.unit ~shape:Arch_db.Rows.t1
+            ~to_cells:Arch_db.Rows.c1 "SELECT path FROM modules" ()
+        in
+        let source_size =
+          List.length
+            (List.filter
+               (fun row ->
+                 match List.map Arch_db.string_of_cell row with
+                 | [ p ] -> Arch_sel.glob_match (snd s) p
+                 | _ -> false)
+               module_paths)
+        in
         { rule = r.name; kind = kind_of r.body; exact = true; witness = [];
-          verdict = (if hits = [] then "PASS" else "VIOLATION");
-          detail = take 20 hits; detail_total = List.length hits; sizes = None;
+          verdict =
+            (if source_size = 0 then "NO_SOURCE" else if hits = [] then "PASS" else "VIOLATION");
+          detail = take 20 hits; detail_total = List.length hits;
+          (* Source only, like `exported`: a `dep` rule has no target POPULATION to size (see
+             above), so a second number here would be a field with no meaning. *)
+          sizes = Some (source_size, 0);
           note =
             Some
-              "declared-dependency check: it sees what the module DECLARES, not what it can \
-               reach. Pair it with `forbid reach` for the semantic question." }
+              (if source_size = 0 then
+                 Printf.sprintf
+                   "selector %s matches no module in this index (of %d) — the rule is VACUOUS. It \
+                    cannot fail, so a green result says nothing about your code; check the path \
+                    before trusting it."
+                   (Arch_sel.to_string s) (List.length module_paths)
+               else
+                 "declared-dependency check: it sees what the module DECLARES, not what it can \
+                  reach. Pair it with `forbid reach` for the semantic question.") }
 
 (* ------------------------------------------------------------------ *)
 
@@ -446,7 +543,30 @@ let () =
   in
   let failed_names = List.filter_map (fun r -> if failing r.verdict then Some r.rule else None) results in
   let count_verdicts vs = List.length (List.filter (fun r -> List.mem r.verdict vs) results) in
-  let unknown = count_verdicts [ "UNKNOWN"; "UNKNOWN_NO_CONTRACT" ] in
+  (* The VERDICT census. These seven counts PARTITION the rules — every rule has exactly one
+     verdict, and `census` below is asserted to sum to the rule count — which is what makes the
+     summary line readable as a whole. `failing` is a different kind of number entirely: it is a
+     policy-driven aggregate that OVERLAPS six of the seven, so the two are reported on separate
+     lines and never added together. See the summary block near the end of this file.
+
+     UNKNOWN and UNKNOWN_NO_CONTRACT are counted apart, not merged. They have different causes and
+     different fixes: the first means the source cone escaped through a ⊤ edge (a real analysis
+     result — the fix is a better producer, or roadmap 3.7); the second means the index was never
+     ⊤-marked at all, so NOTHING was ruled out for any rule (the fix is to rebuild with a
+     contract-stamping backend). A single line reading "N UNKNOWN (the cone escapes through a ⊤
+     edge)" is simply false for the second. *)
+  let proved = count_verdicts [ "PASS" ] in
+  let violations = count_verdicts [ "VIOLATION" ] in
+  let possible = count_verdicts [ "POSSIBLE" ] in
+  let unknown_escaping = count_verdicts [ "UNKNOWN" ] in
+  let unknown_no_contract = count_verdicts [ "UNKNOWN_NO_CONTRACT" ] in
+  (* Retained as the UNION for the JSON field of the same name, whose meaning predates this split
+     and which consumers already read. Never used in the text census, where it would double-count
+     against `unknown_no_contract`. *)
+  let unknown = unknown_escaping + unknown_no_contract in
+  (* NO_SOURCE and NO_TARGET stay merged, unlike the two UNKNOWNs: they are the SAME failure with
+     the same fix — a selector that matches nothing — and the per-rule note already names which of
+     the two selectors it was. *)
   let vacuous = count_verdicts [ "NO_SOURCE"; "NO_TARGET" ] in
   let not_computed = count_verdicts [ "NOT_COMPUTED" ] in
   (* arch-rules never refuses at the process level (unlike arch-impact's exit 3) — an
@@ -455,6 +575,27 @@ let () =
      govern. So `verdict` here only ever takes "pass" or "fail", mirroring the exit code
      computed below (line ~464), never "refused". *)
   let verdict = if failed_names <> [] then "fail" else "pass" in
+  (* The VERDICT census, as name/count pairs for the text and `md` summary lines. Defined — and
+     checked — ABOVE the format split on purpose: the partition claim is a property of the
+     verdicts, not of the renderer, and the JSON object below prints the same seven numbers. Left
+     inside the text branch it left `--format json` unguarded, where an unknown verdict would be
+     under-counted silently AND `failing` would treat it as not-failing: fail-open in the one
+     channel a gate actually reads. *)
+  let census =
+    [ ("proved", proved); ("violation", violations); ("possible", possible);
+      ("unknown", unknown_escaping); ("unknown-no-contract", unknown_no_contract);
+      ("vacuous", vacuous); ("not-computed", not_computed) ]
+  in
+  (* The partition claim, checked rather than asserted in prose: if a verdict string ever escapes
+     `census`, this refuses to print a summary that silently loses it. *)
+  let counted = List.fold_left (fun a (_, n) -> a + n) 0 census in
+  if counted <> List.length results then
+    die
+      (Printf.sprintf
+         "arch-rules: internal error — the summary census covers %d of %d rules. A verdict the \
+          summary does not know about would be silently dropped from the line; refusing to print \
+          it."
+         counted (List.length results)) ;
   (if fmt = "json" then
      print_endline
        (Yojson.Safe.pretty_to_string
@@ -462,8 +603,21 @@ let () =
             [ ("computed", `Bool true);
               ("contract_ok", `Bool contract_ok);
               ("verdict", `String verdict);
+              (* `failing` is the GATE: policy-driven, and it overlaps every census field below
+                 except `proved`. The seven census fields — proved, violations, possible,
+                 unknown_escaping, unknown_no_contract, vacuous, not_computed — partition the
+                 rules and sum to the length of `results`. Do not add `failing` to them.
+
+                 `unknown` is kept as the UNION unknown_escaping + unknown_no_contract, because
+                 that is what it has always meant and gates read it. It is the one field here that
+                 is redundant with two others; the split ones are the honest pair. *)
               ("failing", `Int (List.length failed_names));
+              ("proved", `Int proved);
+              ("violations", `Int violations);
+              ("possible", `Int possible);
               ("unknown", `Int unknown);
+              ("unknown_escaping", `Int unknown_escaping);
+              ("unknown_no_contract", `Int unknown_no_contract);
               ("vacuous", `Int vacuous);
               ("not_computed", `Int not_computed);
               ( "results",
@@ -478,7 +632,9 @@ let () =
                            ("witness", `List (List.map (fun w -> `String w) r.witness));
                            ("note", (match r.note with Some n -> `String n | None -> `Null)) ]
                          @ (match (r.sizes, r.kind) with
-                           | Some (sn, _), "exported" -> [ ("source_size", `Int sn) ]
+                           (* `exported` and `dep` size their SOURCE population only; neither has
+                              a target population a number could describe. *)
+                           | Some (sn, _), ("exported" | "dep") -> [ ("source_size", `Int sn) ]
                            | Some (sn, tn), _ ->
                                [ ("source_size", `Int sn); ("target_size", `Int tn) ]
                            | None, _ -> [])
@@ -504,34 +660,56 @@ let () =
          | Some n -> print_endline (if md then "    > " ^ n else "           note: " ^ n)
          | None -> ())
        results ;
-     let nf = List.length (List.filter (fun r -> failing r.verdict) results) in
-     let nv =
-       List.length (List.filter (fun r -> r.verdict = "NO_SOURCE" || r.verdict = "NO_TARGET") results)
-     in
-     let nnc = List.length (List.filter (fun r -> r.verdict = "NOT_COMPUTED") results) in
-     (* UNKNOWN belongs in this line for the same reason VACUOUS and NOT_COMPUTED already do:
-        it is fail-OPEN, so it does not reach `nf`, and a summary of "N rule(s), 0 failing" is
-        then read as "N rules proved" when nothing was proved at all. That is not a hypothetical
-        misreading — this line reporting 4/0 over 1 proved / 3 UNKNOWN is the misreading that
-        actually happened, twice, and it is the defect
-        specs/qualified-unit-resolution.md §10.5 names: a three-state verdict reported as one
-        number. The JSON has always carried `unknown`; only the channel humans read omitted it. *)
+     (* TWO lines, because there are two different questions and one number cannot answer both.
+
+        Line 1 is the VERDICT: what the analysis found. Its seven counts partition the rules — every
+        rule has exactly one verdict — so the line can be read as a whole and the parts add up to
+        the total. It is unconditional: a state that only appears when non-zero is a state a reader
+        cannot distinguish from a state the tool does not have, and "0 proved" is the single most
+        important thing this summary can say.
+
+        Line 2 is the GATE: what the POLICY did with those verdicts. `failing` is not a verdict —
+        it is an aggregate over VIOLATION, POSSIBLE, NO_SOURCE, NO_TARGET, NOT_COMPUTED and
+        conditionally the two UNKNOWNs, so it OVERLAPS six of the seven census counts. Printing it
+        inside line 1 made "4 rule(s), 1 proved, 3 failing, 1 UNKNOWN" sum to 5 over 4 rules. It
+        also has to state the policy actually in force: the previous text said "fail-open by
+        default" to an operator who had just passed --on-unknown fail, which is a newly-written
+        sentence that is false for the run it annotates — the exact defect class this summary
+        exists to fix.
+
+        specs/qualified-unit-resolution.md §10.5: "a verdict with N states must be reported with N
+        numbers ... Report 1 proved / 3 UNKNOWN / 0 violations". That asks for `violations`, the
+        verdict — not `failing`, the gate. Both are here, on the line each belongs to. *)
+     let nf = List.length failed_names in
+     (* In `md` the two lines are bullets: consecutive plain lines would be reflowed into one
+        paragraph, which would put the census and the gate back on a single line — the exact
+        conflation this split exists to undo. *)
+     let bullet = if md then "- " else "" and sub = if md then "  - " else "  " in
      print_endline "" ;
      print_endline
-       (Printf.sprintf "%d rule(s), %d proved, %d failing%s%s%s" (List.length results)
-          (List.length (List.filter (fun r -> r.verdict = "PASS") results))
-          nf
-          (if unknown > 0 then
-             Printf.sprintf
-               ", %d UNKNOWN (the cone escapes through a ⊤ edge — not proved, and fail-open \
-                by default)" unknown
-           else "")
-          (if nv > 0 then
-             Printf.sprintf ", %d VACUOUS (matched no code — a green result there means nothing)" nv
-           else "")
-          (if nnc > 0 then
-             Printf.sprintf
-               ", %d NOT COMPUTED (the index has no data for that rule form — it was never \
-                checked)" nnc
-           else ""))) ;
+       (Printf.sprintf "%s%d rule(s): %s" bullet (List.length results)
+          (String.concat ", " (List.map (fun (n, c) -> Printf.sprintf "%d %s" c n) census))) ;
+     (* Every state the flags govern, with the value actually in force — no defaults quoted, and
+        no claim about fail-open that the current invocation contradicts. VIOLATION is listed as
+        `always` because no flag can open it. *)
+     print_endline
+       (Printf.sprintf
+          "%sgate: %d failing — violation=always possible=%s unknown=%s vacuous=%s \
+           not-computed=%s"
+          bullet nf on_possible on_unknown on_vacuous on_not_computed) ;
+     (* The causes, once each, only for states actually present. They are per-STATE and must not be
+        shared: for UNKNOWN_NO_CONTRACT no cone escaped anywhere — the index was never ⊤-marked, so
+        no rule on it could have been proved regardless. *)
+     List.iter
+       (fun (n, msg) -> if n > 0 then print_endline (sub ^ msg))
+       [ ( unknown_escaping,
+           "unknown: the source cone reaches a ⊤ edge — no path was found and none can be ruled \
+            out either. Not proved." );
+         ( unknown_no_contract,
+           "unknown-no-contract: this index is not ⊤-marked, so 'no path' is not a proof for ANY \
+            rule on it — a dropped dynamic edge is indistinguishable from an absent one. Rebuild \
+            with a contract-stamping backend." );
+         (vacuous, "vacuous: a selector matched nothing — the rule cannot fail, so it proves nothing.");
+         ( not_computed,
+           "not-computed: the index carries no data for that rule form — it was never checked." ) ]) ;
   exit (if List.exists (fun r -> failing r.verdict) results then 1 else 0)

@@ -55,6 +55,9 @@ let () =
   Rules.register_witness () ;
   Rules.register_witness_adjacency () ;
   Rules.register_summary_line () ;
+  Rules.register_summary_partitions () ;
+  Rules.register_two_unknowns_are_two_states () ;
+  Rules.register_vacuity_covers_every_rule_form () ;
   Pcc.register_index () ;
   Pcc.register_index_infra_failure () ;
   Pcc.register_dossier () ;

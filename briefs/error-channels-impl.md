@@ -78,7 +78,7 @@ call-graph gap); `arch-coverage-matrix` has no `error_channels` row.
 
 - `dune build --root .` exit 0
 - `dune test --root . --force` 110/110 exit 0
-- `arch-rules … --on-vacuous fail` 4 rules, 0 failing
+- `arch-rules … --on-vacuous fail` exit 0 — **1 proved / 0 violations / 3 UNKNOWN**. Recorded here as "4 rules, 0 failing", which was the tool's own summary reporting a three-state verdict as one number; corrected in PR #70. Nothing was proved for three of the four rules.
 - self-index golden re-measured: 23 modules / 733 functions / 4834 calls
 - exception channel re-verified post-merge on both external corpora: every verdict-bearing number
   identical to `docs/exception-raise-sets-validation.md`; one attributed delta (proto_alpha
