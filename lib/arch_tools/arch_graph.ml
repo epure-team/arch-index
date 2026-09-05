@@ -206,13 +206,23 @@ let shortest_path_from_set ~adj ~from ~to_ =
 let witness_to_top g ~from =
   bfs_search ~adj:g.fwd ~seeds:(SS.singleton from) ~stop:(fun x -> SM.mem x g.tops)
 
+let ext_prefix = "ext:"
+
+let has_ext_prefix k =
+  String.length k > String.length ext_prefix
+  && String.sub k 0 (String.length ext_prefix) = ext_prefix
+
+(** The name as written at the call site: what a report shows and what a rule author can be asked
+    to type. Strips [Main]'s prefix; [Flat]'s keys carry none. *)
+let ext_name k =
+  if has_ext_prefix k then
+    String.sub k (String.length ext_prefix) (String.length k - String.length ext_prefix)
+  else k
+
 let label g key =
   match SM.find_opt key g.nodes with
   | Some n -> ( match n.file with Some f -> Printf.sprintf "%s  (%s)" n.name f | None -> n.name)
-  | None ->
-      if String.length key > 4 && String.sub key 0 4 = "ext:" then
-        String.sub key 4 (String.length key - 4)
-      else key
+  | None -> ext_name key
 
 (** External leaves: keys that appear as a call TARGET but have no indexed body.
 
@@ -238,19 +248,6 @@ let label g key =
     [calls.caller_id]/[callee_id], survive. On a DB where that invariant does not hold — one
     written by something other than this repo's own producer — this can still return a false
     external for a genuinely internal, unjoinable function. *)
-let ext_prefix = "ext:"
-
-let has_ext_prefix k =
-  String.length k > String.length ext_prefix
-  && String.sub k 0 (String.length ext_prefix) = ext_prefix
-
-(** The name as written at the call site: what a report shows and what a rule author can be asked
-    to type. Strips [Main]'s prefix; [Flat]'s keys carry none. *)
-let ext_name k =
-  if has_ext_prefix k then
-    String.sub k (String.length ext_prefix) (String.length k - String.length ext_prefix)
-  else k
-
 let ext_keys g =
   SM.fold (fun k _ acc -> if SM.mem k g.nodes then acc else SS.add k acc) g.bwd SS.empty
 

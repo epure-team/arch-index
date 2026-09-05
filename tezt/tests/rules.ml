@@ -87,6 +87,20 @@ let verdict_of j ~prefix =
         rs
   | _ -> None
 
+(* Note of the first rule whose name starts with [prefix]. *)
+let note_of j ~prefix =
+  match Json.member "results" j with
+  | Some (`List rs) ->
+      List.find_map
+        (function
+          | `Assoc f -> (
+              match (List.assoc_opt "rule" f, List.assoc_opt "note" f) with
+              | Some (`String r), Some (`String n) when has_prefix ~prefix r -> Some n
+              | _ -> None)
+          | _ -> None)
+        rs
+  | _ -> None
+
 let int_field b j ~what key expected =
   match Json.int ~what key j with
   | Ok n -> Batch.eq_int b ~msg:(what ^ "." ^ key) n expected
@@ -1005,7 +1019,26 @@ let register_ext_selector () =
             ~msg:
               "ext: on a flat index is NOT_COMPUTED even for a live source that would otherwise \
                VIOLATE"
-            (verdict_of j ~prefix:"no raw arithmetic") (Some "NOT_COMPUTED")) ;
+            (verdict_of j ~prefix:"no raw arithmetic") (Some "NOT_COMPUTED") ;
+          (* This DB has a genuine external leaf reachable from a live source — exactly the
+             fixture on which `fn:Stdlib.+` resolves to NO_TARGET (arch-load never wrote a
+             `functions` row for it here; this DB was hand-built without one). The note must
+             not tell the reader to re-ask the question as `fn:<name>`: that advice is false on
+             this very database. It also must not claim the index itself "cannot answer" the
+             question — this DB could, in principle; the refusal is arch-rules being unable to
+             tell this DB apart from arch-load's ordinary output, not a fact about what a flat
+             schema can hold. *)
+          match note_of j ~prefix:"no raw arithmetic" with
+          | Some n ->
+              Batch.check b
+                ~msg:"the NOT_COMPUTED note must not advise re-asking via fn: on this fixture"
+                (not (Batch.has_substring ~needle:"reachable as fn:" n)) ;
+              Batch.check b
+                ~msg:
+                  "the NOT_COMPUTED note must not claim the index itself cannot answer the \
+                   question"
+                (not (Batch.has_substring ~needle:"cannot be answered on this flat" n))
+          | None -> Batch.note b "ext_flat rule produced no note") ;
       Batch.exit_code b
         ~msg:"and that unanswerable rule fails the gate rather than passing quietly"
         ~expected:1 (rules [flat_db; rf]) ;

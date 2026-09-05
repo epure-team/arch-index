@@ -240,21 +240,27 @@ let eval (t : Arch_db.t) (g : Arch_graph.t) ~sound r =
          index this tool's own pipeline produces, [ext_keys] is empty by construction, not empty
          because nothing happened to match.
 
-         So this is NOT_COMPUTED rather than a silent empty match: the population this selector
-         needs is known in advance to never exist on this producer's output, which is a property
-         of the index, not of the pattern. Once `arch-load` gives the callee a body, the same
-         reachability question is answerable as `fn:<name>` instead of `ext:<name>` — the callee
-         is no longer bodiless, just named. It fails the gate by default. *)
+         So this is NOT_COMPUTED rather than a silent empty match: the guard refuses every
+         `ext:` reach question on this schema, unconditionally, because `arch-load`'s OUTPUT is
+         known in advance to never populate that population — a property of what this repo's one
+         producer writes, not a property of what a flat DB could in principle hold. A hand-built
+         flat DB can carry a genuine external leaf (a `calls` row with no matching `functions`
+         row), and on such a DB `ext:` could sometimes be answered directly — but arch-rules
+         cannot distinguish that DB from `arch-load`'s ordinary output, so it refuses both alike
+         rather than silently returning an empty match on the common case. It fails the gate by
+         default. *)
       { rule = r.name; kind = kind_of r.body; exact = false; verdict = "NOT_COMPUTED"; detail = [];
         detail_total = 0; sizes = None; witness = [];
         note =
           Some
             (Printf.sprintf
-               "%s cannot be answered on this flat (NDJSON) index: arch-load gives every callee a \
-                function row, so on this producer's output the population ext: needs is empty by \
-                construction — not zero external leaves found, but none ever written. The same \
-                callee is reachable as fn:%s instead."
-               (Arch_sel.to_string d) (snd d)) }
+               "%s is refused on a flat (NDJSON) index: arch-load gives every callee it writes a \
+                function row, so on this producer's actual output the population ext: needs is \
+                never populated — not zero external leaves found, but none ever written by this \
+                pipeline. arch-rules cannot tell an arch-load-produced flat DB apart from a \
+                hand-built one that might hold a genuine external leaf, so it refuses this \
+                selector on the flat schema unconditionally rather than risk a silent empty match."
+               (Arch_sel.to_string d)) }
   | Reach (s, d) ->
       let src = Arch_sel.select g s and dst = Arch_sel.select g d in
       let v, hit = reach_verdict g ~sound src dst in

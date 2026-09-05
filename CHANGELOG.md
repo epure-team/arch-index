@@ -32,6 +32,26 @@
   So the step adds no new way for an ordinary PR to fail, and one new way for a broken measurement
   to be caught.
 
+### Added
+- **`ext:<glob>` — a selector that names external leaves.** `arch-rules` can now write
+  `forbid reach from <sel> to ext:<glob>` to forbid reaching a callee with no body in the index
+  (an unresolved external, such as `Stdlib.+`), valid only as the target of `forbid reach`. On a
+  flat (NDJSON) index it is `NOT_COMPUTED`: `arch-load`, this repo's one producer of that schema,
+  synthesises a `functions` row for every callee it writes, so the population `ext:` needs is
+  never populated on that producer's actual output — a property of what `arch-load` writes, not
+  of what the flat schema can hold. `docs/fitness-functions.md`'s selector table now lists it.
+
+  **Observable gate change for consumers.** `forbid dep` now only accepts `module:` on either
+  side; `file:` and `fn:` operands, previously accepted, now **abort with exit 2**. Before this,
+  `forbid dep` threw the selector kind away and globbed every operand straight against
+  `module_deps` strings regardless of what prefix was written, so a rule written as
+  `forbid dep from file:lib/core/** to module:Web.**` looked like a file-path check but was
+  silently re-run as a module-path glob — `forbid dep from module:src/** to file:bar` printed
+  `[ pass ]`, "1 proved", against a target that could never match anything real. That was a false
+  green, not a working check, so the fix is a refusal, not a relaxation: a rule file using
+  `file:`/`fn:` on a `dep` operand now fails fast at parse time instead of silently passing.
+  `docs/fitness-functions.md` documents the restriction and why.
+
 ### Fixed
 - **`arch-rules` reports the verdict and the gate as two different numbers, and `--on-vacuous`
   now covers every rule form.** The summary line collapsed a seven-state verdict into
