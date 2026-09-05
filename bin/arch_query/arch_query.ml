@@ -478,17 +478,17 @@ let () =
                 "arch-query: REFUSED — this index has no exn_origins table, so no exception \
                  origin was ever recorded. escaping-origins cannot report a surface it never \
                  analysed; re-index with an exception-aware producer." ;
-            (* [exn_origins.channel] is a schema-1.3 column, not implied by the table's
-               existence: a pre-1.3 index has [exn_origins] but no [channel], and every
-               query below (the DISTINCT channel probe just past this, and the
-               [--channel] filters that follow) names that column unconditionally. A
-               version claim would not catch this either — the column is what the
-               index HAS, not what its metadata says it is. *)
+            (* [exn_origins.channel] is an error-channels column (schema 1.8), not implied
+               by the table's existence: a pre-1.8 index has [exn_origins] but no
+               [channel], and every query below (the DISTINCT channel probe just past
+               this, and the [--channel] filters that follow) names that column
+               unconditionally. A version claim would not catch this either — the column
+               is what the index HAS, not what its metadata says it is. *)
             if not (Arch_db.has_col t "exn_origins" "channel") then
               die 3
-                "arch-query: REFUSED — this index's exn_origins table predates the channel \
-                 column (schema 1.3); escaping-origins needs it to restrict to the exception \
-                 channel. Re-index with a newer producer." ;
+                "arch-query: REFUSED — this index's exn_origins table predates the \
+                 error-channels column (channel, schema 1.8); escaping-origins needs it to \
+                 restrict to the exception channel. Re-index with a newer producer." ;
             (* A flag given twice used to take the FIRST silently, so
                [--roots a --roots b] answered about [a] while the caller read
                the command line and expected [b]. For a command whose whole
