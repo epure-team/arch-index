@@ -69,7 +69,13 @@ let strip_prefix p s = String.sub s (String.length p) (String.length s - String.
 
    The count is not decoration. MEASURED (re-derived 2026-09-05) on a table that
    carries no UNIQUE constraint over these columns, so the probe could have come
-   back empty and did not:
+   back empty and did not. All three rows come from indexes built by origin/main
+   0982a42 -- proto_alpha and the whole tree from tezos/_build/default with
+   --errors-profile=tezos, octez-manager from its own _build/default. The build
+   state belongs beside the corpus name for the same reason it does for
+   resolution rates: how many origins EXIST depends on which units were compiled,
+   so a collision count is a joint property of the code and the build's coverage,
+   never of the code alone.
 
      proto_alpha     30526 origins / 5305 distinct / 26901 rows (88%) colliding
      octez-manager   18758        / 6367        / 15569      (83%)

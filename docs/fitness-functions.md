@@ -150,7 +150,7 @@ channel**, that the allow-file does not cover.
 
 **`channel:` defaults to `exception`, and the default is load-bearing.** `exn_origins` holds every
 error channel, not just exceptions — on the `option` channel, "raising" means *returning `None`*.
-Measured — on proto_alpha (`lib_protocol`, indexed from `origin/main` `0982a42` with
+Measured — on proto_alpha (`lib_protocol`, 500 `.cmt` indexed from `origin/main` `0982a42` with
 `--errors-profile=tezos`) `form:raise` from `file:**/main.ml` sees **1** origin on `exception`,
 **128** on `option` and **247** on `tzresult` — so the unscoped rule quantified over **376**
 origins while appearing to police crashes. An independent reviewer measured 1 / 75 / 161 on their

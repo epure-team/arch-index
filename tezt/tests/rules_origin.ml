@@ -515,7 +515,7 @@ let register_coverage_and_scope () =
       Batch.check b ~msg:"and how many allow-entries matched nothing"
         (Arch_tezt.contains ~needle:"matching nothing" out) ;
       (* THE CHANNEL SCOPE. exn_origins holds every error channel, not just
-         exceptions. Measured on proto_alpha's lib_protocol, indexed from
+         exceptions. Measured on proto_alpha's lib_protocol (500 .cmt), indexed from
          origin/main 0982a42 with --errors-profile=tezos: `form:raise` from
          file:**/main.ml finds 1 origin on `exception`, 128 on `option` (where
          "raising" means RETURNING None) and 247 on `tzresult` — so the unscoped
