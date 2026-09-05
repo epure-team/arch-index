@@ -97,6 +97,7 @@ let arch_curate () = locate ~env_var:"ARCH_CURATE" "bin/arch_curate/arch_curate.
 let arch_coverage () = locate ~env_var:"ARCH_COVERAGE" "bin/arch_coverage/arch_coverage.exe"
 
 let arch_rules () = locate ~env_var:"ARCH_RULES" "bin/arch_rules/arch_rules.exe"
+let arch_report () = locate ~env_var:"ARCH_REPORT" "bin/arch_report/arch_report.exe"
 
 let arch_impact () = locate ~env_var:"ARCH_IMPACT" "bin/arch_impact/arch_impact.exe"
 

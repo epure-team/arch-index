@@ -3,6 +3,44 @@
 ## [Unreleased]
 
 ### Added
+- **`arch-report <db> --out <dir>` — one query pass, three artifacts** (roadmap 2.2,
+  `specs/reporting-and-integration.md`). Writes `report.json` (the machine contract),
+  `report.sarif` (SARIF 2.1.0, one run per analysis with distinct categories) and `report.html`
+  (a single self-contained file, no external assets, usable as a CI artifact). The database is the
+  fourth artifact and is neither regenerated nor copied.
+
+  **CHECK-5 — every finding appearing identically in all three — is a construction constraint, not
+  a verification one.** `Arch_report.collect` runs the queries once; the three renderers are total
+  functions of that one value and issue no query of their own. Building three renderings
+  independently and then asserting they agree is a test that cannot fail for the right reason:
+  three collections can be wrong the same way. The round-trip is asserted anyway, because a
+  guarantee nothing checks expires the first time someone adds a fourth renderer.
+
+  **The header carries all eight verdicts**, zero included, not the four the spec first named —
+  bucketing eight into four collapses `UNKNOWN` (a cone escaping a ⊤ edge) with
+  `UNKNOWN_NO_CONTRACT` (an index that never marked ⊤), and `NOT_COMPUTED` (never ran) with
+  `NO_SOURCE` (ran over nothing). The ⊤ frontier is a **count** in `run.properties`, never a
+  result list: 286 356 edges on Octez against GitHub's 25 000-result cap.
+
+  **An analysis has four states, and an empty table is not one of the clean ones.** A coverage row
+  is believed; an absent table is `not_analysed`; a table with rows is `covered`; and a table that
+  is **present and empty** is `unknown` — it may have run and found nothing, or never run, and the
+  database cannot tell them apart. Writing `covered` there is exactly the failure FR-003 forbids.
+  Every known analysis gets a labelled section whether or not it has findings (FR-024).
+
+### Changed
+- **`specs/reporting-and-integration.md` amended in three places**, in the same slice as the code
+  rather than in a separate PR — a slice updates code, evidence and card together, and an
+  amendment that lands later leaves a window where the spec instructs the next reader wrongly.
+  FR-005 declared its own blocker (`functions.language`/`universe` "currently unimplemented";
+  both are populated — `universe = internal` and `language = ocaml` for all 14 452 functions on
+  proto_alpha `lib_protocol`, 500 `.cmt`, from `origin/main` `0982a42`). FR-021's verdict split
+  omitted five real verdicts and named one, `PASS_UNDER_HYP`, that no tool can emit — reserved for
+  roadmap 3.2 rather than deleted, so the discharge ledger cannot reinvent it without the
+  constraint that makes it safe. CHECK-1 and CHECK-3 are marked as the ingest slice's (2.3): they
+  require adapters the same document declares unwritten.
+
+### Added
 - **`arch-rules --format sarif` — SARIF 2.1.0 output (roadmap 2.1).** `arch-rules` can now emit
   its verdicts as a SARIF 2.1.0 log, one `run` per invocation, for upload to GitHub code scanning
   or any other SARIF consumer. `VIOLATION`/`POSSIBLE` map to `error`/`warning`; the five
