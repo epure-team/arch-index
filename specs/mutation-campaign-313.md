@@ -1,0 +1,337 @@
+---
+name: roster-spec
+type: spec
+status: live
+feature: Executed mutation campaign (roadmap item 3.13)
+brief: briefs/mutation-campaign-313-intake.md
+date: 2026-09-05
+version: 1.0.0
+---
+
+# Spec — Executed mutation campaign
+
+## Clarifications
+
+| Q | A |
+|---|---|
+| How is a campaign identified across re-runs? | A campaign is a row with a surrogate id. Re-running always inserts a **new** campaign; campaigns are never resumed by identity. This follows the repository's append-only precedent (dated `coverage` snapshots, the pipeline ledger). |
+| Is `seed` mandatory, and what does a seedless engine record? | `seed` is nullable TEXT. NULL means the engine declares no seed concept, and the report says so in words rather than printing an empty value — the same discipline as `arch-coverage`'s `no_data`, which is never rendered as 0 %. |
+| Does a mutant the index cannot map to a function get persisted? | Yes, with `function_id` NULL. `docs/mutation-testing.md` already requires that an unmapped survivor be reported and never dropped; dropping it one layer lower, in storage, would contradict that rule where nobody would see it. |
+| What identifies a test across campaigns? | The resolved test **name** string. Positional addressing (alcotest's group-plus-index) is an invocation detail, re-resolved from the profile each campaign, never part of identity. A name present in an earlier campaign and absent from the current index is a deleted test. |
+| Must the driver resume a partial campaign? | No. A partial campaign is valid and readable: `completed_at` stays NULL, and a mutant with no run row in an incomplete campaign is **PENDING**, which is derived from the absence of the row, not stored. |
+| What does a new test that reaches nothing produce? | It is reported in its own bucket, "reaches no indexed function", never in the killed-nothing defect list. Reporting it as a defect would be the same false accusation the ⊤ rule exists to prevent. |
+| May a profile over-select? | Yes, and it must declare `granularity = case | group | suite`. A superset of the reaching set is still a superset, so over-selection preserves the admissibility of `SURVIVED`. The actually-executed set is recorded, so the cost is visible. |
+| What if no engine is installed? | Abort, exit 2, naming the engine and the profile that asked for it, following the existing `die` convention. An empty campaign must never read as "no survivors". |
+| Where does PENDING live, given the engine-status vocabulary is closed to four values? | Nowhere in a column. PENDING is the **absence** of a `mutant_runs` row inside an incomplete campaign. Storing it would require widening a closed vocabulary the whole codebase depends on (`arch_mutants.ml:348-349`). |
+| Do we know **which** test killed a mutant? | Usually not. Engines report per mutant, not per (mutant, test). Attribution is recorded only when it is actually known — a singleton executed set, or an engine that names the killing test. Otherwise the campaign records the attempted set and the aggregate outcome, and any question needing attribution answers `UNKNOWN`. |
+
+## User Stories
+
+### US-1: Execute a campaign with per-mutant test selection (Priority: P0)
+
+As a maintainer running a mutation campaign, I want `arch-mutants run` to drive the engine with,
+per mutant, only the tests that reach the mutated function, so that a campaign costs the selected
+subset rather than the whole suite times the mutant count.
+
+**Why this priority**: nothing executes today. Every other story consumes the facts this one produces.
+**Scope**: This story does NOT generate mutants, rewrite source, launch a build, or install an engine.
+**Independent Test**: with a stub engine that records its argv and a fixture index, the recorded
+per-mutant invocation names exactly the executed set the plan declared, and the campaign records
+that set.
+
+**Acceptance Scenarios**:
+1. **Given** a fixture index whose test cone is closed and a stub engine, **When** `arch-mutants run` is invoked over a two-mutant plan, **Then** the stub is invoked twice and each invocation carries only the tests the plan lists as reaching that mutant's function.
+2. **Given** a profile declaring `granularity = group`, **When** the reaching set is a strict subset of a group, **Then** the executed set is the whole group, `executed_superset` is true, and the campaign records both the intended and the executed sets.
+3. **Given** no engine binary on PATH, **When** `arch-mutants run` is invoked, **Then** it exits 2 naming the engine and the profile, and writes no campaign row.
+
+### US-2: Persist campaign facts (Priority: P0)
+
+As a maintainer, I want each campaign's mutants, per-mutant outcomes and any known per-test
+attribution persisted, so that a later campaign can answer questions about an earlier one.
+
+**Why this priority**: the deleted-test rule and the per-added-test verdict are queries over these tables.
+**Scope**: This story does NOT persist engine stdout, mutant diffs, or source snapshots.
+**Independent Test**: after two runs differing only in seed, the mutant site rows are unchanged in
+number while campaign and run rows have doubled.
+
+**Acceptance Scenarios**:
+1. **Given** an empty database, **When** a campaign of three mutants completes, **Then** `mutant_campaigns` has one row, `mutants` three, `mutant_runs` three, and `mutant_kills` has a row only for pairs whose attribution is known.
+2. **Given** that same database, **When** a second campaign runs the same mutants with a different seed, **Then** `mutants` still has three rows and `mutant_runs` has six.
+3. **Given** a campaign interrupted after one of three mutants, **When** the tables are read, **Then** `completed_at` is NULL, `mutant_runs` has one row, and the two absent mutants are reported PENDING rather than SURVIVED.
+
+### US-3: A survivor under a bounded selection is UNKNOWN (Priority: P0)
+
+As a reviewer reading a mutation report, I want a survivor found under a selection that may have
+been incomplete reported as unknown rather than as a test gap, so that I am not sent to strengthen
+a test that was never run.
+
+**Why this priority**: this is the correctness core. Without it the output is unsound in the one
+direction that produces false accusations against real tests.
+**Scope**: This story does NOT decide whether a survivor is an equivalent mutant.
+**Independent Test**: one engine report replayed over three fixture indexes — closed cone, ⊤ edge
+in the test cone, and an index carrying no soundness contract — publishes `SURVIVED`, `UNKNOWN`
+and `UNKNOWN_NO_CONTRACT` respectively, while the stored engine status is `SURVIVED` in all three.
+
+**Acceptance Scenarios**:
+1. **Given** an index whose test cone holds no ⊤ edge and which carries a soundness contract, **When** the engine reports SURVIVED, **Then** the published verdict is `SURVIVED` and `selection_provenance` is `proved_superset`.
+2. **Given** an index with a ⊤ edge inside the test cone, **When** the engine reports SURVIVED for a mutant in the escaped region, **Then** the published verdict is `UNKNOWN` and the report names the ⊤ anchor.
+3. **Given** an index carrying no soundness contract at all, **When** the engine reports SURVIVED, **Then** the published verdict is `UNKNOWN_NO_CONTRACT`, distinct from the ⊤ case.
+4. **Given** any of the three indexes, **When** the engine reports KILLED or TIMEOUT, **Then** the published verdict is `KILLED` — a kill is a proof and selection provenance does not weaken it.
+
+### US-4: Diff-scoped selection, in both directions (Priority: P1)
+
+As a CI job on a pull request, I want the campaign restricted to mutants of what the diff touched
+and of everything a modified or added test reaches, so that cost is proportional to the change
+while a weakened test cannot pass unnoticed.
+
+**Why this priority**: the value proposition for machine-written change, but it needs US-1 to US-3 first.
+**Scope**: This story does NOT detect a semantic change with no line change — a constant, an
+interface signature, a dependency bump. Those remain the ordinary suite's job.
+**Independent Test**: a diff touching only a test file still selects mutants, in the code that test reaches.
+
+**Acceptance Scenarios**:
+1. **Given** a diff modifying one production function, **When** selection runs, **Then** the selected mutants are those whose site falls inside that function's span.
+2. **Given** a diff modifying only a test helper, **When** selection runs, **Then** the selected mutants are those of every function reached by every test case that traverses the helper.
+3. **Given** a diff deleting a test, **When** selection runs, **Then** every mutant that the previous campaign attributed to that test alone is re-selected, and any mutant whose attribution was never known is reported as un-recheckable rather than silently skipped.
+
+### US-5: A test that kills nothing is a defect (Priority: P1)
+
+As the judge rejecting a generated test, I want the list of added tests that killed no mutant of
+anything they reach, so that a vacuous test is rejected without a human reading it.
+
+**Why this priority**: high value, and it depends on US-2's tables.
+**Scope**: a defect LIST. No ratio, no percentage, no threshold — `docs/mutation-testing.md` refuses
+the mutation score on record and this story does not reopen it.
+**Independent Test**: a test asserting only a tautology appears in the list; one asserting a real
+postcondition of the same function does not.
+
+**Acceptance Scenarios**:
+1. **Given** an added test whose reachable mutants all came back SURVIVED under `proved_superset`, **When** the verdict runs, **Then** the test appears in the defect list.
+2. **Given** an added test whose reachable mutants all came back UNKNOWN, **When** the verdict runs, **Then** the test does NOT appear in the defect list and is reported separately as unproven.
+3. **Given** an added test that reaches no indexed function, **When** the verdict runs, **Then** it appears in a third bucket, "reaches nothing indexed", never in the defect list.
+4. **Given** an empty defect list, **When** the report is printed, **Then** it states how many added tests were examined and what would have placed one on the list.
+
+### US-6: Per-framework test-invocation profiles (Priority: P2)
+
+As a maintainer of a project in another language, I want the mapping from a test node to its
+invocation declared in a profile, so that a new framework needs no code change.
+
+**Why this priority**: alcotest alone unblocks the pilot; other frameworks are additive.
+**Scope**: This story does NOT install, detect or configure test runners.
+**Independent Test**: a profile declaring a template renders the expected command for a known test
+node; a language with no profile yields `not_analysed` rather than an empty campaign.
+
+**Acceptance Scenarios**:
+1. **Given** a profile `alcotest-tests.toml` declaring `granularity = "group"` and a command template, **When** the driver renders an invocation for a known test node, **Then** the rendered command matches the expected string exactly.
+2. **Given** a profile file missing the `granularity` key, **When** it is loaded, **Then** loading aborts with exit 2 naming the file and the missing key — it is not silently defaulted.
+3. **Given** a project whose language has no profile, **When** a campaign is attempted, **Then** the run reports `mutation: not_analysed` for that language and exits without inventing an empty result.
+
+## Challenges
+
+| ID | Story | Challenge | Resolution |
+|---|---|---|---|
+| C-1 | US-1 | "Once per mutant with exactly the reaching tests" is unsatisfiable when the profile's granularity is `group` or `suite`. | The acceptance criterion is restated in terms of the **executed** set, not the reaching set. The profile declares granularity; the driver records intended and executed sets separately and sets `executed_superset`. Over-selection is sound; under-selection is not. |
+| C-2 | US-1 | No argument grammar is given for `run`, so "the stub records its argv" asserts against nothing. | Grammar fixed as `arch-mutants run <db> --plan <plan.json> --engine <cmd> [--tests <selector>] [--profile <name>] [--diff <range>]`, matching the existing subcommand-first, DB-positional shape. |
+| C-3 | US-1 | `plan` emits targets (functions with spans), not mutants; `run` cannot iterate mutants that do not exist yet. | `run` consumes a **mutant list** the engine's own generation phase produced (the `--format lines` allowlist is what constrains that generation). The site → function mapping is computed once, before execution, and reused for the verdict; it is not run twice. |
+| C-4 | US-1 | Under-selection can produce a KILLED-by-omission... no: it can produce a **survivor** an excluded test would have killed. Does `run` refuse to execute when `top_bounded`? | It executes. Refusing would make the tool useless on any real index (Octez has 286 356 ⊤ edges). The shortfall is labelled, not avoided: this is precisely why `UNKNOWN` exists. Refusal is reserved for the case where the profile cannot address the tests at all. |
+| C-5 | US-2 | Is a mutant's identity stable across campaigns, and what is its natural key? | Stable. `mutants` is a site table keyed by `(file_path, line, col_start, col_end, replacement, source_hash)`, unique. Engine-assigned ids are not trusted for identity, consistently with the same refusal for tests. A re-run of unchanged code adds no `mutants` rows. |
+| C-6 | US-2 | What does a mutant with an empty attempted set write, given kills are keyed per test? | Nothing in `mutant_kills`. The per-mutant outcome lives in `mutant_runs` (campaign × mutant); `mutant_kills` holds only pairs whose attribution is known. This is why the two tables are separate. |
+| C-7 | US-3 | The story conflates stored status with published verdict. | Restated: the stored `engine_status` is `SURVIVED` in all three fixtures; only the published verdict differs. The independent test now asserts both, so a change that stores the verdict would fail it. |
+| C-8 | US-3 | Does US-3 apply to mutants of `unreached` functions? | No. `run` is only ever handed mutants inside `plan`'s targets. `unreached` needs a dead-code report, not a mutant, and `docs/mutation-testing.md` already says so. |
+| C-9 | US-3 | The fixture pair covers only the ⊤ boundary, not `no_contract`. | A third fixture is added, reusing `Fixture.malformed_contract` which `tezt/lib/arch_tezt.ml:777` already provides and which four existing suites share. |
+| C-10 | US-4 | A modified test's reach set is itself a lower bound, so US-4 is a bound of a bound. | Yes, and it inherits US-3's semantics unchanged: mutants selected through a bounded test reach are labelled with the same `selection_provenance`. There is no separate accounting. |
+| C-11 | US-4 | Is test-diff selection keyed at file, function or line granularity? | Function. A diff is mapped to touched functions through `arch-impact`'s existing machinery; a comment-only change inside a function still selects it, and that over-selection is sound and cheap relative to the alternative of parsing intent. |
+| C-12 | US-4 | What is "the diff" scoped against? | An explicit `--diff <range>` argument, same shape as `arch-impact --diff`. No implicit default; an absent range means whole-index selection, stated in the report. |
+| C-13 | US-5 | A test whose reachable mutants all came back UNKNOWN is indistinguishable from one that failed to kill. | Resolved in the acceptance scenarios: only mutants whose verdict is `SURVIVED` under `proved_superset` can place a test on the defect list. UNKNOWN mutants move it to an "unproven" bucket instead. |
+| C-14 | US-5 | "Killed nothing" needs a denominator, which is threshold-like. | The denominator is the mutants **attempted in this campaign** that the test's reach set contains. A test whose reach set contains no attempted mutant lands in the "nothing attempted" bucket, not the defect list. |
+| C-15 | US-6 | `not_analysed` borrows `analysis_coverage`'s vocabulary; a second writer to that table would break its single-writer invariant. | The mutation layer does **not** write `analysis_coverage`. It reports the string in its own output and, when persisted, writes its own column. The single-writer invariant of `arch-coverage-matrix` is preserved. |
+| C-16 | US-6 | Is a profile without `granularity` invalid or defaulted? | Invalid, exit 2, named in scenario 2. Defaulting would silently decide the soundness question the field exists to answer. |
+| C-17 | US-6 | Alcotest cannot filter by exact case name, so "no code change" may hide a per-framework shim. | Acknowledged and resolved by C-1's granularity mechanism, not hidden: the alcotest profile declares `granularity = "group"`. No shim; the declared coarseness is the answer. |
+| C-18 | Prior art (Stryker) | Stryker stores `NoCoverage` as a sibling of `Survived`; this design keeps four values plus an orthogonal column, so a naive reader of raw rows can misread a bounded SURVIVED. And PENDING has no slot in a closed four-value vocabulary. | Divergence justified and mitigated. Stryker's `NoCoverage` means "no test covers this", a fact about coverage; our `top_bounded` means "the analysis may have missed a covering test", a fact about the analysis. They are not the same state and merging them would lose the distinction. Mitigation: no view or query returns `engine_status` without `selection_provenance`, enforced by CHECK-7. PENDING is derived from the absence of a run row in an incomplete campaign, never stored. |
+| C-19 | Prior art (PIT) | PIT establishes real per-test-case coverage before scoring; this design labels a static shortfall after the fact. | Divergence justified: PIT owns its runtime and can instrument per test case on the JVM. arch-index is language-agnostic and static by construction, and the research found per-test coverage native only in one of five surveyed runners. The limitation is not merely accepted, it is **printed**: every campaign report states its selection provenance. |
+| C-20 | Prior art (cargo-mutants) | cargo-mutants scopes tests at package level only and folds all non-kills into "missed". | A cargo-mutants profile declares `granularity = "suite"`. The abstraction does not paper over the engine's limit; it records it, and the resulting executed set is a superset, which stays sound. |
+| C-21 | Prior art (mutmut) | mutmut excludes uncovered mutants; this design would run and label them. | The two agree more than they differ: `plan` already refuses to target `unreached` functions, which is mutmut's exclusion. The remaining case, a target with a **provably empty** reaching set inside a closed cone, is run and recorded `SURVIVED` with an empty executed set — it is a genuine, provable test gap, which is exactly what the tool should say. |
+| C-22 | Prior art (mutaml) | mutaml has no per-mutant test scoping, and it is the only OCaml engine. | **Open risk, documented, not assumed away.** The engine contract this design needs is "run this command with this mutant active", which `mutaml-runner` appears to offer through its per-mutant command, but the research explicitly flagged mutaml's report structure as undocumented and its scoping flag as selecting mutants rather than tests. CHECK-8 is an executed integration check against a real mutaml; until it runs green, the OCaml integration is unverified and the spec says so rather than claiming it works. |
+| C-23 | Prior art (coverage.py) | For Python, `--cov-context=test` would give an exact reaching set, making UNKNOWN unnecessary for that profile. | In bounds and welcome. A profile may declare `reach_source = "graph" \| "dynamic"`. A dynamic source may only **add** tests to the selection, never remove any (P2), so it can promote a selection to `proved_superset` but never demote one. This is the one place where the additive-only rule does observable work. |
+| C-24 | Prior art (tezt/bisect) | A timed-out mutant killed with SIGTERM may lose its coverage flush, corrupting attribution. | Attribution is not derived from coverage files, so a lost flush cannot corrupt a kill row. It can lose a dynamic reach measurement, which under C-23's additive-only rule can only shrink the selection back to the graph bound — a loss of precision, never of soundness. Stated in the report when a dynamic source returns less than the graph. |
+
+## Functional Requirements
+
+#### Campaign execution (US-1)
+
+- **FR-001** [US-1]: `arch-mutants run` MUST accept `<db> --plan <file> --engine <cmd>` and MUST NOT generate mutants, rewrite source files, or invoke a build.
+- **FR-002** [US-1]: For each mutant, the driver MUST invoke the engine with a test set that is a superset of the reaching set the plan declares for that mutant's function, and MUST record both the intended and the executed sets.
+- **FR-003** [US-1]: The driver MUST NOT invoke the engine with a **subset** of the intended reaching set under any circumstances.
+- **FR-004** [US-1]: When the engine command cannot be resolved, the driver MUST exit 2 naming the engine and the profile, and MUST NOT write a campaign row.
+
+#### Persistence (US-2)
+
+- **FR-005** [US-2]: The schema MUST gain `mutant_campaigns`, `mutants`, `mutant_runs` and `mutant_kills`, and MUST NOT reuse the name `mutation_sites`, which already denotes imperative writes.
+- **FR-006** [US-2]: `mutants` MUST be unique on `(file_path, line, col_start, col_end, replacement, source_hash)` and MUST accept a NULL `function_id` for a mutant the index cannot map.
+- **FR-007** [US-2]: `mutant_kills` MUST hold a row only for a (campaign, mutant, test) pair whose attribution is actually known; the system MUST NOT infer attribution from an executed set of size greater than one.
+- **FR-008** [US-2]: A re-run MUST insert new `mutant_campaigns` and `mutant_runs` rows and MUST NOT update or delete any prior row.
+- **FR-009** [US-2]: The schema version MUST be bumped by one minor step at implementation time, read from `lib/arch_index/arch_index_db.ml` rather than hard-coded from this spec, and `docs/schema.md` MUST gain the corresponding row.
+
+#### Verdict soundness (US-3)
+
+- **FR-010** [US-3]: Each `mutant_runs` row MUST carry `selection_provenance ∈ {proved_superset, top_bounded, no_contract}`, constrained by a CHECK.
+- **FR-011** [US-3]: The published verdict MUST be computed, never stored, as: KILLED or TIMEOUT → `KILLED`; ERROR → `ERROR`; SURVIVED with `proved_superset` → `SURVIVED`; SURVIVED with `top_bounded` → `UNKNOWN`; SURVIVED with `no_contract` → `UNKNOWN_NO_CONTRACT`.
+- **FR-012** [US-3]: `selection_provenance` MUST be `proved_superset` only when the test cone holds no ⊤ edge **and** the index carries a soundness contract, reusing the predicate already computed at `bin/arch_mutants/arch_mutants.ml:122`.
+- **FR-013** [US-3]: No report, view, or JSON output MUST expose `engine_status` without the accompanying `selection_provenance` in the same record.
+- **FR-014** [US-3]: A mutant with no `mutant_runs` row in a campaign whose `completed_at` is NULL MUST be reported PENDING, and MUST NOT be reported SURVIVED.
+- **FR-015** [US-3]: The system MUST NOT emit any mutation score, ratio, percentage, or threshold.
+
+#### Diff scoping (US-4)
+
+- **FR-016** [US-4]: With `--diff <range>`, selection MUST be the union of mutants inside functions the range touches and mutants inside every function reached by a test the range modified or added.
+- **FR-017** [US-4]: For a test the range deletes, selection MUST include every mutant a prior campaign attributed to that test alone, and MUST report separately every mutant whose attribution was never known.
+- **FR-018** [US-4]: Mutants selected through a bounded test reach MUST carry the same `selection_provenance` rules as any other mutant; there is no separate accounting.
+
+#### Per-added-test verdict (US-5)
+
+- **FR-019** [US-5]: A test added by the range MUST appear on the defect list only when every mutant in its reach that was attempted in this campaign published `SURVIVED`.
+- **FR-020** [US-5]: A test whose attempted reachable mutants all published `UNKNOWN` MUST NOT appear on the defect list and MUST be reported as unproven.
+- **FR-021** [US-5]: A test reaching no indexed function MUST be reported in its own bucket and MUST NOT appear on the defect list.
+- **FR-022** [US-5]: When the defect list is empty, the report MUST state how many added tests were examined and what would have placed one on the list.
+
+#### Profiles (US-6)
+
+- **FR-023** [US-6]: A test-invocation profile MUST declare `granularity ∈ {case, group, suite}`; a profile missing it MUST abort loading with exit 2 naming the file and the key.
+- **FR-024** [US-6]: A profile MAY declare `reach_source ∈ {graph, dynamic}`. A dynamic source MUST only add tests to a selection and MUST NOT remove any.
+- **FR-025** [US-6]: A language with no profile MUST report `mutation: not_analysed` and MUST NOT produce an empty campaign result.
+- **FR-026** [US-6]: The mutation layer MUST NOT write to `analysis_coverage`, whose rows are owned and replaced wholesale by `arch-coverage-matrix`.
+
+## Acceptance Criteria
+
+- AC-1 [US-1 happy path]: a two-mutant plan drives exactly two stub invocations, each carrying the declared executed set → recorded argv matches.
+- AC-2 [US-1, C-1]: a `group`-granularity profile executes a superset and records both sets → `executed_superset` true, intended set preserved.
+- AC-3 [US-1, C-2]: engine absent → exit 2, no campaign row written.
+- AC-4 [US-2 happy path]: a completed three-mutant campaign writes 1 campaign, 3 mutants, 3 runs → counts match.
+- AC-5 [US-2, C-5]: a second campaign over unchanged code adds campaign and run rows but no `mutants` rows → site count unchanged.
+- AC-6 [US-2, C-6]: a mutant with an executed set of size > 1 that is killed writes no `mutant_kills` row → attribution not invented.
+- AC-7 [US-3 happy path]: closed cone plus contract, SURVIVED → published `SURVIVED`, provenance `proved_superset`.
+- AC-8 [US-3, C-9]: ⊤ in the test cone → published `UNKNOWN`; no contract → published `UNKNOWN_NO_CONTRACT`; stored status `SURVIVED` in both.
+- AC-9 [US-3, C-18]: a KILLED under `top_bounded` still publishes `KILLED` → a kill is not weakened by provenance.
+- AC-10 [US-3, C-7]: no output path exposes a status without its provenance → grep of every emitter finds no lone status field.
+- AC-11 [US-2/US-3, D7]: an interrupted campaign reports its unattempted mutants PENDING → never SURVIVED.
+- AC-12 [US-4 happy path]: a diff touching only a test helper selects mutants in the code that helper's tests reach.
+- AC-13 [US-4, C-11]: a comment-only change inside a production function still selects that function's mutants → over-selection, stated.
+- AC-14 [US-5 happy path]: a tautological added test appears on the defect list; a real-postcondition test does not.
+- AC-15 [US-5, C-13]: an added test whose reachable mutants are all UNKNOWN is reported unproven, not defective.
+- AC-16 [US-5, FR-022]: an empty defect list prints the examined count and the criterion → no bare zero.
+- AC-17 [US-6, C-16]: a profile without `granularity` aborts with exit 2 naming the file and the key.
+- AC-18 [US-6, FR-025]: a language with no profile yields `not_analysed`, not an empty result.
+- AC-19 [P4]: the `mutants` uniqueness key is probed on the largest available population, and the probe counts rejected rows because the key is a UNIQUE constraint.
+- AC-20 [C-22]: the mutaml integration is exercised against a real mutaml, or the report states it is unverified — never silently assumed.
+
+## Edge Cases
+
+- EC-1 [US-1]: a target with a provably empty reaching set inside a closed cone → the engine runs with an empty test set and the result is a genuine, provable test gap, recorded `SURVIVED` under `proved_superset`.
+- EC-2 [US-1]: the engine disappears mid-campaign → the campaign stays open (`completed_at` NULL), completed mutants keep their rows, the rest are PENDING, exit 2.
+- EC-3 [US-2]: two campaigns write concurrently → each holds its own campaign id; SQLite's write lock serialises them; no row is shared, so no reconciliation is needed.
+- EC-4 [US-2]: a mutant's function is deleted between campaigns → the `mutants` row is retained, its `function_id` no longer resolves, and it is reported as stale rather than deleted or errored.
+- EC-5 [US-3]: `no_contract` is produced by an index whose producer never stamped a soundness contract, distinct from a contract that exists and whose cone escapes.
+- EC-6 [US-3]: KILLED under `top_bounded` → published KILLED, and the report notes the guarantee rests on an incomplete selection, since a stronger selection could only have killed it too.
+- EC-7 [US-4]: a brand-new test with no campaign history → its full reach set is in scope on its first campaign.
+- EC-8 [US-4]: a deleted test whose mutants had unknown attribution → reported as un-recheckable, never silently skipped.
+- EC-9 [US-5]: an added test whose reachable mutants all came back ERROR → not defect-eligible; ERROR is inconclusive, reported in the unproven bucket.
+- EC-10 [US-6]: a malformed profile → exit 2, distinct from the absent-profile `not_analysed` path.
+- EC-11 [US-6]: a test node the profile's template cannot render → exit 2 naming the node and the profile, never a silently skipped test.
+- EC-12 [US-2]: a partial campaign read by reporting tooling → included, labelled partial, with its PENDING count stated.
+
+## Runnable Checks
+
+Exit convention: 0 = check passes, 1 = assertion fired, ≥2 = error. Tests are tezt cases in
+`tezt/tests/mutants.ml`, following the existing `Test.register ~__FILE__ ~title ~tags` pattern
+and the shared `Fixture.flat` / `Fixture.malformed_contract` helpers.
+
+- CHECK-1 [AC-1] (authentic-success-path): `dune test --force` — the new tezt case `mutants: run drives the engine once per mutant with the declared set` asserts the stub's recorded argv.
+- CHECK-2 [AC-2]: `dune test --force` — `mutants: a group-granularity profile executes a superset and says so`.
+- CHECK-3 [AC-3] (fail-closed-path): `dune test --force` — `mutants: run with no engine exits 2 and writes no campaign`.
+- CHECK-4 [AC-7, AC-8, AC-9]: `dune test --force` — `mutants: one engine report, three indexes, three published verdicts`, reusing `Fixture.malformed_contract` for the `no_contract` arm.
+- CHECK-5 [AC-11]: `dune test --force` — `mutants: an interrupted campaign reports PENDING, never SURVIVED`.
+- CHECK-6 [AC-14, AC-15, AC-16]: `dune test --force` — `mutants: the killed-nothing list excludes unproven tests and states its criterion when empty`.
+- CHECK-7 [AC-10]: `scripts/check-status-provenance.sh` — greps every emitter in `bin/arch_mutants/` for a status field written without a provenance field in the same record; exit 1 on any hit. Self-contained, no test runner.
+- CHECK-8 [AC-20]: `scripts/check-mutaml-integration.sh` — runs a real `mutaml-runner` over a two-function fixture and asserts a per-mutant test command was honoured. Exit 3 (not 1) when mutaml is absent, so an unverified integration is distinguishable from a failed one.
+- CHECK-9 [AC-19]: `scripts/check-mutant-key.sh <db>` — inserts the campaign's mutants and reports the count of rows **rejected** by the UNIQUE constraint, not a `GROUP BY` count, because under a constraint a duplicate never becomes a group. Run against the largest population available and print the population size and the working tree with the count.
+- CHECK-10 [AC-17, AC-18]: `dune test --force` — `mutants: a profile without granularity aborts; a language without a profile reads not_analysed`.
+
+**Authentic path**: CHECK-1 reaches the real driver through the real CLI with a stub engine at the
+process boundary. CHECK-8 is the only check that reaches a real external engine, and it reports
+exit 3 rather than passing when that engine is absent.
+
+## Claims Metadata
+
+Deterministic validation is **unavailable** in this repository: neither `scripts/claims-reconcile.js`
+nor `.harness/bin/claims-reconcile.js` exists, so the block below was neither validated nor
+projected. It is retained as metadata; no validation result is simulated.
+
+```claims
+{"record":"claims-header","schema_version":1,"namespace":"mutation-campaign-313","spec_lifecycle":"draft"}
+{"record":"requirement","id":"FR-001","lifecycle":"draft","external_sources":[],"depends_on":[]}
+{"record":"requirement","id":"FR-002","lifecycle":"draft","external_sources":[],"depends_on":[]}
+{"record":"requirement","id":"FR-003","lifecycle":"draft","external_sources":[],"depends_on":["FR-002"]}
+{"record":"requirement","id":"FR-004","lifecycle":"draft","external_sources":[],"depends_on":[]}
+{"record":"requirement","id":"FR-005","lifecycle":"draft","external_sources":[],"depends_on":[]}
+{"record":"requirement","id":"FR-006","lifecycle":"draft","external_sources":[],"depends_on":["FR-005"]}
+{"record":"requirement","id":"FR-007","lifecycle":"draft","external_sources":[],"depends_on":["FR-005"]}
+{"record":"requirement","id":"FR-008","lifecycle":"draft","external_sources":[],"depends_on":["FR-005"]}
+{"record":"requirement","id":"FR-009","lifecycle":"draft","external_sources":[],"depends_on":["FR-005"]}
+{"record":"requirement","id":"FR-010","lifecycle":"draft","external_sources":[],"depends_on":["FR-005"]}
+{"record":"requirement","id":"FR-011","lifecycle":"draft","external_sources":[],"depends_on":["FR-010"]}
+{"record":"requirement","id":"FR-012","lifecycle":"draft","external_sources":[],"depends_on":["FR-010"]}
+{"record":"requirement","id":"FR-013","lifecycle":"draft","external_sources":[],"depends_on":["FR-010"]}
+{"record":"requirement","id":"FR-014","lifecycle":"draft","external_sources":[],"depends_on":["FR-008"]}
+{"record":"requirement","id":"FR-015","lifecycle":"draft","external_sources":[],"depends_on":[]}
+{"record":"requirement","id":"FR-016","lifecycle":"draft","external_sources":[],"depends_on":["FR-002"]}
+{"record":"requirement","id":"FR-017","lifecycle":"draft","external_sources":[],"depends_on":["FR-007"]}
+{"record":"requirement","id":"FR-018","lifecycle":"draft","external_sources":[],"depends_on":["FR-010"]}
+{"record":"requirement","id":"FR-019","lifecycle":"draft","external_sources":[],"depends_on":["FR-011"]}
+{"record":"requirement","id":"FR-020","lifecycle":"draft","external_sources":[],"depends_on":["FR-011"]}
+{"record":"requirement","id":"FR-021","lifecycle":"draft","external_sources":[],"depends_on":[]}
+{"record":"requirement","id":"FR-022","lifecycle":"draft","external_sources":[],"depends_on":["FR-019"]}
+{"record":"requirement","id":"FR-023","lifecycle":"draft","external_sources":[],"depends_on":[]}
+{"record":"requirement","id":"FR-024","lifecycle":"draft","external_sources":[],"depends_on":["FR-002"]}
+{"record":"requirement","id":"FR-025","lifecycle":"draft","external_sources":[],"depends_on":["FR-023"]}
+{"record":"requirement","id":"FR-026","lifecycle":"draft","external_sources":[],"depends_on":[]}
+{"record":"acceptance-criterion","id":"AC-1","for":["FR-001","FR-002"]}
+{"record":"acceptance-criterion","id":"AC-2","for":["FR-002"]}
+{"record":"acceptance-criterion","id":"AC-3","for":["FR-004"]}
+{"record":"acceptance-criterion","id":"AC-4","for":["FR-005"]}
+{"record":"acceptance-criterion","id":"AC-5","for":["FR-006","FR-008"]}
+{"record":"acceptance-criterion","id":"AC-6","for":["FR-007"]}
+{"record":"acceptance-criterion","id":"AC-7","for":["FR-011","FR-012"]}
+{"record":"acceptance-criterion","id":"AC-8","for":["FR-011"]}
+{"record":"acceptance-criterion","id":"AC-9","for":["FR-011"]}
+{"record":"acceptance-criterion","id":"AC-10","for":["FR-013"]}
+{"record":"acceptance-criterion","id":"AC-11","for":["FR-014"]}
+{"record":"acceptance-criterion","id":"AC-12","for":["FR-016"]}
+{"record":"acceptance-criterion","id":"AC-13","for":["FR-016"]}
+{"record":"acceptance-criterion","id":"AC-14","for":["FR-019"]}
+{"record":"acceptance-criterion","id":"AC-15","for":["FR-020"]}
+{"record":"acceptance-criterion","id":"AC-16","for":["FR-022"]}
+{"record":"acceptance-criterion","id":"AC-17","for":["FR-023"]}
+{"record":"acceptance-criterion","id":"AC-18","for":["FR-025"]}
+{"record":"acceptance-criterion","id":"AC-19","for":["FR-006"]}
+{"record":"acceptance-criterion","id":"AC-20","for":["FR-002"]}
+{"record":"check","id":"CHECK-1","for":["AC-1"]}
+{"record":"check","id":"CHECK-2","for":["AC-2"]}
+{"record":"check","id":"CHECK-3","for":["AC-3"]}
+{"record":"check","id":"CHECK-4","for":["AC-7","AC-8","AC-9"]}
+{"record":"check","id":"CHECK-5","for":["AC-11"]}
+{"record":"check","id":"CHECK-6","for":["AC-14","AC-15","AC-16"]}
+{"record":"check","id":"CHECK-7","for":["AC-10"]}
+{"record":"check","id":"CHECK-8","for":["AC-20"]}
+{"record":"check","id":"CHECK-9","for":["AC-19"]}
+{"record":"check","id":"CHECK-10","for":["AC-17","AC-18"]}
+```
+
+## Entities
+
+- `campaign`: one execution of a mutation engine over a selected mutant set, against one index, with one seed. Never resumed; a re-run is a new campaign.
+- `mutant site`: a location plus a replacement, identified by file, line, column span, replacement text and source content hash. Stable across campaigns.
+- `mutant run`: the outcome of one campaign for one mutant site — the engine status plus how the test selection was obtained.
+- `selection provenance`: `proved_superset`, `top_bounded`, or `no_contract` — how the executed test set relates to the true set of tests reaching the mutated function.
+- `published verdict`: the derived, never-stored value a reader sees — `KILLED`, `SURVIVED`, `UNKNOWN`, `UNKNOWN_NO_CONTRACT`, `ERROR`, or `PENDING`.
+- `attribution`: knowing which individual test killed a mutant. Known only when the executed set was a singleton or the engine names the killer; otherwise absent, never inferred.
+- `intended set` / `executed set`: the tests the plan says reach a mutant, and the tests the profile could actually address. The second is always a superset of the first, never a subset.
