@@ -125,3 +125,35 @@ the migration plus three run rows — the query returns 1 and 1, the report publ
 This is not a regression this PR introduces. It is a hardcoded zero finally meeting data, and it
 belongs to issue #84 rather than here — recorded so the reviewer of #84 has the date it starts
 mattering. Findings handed to the roadmap session separately.
+
+## What a GO on this branch can and cannot mean
+
+**No campaign has ever run.** Measured, not assumed: no database under `~/dev` or
+`/mnt/ssd-external-2to` carries a `mutants` table, and `scripts/check-mutaml-integration.sh`
+returns **3 — unverified**. There are no kills, no survivors, no attributions. The machinery's
+intended output has never been observed by anyone.
+
+**Three review rounds have produced 96 findings on that machinery.** Every one read code, gates,
+schemas, provenance or specs; none read a campaign result, because none exists. That is the
+correct order — build the harness before running it, and the nine ratchet checks, the reconciler
+and the guards are real artefacts either way. But it is exactly the kind of fact that stops being
+visible once a branch has fifty commits and a NO-GO/GO history behind it.
+
+So the claim a GO here supports is narrow, and worth stating in the words that bound it: **the
+machinery is correct, not that the campaign it exists for produces attributable kills.** A reader
+who sees a passing verdict on a mutation-campaign branch will assume kills have been observed.
+They have not.
+
+**What would change this, and what would not.** Running a campaign to satisfy a review is how the
+review stops measuring the thing, so that is not the answer. What is: the review found that
+`check-mutaml-integration.sh`'s unverified state is a **missing `--build-context` flag** rather
+than a fixture limitation — mutaml-runner resolves `--muts` under its build context, and supplying
+it makes the check pass against the real installed engine. That turns one unverified integration
+into a verified one, and it is in this round's scope. It still would not produce a campaign
+result; it would only mean the wrapper mechanism has been observed working end to end, which is
+the premise everything else rests on and which is currently established by reading the engine's
+source.
+
+Until a pilot runs on a real corpus — the miaou measurement, deliberately sequenced after this
+merges — the honest summary is: **the selection rule is sound, the persistence is sound, the
+verdict derivation is sound, the refusals are sound, and nothing has been mutated.**
