@@ -207,6 +207,11 @@ node; a language with no profile yields `not_analysed` rather than an empty camp
   **self-uncertified**, and the report MUST state that such a campaign cannot distinguish a weak
   test suite from a stale or wrong binary. A campaign containing at least one kill is
   self-certifying, because a stale binary is unmutated and therefore cannot produce a kill.
+- **FR-030** [US-1]: The campaign MUST refuse to run when a binary it resolves lies **outside** the
+  working tree it was invoked from, unless an environment override names a path that exists. This
+  is a structural guard, not a documented precaution: on 2026-09-05 an agent briefed specifically
+  about this hazard worked inside the checkout anyway, because the warning was one paragraph inside
+  a long brief. A refusal that fires is worth more than a paragraph that is read.
 - **FR-029** [US-1]: A campaign with no kills MUST distinguish "ran and everything survived" from
   "nothing meaningfully ran" — a campaign composed entirely of `ERROR` outcomes, or of mutants
   never attempted, has zero kills for a different reason and MUST NOT be reported in the same
@@ -238,6 +243,7 @@ node; a language with no profile yields `not_analysed` rather than an empty camp
 - AC-20 [C-22]: the mutaml integration is exercised against a real mutaml, or the report states it is unverified — never silently assumed.
 - AC-21 [FR-027]: an all-survivor campaign prints "self-uncertified" and names the reason → an entirely green campaign never reads as evidence.
 - AC-22 [FR-028]: the campaign record names the resolved engine and runner paths → a reader can tell which binary ran.
+- AC-24 [FR-030]: a binary resolved through an ancestor directory outside the tree makes the campaign refuse, exit 1 → the stale-parent-binary case cannot silently produce a page of survivors.
 - AC-23 [FR-029]: an all-ERROR campaign and an all-survivor campaign print different reasons for having no kills → "didn't really run" is never dressed as "ran and found nothing".
 
 ## Edge Cases
@@ -270,6 +276,7 @@ and the shared `Fixture.flat` / `Fixture.malformed_contract` helpers.
 - CHECK-7 [AC-10]: `scripts/check-status-provenance.sh` — greps every emitter in `bin/arch_mutants/` for a status field written without a provenance field in the same record; exit 1 on any hit. Self-contained, no test runner.
 - CHECK-8 [AC-20]: `scripts/check-mutaml-integration.sh` — runs a real `mutaml-runner` over a two-function fixture and asserts a per-mutant test command was honoured. Exit 3 (not 1) when mutaml is absent, so an unverified integration is distinguishable from a failed one.
 - CHECK-9 [AC-19]: `scripts/check-mutant-key.sh <db>` — inserts the campaign's mutants and reports the count of rows **rejected** by the UNIQUE constraint, not a `GROUP BY` count, because under a constraint a duplicate never becomes a group. Run against the largest population available and print the population size and the working tree with the count.
+- CHECK-15 [AC-24]: `scripts/check-binary-provenance.sh` → exit 0 when every resolved binary is inside the tree, exit 1 otherwise. **Already implemented and red-verified on both detection branches**: an environment override pointing outside the tree, and a nested tree whose ancestor walk reaches the parent's `_build`, which reproduces issue #77's exact mechanism. Self-contained, no test runner.
 - CHECK-14 [AC-21, AC-22]: `dune test --force` — `mutants: an all-survivor campaign is reported self-uncertified and names the binaries it resolved`. This closes the failure mode issue #77 describes: `tezt/lib/arch_tezt.ml`'s `locate` walks ancestors from the working directory, so an incomplete `_build` silently runs the parent checkout's binary. That binary is unmutated, every mutant survives, and the report becomes a page of false test gaps that looks exactly like a real finding.
 - CHECK-11 [P1, P2, P3]: `quint typecheck specs/mutation-campaign-313.qnt && quint run specs/mutation-campaign-313.qnt --invariant=allInvariants --max-samples=20000 --max-steps=12` → no violation. Executed on quint 0.32.0; the ITF trace is committed so `ocaml-quint-connect` can replay without quint present at CI time.
 - CHECK-12 [P2]: `yes | quint verify specs/mutation-campaign-313.qnt --temporal=p2ExecutedIsMonotoneOverTime --max-steps=6` → no violation. **Bounded and caveated**: Apalache documents its temporal support as experimental, and TLC rejects this shape because a `[]` over an action requires the `[A]_v` subscripted form, which Quint does not emit here.
