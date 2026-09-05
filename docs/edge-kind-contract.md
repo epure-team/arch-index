@@ -126,10 +126,52 @@ Both backends also share one **precision** limitation (not a soundness issue): w
 a branch calls the same target (`if b then f () else f ()`), the call is `MAY_ENUMERATED`, not
 `MUST` — neither backend reasons about callee-level coverage across mutually-exclusive blocks.
 
-**Precision status (self-index):** `MAY_TOP` ≈ 4% (down from ~79% pre-CFG), `MUST` ≈ 32%,
-`MAY_ENUMERATED` ≈ 64% — the ⊤ frontier now contains only genuinely unknowable targets (computed
-heads, parameter calls, dynamic roots, FFI anchors). Remaining precision follow-up: 0-CFA
-closure-flow to enumerate first-class-value calls (research R3); see
+**Precision status — measured 2026-09-05 on `main` at `70cb47f`, three scopes.** The previous
+paragraph gave one unlabelled set of figures and drew a conclusion from it; both are corrected
+here rather than adjusted, because the conclusion was the load-bearing half.
+
+| scope | `MUST` | `MAY_ENUMERATED` | `MAY_TOP` |
+|---|---|---|---|
+| this library alone (23 modules, 5 155 calls) | 33.8 % | 60.3 % | **5.9 %** |
+| this repo (93 modules, 14 578 calls) | 43.4 % | 48.7 % | **7.9 %** |
+| Octez `_build/default` (10 033 modules, 1 445 080 calls) | 33.1 % | 47.1 % | **19.8 %** |
+
+The figures this paragraph carried — 4 % / 32 % / 64 % — were the single-library scope and did
+not say so. They were also stale: the same scope now measures **5.9 %**, and ⊤ has risen at every
+scale since, which is the correct direction. Roadmap items 1.6, #69 and the error channels each
+convert claims the tool could not support into stated unknowns; a ⊤ that rises because the tool
+stopped asserting falsely is not a regression.
+
+**RETRACTED: "the ⊤ frontier now contains only genuinely unknowable targets."** It does not, and
+the taxonomy this document defines is what shows it. On Octez:
+
+- `ambiguous_unit` — **16 151 edges**. A reference naming units that ARE in the index, where more
+  than one function answers. Not unknowable: under-determined, and roadmap 1.6 records it as ⊤
+  precisely because picking one would forge a `MUST`.
+- `module_param` — **117 048 edges**, which includes module *aliases* (`module S = Target`) whose
+  target the producer records and the resolver does not read. That is a wiring gap, not an
+  unknowable target.
+- `callback_param` — 153 157 edges. This class *is* mostly what the retracted sentence described.
+
+**A figure the earlier paragraph did not carry, and which measures the remaining work better than
+the ⊤ rate does:** on Octez, **278 826 `MUST` edges carry `callee_id IS NULL` — 58.3 % of all
+`MUST`**. Each is an honest external leaf *or* a target the index could hold and does not. The ⊤
+rate is the wrong progress metric here, because ⊤ is absorbing: resolving edges below a node does
+not lower it while any one ⊤ edge remains in that node's forward closure.
+
+Every number above is reproducible; re-derive rather than cite, and name the WORKING TREE, not
+only the commit — an untracked file changed the repo-scope counts between two derivations of this
+table while leaving the ratios identical.
+
+```
+arch_callgraph_ocaml --build-dir=<dir> --db-path=<out>.db --schema-path=architecture-schema.sql
+sqlite3 <out>.db "SELECT COALESCE(kind,'NULL'), count(*), \
+  round(100.0*count(*)/(SELECT count(*) FROM calls),1) FROM calls GROUP BY kind;"
+sqlite3 <out>.db "SELECT count(*) FROM calls WHERE kind='MUST' AND callee_id IS NULL;"
+```
+
+Remaining precision follow-up: 0-CFA closure-flow to enumerate first-class-value calls
+(research R3); see
 [docs/research/control-flow-coverage-analysis.md](research/control-flow-coverage-analysis.md).
 
 ## ⊤-anchor taxonomy (roadmap 1.4)
