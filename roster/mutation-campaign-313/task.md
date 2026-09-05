@@ -117,3 +117,38 @@ survivors, and its first run reported 1 survivor out of 5 — both runs self-cer
 derived three times in one day at 78.5 %, 6.7 % and 3.1 % — a factor of 25, all three correct,
 because the rate measured which units had been *compiled*. Scope is not metadata here, it is the
 result. This applies directly to CHECK-9's key probe and to any campaign count.
+
+## Incoming changes and a key-identity precedent (2026-09-05, guardian pre-notice)
+
+**The schema version will move under this branch before implementation.** Two converged PRs land
+the main schema at 1.11 and the flat schema at 1.3. This is why FR-009 says to read the constant
+at implementation time rather than carry a number from the spec: between writing this spec and
+implementing it, the base moves twice, and three sessions are active on the repository. Protocol
+after two recorded collisions: read the base, bump the minor by one, add the row to
+`docs/schema.md`.
+
+**`#76` (SARIF out) also lands on main**, bringing `arch-rules --format sarif`, a new
+`lib/arch_tools/arch_sarif.ml`, and the mandatory `~allow` on `Arch_sel.parse`.
+
+**`#77` fix is in progress.** Until it ships, keeping this worktree outside the main checkout is
+load-bearing, not hygiene — see the previous section for why a stale binary is the worst possible
+failure for a mutation campaign specifically.
+
+**Key-identity precedent from item 3.14, and it is the strongest one yet for CHECK-9.** On the
+`option` error channel, `line = 0` on 95 % of rows *and* every rendered `None` is unqualified.
+The combination makes roughly **28 500 origins share a single identity string**. That is not a
+collision rate, it is a collapse: an identity that distinguishes nothing at all over most of the
+population.
+
+Two consequences for this item, both already in the spec but now with a measured precedent behind
+them. First, the `mutants` key must include the column span and the source content hash, not just
+`file:line`, precisely because a line number can be absent or degenerate for a whole class of
+rows. Second, CHECK-9 must run on the largest available population and count **rejected inserts**
+under the UNIQUE constraint, because a probe that groups rows cannot see a duplicate the
+constraint already refused. A key that looks perfect on a fixture is the normal outcome; the two
+recorded precedents are 1 150 collisions out of 25 479, and 28 500 rows sharing one string.
+
+**Every published number names its corpus, its commit AND its `.cmt` count.** Three derivations of
+one quantity in a single day gave 78.5 %, 6.7 % and 3.1 % — a factor of 25, all three correct,
+because the rate measured which units had been compiled. A number that names only its tree can be
+neither reproduced nor contradicted.
