@@ -547,20 +547,34 @@ let register_query_readers () =
         (Db.with_db db (fun c ->
              Db.int c
                "SELECT count(*) FROM calls WHERE edge_form IS NOT NULL AND \
-                edge_form <> 'value_alias'"))
+                edge_form NOT IN ('value_alias', 'module_alias')"))
         0 ;
-      (* The constraint is armed, proved by trying to violate it. [module_alias]
-         is the specific wrong value C-15 warns about — [deps.dep_kind='alias']
-         already means MODULE alias, and the whole point of naming this column
-         [edge_form] was to stop the two relations sharing one word. Written
-         LAST in this batch: it mutates the database, so anything reading rows
-         afterwards would read a half-updated one. *)
+      (* The constraint is armed, proved by trying to violate it.
+
+         The probe USED to be [module_alias], on the reading that C-15 forbade
+         it. It does not: C-15 forbids the column being named [is_alias] and
+         forbids the bare word [alias], precisely because
+         [module_deps.dep_kind='alias'] already means a module alias. It asks
+         for a DISAMBIGUATED value, which is what [value_alias] is — and
+         [module_alias] (schema 1.11, specs/reexport-resolution.md) is the same
+         discipline applied to the sibling fact: this head was spelled through a
+         module alias. The two relations still do not share a word.
+
+         So the probe had to move to a value that is genuinely outside the
+         vocabulary. That it had to move at all is the useful part: an unused
+         value is not a forbidden one, and a test that probes a constraint with
+         a value someone may later legitimately want conflates "rejected today"
+         with "must be rejected forever". [wrapper] is chosen because nothing in
+         either spec proposes it.
+
+         Written LAST in this batch: it mutates the database, so anything
+         reading rows afterwards would read a half-updated one. *)
       Batch.check b
         ~msg:"the edge_form CHECK constraint actually REFUSES an out-of-vocabulary value"
         (Db.with_db_rw db (fun c ->
              match
                Db.exec_result c
-                 "UPDATE calls SET edge_form='module_alias' WHERE edge_form='value_alias'"
+                 "UPDATE calls SET edge_form='wrapper' WHERE edge_form='value_alias'"
              with
              | Ok () -> false (* accepted — the constraint is NOT armed *)
              | Error _ -> true))) ;

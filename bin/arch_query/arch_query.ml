@@ -264,7 +264,16 @@ let () =
                column nor the rows, and an unconditional predicate would ERROR
                against it rather than merely over-count. *)
             let not_alias_and =
-              if Arch_db.has_col t "calls" "edge_form" then "AND edge_form IS NULL " else ""
+              (* NOT "edge_form IS NULL": the exclusion is of VALUE aliases
+                 specifically, and 'module_alias' (schema 1.11) is a real call
+                 whose head merely happened to be spelled through a module
+                 alias. Counting it is correct; dropping it would have silently
+                 removed 3247 genuine edges on proto_alpha. Written as a single
+                 COALESCE conjunct so the operator-precedence care taken around
+                 the parenthesised OR below still holds. *)
+              if Arch_db.has_col t "calls" "edge_form" then
+                "AND COALESCE(edge_form,'') <> 'value_alias' "
+              else ""
             in
             if flat then
               q
@@ -887,7 +896,11 @@ let () =
                make this query ERROR against one rather than merely over-count.
                Same shape as the [functions.exported] gate below. *)
             let not_alias =
-              if Arch_db.has_col t "calls" "edge_form" then "WHERE edge_form IS NULL " else ""
+              (* See [callers-of]: 'module_alias' is a real call site, only
+                 'value_alias' is not. *)
+              if Arch_db.has_col t "calls" "edge_form" then
+                "WHERE COALESCE(edge_form,'') <> 'value_alias' "
+              else ""
             in
             q ~h:[ "callee_name"; "callers" ] ~shape:Arch_db.Rows.s_i ~cells:Arch_db.Rows.csi ~pty:unit_ty
               (Printf.sprintf
@@ -1103,7 +1116,9 @@ let () =
                gate — this query states it REUSES that measure, so the two must
                agree or the claim in the comment above becomes false. *)
             let not_alias =
-              if Arch_db.has_col t "calls" "edge_form" then "AND edge_form IS NULL " else ""
+              if Arch_db.has_col t "calls" "edge_form" then
+                "AND COALESCE(edge_form,'') <> 'value_alias' "
+              else ""
             in
             q ~h:[ "path"; "fan_in" ] ~shape:Arch_db.Rows.s_i ~cells:Arch_db.Rows.csi ~pty:unit_ty
               (Printf.sprintf
