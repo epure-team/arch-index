@@ -148,9 +148,23 @@ the taxonomy this document defines is what shows it. On Octez:
 - `ambiguous_unit` — **16 151 edges**. A reference naming units that ARE in the index, where more
   than one function answers. Not unknowable: under-determined, and roadmap 1.6 records it as ⊤
   precisely because picking one would forge a `MUST`.
-- `module_param` — **117 048 edges**, which includes module *aliases* (`module S = Target`) whose
-  target the producer records and the resolver does not read. That is a wiring gap, not an
-  unknowable target.
+- `module_param` — **117 048 edges**, of which **42 987 (36.7 %)** are headed by a module alias
+  (`module S = Target`) declared in the calling module, and **39 524 (33.8 %)** have an alias
+  target naming a module that is **in the index**. Both halves are already in the database and
+  the resolver reads neither: a wiring gap, not an unknowable target. (The 39 524 was measured
+  by the roadmap owner's session on an independent Octez index; the three figures below were
+  cross-derived and reproduce exactly.)
+
+  **The key is the PAIR, never the name.** 3 423 distinct `(source_module, alias_name)` keys, of
+  which **0 are ambiguous** — and that zero is a measurement, not a schema tautology: there is no
+  UNIQUE index on the pair, so a second target would be stored and counted. It matters because
+  **277 alias names are reused across modules with different targets**: the bare name is globally
+  ambiguous and only the source-module scoping makes the key sound. Anyone wiring this must key
+  on the pair.
+
+  **Upper bound, not a resolution count.** Name coincidence is not proof: it excludes neither a
+  local module shadowing the alias nor an alias to a *module type*, and a resolved head still has
+  to find the function.
 - `callback_param` — 153 157 edges. This class *is* mostly what the retracted sentence described.
 
 **A figure the earlier paragraph did not carry, and which measures the remaining work better than
