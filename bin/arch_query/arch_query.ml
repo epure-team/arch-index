@@ -49,7 +49,7 @@ Subcommands:
                                functions whose may-raise set contains Exn (⊤ nodes listed apart)
   exn-stats    [--assume-externals-pure]
                                bounded/unbounded share of every node, ⊤ reasons, origin counts
-  escaping-origins --roots <module-path>:<fn>|<module-path>:* [--forms <f1,f2,...>]
+  escaping-origins --roots exported|<module-path>:<fn>|<module-path>:* [--forms <f1,f2,...>]
                    [--channel <name>]   (default: exception — see NOTE below)
                                fatal origins (assert/division/index/partial_match by default)
                                in the forward closure of the root. Prints root/scope/coverage
@@ -632,7 +632,29 @@ let () =
                '%' and '_' in the caller's fragment are ESCAPED: they are LIKE
                metacharacters, so an unescaped '_' silently matches any
                character and re-opens the same hole one character at a time. *)
+            (* [--roots exported] roots at THE WHOLE API SURFACE, which is the shape the
+               question "what can an external caller trigger" actually has. Rooting at one
+               module answers for one module; the crash surface a consumer is exposed to is
+               the closure of every function that appears in an .mli.
+
+               Spelled as the BARE KEYWORD `exported`, not as a selector, and deliberately:
+               `arch-coverage --roots exported` already means exactly this set, computed from
+               the same flag. A second spelling for one set is how two names for one thing come
+               to disagree — so this is the same word, over the same column.
+
+               It is a ROOT SET, not a name, so the ambiguity refusal below does not apply to
+               it: several entry points is the point, not an absence of proof. The vacuity
+               guard does apply, and is stricter — an index whose producer never marked exports
+               yields an empty cone, and every list would then be empty for want of a starting
+               point rather than for want of crash sites. That reads as "nothing can crash
+               here", which is the worst available answer to this question. *)
+            let exported_roots = root_spec = "exported" in
+            if exported_roots && not (Arch_db.has_col t "functions" "exposed") then
+              die 3
+                "arch-query: REFUSED — --roots exported needs functions.exposed, and this index                  predates it. Re-index with a producer that records exports, or name a module                  root explicitly." ;
             let path_frag, root_name =
+              if exported_roots then ("", "*")
+              else
               match String.rindex_opt root_spec ':' with
               | Some i ->
                   ( String.sub root_spec 0 i,
@@ -670,7 +692,11 @@ let () =
                be unique, or several protocol versions answer at once. *)
             let whole_module = root_name = "*" in
             let n_roots =
-              if whole_module then
+              if exported_roots then
+                Arch_db.count1 t
+                  "SELECT count(*) FROM functions WHERE COALESCE(exposed,0) = 1 AND ? IS NOT NULL"
+                  path_pat
+              else if whole_module then
                 Arch_db.count1 t
                   "SELECT count(*) FROM modules WHERE ('/' || path) LIKE ? ESCAPE '\\'"
                   path_pat
@@ -680,13 +706,21 @@ let () =
                    WHERE ('/' || m.path) LIKE ? ESCAPE '\\' AND f.name = ?"
                   (path_pat, root_name)
             in
+            if n_roots = 0 && exported_roots then
+              die 3
+                "arch-query: REFUSED — no function in this index is marked exported, so the API \
+                 cone is empty and every list below would be empty for want of a starting point \
+                 rather than for want of crash sites. Name a module root explicitly, or use a \
+                 producer that records exports." ;
             if n_roots = 0 then
               die 3
                 (Printf.sprintf
                    "arch-query: REFUSED — no %s matches --roots '%s' in this index."
                    (if whole_module then "module" else "function")
                    root_spec) ;
-            if n_roots > 1 && whole_module then (
+            (* Several entry points is what [--roots exported] MEANS, so the ambiguity refusal
+               is skipped for it — and only for it. It still applies to every named root. *)
+            if n_roots > 1 && whole_module && not exported_roots then (
               q ~h:[ "candidate" ] ~shape:Arch_db.Rows.t1
                 ~cells:(fun a -> [ Arch_db.text_cell a ])
                 ~pty:Arch_db.Ty.string
@@ -697,7 +731,7 @@ let () =
                    "arch-query: REFUSED — --roots '%s' matches %d modules (listed above). \
                     Qualify the path so exactly one module answers."
                    root_spec n_roots)) ;
-            if n_roots > 1 then (
+            if n_roots > 1 && not exported_roots then (
               (* Print the candidates BEFORE refusing: a refusal that does not
                  say what to pick instead just moves the work to the caller. *)
               q ~h:[ "candidate" ] ~shape:Arch_db.Rows.t1 ~cells:(fun a -> [ Arch_db.text_cell a ])
@@ -713,10 +747,18 @@ let () =
                     the root with its module path."
                    root_spec n_roots)) ;
             (* The two closures, shared by the coverage line and the table. *)
+            (* The exported predicate is ANDed into the existing root CTE rather than given
+               its own query, so the three bound parameters and every consumer of [ctes] stay
+               exactly as they were. With [path_pat = "%"] and [root_name = "*"] the first two
+               conjuncts are true of every function, and the third does the selecting. *)
+            let exported_pred =
+              if exported_roots then " AND COALESCE(f.exposed,0) = 1" else ""
+            in
             let ctes =
-              "WITH RECURSIVE root(id) AS (\n\
-              \  SELECT f.id FROM functions f JOIN modules m ON f.module_id=m.id\n\
-              \  WHERE ('/' || m.path) LIKE ? ESCAPE '\\' AND (? = '*' OR f.name = ?)),\n\
+              Printf.sprintf
+                "WITH RECURSIVE root(id) AS (\n\
+                \  SELECT f.id FROM functions f JOIN modules m ON f.module_id=m.id\n\
+                \  WHERE ('/' || m.path) LIKE ? ESCAPE '\\' AND (? = '*' OR f.name = ?)%s),\n\
                reach(id) AS (\n\
               \  SELECT id FROM root UNION\n\
               \  SELECT c.callee_id FROM calls c JOIN reach r ON c.caller_id=r.id\n\
@@ -725,6 +767,7 @@ let () =
               \  SELECT id FROM root UNION\n\
               \  SELECT c.callee_id FROM calls c JOIN must_reach r ON c.caller_id=r.id\n\
               \   WHERE c.callee_id IS NOT NULL AND c.kind='MUST')\n"
+                exported_pred
             in
             let cov =
               Arch_db.rows t
@@ -785,7 +828,11 @@ let () =
                 ~params_ty:Arch_db.Ty.(t2 string string)
                 ~shape:Arch_db.Rows.t1
                 ~to_cells:(fun a -> [ Arch_db.text_cell a ])
-                (if whole_module then
+                (if exported_roots then
+                   (* Not used for the label in this mode; kept cheap rather than listing
+                      every module in the index. *)
+                   "SELECT path FROM modules WHERE ? IS NOT NULL AND ? IS NOT NULL LIMIT 0"
+                 else if whole_module then
                    "SELECT path FROM modules WHERE ('/' || path) LIKE ? ESCAPE '\\' \
                     AND ? IS NOT NULL ORDER BY 1"
                  else
@@ -796,9 +843,16 @@ let () =
               |> List.filter_map (function c :: _ -> Some (Arch_db.string_of_cell c) | [] -> None)
             in
             let root_label =
-              match resolved_roots with
-              | [ r ] -> if whole_module then r ^ ":*" else r
-              | l -> String.concat ", " l
+              if exported_roots then
+                (* Name the SET and its size. Printing every exported function would bury the
+                   coverage line under hundreds of rows, and the number is what a reader needs
+                   to judge whether the cone started somewhere plausible. *)
+                Printf.sprintf "exported (%d entry point%s)" n_roots
+                  (if n_roots = 1 then "" else "s")
+              else
+                match resolved_roots with
+                | [ r ] -> if whole_module then r ^ ":*" else r
+                | l -> String.concat ", " l
             in
             (* PRODUCER IDENTITY. The scope line was added to make two runs
                comparable, and it did not: a reviewer measured 21 origins where

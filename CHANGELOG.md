@@ -31,6 +31,38 @@
   fixture that accidentally satisfied the MAIN predicate would be read through the already-tested
   branch and pass while proving nothing about FLAT.
 
+- **`arch-query <db> escaping-origins --roots exported` — the crash surface an external caller
+  can reach.** The command already answered "which fatal origins are reachable from this root"
+  for one named root; the API surface is a *set*, and rooting at one module answers for one
+  module. `--roots exported` roots at every function that appears in an `.mli`, which is the
+  shape the question actually has.
+
+  Measured on proto_alpha (`main` 8260ad9, 286 `.cmt`, `--errors-profile=tezos`): **3 011 entry
+  points, 5 282 nodes reached, 217 fatal-origin sites — 127 MUST and 90 MAY**, of which 175 are
+  outside `test/`. By form: 118 `assert`, 76 `division`, 23 `index`. The coverage line reports
+  13 519 unresolved edges and 2 369 ⊤ on the same run, so that list is a **lower bound** and
+  says so.
+
+  **Spelled as the bare keyword `exported`, not as a selector.** `arch-coverage --roots exported`
+  already means this set, computed from the same `functions.exposed` column; a second spelling
+  for one set is how two names for one thing come to disagree in the place it matters.
+
+  **An index with no exports is REFUSED (exit 3), never reported empty.** That is the
+  load-bearing half: an unmarked index gives an empty cone, and every list is then empty for
+  want of a *starting point* rather than for want of crash sites — which reads as "nothing here
+  can crash", the worst available answer to this question. An index predating
+  `functions.exposed` is refused separately, by column guard rather than by crash.
+
+  Several entry points is what the keyword *means*, so the ambiguity refusal that protects named
+  roots is skipped for it — and only for it; a named root still refuses rather than unioning
+  candidates.
+
+  Red-verified with scoped runs, one mutant per assertion, distinct binaries: rooting at every
+  function instead of the exported ones (`f791814cd474`) fails the discrimination test, whose
+  fixture contains a divider no entry point reaches; removing the vacuity guard
+  (`1bb340f319e7`) leaves that test green and fails only the refusal test. Scoped because a
+  suite-wide run under first-failure semantics credits the kill to whichever test sits earliest.
+
 ### Fixed
 - **A newer binary reading an older index refuses instead of crashing, and the refusal names what
   is missing.** The class is *any* column or table a tool's query names that the index in front of

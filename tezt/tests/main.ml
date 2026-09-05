@@ -107,6 +107,7 @@ let () =
   Sarif_in.register () ;
   Exported_selector.register () ;
   Flat_exported_selector.register () ;
+  Escaping_origins_exported.register () ;
   Insert_rowid_attribution.register () ;
   Dropped_node_dependents.register_dropped_function () ;
   Dropped_node_dependents.register_dropped_module () ;
