@@ -131,6 +131,49 @@ module Aliased (P : HAS_F) = struct
 
   let through_alias n = M.f n
 end
+
+(* THE OTHER ROUTES TO THE SAME DEFECT. Round 1 proved only the plain case, and
+   "the guard tests the root so it should cover the rest" is not a measurement.
+   Each of these binds a module to something that is NOT a compilation unit, by
+   a different syntactic road. *)
+module Routes (P : HAS_F) = struct
+  (* Through a SIGNATURE CONSTRAINT: Tmod_constraint wrapping Tmod_ident, which
+     [module_target_path] unwraps — so the constraint does not hide the root. *)
+  module R2 : HAS_F = P
+
+  let r2 n = R2.f n
+
+  (* NESTED inside a submodule: iter_structure_items descends, so this reaches
+     the table under a deeper prefix. *)
+  module Inner = struct
+    module R3 = P
+
+    let r3 n = R3.f n
+  end
+
+  (* An alias TO an alias to a parameter — two hops, where the first hop is
+     itself refused, so the second has nothing to chase. *)
+  module R1 = P
+  module R5 = R1
+
+  let r5 n = R5.f n
+
+  (* An EXPRESSION-level binding. This one is safe for a DIFFERENT reason and
+     the difference matters: [iter_structure_items] walks structure items, and
+     [Texp_letmodule] is not one, so it never reaches the table at all. If the
+     walker is ever taught to visit it, the guard is what will have to catch it
+     — this line is here so that change fails loudly rather than silently. *)
+  let r4 n =
+    let module R4 = P in
+    R4.f n
+end
+
+(* A FIRST-CLASS MODULE. [Tmod_unpack] makes [module_target_path] return None,
+   so like [let module] it never reaches the table — again a different reason
+   from the guard's. *)
+let r6 (x : (module HAS_F)) n =
+  let module R6 = (val x : HAS_F) in
+  R6.f n
 |} );
   ]
 
@@ -265,7 +308,39 @@ let register_rewrite () =
             |> List.map (function
                  | [x] -> Db.to_string ~sql:"aliased" x
                  | _ -> Test.fail "aliased: unexpected row shape")))
-        "MAY_TOP/module_param/unmarked/unresolved") ;
+        "MAY_TOP/module_param/unmarked/unresolved" ;
+      (* THE BATTERY. Every road to a module bound to something that is not a
+         compilation unit must leave its ⊤ standing. Measured against the
+         unguarded producer, four of these are DECLINED BY THE GUARD (plain,
+         signature-constrained, nested, two-hop) and two NEVER REACH THE TABLE
+         (let module, first-class unpack) — stated because they are different
+         guarantees, and the second kind stops holding the day the walker learns
+         to visit expression-level module bindings. *)
+      List.iter
+        (fun (caller, road) ->
+          Batch.eq_string b
+            ~msg:(Printf.sprintf "%s: %s keeps its ⊤" caller road)
+            (String.concat ","
+               (Db.with_db db (fun c ->
+                    Db.rows c
+                      (Printf.sprintf
+                         "SELECT COALESCE(c.kind,'?')||'/'\
+                          ||CASE WHEN c.edge_form IS NULL THEN 'unmarked' ELSE c.edge_form END \
+                          ||'/'||CASE WHEN c.callee_id IS NULL THEN 'unresolved' ELSE 'RESOLVED' END \
+                          FROM calls c JOIN functions cf ON c.caller_id=cf.id \
+                          WHERE cf.name='%s' AND c.callee_name LIKE '%%.f'"
+                         caller))
+                |> List.map (function
+                     | [x] -> Db.to_string ~sql:"route" x
+                     | _ -> Test.fail "route: unexpected row shape")))
+            "MAY_TOP/unmarked/unresolved")
+        [
+          ("Routes.r2", "an alias to a parameter behind a signature constraint");
+          ("Routes.Inner.r3", "a nested alias to a parameter");
+          ("Routes.r5", "an alias to an alias to a parameter");
+          ("Routes.r4", "a let module binding (never reaches the table)");
+          ("r6", "a first-class module unpack (never reaches the table)");
+        ]) ;
   Lwt.return_unit
 
 (* FR-012 / SA-1, alone in its own test because it is the one assertion whose
