@@ -16,7 +16,7 @@ Fresh cycle, round 1. No qualifying causes — every gate passed on its first ru
 | Tests | `GOFLAGS=-buildvcs=false dune test --root . --force` | ✅ 124 passed, 0 failed (exit 0) | 88s |
 | Format / Lint | — | ⚠️ **not documented** — no `.ocamlformat`, no lint step in `.github/workflows/ci.yml`. Recorded, not invented. | — |
 | Self-index golden | index `_build/default/lib/arch_index` + `diff test/fixtures/self-index-stats.txt` | ✅ diff empty (23 / 746 → re-measured 23 / 761 / 4967 matches) | <1s |
-| Architecture rules | `arch_rules … arch-rules.txt --on-vacuous fail` | ✅ 4 rules, 0 failing (exit 0) | <1s |
+| Architecture rules | `arch_rules … arch-rules.txt --on-vacuous fail` | exit 0 — **1 proved / 0 violations / 3 UNKNOWN**. Recorded here as ✅ "4 rules, 0 failing", which was the tool's own summary collapsing a three-state verdict into one number; corrected in PR #70. Three of the four rules proved nothing, so this is not a green gate — it is an unchanged one. See specs/qualified-unit-resolution.md §10.5. | <1s |
 
 ### The `GOFLAGS` claim, verified rather than accepted
 

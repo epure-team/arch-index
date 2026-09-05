@@ -33,6 +33,30 @@
   to be caught.
 
 ### Fixed
+- **`arch-rules` reports the verdict and the gate as two different numbers, and `--on-vacuous`
+  now covers every rule form.** The summary line collapsed a seven-state verdict into
+  `N rule(s), M failing`, which reads as a pass for a run that proved almost nothing: on this
+  repo's own four-rule file, `4 rules, 0 failing` was really *1 proved / 0 violations /
+  3 UNKNOWN*. It is now two lines — a census that partitions the rules (every state printed even
+  at zero) and a separate `gate:` line carrying `failing` plus the policy flag values actually in
+  force, since `failing` overlaps six of the seven census counts and must never be added to them.
+  `--format json` gains `possible`, `unknown_escaping`, `unknown_no_contract` and
+  `not_computed`; every pre-existing field is unchanged.
+
+  **Observable gate change for consumers.** `forbid dep`, `forbid exported` and `forbid effect`
+  previously had no vacuity check at all — only `forbid reach` did — so they emitted `PASS` for a
+  rule whose selector had stopped matching, and `--on-vacuous fail` (the default) covered one
+  rule form in four. They now emit `NO_SOURCE` over the population each actually quantifies over.
+  For `reach`-only rule sets, including this repository's own `arch-rules.txt`, nothing moves and
+  the exit code is identical. A rule set containing `dep` / `exported` / `effect` rules can now go
+  from exit 0 to exit 1 — for instance a single `forbid exported` rule against an index whose
+  producer does not record export status. That is the fix working, not a regression: the old
+  exit 0 was a rule that could not fail. `--on-vacuous warn` restores the previous behaviour while
+  the selector or the producer is corrected. `forbid dep` deliberately gains no target-side check
+  — a `dep` target ranges over modules *already depended on*, so "nothing matches `Web.**`" is the
+  preventive rule succeeding, and calling it vacuous would fail the build precisely when the
+  codebase is clean.
+
 - **The recalibration gate would write a degenerate measurement over a pinned constant.** A query
   that succeeds but matches nothing returns `0`, not an error: sqlite3 writes nothing to stderr,
   `0` passes an is-it-an-integer check, and `A=B=C=D=0` is the cleanest possible "attributable to

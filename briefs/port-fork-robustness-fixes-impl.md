@@ -74,7 +74,7 @@ rather than from memory.
 - [x] Tests: `dune test` → **exit 0** (70 tezt + the alcotest targets; 3 new files: `test_lsp_uri` 14 cases, `lsp_error_diagnostics` 1 case with 6 assertions, `lsp_call_diagnostics` 1 case with 7 assertions — 71 tezt tests, up from 70)
 - [x] Unit target alone: `dune exec test/test_lsp_uri.exe` → `Test Successful … 14 tests run.`
 - [x] **Self-index golden** (`.github/workflows/ci.yml:74-87`): `arch_callgraph_ocaml --build-dir=_build/default/lib/arch_index` then `diff test/fixtures/self-index-stats.txt` → **exit 0** after regenerating the golden per `docs/adr/001-self-index-golden.md`. It was **exit 1** in round 1 (`functions: 426` golden vs `431` actual) and `dune build`/`dune test` were both 0, so this was the only gate that saw it. The golden has moved three times across rounds and each delta was accounted for by diffing the edge multiset, not inferred: round 1 `426 → 431` functions / `3391 → 3382` calls (dedup collapsing duplicated bodies), round 3 `431 → 432` / `3382 → 3391` (`report_once` — its own node plus 8 edges; the return to main's original 3391 is arithmetic coincidence, verified as such by review), round 4 `432 → 432` / `3391 → 3393`, exactly `outgoing_calls -> relative_path` and `outgoing_calls -> strip_file_uri` from the R3-2 fix and nothing else (`comm` on the normalised edge sets, empty removed-side).
-- [x] `arch-rules /tmp/self.db arch-rules.txt --on-vacuous fail` → **exit 0** (`4 rule(s), 0 failing`)
+- [x] `arch-rules /tmp/self.db arch-rules.txt --on-vacuous fail` → **exit 0**. Recorded at the time as `4 rule(s), 0 failing`; CORRECTED (PR #70) — that line was the tool's own summary collapsing a three-state verdict into one number, and the run was **1 proved / 0 violations / 3 UNKNOWN**. Only one of the four invariants was established; the other three abstain because their cone escapes through a ⊤ edge. The exit code was and is 0 — UNKNOWN is fail-open — so the correct claim is *the gate is unchanged*, not *the gate passes*. See specs/qualified-unit-resolution.md §10.5.
 - [x] Format: `dune fmt` — **n/a**, no `.ocamlformat` in this repo (verified: `test -f .ocamlformat` false), so formatting is not a gate here
 
 ## Red-then-green
@@ -271,7 +271,7 @@ now each accounted for by an edge-set diff rather than by a plausible sentence.
 | Build | `dune build` | 0 |
 | Tests | `dune test` | 0 — **71/71** (was 70) |
 | Self-index golden | index + `diff test/fixtures/self-index-stats.txt` | 0 (`19 / 432 / 3393`) |
-| arch-rules | `./arch-rules /tmp/selfg.db arch-rules.txt --on-vacuous fail` | 0 (`4 rule(s), 0 failing`) |
+| arch-rules | `./arch-rules /tmp/selfg.db arch-rules.txt --on-vacuous fail` | 0 — **1 proved / 0 violations / 3 UNKNOWN** (recorded here as `4 rule(s), 0 failing`; corrected in PR #70, see the checklist above) |
 
 Mutants R3-1a / R3-1b / M-c were each run by rebuilding and executing the new test through the tezt
 binary by `--title`; the suite as a whole was then re-run with `dune test` (exit 0) with every

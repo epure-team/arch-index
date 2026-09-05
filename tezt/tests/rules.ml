@@ -489,7 +489,7 @@ let register_summary_line () =
          not the defect; the summary claiming it as a result is. *)
       Batch.eq_int b ~msg:"an UNKNOWN-only run still exits 0 (fail-open)" code 0 ;
       Batch.contains b ~msg:"the summary must state how many rules were UNKNOWN"
-        ~haystack:out "1 UNKNOWN" ;
+        ~haystack:out "1 unknown" ;
       Batch.contains b
         ~msg:"the summary must state how many rules were actually PROVED, not only how many failed"
         ~haystack:out "0 proved" ;
@@ -506,5 +506,321 @@ let register_summary_line () =
       let _, out4 = rules [db; rf] in
       Batch.contains b ~msg:"four-rule summary names the proved count" ~haystack:out4 "1 proved" ;
       Batch.contains b ~msg:"four-rule summary names the failing count" ~haystack:out4 "2 failing" ;
-      Batch.contains b ~msg:"four-rule summary names the UNKNOWN count" ~haystack:out4 "1 UNKNOWN") ;
+      Batch.contains b ~msg:"four-rule summary names the UNKNOWN count" ~haystack:out4 "1 unknown" ;
+      (* POSSIBLE was the state the first version of this summary forgot. It is
+         fail-OPEN under --on-possible warn, so on that run it appeared in no
+         count at all: "4 rule(s), 1 proved, 1 failing, 1 UNKNOWN" accounted for
+         three of four rules and the missing one was the state that means a
+         dynamic dispatch could land on the forbidden target. *)
+      Batch.contains b ~msg:"four-rule summary names the POSSIBLE count" ~haystack:out4
+        "1 possible" ;
+      Batch.contains b ~msg:"four-rule summary names the VIOLATION count" ~haystack:out4
+        "1 violation" ;
+      let _, out_pw = rules [db; rf; "--on-possible"; "warn"] in
+      Batch.contains b
+        ~msg:"POSSIBLE must be named even when the policy lets it through the gate"
+        ~haystack:out_pw "1 possible") ;
+  Lwt.return_unit
+
+(* The census line must PARTITION the rules: every rule has exactly one verdict,
+   so the counts on it sum to the rule count. The previous line could not be read
+   that way — it printed `failing`, a policy aggregate that overlaps six of the
+   seven verdict states, in among the verdict counts, so "4 rule(s), 1 proved,
+   3 failing, 1 UNKNOWN" summed to 5 over 4 rules.
+
+   Mutations this kills: printing `failing` inside the census again (the sum
+   exceeds the total); dropping any state from the census (the sum falls short);
+   merging UNKNOWN with UNKNOWN_NO_CONTRACT (the two-index case below); making
+   the per-state lines conditional such that "0 proved" can vanish. *)
+let has_sub ~haystack sub =
+  let n = String.length sub and m = String.length haystack in
+  let rec go i = i + n <= m && (String.sub haystack i n = sub || go (i + 1)) in
+  go 0
+
+let census_of line =
+  (* "N rule(s): a x, b y, ..." -> [(x, a); ...] *)
+  match String.index_opt line ':' with
+  | None -> []
+  | Some i ->
+      String.sub line (i + 1) (String.length line - i - 1)
+      |> String.split_on_char ','
+      |> List.filter_map (fun part ->
+             match String.split_on_char ' ' (String.trim part) with
+             | [n; name] -> ( match int_of_string_opt n with Some n -> Some (name, n) | None -> None)
+             | _ -> None)
+
+let summary_lines out =
+  String.split_on_char '\n' out
+  |> List.filter (fun l -> has_sub ~haystack:l "rule(s):" || has_sub ~haystack:l "gate:")
+
+let register_summary_partitions () =
+  Test.register ~__FILE__
+    ~title:"rules: the summary census partitions the rules, and the gate is a separate line"
+    ~tags:["rules"; "summary"]
+  @@ fun () ->
+  let db = Fixture.flat ~name:"rules_partition" layered_stream in
+  let rf = rule_file "partition_four" four_rules in
+  Batch.run (fun b ->
+      List.iter
+        (fun (flags, expected_gate) ->
+          let _, out = rules ([db; rf] @ flags) in
+          match summary_lines out with
+          | [census; gate] ->
+              let cs = census_of census in
+              Batch.eq_int b
+                ~msg:
+                  (Printf.sprintf "the census must cover all 4 rules under %s"
+                     (String.concat " " flags))
+                (List.fold_left (fun a (_, n) -> a + n) 0 cs)
+                4 ;
+              (* Every state gets a number, present or not. A state that only
+                 appears when non-zero cannot be told from a state the tool does
+                 not have, and "0 proved" is the single most important thing
+                 this line ever says. *)
+              List.iter
+                (fun k ->
+                  Batch.check b
+                    ~msg:(Printf.sprintf "the census must always name %S" k)
+                    (List.mem_assoc k cs))
+                ["proved"; "violation"; "possible"; "unknown"; "unknown-no-contract"; "vacuous";
+                 "not-computed"] ;
+              (* The gate is policy-dependent and overlaps the census, so it
+                 lives on its own line and is never added to those counts. *)
+              Batch.contains b
+                ~msg:
+                  (Printf.sprintf "the gate line must report %d failing under %s" expected_gate
+                     (String.concat " " flags))
+                ~haystack:gate
+                (Printf.sprintf "%d failing" expected_gate) ;
+              (* The parenthetical used to read "fail-open by default" even to an
+                 operator who had passed --on-unknown fail: a newly-written
+                 sentence false for the run it annotated. It must read the LIVE
+                 policy. *)
+              List.iter
+                (fun (flag, value) ->
+                  if List.mem flag flags then
+                    Batch.contains b
+                      ~msg:(Printf.sprintf "the gate line must state the LIVE %s policy" flag)
+                      ~haystack:gate value)
+                [("--on-unknown", "unknown=fail"); ("--on-possible", "possible=warn")]
+          | ls ->
+              Batch.note b "expected exactly one census line and one gate line, got %d"
+                (List.length ls))
+        [([], 2); (["--on-unknown"; "fail"], 3); (["--on-possible"; "warn"], 1)] ;
+
+      (* --format md is not decoration: scripts/pcc/pcc-dossier embeds this output
+         verbatim into a Markdown dossier a human reads. In Markdown two
+         consecutive plain lines are ONE paragraph — a renderer reflows them onto
+         a single line and puts the census and the gate back together, which is
+         exactly the conflation this split exists to undo. The two lines are
+         therefore bullets, and that is load-bearing.
+
+         Mutation this kills (the reviewer's N10): `let bullet = ""` unconditionally
+         in arch_rules.ml. It survived the whole suite, tezt/tests/pcc.ml included,
+         before this assertion existed. *)
+      let _, out_md = rules [db; rf; "--format"; "md"] in
+      let md_summary = summary_lines out_md in
+      Batch.eq_int b ~msg:"--format md prints exactly one census line and one gate line"
+        (List.length md_summary) 2 ;
+      List.iter
+        (fun l ->
+          Batch.check b
+            ~msg:
+              (Printf.sprintf
+                 "in --format md the summary line %S must be a bullet, or Markdown reflows the \
+                  census and the gate into one paragraph"
+                 l)
+            (String.length l >= 2 && String.sub l 0 2 = "- "))
+        md_summary ;
+
+      (* An all-PASS run must not mention states it does not have, beyond the
+         zeros in the census itself: no cause line for a state with no members.
+         Kills the mutant that makes the explanatory lines unconditional, which
+         printed "the cone escapes through a ⊤ edge" over a run where nothing
+         escaped. *)
+      let pf =
+        rule_file "partition_pass"
+          "rule \"p\"\n  forbid reach from file:src/pure/** to file:lib/db/**\n"
+      in
+      let code, outp = rules [db; pf] in
+      Batch.eq_int b ~msg:"an all-PASS run exits 0" code 0 ;
+      Batch.contains b ~msg:"an all-PASS run reports 1 proved" ~haystack:outp "1 proved" ;
+      Batch.check b
+        ~msg:"an all-PASS run must not print the ⊤-edge explanation for a state it does not have"
+        (not (has_sub ~haystack:outp "cone reaches a ⊤ edge"))) ;
+  Lwt.return_unit
+
+(* UNKNOWN and UNKNOWN_NO_CONTRACT were counted together and explained with ONE
+   sentence — "the cone escapes through a ⊤ edge" — which is false for the
+   second: no cone escaped, the index was never ⊤-marked, so nothing could have
+   been proved for any rule on it. Different cause, different fix.
+
+   Mutation this kills (the reviewer's M6): dropping UNKNOWN_NO_CONTRACT from the
+   count. Before the split it survived all 9 tests in this file. *)
+let register_two_unknowns_are_two_states () =
+  Test.register ~__FILE__
+    ~title:"rules: an escaping cone and an un-⊤-marked index are not the same UNKNOWN"
+    ~tags:["rules"; "summary"]
+  @@ fun () ->
+  (* The same graph twice: once ⊤-marked, once not. The rule is identical, so the
+     ONLY thing that can move the verdict is the contract. *)
+  let marked = Fixture.flat ~name:"rules_two_unk_marked" layered_stream in
+  let unmarked = Fixture.flat ~name:"rules_two_unk_unmarked" layered_stream in
+  Db.with_db_rw unmarked (fun conn ->
+      Db.exec conn "DELETE FROM comment_db_meta WHERE key = 'callgraph_contract'") ;
+  let uf =
+    rule_file "two_unknowns_escaping"
+      "rule \"u\"\n  forbid reach from file:src/job/** to file:lib/db/**\n"
+  in
+  let pf =
+    rule_file "two_unknowns_closed"
+      "rule \"p\"\n  forbid reach from file:src/pure/** to file:lib/db/**\n"
+  in
+  Batch.run (fun b ->
+      let _, out_esc = rules [marked; uf] in
+      Batch.contains b ~msg:"an escaping cone is counted as `unknown`" ~haystack:out_esc
+        "1 unknown, 0 unknown-no-contract" ;
+      let _, out_nc = rules [unmarked; pf] in
+      Batch.contains b
+        ~msg:"an un-⊤-marked index is counted as `unknown-no-contract`, NOT as `unknown`"
+        ~haystack:out_nc "0 unknown, 1 unknown-no-contract" ;
+      Batch.check b
+        ~msg:"UNKNOWN_NO_CONTRACT must not be explained as an escaping cone — nothing escaped"
+        (not (has_sub ~haystack:out_nc "cone reaches a ⊤ edge")) ;
+      Batch.contains b
+        ~msg:"UNKNOWN_NO_CONTRACT must be explained by the missing contract"
+        ~haystack:out_nc "not ⊤-marked" ;
+      (* JSON keeps `unknown` as the union — gates read it — and gains the split
+         pair, so text and JSON can be checked against each other. *)
+      match rules_json b ~what:"no_contract" [unmarked; pf; "--format"; "json"] with
+      | None -> ()
+      | Some j ->
+          int_field b j ~what:"no_contract" "unknown" 1 ;
+          int_field b j ~what:"no_contract" "unknown_escaping" 0 ;
+          int_field b j ~what:"no_contract" "unknown_no_contract" 1 ;
+          int_field b j ~what:"no_contract" "proved" 0) ;
+  Lwt.return_unit
+
+(* `pass` was emitted with NO vacuity check at all for `dep`, `exported` and
+   `effect`: only `reach` had NO_SOURCE/NO_TARGET. So --on-vacuous fail — the
+   flag that exists precisely to catch a rule that has stopped matching —
+   covered one rule form in four, and the other three printed the word "proved"
+   for a rule that could not fail.
+
+   The `exported` case contradicted itself on screen: the note said the selector
+   matched nothing, and two lines below the summary said proved. *)
+let register_vacuity_covers_every_rule_form () =
+  Test.register ~__FILE__
+    ~title:"rules: --on-vacuous covers every rule form, not only `reach`"
+    ~tags:["rules"; "policy"; "vacuous"]
+  @@ fun () ->
+  (* No function here is exported, and no effects table is populated. *)
+  let bare =
+    Fixture.flat ~name:"rules_vacuous_forms"
+      {|{"type":"function","name":"a.one","file_path":"src/a/one.ts"}
+{"type":"function","name":"a.two","file_path":"src/a/two.ts"}
+{"type":"call","caller_name":"a.one","caller_file":"src/a/one.ts","callee_name":"a.two","callee_file":"src/a/two.ts","call_site":"src/a/one.ts:1","kind":"MUST"}
+|}
+  in
+  Batch.run (fun b ->
+      let ef =
+        rule_file "vac_exported"
+          "rule \"nothing is named like this\"\n  forbid exported outside file:zzzz/nope/**\n"
+      in
+      Batch.exit_code b
+        ~msg:"an `exported` rule over an index with no exported function must FAIL --on-vacuous fail"
+        ~expected:1
+        (rules [bare; ef; "--on-vacuous"; "fail"]) ;
+      let _, out_e = rules [bare; ef; "--on-vacuous"; "fail"] in
+      Batch.check b ~msg:"a vacuous `exported` rule must not be summarised as proved"
+        (has_sub ~haystack:out_e "0 proved" && has_sub ~haystack:out_e "1 vacuous") ;
+      Batch.exit_code b ~msg:"--on-vacuous warn still downgrades it" ~expected:0
+        (rules [bare; ef; "--on-vacuous"; "warn"]) ;
+
+      (* A selector that matches no function makes the effect cone empty, so "no
+         effect found" is a statement about the empty set. Asserted on a main
+         index WITH an effects table, so the verdict cannot be NOT_COMPUTED. *)
+      let eff_db =
+        Fixture.main ~name:"rules_vacuous_effect"
+          ~seed:
+            "INSERT INTO modules (id, path) VALUES (1, 'src/a/one.ml');\n\
+             INSERT INTO functions (id, module_id, name) VALUES (1, 1, 'one');\n\
+             INSERT INTO comment_db_meta (key, value) VALUES ('callgraph_contract', 'v1');" ()
+      in
+      Db.with_db_rw eff_db (fun conn ->
+          Db.exec conn
+            (read_file (locate ~env_var:"ARCH_EFFECTS_MIGRATION" "effects-schema-migration.sql")) ;
+          (* Non-empty, because arch-rules reports NOT_COMPUTED on an EMPTY
+             function_effects table — which would satisfy the vacuity assertion
+             below for the wrong reason and make it a check that checks nothing. *)
+          Db.exec conn
+            "INSERT INTO function_effects (function_name, file_path, value_kind, target, \
+             is_direct, soundness) VALUES ('one', 'src/a/one.ml', 'GlobalVar', 'g', 1, 'sound')") ;
+      let ff =
+        rule_file "vac_effect"
+          "rule \"aimed at nothing\"\n  forbid effect from file:zzzz/nope/** kind:GlobalVar\n"
+      in
+      let _, out_f = rules [eff_db; ff; "--on-vacuous"; "fail"] in
+      Batch.contains b ~msg:"a vacuous `effect` rule is VACUOUS, not proved" ~haystack:out_f
+        "1 vacuous" ;
+      Batch.exit_code b ~msg:"a vacuous `effect` rule must FAIL --on-vacuous fail" ~expected:1
+        (rules [eff_db; ff; "--on-vacuous"; "fail"]) ;
+
+      (* `dep` reads module paths from a table, so its vacuity is a source
+         selector matching no module. The TARGET side gets no such check on
+         purpose: a `dep` target ranges over modules already depended on, so
+         "nothing matches Web.**" is the preventive rule SUCCEEDING, and calling
+         it vacuous would fail the gate exactly when the codebase is clean. *)
+      let dep_db =
+        Fixture.main ~name:"rules_vacuous_dep"
+          ~seed:
+            "INSERT INTO modules (id, path) VALUES (1, 'lib/core/engine.ml'), (2, \
+             'lib/util/str.ml');\n\
+             INSERT INTO functions (id, module_id, name) VALUES (1, 1, 'run'), (2, 2, 'trim');\n\
+             INSERT INTO module_deps (source_module, target_module, target_path, dep_kind, \
+             line_number) VALUES (1, 2, 'lib/util/str.ml', 'open', 1);\n\
+             INSERT INTO comment_db_meta (key, value) VALUES ('callgraph_contract', 'v1');" ()
+      in
+      let df =
+        rule_file "vac_dep"
+          "rule \"no such module anywhere\"\n\
+          \  forbid dep from module:zzzz/nope/** to module:Qqqq.**\n"
+      in
+      Batch.exit_code b ~msg:"a `dep` rule whose source matches no module must FAIL --on-vacuous fail"
+        ~expected:1
+        (rules [dep_db; df; "--on-vacuous"; "fail"]) ;
+      let _, out_d = rules [dep_db; df; "--on-vacuous"; "fail"] in
+      Batch.contains b ~msg:"a vacuous `dep` rule reports 0 proved" ~haystack:out_d "0 proved" ;
+      Batch.contains b ~msg:"a vacuous `dep` rule reports 1 vacuous" ~haystack:out_d "1 vacuous" ;
+
+      (* The control that stops the check above from being satisfied by absence:
+         a real source with an unmatched TARGET must still be a PASS, not
+         VACUOUS. Without this, "everything is vacuous" would pass the test. *)
+      let pf =
+        rule_file "dep_preventive"
+          "rule \"core must not depend on the web framework\"\n\
+          \  forbid dep from module:lib/core/** to module:Web.**\n"
+      in
+      Batch.exit_code b
+        ~msg:"a preventive `dep` rule whose target matches nothing must PASS, not be VACUOUS"
+        ~expected:0
+        (rules [dep_db; pf; "--on-vacuous"; "fail"]) ;
+      let _, out_p = rules [dep_db; pf; "--on-vacuous"; "fail"] in
+      Batch.contains b ~msg:"the preventive `dep` rule is proved, not vacuous" ~haystack:out_p
+        "1 proved" ;
+      Batch.contains b ~msg:"the preventive `dep` rule is not counted vacuous" ~haystack:out_p
+        "0 vacuous" ;
+
+      (* Same control on the `exported` side: with exported functions present, an
+         empty selector is a VIOLATION (every export is an offender), never
+         downgraded to VACUOUS. A verdict you FOUND is never demoted. *)
+      let exp_db = Fixture.flat ~name:"rules_vacuous_exp_control" layered_stream in
+      Batch.exit_code b
+        ~msg:"an empty `exported` selector over a real export set stays a VIOLATION"
+        ~expected:1
+        (rules [exp_db; ef]) ;
+      let _, out_c = rules [exp_db; ef] in
+      Batch.contains b ~msg:"that control is a violation, not a vacuity" ~haystack:out_c
+        "1 violation" ;
+      Batch.contains b ~msg:"that control is not counted vacuous" ~haystack:out_c "0 vacuous") ;
   Lwt.return_unit

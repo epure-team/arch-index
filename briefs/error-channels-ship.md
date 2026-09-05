@@ -13,7 +13,7 @@
 | QA | GO (round 1, no qualifying causes) |
 | Build | exit 0 |
 | Tests | 126/126, exit 0 |
-| arch-rules | 4 rules, 0 failing |
+| arch-rules | exit 0 — **1 proved / 0 violations / 3 UNKNOWN** (recorded here as "4 rules, 0 failing"; that was the tool's own summary collapsing a three-state verdict into one number — corrected in PR #70. The gate is unchanged, not passed. See specs/qualified-unit-resolution.md §10.5) |
 | Self-index golden | diff empty |
 | Schema version | base 1.7 → 1.8, exactly one `docs/schema.md` row |
 | `runner.ml` / `exn_raise_sets.ml` | zero-diff vs origin/main |

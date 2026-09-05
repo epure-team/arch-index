@@ -16,7 +16,7 @@ it answers *does module A mention module B*, not *can a call in A reach B*. A la
 routed through a callback, an interface, or a function value is invisible to it — and so is a
 `import` that is present but never actually used to cross the boundary.
 
-`arch-rules` answers the semantic question over the sound call graph, and reports **four**
+`arch-rules` answers the semantic question over the sound call graph, and reports **seven**
 verdicts where other tools report two:
 
 | verdict | meaning | exit |
@@ -24,6 +24,7 @@ verdicts where other tools report two:
 | `VIOLATION` | a **MUST** path exists — this happens at runtime on that path | fail |
 | `POSSIBLE` | reachable over MUST ∪ MAY_ENUMERATED — a dynamic dispatch could land there | fail (`--on-possible warn` to soften) |
 | `UNKNOWN` | nothing found, but the cone escapes through a ⊤ edge — **nothing is proved** | warn (`--on-unknown fail` to harden) |
+| `UNKNOWN_NO_CONTRACT` | nothing found, on an index that was never ⊤-marked — so nothing could have been proved for *any* rule on it. A different cause from `UNKNOWN` with a different fix: rebuild with a contract-stamping backend | warn (shares `--on-unknown`) |
 | `PASS` | proved unreachable in a closed universe | pass |
 | `VACUOUS` | the selector matched no code | fail (`--on-vacuous warn` to soften) |
 | `NOT_COMPUTED` | the index lacks the data this rule needs, so the rule was never evaluated | fail (`--on-not-computed warn` to soften) |
@@ -58,6 +59,41 @@ not evidence of anything. This is the same refusal `arch-query unreachable` make
 A rule whose selector matches nothing cannot fail, so it turns green forever the moment someone
 renames a directory. That is worse than having no rule, because it looks like coverage. Vacuous
 rules fail by default and are counted separately in the summary.
+
+`--on-vacuous` covers **all four** rule forms, and what counts as "matching nothing" differs by
+form, because each quantifies over a different population:
+
+| form | VACUOUS when |
+|---|---|
+| `forbid reach` | either selector matches no function (`NO_SOURCE` / `NO_TARGET`) |
+| `forbid effect` | the source selector matches no function, so the cone is empty |
+| `forbid exported` | **no function in the index is exported at all** — the rule quantifies over the empty set. An empty *selector* with exports present is a `VIOLATION` (every export is an offender), never downgraded |
+| `forbid dep` | the **source** selector matches no module in the index |
+
+`forbid dep` deliberately has no target-side vacuity check, unlike `forbid reach`. A `reach`
+target ranges over functions that exist; a `dep` target ranges over module paths *already depended
+on*. So "nothing matches `Web.**`" is not evidence of a typo — it is the rule succeeding, and
+`forbid dep from module:lib/core/** to module:Web.**` is a preventive rule whose whole purpose is
+to hold while nothing depends on `Web`. Calling that VACUOUS would fail the build precisely when
+the codebase is clean.
+
+### The summary line is two lines
+
+The text and `md` summaries print a **census** and a **gate**, in that order:
+
+```
+4 rule(s): 1 proved, 0 violation, 0 possible, 3 unknown, 0 unknown-no-contract, 0 vacuous, 0 not-computed
+gate: 0 failing — violation=always possible=fail unknown=warn vacuous=fail not-computed=fail
+```
+
+The first line is what the analysis **found**. Its counts partition the rules, so they sum to the
+total and the line can be read as a whole. Every state is printed even at zero: a state that
+appears only when non-zero cannot be told from a state the tool does not have, and `0 proved` is
+the single most important thing this summary can say.
+
+The second line is what the **policy did** with those verdicts. `failing` overlaps six of the
+seven census counts, so it lives on its own line and is never added to them, and the flag values
+shown are the ones **actually in force** for that invocation — not the defaults.
 
 ## Rule syntax
 
@@ -128,8 +164,13 @@ floats. Absence of data is stated, never implied.
 | `computed` | bool | the rule set was evaluated (always `true` when this object is printed) |
 | `contract_ok` | bool | is this index ⊤-marked (the same fact that degrades `PASS` to `UNKNOWN_NO_CONTRACT` per rule). Computed by the same `Arch_db.contract_ok` helper `arch-impact` uses for its own `contract_ok` — the same index gets the same answer from both tools, never `t.contract <> None` alone (a flag set on an index with a NULL-kind edge is worse than no flag; see `Arch_db.require_contract`'s doc comment) |
 | `verdict` | `"pass"` \| `"fail"` | the same decision the exit code encodes — restated for a stdout-only consumer |
-| `failing` | int | `= len(failed)` — how many rules count as failing under the current `--on-*` policy |
-| `unknown` | int | rules verdicted `UNKNOWN` or `UNKNOWN_NO_CONTRACT` |
+| `failing` | int | **the gate, not a verdict.** `= len(failed)` — how many rules count as failing under the current `--on-*` policy. It is a policy-driven aggregate that OVERLAPS every census field below except `proved`, so it must never be added to them |
+| `proved` | int | rules verdicted `PASS` |
+| `violations` | int | rules verdicted `VIOLATION` |
+| `possible` | int | rules verdicted `POSSIBLE` |
+| `unknown` | int | rules verdicted `UNKNOWN` **or** `UNKNOWN_NO_CONTRACT` — the union, kept with its original meaning because gates read it. It is `unknown_escaping + unknown_no_contract` |
+| `unknown_escaping` | int | rules verdicted `UNKNOWN`: the source cone reaches a ⊤ edge |
+| `unknown_no_contract` | int | rules verdicted `UNKNOWN_NO_CONTRACT`: the index was never ⊤-marked, so nothing could have been proved for *any* rule on it. A different cause with a different fix — hence a separate number |
 | `vacuous` | int | rules verdicted `NO_SOURCE` or `NO_TARGET` (a selector matched nothing) |
 | `not_computed` | int | rules verdicted `NOT_COMPUTED` (the index lacks the data the rule form needs) |
 | `results[].verdict` | string | the per-rule verdict, unchanged (`VIOLATION`/`POSSIBLE`/`UNKNOWN`/`UNKNOWN_NO_CONTRACT`/`PASS`/`NO_SOURCE`/`NO_TARGET`/`NOT_COMPUTED`) |
@@ -137,6 +178,10 @@ floats. Absence of data is stated, never implied.
 | `results[].detail_total` | int | the untruncated count `detail` was capped from — equal to `len(detail)` when nothing was cut, so a consumer never has to guess whether "20 shown" means "20 total" or "20 of 200" |
 | `results[].witness` | array of string | for a `reach` rule verdicted `VIOLATION`/`POSSIBLE`/`UNKNOWN`, the concrete call path (source-to-target order) that produced the verdict — `VIOLATION` walks the same MUST-only edges its own proof used, `POSSIBLE` the wider MUST ∪ MAY_ENUMERATED cone, `UNKNOWN` the path to the nearest ⊤-holding caller (the same function `detail`'s first entry names). `[]` on every other verdict and every non-`reach` rule form, since none of those carry a reachability claim a path could illustrate |
 | `failed` | array of string | rule names counted failing — `failing` is its length, kept as a separate int field so a gate does not need to count an array |
+
+`proved`, `violations`, `possible`, `unknown_escaping`, `unknown_no_contract`, `vacuous` and
+`not_computed` **partition** the rule set: every rule has exactly one verdict, so those seven sum
+to `len(results)`. `unknown` is the one redundant field, retained for compatibility.
 
 **`verdict` is only ever `"pass"` or `"fail"`, never `"refused"`.** Unlike `arch-impact`,
 `arch-rules` has no process-level sound-refusal path (no exit 3): an un-⊤-marked or data-less

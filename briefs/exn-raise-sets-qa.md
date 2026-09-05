@@ -16,7 +16,7 @@ Fresh cycle, round 1; `qa_no_go_round` 0/3 (causes: none). Gated with
 | Build | `dune build --root .` | ✅ PASS (exit 0) | 0s (cached) |
 | Tests | `dune test --root . --force` | ✅ 91 passed / 0 failed (exit 0) | 85s |
 | Format | not documented (no `.ocamlformat`, no fmt step in CI) | n/a | — |
-| Self-index + rules | `arch_callgraph_ocaml … lib/arch_index` + `arch-rules … --on-vacuous fail` | ✅ 4 rules, 0 failing | — |
+| Self-index + rules | `arch_callgraph_ocaml … lib/arch_index` + `arch-rules … --on-vacuous fail` | exit 0 — **1 proved / 0 violations / 3 UNKNOWN**. Recorded here as ✅ "4 rules, 0 failing", which was the tool's own summary collapsing a three-state verdict into one number; corrected in PR #70. Three of the four rules proved nothing, so this is not a green gate — it is an unchanged one. See specs/qualified-unit-resolution.md §10.5. | — |
 | Golden (CHECK-2) | `diff test/fixtures/self-index-stats.txt` | ✅ `modules: 20 / functions: 532 / calls: 3804` | — |
 | CHECK-4 | `git diff 69e5c3d --stat -- lib/arch_index/runner.ml` empty; schema diff additive only | ✅ | — |
 

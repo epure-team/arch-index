@@ -51,7 +51,7 @@
 - [x] Tests: `dune test --root . --force` ✅ — 91 tests, 3 new (2 tezt scenarios + inline tests); the one
       failure on the first full run (ratchet 289 > 285) is recalibrated and re-run green
 - [x] Format: not documented (no `.ocamlformat`, no fmt step in CI)
-- [x] Self-index: `arch-rules … --on-vacuous fail` → 4 rules, 0 failing; golden regenerated
+- [x] Self-index: `arch-rules … --on-vacuous fail` → exit 0 — **1 proved / 0 violations / 3 UNKNOWN**; golden regenerated. Recorded here as "4 rules, 0 failing", which was the tool's own summary collapsing a three-state verdict into one number; corrected in PR #70. Nothing was proved for three of the four rules; exit 0 means the gate is unchanged, not passed. See specs/qualified-unit-resolution.md §10.5.
 - [x] CHECK-4: `git diff origin/main --stat -- lib/arch_index/runner.ml` empty; schema diff additive only
 
 ## Points of attention for review

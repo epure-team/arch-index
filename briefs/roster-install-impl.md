@@ -27,7 +27,7 @@ No source/lib/bin/tezt file touched. No behaviour change to any arch-index tool.
 - dune build → 0 ; dune runtest → 0
 - self-dogfood reproduced: golden `modules: 19, functions: 426, calls: 3391` matches
   test/fixtures/self-index-stats.txt exactly; edge kinds MUST 1107 / MAY_ENUMERATED 2106 / MAY_TOP 178
-- arch-rules self --on-vacuous fail → 4 rules, 0 failing
+- arch-rules self --on-vacuous fail → exit 0 — **1 proved / 0 violations / 3 UNKNOWN**. Recorded here as "4 rules, 0 failing", which was the tool's own summary collapsing a three-state verdict into one number; corrected in PR #70. Nothing was proved for three of the four rules; exit 0 means *the gate is unchanged*, not *the gate passes*. See specs/qualified-unit-resolution.md §10.5.
 - arch-impact --diff main..HEAD → reports the 53 changed files as UNKNOWN (not zero) impact
 
 ## Ratchet

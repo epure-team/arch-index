@@ -28,7 +28,11 @@ Roadmap item 3.4 in its exception-**identity** form — a computed Java-`throws`
 ## Evidence (soundness gate)
 
 - `dune build --root .` ✅ · `dune test --root . --force` 91/91 ✅ (85 s) · `arch-rules … --on-vacuous
-  fail` 4/0 ✅ · golden `20 / 532 / 3804` ✅ · CHECK-4 (additive schema, `runner.ml` untouched) ✅.
+  fail` exit 0 — **1 proved / 0 violations / 3 UNKNOWN** (recorded here as `4/0` ✅; that was the
+  tool's own summary collapsing a three-state verdict into one number — corrected in PR #70. Three
+  of the four rules proved nothing, so the gate is unchanged, not passed; see
+  specs/qualified-unit-resolution.md §10.5) · golden `20 / 532 / 3804` ✅ · CHECK-4 (additive
+  schema, `runner.ml` untouched) ✅.
 - Review round 1: 20 findings, 3 HIGH + 5 correctness MEDIUM fixed in-round — including a real
   soundness hole the spec had not covered (a raise inside `lazy`/object/functor bodies under a
   `try` was stored as closed; fixed by clearing the scope stack around deferred walks, pinned as
