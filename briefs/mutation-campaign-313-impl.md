@@ -227,3 +227,25 @@ claimed time, and **the review is not stale by construction** — its findings d
 round 2 then fixed. The conclusion was right; the reasoning that first reached it was not, and the
 other reading (a review closing over an object that had not stopped changing) would have meant the
 round-2 gate closing on findings unattributable to the code that now exists.
+
+**Measured, so the class is settled: the hand-written stamps are NOT recoverable.** Deltas against
+each stamp's own commit **author** date: `+300, +27, +22, +3, 0, −36, −36, −45, −57` minutes.
+Median 0, no cluster at +2h — so not a timezone error, and not timezone-plus-drafting-lag either.
+The mechanism is plainer and less repairable: **every hand-written stamp is a round number**,
+seconds at `00` and minutes on a multiple of five. Nobody read a clock; a plausible time was typed.
+The only zero delta is the one generated above.
+
+**Consequence for `briefs/<task>-state.json`, stated here because the next reader will reach for
+those fields exactly when they need a timeline:** the ledger keeps its standing as an *ordered
+record* — the event order was never in doubt and the shas carry it — but it has **no standing as a
+chronology**. Its early `at` values are hand-written the same way. Sorting the events by time
+yields fiction; read the order, and take the "when" from the commit.
+
+**A first attempt at this measurement was wrong and is retracted.** It compared against `%cI` and
+returned nine identical values — `00:04:26` across nine briefs written over twelve hours. **A
+rebase rewrites every commit date to its own**, so the instrument was reporting the rebase rather
+than the work; `%aI` is the one that survives. The tell was the uniformity itself: nine
+independently written documents do not share a commit second. That is the third instrument in this
+task to return a plausible answer while measuring something adjacent to the question — after a
+registration count blind to suffixed forms, and a whole-file deletion check blind to deletions
+inside surviving files. **A value too uniform for its population is the signature.**
