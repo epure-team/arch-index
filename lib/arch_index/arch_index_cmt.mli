@@ -380,16 +380,36 @@ val build_local_fn_stamps :
     (specs/point-free-aliases.md). *)
 val build_local_alias_stamps : Typedtree.structure -> (string, string) Hashtbl.t
 
+(** [build_module_alias_stamps structure] maps each module-alias binder's
+    identity ([Ident.unique_name]) to the path of the module it aliases —
+    [module S = Saturation_repr] gives [S/1234 -> "…Saturation_repr"]. Nested
+    binders are included, unlike the [module_deps] rows, whose [prefix = ""]
+    gate is right for a FILE-level dependency and wrong for the question "what
+    does this identifier denote".
+
+    Keyed on the stamp and never on the alias name: a nested [module S =
+    Test_stub] beside a toplevel [module S = Saturation_repr] is two keys here
+    and would be one under a name, which is how a production call gets pointed
+    at a test stub. Stamps are unique WITHIN a compilation unit and not across
+    them, so this table must be built per [.cmt] and consumed inside that same
+    walk (specs/reexport-resolution.md D1-bis/D1-quater, FR-012). *)
+val build_module_alias_stamps : Typedtree.structure -> (string, string) Hashtbl.t
+
 (** [collect_calls_from_expr ~src_path ~caller_module ~caller_name
     ~local_fn_stamps expr] lowers [expr] onto per-node CFGs and returns the
     collected call edges plus the promoted lambda nodes. [local_fn_stamps] maps
     same-module top-level function-binder stamps ([Ident.unique_name]) to their
     syntactic arity. [local_alias_stamps] (default: empty — no alias-chain
-    closure) is {!build_local_alias_stamps}'s table for the same structure. *)
+    closure) is {!build_local_alias_stamps}'s table for the same structure.
+    [module_alias_stamps] (default: empty — every module-alias-rooted head stays
+    ⊤, i.e. today's behaviour) is {!build_module_alias_stamps}'s table for the
+    same structure; a head it resolves is emitted qualified and carries
+    [edge_form = "module_alias"], which the kind matrix demotes. *)
 val collect_calls_from_expr :
   ?canon_exn:(Path.t -> string) ->
   ?value_channels:Arch_errors_config.channel list ->
   ?local_alias_stamps:(string, string) Hashtbl.t ->
+  ?module_alias_stamps:(string, string) Hashtbl.t ->
   src_path:string ->
   caller_module:string ->
   caller_name:string ->

@@ -1389,7 +1389,16 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
              candidate set is right, the certainty is not", which is exactly
              this case — so it is a third demotion REASON, not a fourth kind. *)
           let demoted =
-            call.cond || call.partial || call.edge_form = Some "value_alias"
+            call.cond || call.partial
+            || call.edge_form = Some "value_alias"
+            (* A head rewritten through a module alias
+               (specs/reexport-resolution.md D2-bis/FR-011): the rewrite
+               discharges the NAMING conjunct of MUST and leaves
+               uniqueness and saturation standing, so the edge is
+               MAY_ENUMERATED however its head classifies.  A second
+               member of an existing demotion reason, NOT a new [kind] —
+               the kind vocabulary is asserted closed by a test. *)
+            || call.edge_form = Some "module_alias"
           in
           (* Roadmap 1.4 (⊤-anchor taxonomy): [top_reason] is [None] whenever
              [kind] is not "MAY_TOP" (the column is meaningless for a
