@@ -211,10 +211,29 @@ SARIF emission.
 - **One `result` per rule verdict that is not `PASS`.** A `PASS` is a proof, not a finding, and
   putting proofs in the same list as violations is what CodeQL-style tools do that this project's
   design explicitly rejects.
-- `ruleId` is the `arch-rules` rule name. `level`: `VIOLATION` → `error`, `POSSIBLE` → `warning`,
+- `ruleId` is the `arch-rules` rule name — TODAY this doubles as its human title, because the
+  `.rules` DSL has no stable-id syntax of its own; renaming a rule's prose therefore closes its
+  GitHub alerts and opens new ones (see `lib/arch_tools/arch_sarif.ml`'s doc comment on
+  `rule_id`). `level`: `VIOLATION` → `error`, `POSSIBLE` → `warning`,
   every other verdict (`UNKNOWN`, `UNKNOWN_NO_CONTRACT`, `NOT_COMPUTED`, `NO_SOURCE`, `NO_TARGET`)
   → `note` — none of these is a proof of anything, but FR-024's "never silence" discipline applies
   to a single rule's own verdict too, not just to a whole language's coverage.
+- Every result carries `properties.verdict` (the exact verdict string, e.g.
+  `"UNKNOWN_NO_CONTRACT"` — `level` alone collapses five distinct "nothing proved" verdicts onto
+  `note`) and `properties.detail_total` — the untruncated count `results[].locations` (see below)
+  was capped from, the same `detail_total` fitness function as `--format json`'s (row above),
+  reintroduced here so a SARIF consumer never has to guess whether 20 locations means 20 total or
+  20 of 200.
+- `results[].locations` carries the offending call paths/functions as SARIF
+  `logicalLocations`/`physicalLocation` entries — but ONLY for `reach` and `exported` rules, whose
+  `detail` rows are real display labels (`name` or `name  (file)`, from `Arch_graph.label`). A
+  `dep` or `effect` rule's `detail` rows are free-form prose ("A --kind--> B  (line N)", "name
+  KIND VALUE") — not locations — so `locations` is `[]` for those two rule forms; the same
+  evidence is still readable in `message.text`, which always includes it. Absolute paths are
+  emitted with no `uriBaseId`, so GitHub resolves them relative to the repository root rather than
+  to a declared base — correct only when the index's own paths already are repo-relative (true of
+  every producer in this repo today); a future producer that indexes with absolute filesystem
+  paths would need a `uriBaseId` added here.
 - An `UNKNOWN` result carries `properties.soundness = "unknown_top"` and, when known,
   `properties.top_reason` — the ⊤-anchor taxonomy values (see `results[].top_reasons` above) for
   the edge the cone actually hit.
@@ -223,6 +242,8 @@ SARIF emission.
 - `driver.name`/`driver.version` come from this index's own provenance
   (`producer_runs` on the main schema, `comment_db_meta` on the flat one — see `docs/schema.md`'s
   Provenance section), falling back to `"arch-index"` on a pre-1.2 index that recorded neither.
+  `driver.rules` lists every distinct `ruleId` seen, `{id}` only — no `name`/`shortDescription`,
+  so a consumer like GitHub shows the bare id rather than a richer catalogue entry.
 - **The ⊤ frontier is a count, in `run.properties.top_frontier` — never a member of `results`.**
   A real corpus's ⊤ frontier is orders of magnitude past GitHub's 25 000-result cap (Octez alone
   carries 286k+ such edges); putting it in `results` would either get silently truncated or make
@@ -232,9 +253,12 @@ SARIF emission.
   category in one upload as of July 2025, so a caller emitting several analyses from one producer
   (2.2's `arch-report`, which calls the same `Arch_sarif` writer once per analysis) must give each
   a distinct category, or a second upload overwrites the first rather than merging with it.
+- `run.properties.contract_ok`/`computed`/`proved` mirror `--format json`'s own top-level fields
+  of the same name (see the table above) — without these, an all-`PASS` run and a run that
+  evaluated nothing both produce a document with an empty `results` and no way to tell them apart.
 - The `analysis_coverage` matrix (roadmap 1.3), when present, becomes `run.properties.coverage`;
   a `status = "not_analysed"` row becomes a `toolExecutionNotifications` entry on the run, never
-  an absent section (spec FR-024).
+  an absent section (spec FR-024). Its `descriptor.id` is `"not_analysed/<analysis>"`.
 - A finding whose `soundness_class` is `"heuristic"` (roadmap 2.3, not yet wired into
   `arch-rules` itself — every finding this tool emits today is derived from this repo's own
   sound-or-⊤-marked index) carries that verbatim in `properties.soundness_class`, so a consumer

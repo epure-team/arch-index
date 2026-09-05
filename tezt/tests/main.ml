@@ -49,6 +49,7 @@ let () =
   Rules.register_verdicts () ;
   Rules.register_selectors () ;
   Rules.register_exit_policy () ;
+  Rules.register_format_typo_refused () ;
   Rules.register_malformed_rules () ;
   Rules.register_no_contract () ;
   Rules.register_not_computed () ;

@@ -12,7 +12,7 @@ One row per indexed function or value.
 |---|---|---|
 | `id` | INTEGER | Primary key |
 | `module_id` | INTEGER | FK → `modules` |
-| `name` | TEXT | Qualified name (e.g. `Arch_index_db.exec_exn`) |
+| `name` | TEXT | Qualified name (e.g. `Arch_index_db.exec_exn`). **Avoid the exact two-space-then-open-paren sequence (`"  ("`) inside a name.** `Arch_graph.label` joins a name and its file as `"name  (file)"`, and `--format sarif` (`lib/arch_tools/arch_sarif.ml`'s `split_label`) parses that exact separator back apart to build a SARIF location; a name that legitimately contains `"  ("` (unusual, but not forbidden by this schema) is indistinguishable from the separator and gets mis-split into a bogus name/file pair. Documented here because a producer choosing a naming scheme is the one place that can avoid it — `split_label`'s own doc comment records the same caveat from the reading side. |
 | `signature` | TEXT | Type signature (nullable) |
 | `line_start`, `line_end` | INTEGER | Source location |
 | `exposed` | BOOLEAN | Appears in `.mli` (public API) |
