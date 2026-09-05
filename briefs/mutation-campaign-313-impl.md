@@ -2,12 +2,19 @@
 
 **Date:** 2026-09-05T16:40:00+02:00
 **Mode:** full (critical route)
-**Status:** PARTIAL — slice 1's code is complete and verified, but the slice's stated **exit
-criterion**, a measured campaign over `~/dev/miaou`, was not run. It needs a real engine, and
-installing one needs a dedicated opam switch that only Mathias can authorise. The driver has been
-exercised against stub engines and one faithful stand-in, never against a real mutaml.
+**Status:** COMPLETED **for a re-scoped deliverable.** Mathias re-sequenced the work on
+2026-09-05: ship slices 1 to 3 plus FR-034 first, then run the miaou pilot and build slices 4 and
+5 on top of the merged base. This brief therefore covers slices 1, 2 and 3 plus the FR-034
+refusal, and both the pilot and slices 4–5 are **out of this deliverable's scope by instruction**,
+not left undone.
 
-Slices 2 to 5 are untouched, as scoped.
+**What that means for the reader, stated because it is easy to lose:** the campaign mechanism is
+established by reading the engine's source and has **never been observed running**.
+`scripts/check-mutaml-integration.sh` returns 3 — unverified — and that must not be read as
+covered. The pilot measurement that would change this comes after merge.
+
+The earlier `implement/PARTIAL` event stays in the ledger. It was correct when written, and the
+append-only history is the record of the re-scoping rather than a contradiction of it.
 
 ## Modified files
 

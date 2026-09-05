@@ -39,6 +39,12 @@
       "reason": "slice 1 code complete and verified (193/193, guards green), but the slice's exit criterion — a measured campaign on ~/dev/miaou — needs a real engine, which needs a dedicated opam switch only Mathias can authorise",
       "at": "2026-09-05T16:45:00+02:00",
       "by": "roster-implement"
+    },
+    {
+      "phase": "implement",
+      "outcome": "COMPLETED",
+      "at": "2026-09-05T22:00:00+02:00",
+      "by": "roster-implement"
     }
   ]
 }
