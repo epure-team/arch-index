@@ -535,52 +535,63 @@ value by hand **before** running. The golden is checked only by CI, never by `ru
 Golden and `clean_measured` re-measured per slice with a 2×2 attribution, written only
 when A=B and C=D.
 
-## Measured result (2026-09-05, both corpora, baseline = origin/main 0982a42)
+## Measured result — CORRECTED 2026-09-05 after an independent re-review
 
-Distinct binaries confirmed by md5. Neither corpus changed its total call count,
-so no edge was created or destroyed — every number below is a reclassification.
+**A claim in the first version of this section was refuted, and the correction
+strengthens the feature rather than weakening it.** I wrote that the
+persistent-root guard "removed only rewrites that resolved to nothing — 2 839
+resolved on both sides". That reproduces **exactly** on proto_alpha, and it is
+false as a statement about the guard: it is a statement about *that corpus*.
 
-| | proto_alpha base → after | octez-manager base → after |
+| corpus | rewrites, unguarded → guarded | resolved, unguarded → guarded |
 |---|---|---|
-| total calls | 73 939 → 73 939 | 59 101 → 59 101 |
-| **MUST** | 22 416 → **22 416** | 22 476 → **22 476** |
-| MAY_TOP `callback_param` | 5 739 → 5 739 | 5 187 → 5 187 |
-| MAY_TOP `module_param` | 5 464 → **2 195** | 5 334 → **213** |
-| MAY_ENUMERATED | 40 319 → 43 588 | 26 104 → 31 225 |
-| `edge_form='module_alias'` | **3 247** (2 839 resolved, **0 MUST**) | **5 115** (3 009 resolved, **0 MUST**) |
+| proto_alpha (468 modules) | 3 247 → 3 203 | 2 839 → **2 839** |
+| whole `src` (8 615 modules) | 43 401 → 41 622 | 32 737 → **32 664** |
 
-The accounting closes exactly on proto_alpha: 3 247 rewritten heads + 22 edges
-that were already `value_alias` and kept that (narrower) form = 3 269, which is
-the `module_param` drop to the row. FR-011 holds as a measurement, not only as a
-matrix argument: **zero** rewritten edges are MUST on either corpus.
+On the whole tree the guard removes **73 resolved edges**, and they are precisely
+the forged shape: `List.map` ×18, `Context.Tree.to_value` ×13,
+`Context.Tree.empty` ×9, `E.Tree.find`, `P.Tree.*` — functor parameters resolved
+to unrelated modules that happen to share their name. A parameter named `List`
+resolving to the stdlib's `List.map` is the defect in one line.
 
-### What it is worth in BOUNDED NODES, which is the only figure that decides anything
+So the CRITICAL was **live at scale**, not a fixture curiosity. My single-corpus
+claim accidentally told the weaker and wrong story — that the guard changed
+nothing. Same trap this repository already has a note for: *two corpora agreeing
+proves nothing if both lack the dominant shape*, here committed with **one**.
 
-| | externals open | externals assumed pure |
+**Kind and ⊤ figures (proto_alpha, baseline origin/main), unaffected by the
+correction:** `module_param` ⊤ 5 464 → 2 240; MUST 22 416 → 22 416; zero
+rewritten edges are MUST; no edge created or destroyed.
+
+### Bounded nodes — still the only figure that decides anything
+
+| | externals open | externals pure |
 |---|---|---|
-| proto_alpha base | 3 084 (21.3 %) | 6 439 (44.6 %) |
-| proto_alpha after | 3 085 (21.3 %) — **+1 node** | 6 576 (**45.5 %**) — **+0.9 pt** |
-| octez-manager base | 2 587 (21.0 %) | 5 544 (45.0 %) |
-| octez-manager after | 2 596 (21.1 %) — **+9 nodes** | 6 536 (**53.1 %**) — **+8.1 pt** |
+| proto_alpha | 3 084 → 3 085 (**+1 node**) | 44.6 % → **45.5 %** |
+| octez-manager | 2 587 → 2 596 (**+9 nodes**) | 45.0 % → **53.1 %** |
 
-**With externals open this feature bounds one node on one corpus and nine on the
-other, having deleted 3 269 and 5 121 ⊤ edges.** That is not a disappointment to
-explain away; it is ⊤'s absorption restated, and it is the finding this spec's
-US-4 was written to force into the open rather than let a ⊤-rate headline hide.
+Deleting thousands of ⊤ edges bounds one node and nine. That is ⊤'s absorption
+restated. What moves is *why* the rest are unbounded: `may_top_edge` falls while
+`external` rises — an unknowable cause traded for a fixable one.
 
-What actually moved is *why* the remaining nodes are unbounded:
-`unbounded.may_top_edge` falls (8 009 → 7 872, 6 773 → 5 781) while
-`unbounded.external` rises (3 359 → 3 495, 2 957 → 3 940). The nodes did not
-become provable — they stopped being blocked by "I cannot tell what this module
-is" and started being blocked by "that module is outside the index". That is a
-reclassification from an unknowable to a *fixable* cause, and it is why the
-externals-pure column is the honest measure of this slice: **+0.9 pt and
-+8.1 pt**, a ninefold spread between two corpora, reported per corpus because an
-average of two inverted numbers describes neither.
+### A rewritten edge is not guaranteed to resolve
 
-This reproduces, on a third class, the correction already recorded against the
-ceiling table: **a class measured while another dominates measures the other
-class.**
+| corpus | rewrites | acquire a `callee_id` |
+|---|---|---|
+| whole `src` | 41 622 | 32 664 (**78.5 %**) |
+| dune-wrapped corpus (reviewer's) | 27 479 | 1 823 (**6.7 %**) |
+
+The ratio inverts with wrapping, because `module S = Saturation_repr` inside a
+wrapped library renders a name the resolver cannot bind. **An unresolved rewrite
+is nonetheless not less honest than the ⊤ it replaces**: the guard guarantees the
+new head is rooted at a real compilation unit, so the edge is bounded by a *named*
+target that sits outside the index — the same standing as any external leaf, and
+255 540 `MAY_ENUMERATED` rows already carry no `callee_id` before this feature
+runs. What would be dishonest is a rewrite to a name that is not a unit, which is
+exactly what the guard forbids.
+
+The tezt assertion on this is scoped to its fixture and says so, rather than
+stating a corpus property it cannot see.
 
 ## Residuals
 

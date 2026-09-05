@@ -99,6 +99,18 @@ let deep_call a b = D.Syntax.plus a b
    [edge_form='module_alias'] assertion below would pass just as well if the
    producer marked every qualified edge. *)
 let direct n = Ma_real.g n
+
+(* A POINT-FREE binding whose right-hand side is qualified THROUGH a module
+   alias. Both facts are true of this site at once, and they demote for opposite
+   reasons: [value_alias] says NO CALL HAPPENS HERE, [module_alias] says a real
+   call whose head was spelled through a hub. The site fact wins, and it must,
+   because the three caller-count consumers exclude only [value_alias] — mark
+   this [module_alias] and a binding that applies nothing is counted as a
+   caller, which is the exact inflation the column was added to prevent.
+
+   No fixture contained this shape, so the precedence rule in [add_path_call]
+   had no coverage at all. *)
+let point_free_via_alias = S.f
 |} );
     ( "ma_b.ml",
       {|module S = Ma_other
@@ -272,11 +284,25 @@ let register_rewrite () =
                "SELECT count(*) FROM calls WHERE edge_form='module_alias' \
                 AND callee_name LIKE 'Deep.%'"))
         0 ;
-      (* Every rewritten edge must RESOLVE. Not a nicety: an unresolvable
-         rewrite is a head we changed without being able to say to what, which
-         is strictly less honest than the ⊤ it replaced. *)
+      (* Every rewritten edge in THIS FIXTURE resolves — and the scope is the
+         point, because an earlier revision stated it as a property of the
+         FEATURE. It is not. Measured on the whole Tezos `src` tree: 41 622
+         rewritten edges, 8 958 of them (21.5 %) with no callee_id; on a
+         dune-WRAPPED corpus the reviewer measured the inverse, only 6.7 %
+         acquiring one, because `module S = Saturation_repr` inside a wrapped
+         library renders a name the resolver cannot bind. A three-module
+         unwrapped fixture cannot produce that shape.
+
+         The doctrine survives the correction but had to be restated. An
+         unresolved rewrite is NOT less honest than the ⊤ it replaced: the guard
+         guarantees the new head is rooted at a real compilation unit, so the
+         edge is bounded by a NAMED target that happens to sit outside the
+         index — the same standing as any external leaf, and 255 540
+         MAY_ENUMERATED rows already have no callee_id before this feature runs.
+         What would be dishonest is a rewrite to a name that is not a unit, and
+         that is exactly what the persistent-root guard forbids. *)
       Batch.eq_int b
-        ~msg:"no rewritten edge is left unresolvable"
+        ~msg:"no rewritten edge is left unresolvable IN THIS FIXTURE (not a claim about corpora)"
         (Db.with_db db (fun c ->
              Db.int c
                "SELECT count(*) FROM calls WHERE edge_form='module_alias' AND callee_id IS NULL"))
@@ -295,6 +321,33 @@ let register_rewrite () =
              Db.int c
                "SELECT count(*) FROM calls WHERE edge_form='module_alias' AND kind \
                 <> 'MAY_ENUMERATED'"))
+        0 ;
+      (* N6. A point-free binding through a module alias keeps the NARROWER
+         site fact. Under the mutant that forces [module_alias] here, the suite
+         stayed 168/0 — nothing observed the precedence. *)
+      Batch.eq_string b
+        ~msg:"a point-free binding through a module alias stays value_alias, not module_alias"
+        (String.concat ","
+           (Db.with_db db (fun c ->
+                Db.rows c
+                  "SELECT COALESCE(c.edge_form,'unmarked') FROM calls c \
+                   JOIN functions cf ON c.caller_id=cf.id \
+                   WHERE cf.name='point_free_via_alias'")
+            |> List.map (function
+                 | [x] -> Db.to_string ~sql:"pf" x
+                 | _ -> Test.fail "pf: unexpected row shape")))
+        "value_alias" ;
+      (* And the consequence, which is why the precedence matters at all: the
+         three caller-count consumers exclude value_alias, so this binding must
+         NOT appear as a caller of Ma_real.f. Asserting only the marker would
+         pass on a consumer that ignored it. *)
+      Batch.eq_int b
+        ~msg:"and it is therefore NOT counted as a caller (the inflation the column prevents)"
+        (Db.with_db db (fun c ->
+             Db.int c
+               "SELECT count(*) FROM calls c JOIN functions cf ON c.caller_id=cf.id \
+                WHERE cf.name='point_free_via_alias' \
+                AND COALESCE(c.edge_form,'') <> 'value_alias'"))
         0 ;
       (* The ordinary qualified call must NOT be marked. *)
       Batch.eq_int b ~msg:"a qualified call with no alias in its head is not marked"
