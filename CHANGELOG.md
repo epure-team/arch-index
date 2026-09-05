@@ -60,9 +60,23 @@ disagreement — which is why a number here names its build state and not just i
   ATTRIBUTES the movement across a 2x2 (base vs new binary, base vs new corpus) and writes only
   the part it can prove is source-only, never a ratchet loosening.
 
-  `--self-test` runs in the Tezt suite (`tezt/tests/recalibrate_self_test.ml`) and `--check` runs
-  in CI. Before this it was invoked by nothing at all: no CI step, no dune rule, no Makefile
-  target.
+- **A head spelled through a module alias is resolved instead of going to ⊤.** `S.safe_int`, where
+  the file declares `module S = Saturation_repr`, had a path rooted at a local binder;
+  `qualified_is_dynamic` judged it dynamic and the edge became `MAY_TOP` with
+  `top_reason='module_param'` — *I cannot tell what this module is*. The producer now rewrites such
+  a head to the qualified name it denotes, at the site where the binder's `Ident` is in hand, and
+  the edge flows through ordinary qualified resolution. Rows carry `edge_form='module_alias'`
+  (schema `1.10` → **`1.11`**, flat `1.2` → **`1.3`**) and are demoted to `MAY_ENUMERATED`: the
+  rewrite discharges only the *naming* conjunct of MUST. Measured: `module_param` ⊤ falls
+  5 464 → 2 240 on proto_alpha and 5 334 → 213 on octez-manager, with **zero** change to the MUST
+  count and no edge created or destroyed on either corpus.
+
+  **This does not bound more nodes, and the release note says so rather than quoting the ⊤ drop.**
+  With externals open it bounds one extra node on proto_alpha and nine on octez-manager — ⊤ is
+  absorbing. What changes is *why* the rest are unbounded: `may_top_edge` falls while `external`
+  rises, trading an unknowable cause for a fixable one. With externals assumed pure the slice is
+  worth **+0.9 pt** and **+8.1 pt** respectively — reported per corpus, because an average of two
+  numbers that differ ninefold describes neither.
 
   The CI step separates the two non-zero exits. A **refusal** (exit 2 — a degraded cell, a corpus
   below the adequacy floor, a component collapsed below half its pin, an unreadable or
@@ -100,70 +114,18 @@ disagreement — which is why a number here names its build state and not just i
   `file:`/`fn:` on a `dep` operand now fails fast at parse time instead of silently passing.
   `docs/fitness-functions.md` documents the restriction and why.
 
+  An alias whose target is **not a real compilation unit** — a functor parameter (`module M = X`
+  inside `module Make (X : S)`) or a unit-local module — is deliberately **not** rewritten: its ⊤
+  was honest, and rewriting it would point a resolved edge at whatever unit happened to share the
+  parameter's name.
+
 ### Fixed
-- **`arch-rules` reports the verdict and the gate as two different numbers, and `--on-vacuous`
-  now covers every rule form.** The summary line collapsed a seven-state verdict into
-  `N rule(s), M failing`, which reads as a pass for a run that proved almost nothing: on this
-  repo's own four-rule file, `4 rules, 0 failing` was really *1 proved / 0 violations /
-  3 UNKNOWN*. It is now two lines — a census that partitions the rules (every state printed even
-  at zero) and a separate `gate:` line carrying `failing` plus the policy flag values actually in
-  force, since `failing` overlaps six of the seven census counts and must never be added to them.
-  `--format json` gains `possible`, `unknown_escaping`, `unknown_no_contract` and
-  `not_computed`; every pre-existing field is unchanged.
-
-  **Observable gate change for consumers.** `forbid dep`, `forbid exported` and `forbid effect`
-  previously had no vacuity check at all — only `forbid reach` did — so they emitted `PASS` for a
-  rule whose selector had stopped matching, and `--on-vacuous fail` (the default) covered one
-  rule form in four. They now emit `NO_SOURCE` over the population each actually quantifies over.
-  For `reach`-only rule sets, including this repository's own `arch-rules.txt`, nothing moves and
-  the exit code is identical. A rule set containing `dep` / `exported` / `effect` rules can now go
-  from exit 0 to exit 1 — for instance a single `forbid exported` rule against an index whose
-  producer does not record export status. That is the fix working, not a regression: the old
-  exit 0 was a rule that could not fail. `--on-vacuous warn` restores the previous behaviour while
-  the selector or the producer is corrected. `forbid dep` deliberately gains no target-side check
-  — a `dep` target ranges over modules *already depended on*, so "nothing matches `Web.**`" is the
-  preventive rule succeeding, and calling it vacuous would fail the build precisely when the
-  codebase is clean.
-
-- **The recalibration gate would write a degenerate measurement over a pinned constant.** A query
-  that succeeds but matches nothing returns `0`, not an error: sqlite3 writes nothing to stderr,
-  `0` passes an is-it-an-integer check, and `A=B=C=D=0` is the cleanest possible "attributable to
-  source change only". Simulating a column rename in the ceiling predicate made
-  `--write --only ceiling` report `TIGHTENED clean_measured 347 -> 0 (installed file re-read and
-  confirmed)` and exit 0; the same hole left the golden — the *change detector* — reading
-  `modules: 0 / functions: 0 / calls: 0`, "verified byte-identical", exit 0.
-
-  Two adequacy floors now stand between a measurement and a write, and every cell of the 2x2 is
-  gated, not just the one that gets written. A *relative* floor refuses any component that has
-  collapsed below half the pinned value; an *absolute* floor requires each cell's database to
-  hold at least `min_total_calls` rows in `calls` — read out of `must_null_ceiling.ml` rather
-  than copied, so the two cannot drift apart. `--check` now exits 2 on these inputs.
-
-  This is also a correction to the "a ratchet may always be TIGHTENED automatically" axiom the
-  script was built on. That axiom is about DIRECTION and says nothing about MAGNITUDE, but every
-  way a measurement can silently break moves the number DOWN — into the direction it calls
-  always-safe. A tighten is safe for the invariant and destructive for the constant:
-  `clean_measured = 0` cannot fail CI, and it can never catch anything again either.
-- **An unanchored read of `let headroom` truncated a legal OCaml literal.** `let headroom = 1_000`
-  means 1000 and was read as **1**, with no refusal and no diagnostic, because the pattern ended
-  in `.*` and the result was passed through a plain integer check. Measured: with the pin at 400
-  and `headroom = 1_000`, `--write --only ceiling` rewrote 400 -> 340 and reported success, when
-  340 is inside the real band and nothing should have been written. Read-only, the same misread
-  reported a healthy tree as `STALE`, exit 1. Every read of a pinned integer now goes through one
-  anchored reader, which also refuses a constant that is defined twice rather than silently
-  taking the first with `head -1`.
-- `is_int` accepted values `$(( ))` cannot evaluate. `08` passed, then made the band comparison
-  abort with "value too great for base" — so no arm of the `if/elif/else` ran, the currency
-  verdict silently kept its previous value, and a bash error went to stderr. The self-test had
-  pinned the wrong half of this by asserting `00` as a pass.
-- The refusal message for an unreadable pinned CONSTANT blamed sqlite3 and told the reader to
-  "check the column names against the current schema", when no query is involved. Cell failures
-  and pin failures now print separate diagnostics; the pin one names the file, the anchored
-  regex, and the candidate lines.
-- Each metric's four cell databases now get per-metric paths. They were four fixed names reused
-  across metrics, so correctness depended on an unstated (and untested) assumption that the
-  producer truncates rather than appends.
-
+- **`fan-in`, `god-modules` and `callers-of` excluded a real call site.** They tested
+  `edge_form IS NULL`, i.e. every non-NULL value rather than the one value that is not a call site.
+  That was correct only while `'value_alias'` was the vocabulary's sole member. The predicate is now
+  `COALESCE(edge_form,'') <> 'value_alias'`; without the fix these commands would have silently
+  dropped 3 247 genuine edges on proto_alpha. `docs/edge-kind-contract.md` stated the wrong
+  predicate and is corrected with it.
 - **A completion marker can no longer outlive its evidence.** `comment_db_meta`'s
   `error_contract` / `exn_contract` / `callgraph_contract` keys claim that an analysis RAN; they
   are now cleared twice — once before the schema is demolished, once after it is rebuilt — so a

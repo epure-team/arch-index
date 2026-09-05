@@ -725,6 +725,23 @@ let rec module_path_of_expr (me : Typedtree.module_expr) =
   | Tmod_constraint (inner, _, _, _) -> module_path_of_expr inner
   | _ -> None
 
+(** As {!module_path_of_expr}, but keeps the [Path.t] instead of rendering it.
+
+    The rendered name cannot answer the one question a rewrite must ask — {i does
+    this name denote a real compilation unit?} — because [Path.name] prints a
+    functor parameter and a library module identically. See
+    {!build_module_alias_stamps}. *)
+let rec module_target_path (me : Typedtree.module_expr) =
+  match me.mod_desc with
+  | Tmod_ident (path, _longident) -> Some path
+  | Tmod_constraint (inner, _, _, _) -> module_target_path inner
+  | _ -> None
+
+(** The [Ident] a module path is rooted at, or [None] for a functor application. *)
+let rec module_path_root = function
+  | Path.Pident id -> Some id
+  | Path.Pdot (p, _) | Path.Papply (p, _) | Path.Pextra_ty (p, _) -> module_path_root p
+
 (** Format a Path.t to a module-qualified name. *)
 let path_to_module_name path =
   match path with
@@ -1053,13 +1070,44 @@ let build_module_alias_stamps (structure : Typedtree.structure) =
   iter_structure_items structure ~f:(fun ~prefix:_ (it : Typedtree.structure_item) ->
       match it.str_desc with
       | Tstr_module {mb_id = Some id; mb_expr; _} -> (
-          match module_path_of_expr mb_expr with
-          | Some target -> Hashtbl.replace module_alias_stamps (Ident.unique_name id) target
-          | None ->
-              (* A functor application, a literal structure, an unpack: these
-                 do not NAME a module defined elsewhere, so there is nothing to
-                 rewrite a head to.  The ⊤ stands, which is the honest answer —
-                 not a miss to be recovered later. *)
+          match module_target_path mb_expr with
+          | Some target
+            when match module_path_root target with
+                 | Some r -> Ident.persistent r
+                 | None -> false ->
+              Hashtbl.replace module_alias_stamps (Ident.unique_name id) (Path.name target)
+          | Some _ | None ->
+              (* Nothing is recorded, so the ⊤ stands — the honest answer, not a
+                 miss to be recovered later. Three shapes land here:
+
+                 - a functor application, a literal structure, an unpack: these
+                   do not NAME a module defined elsewhere at all;
+                 - {b an alias bound to a FUNCTOR PARAMETER}, which is the one
+                   that makes this guard load-bearing rather than tidy. Inside
+                   [module Make (X : S)], the binding [module M = X] is a
+                   perfectly ordinary [Tstr_module]/[Tmod_ident] — [X] is an
+                   [Ident] like any other, and [Path.name] renders it "X"
+                   exactly as it would render a library module. Recording it
+                   rewrites [M.f] to [X.f], a module that does not exist; and if
+                   any compilation unit in the corpus happens to be called [X],
+                   the edge RESOLVES to it. An honest ⊤ becomes a proof-carrying
+                   pointer at an unrelated function that merely shares the
+                   parameter's name. Measured on a four-line fixture:
+                   [M.f → NULL/MAY_TOP] became [X.f → callee_id=2/MAY_ENUMERATED].
+                   This is the ADR 003 / SA-1 defect reached by a different road,
+                   and the [ma_param.ml] fixture could not see it because it
+                   exercises a parameter used DIRECTLY — no [module M = X], hence
+                   an empty table, hence a decline that proves nothing;
+                 - an alias to a UNIT-LOCAL module ([module D = Deep]). Its root
+                   is a local [Ident] too, and it never resolved anyway — the
+                   rewritten [Deep.Syntax.plus] carries no unit. Declining it is
+                   strictly better than emitting an unresolvable rewrite.
+
+                 [Ident.persistent] is exactly the right test because it is the
+                 same one [qualified_is_dynamic] uses to decide the ⊤ in the
+                 first place: a persistent root IS a real compilation unit. The
+                 rewrite may therefore only ever move a head from one persistent
+                 spelling to another. *)
               ())
       | _ -> ()) ;
   module_alias_stamps

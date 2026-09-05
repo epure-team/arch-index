@@ -652,13 +652,18 @@ let register_flat_schema_marks_aliases () =
            "SELECT count(*) FROM calls WHERE caller_name='caller' AND callee_name='raiser' \
             AND edge_form IS NULL")
         1 ;
-      (* CHECK-2 on this schema as well: the vocabulary is one member wide here
-         too, and a second value would mean the two producers disagree about
-         what the column means. *)
+      (* CHECK-2 on this schema as well. The vocabulary is TWO members wide as of
+         flat schema 1.3, and this assertion said "one" until then — the
+         main-schema twin was widened for 'module_alias' and this one was
+         forgotten, which left the flat producer's new capability with no
+         coverage AND this line latently red on any fixture declaring a module
+         alias. The flat schema carries no CHECK constraint, so nothing but this
+         assertion polices its vocabulary at all. *)
       Batch.eq_int b
         ~msg:"CHECK-2 (flat): no flat row carries an out-of-vocabulary edge_form"
         (count
-           "SELECT count(*) FROM calls WHERE edge_form IS NOT NULL AND edge_form <> 'value_alias'")
+           "SELECT count(*) FROM calls WHERE edge_form IS NOT NULL \
+            AND edge_form NOT IN ('value_alias', 'module_alias')")
         0) ;
   Lwt.return_unit
 

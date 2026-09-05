@@ -113,6 +113,24 @@ end
 module Make (S : HAS_F) = struct
   let through_param n = S.f n
 end
+
+(* THE CRITICAL CASE, and the one the first version of this fixture could not
+   see. Above, [S] is a functor parameter used DIRECTLY: no [module _ = S]
+   exists, so the alias table is empty and the decline proves nothing — it
+   measures the ABSENCE of a binding, not the correctness of one.
+
+   Here the parameter is ALIASED. [module M = Ma_other] inside [Aliased] is an
+   ordinary Tstr_module/Tmod_ident, and so is [module M = P]: [P] is an [Ident]
+   like any other and [Path.name] renders it "P" exactly as it would render a
+   library module. Recording it rewrites [M.f] to [P.f] — and had any unit in
+   this fixture been called [P], the edge would have RESOLVED to it, turning an
+   honest ⊤ into a proof-carrying pointer at an unrelated function that merely
+   shares the parameter's name. *)
+module Aliased (P : HAS_F) = struct
+  module M = P
+
+  let through_alias n = M.f n
+end
 |} );
   ]
 
@@ -159,24 +177,33 @@ let register_rewrite () =
       Batch.eq_string b
         ~msg:"the rewritten head set is exactly the alias-rooted calls, each to its own target"
         (String.concat ", " (List.map (fun (a, c, _, _) -> a ^ "->" ^ c) rows))
-        "Internal_for_tests.nested_stub->Ma_stub.f, deep_call->Deep.Syntax.plus, \
-         via_alias->Ma_other.f, via_alias->Ma_real.f" ;
-      (* A LIMITATION, pinned here rather than left to be discovered. The
-         rewrite is only as good as [Path.name] of the alias TARGET, and
-         [module D = Deep] names a module local to this unit, so the rewritten
-         head is the unqualified [Deep.Syntax.plus] and qualified resolution
-         does not find it. The edge is honest — MAY_ENUMERATED with no
-         [callee_id], a bounded candidate we cannot point at a row — and it is
-         strictly better than the ⊤ it replaces, but it is NOT the resolution
-         the flagship cross-unit case gets. Asserted so that making it resolve
-         later is a visible change and not a silent one. *)
+        "Internal_for_tests.nested_stub->Ma_stub.f, via_alias->Ma_other.f, \
+         via_alias->Ma_real.f" ;
+      (* An alias to a UNIT-LOCAL module ([module D = Deep]) is DECLINED, and
+         the ⊤ stands. An earlier revision rewrote it and shipped the result as
+         a "declared limitation" — an edge that rewrote but could not resolve,
+         because [Path.name] of a unit-local target carries no unit.
+
+         The persistent-root guard that closes the functor-parameter CRITICAL
+         subsumes it: a unit-local module's root is a local [Ident] too. So the
+         limitation is not worked around, it is gone, and the rewrite may only
+         ever move a head from one persistent spelling to another. *)
       Batch.eq_int b
-        ~msg:"an alias to a UNIT-LOCAL module rewrites but does not resolve (declared limitation)"
+        ~msg:"an alias to a UNIT-LOCAL module is declined, not rewritten into something unresolvable"
         (Db.with_db db (fun c ->
              Db.int c
                "SELECT count(*) FROM calls WHERE edge_form='module_alias' \
-                AND callee_name='Deep.Syntax.plus' AND callee_id IS NULL"))
-        1 ;
+                AND callee_name LIKE 'Deep.%'"))
+        0 ;
+      (* Every rewritten edge must RESOLVE. Not a nicety: an unresolvable
+         rewrite is a head we changed without being able to say to what, which
+         is strictly less honest than the ⊤ it replaced. *)
+      Batch.eq_int b
+        ~msg:"no rewritten edge is left unresolvable"
+        (Db.with_db db (fun c ->
+             Db.int c
+               "SELECT count(*) FROM calls WHERE edge_form='module_alias' AND callee_id IS NULL"))
+        0 ;
       (* FR-011, as a structural claim rather than a spot check: no rewritten
          edge may be MUST however its head classifies. The rewrite discharges
          the NAMING conjunct of MUST and leaves uniqueness and saturation
@@ -215,7 +242,30 @@ let register_rewrite () =
             |> List.map (function
                  | [x] -> Db.to_string ~sql:"param" x
                  | _ -> Test.fail "param: unexpected row shape")))
-        "MAY_TOP/module_param/unmarked") ;
+        "MAY_TOP/module_param/unmarked" ;
+      (* THE CRITICAL. A parameter that is ALIASED, which the direct-use case
+         above cannot witness: there the table is empty, so the decline measures
+         the absence of a binding rather than the correctness of one. Here a
+         binding exists and names a functor parameter, and the guard must refuse
+         it on the ground that its root is not a compilation unit.
+
+         Without the guard this reads MAY_ENUMERATED/-/module_alias with a
+         callee_id pointing at whatever unit happens to share the parameter's
+         name. *)
+      Batch.eq_string b
+        ~msg:"an alias BOUND TO a functor parameter keeps its ⊤ — the head is not a real unit"
+        (String.concat ","
+           (Db.with_db db (fun c ->
+                Db.rows c
+                  "SELECT COALESCE(c.kind,'?')||'/'||COALESCE(c.top_reason,'?')||'/'\
+                   ||CASE WHEN c.edge_form IS NULL THEN 'unmarked' ELSE c.edge_form END \
+                   ||'/'||CASE WHEN c.callee_id IS NULL THEN 'unresolved' ELSE 'RESOLVED' END \
+                   FROM calls c JOIN functions cf ON c.caller_id=cf.id \
+                   WHERE cf.name='Aliased.through_alias' AND c.callee_name LIKE '%.f'")
+            |> List.map (function
+                 | [x] -> Db.to_string ~sql:"aliased" x
+                 | _ -> Test.fail "aliased: unexpected row shape")))
+        "MAY_TOP/module_param/unmarked/unresolved") ;
   Lwt.return_unit
 
 (* FR-012 / SA-1, alone in its own test because it is the one assertion whose
@@ -288,7 +338,7 @@ let register_stamp_key () =
    and the broad predicate agree on it exactly. *)
 let register_consumers_count_it () =
   Test.register ~__FILE__
-    ~title:"module-alias heads: callers-of and fan-in COUNT a rewritten edge"
+    ~title:"module-alias heads: callers-of, fan-in and god-modules all COUNT a rewritten edge"
     ~tags:["cmt"; "query"; "alias"; "module_alias"; "callers_of"; "fan_in"]
   @@ fun () ->
   with_fixture ~name:"ma_readers" ~files:fixture_files @@ fun fixture ->
@@ -317,7 +367,73 @@ let register_consumers_count_it () =
       let co = query ["callers-of"; "f"] in
       Batch.check b
         ~msg:("callers-of names the caller that reached f through an alias (output:\n" ^ co ^ ")")
-        (Arch_tezt.contains ~needle:"via_alias" co)) ;
+        (Arch_tezt.contains ~needle:"via_alias" co) ;
+      (* THE TWO SITES THE FIRST VERSION OF THIS TEST DID NOT COVER, and their
+         absence was not visible from the title — which said "callers-of and
+         fan-in" while asserting only the first. A reviewer's mutants found it:
+         reverting `callers-of` was KILLED, reverting `fan-in` and
+         `god-modules` both SURVIVED. Two of the three fixes this branch exists
+         for could have been undone in silence. *)
+      let fi = query ["fan-in"] in
+      Batch.check b
+        ~msg:("fan-in counts a call reached through a module alias (output:\n" ^ fi ^ ")")
+        (Arch_tezt.contains ~needle:"Ma_real.f" fi || Arch_tezt.contains ~needle:"\tf" fi
+       || Arch_tezt.contains ~needle:"f " fi) ;
+      (* The numeric form of the same claim, derived by hand from the fixture
+         BEFORE running: [Ma_real.f] is called by ma_a's [via_alias] (through
+         the alias) and by nothing else. A "contains" assertion would pass on a
+         report that listed the name with a count of zero. *)
+      let fan_in_of name =
+        Db.with_db db (fun c ->
+            Db.int c
+              (Printf.sprintf
+                 "SELECT count(*) FROM calls c JOIN functions f ON c.callee_id=f.id \
+                  JOIN modules m ON f.module_id=m.id \
+                  WHERE f.name='f' AND m.path LIKE '%%%s' \
+                  AND COALESCE(c.edge_form,'') <> 'value_alias'"
+                 name))
+      in
+      Batch.eq_int b
+        ~msg:"the alias-mediated edge into Ma_real.f is counted, not excluded"
+        (fan_in_of "ma_real.ml") 1 ;
+      (* god-modules states in its own preamble that it REUSES fan-in's measure;
+         if only one of the two counts alias-mediated edges that claim is false.
+         Nothing invoked it on this fixture before. *)
+      let gm = query ["god-modules"] in
+      Batch.check b ~msg:"god-modules produces output at all" (String.length gm > 0) ;
+      (* THE NUMBER, not the presence. A [contains "ma_real"] assertion here
+         SURVIVED the mutant that reverts god-modules to the broad exclusion —
+         ma_real still appears, just with a smaller count, because it also has
+         one ordinary in-edge. The assertion measured its own selector rather
+         than the behaviour, which is the failure this file's own docstring
+         warns about, reproduced while fixing it.
+
+         Derived by hand from the fixture BEFORE running: ma_real.ml receives
+         [direct -> Ma_real.g] (ordinary) and [via_alias -> Ma_real.f]
+         (alias-mediated) = 2. ma_stub.ml and ma_other.ml each receive exactly
+         ONE in-edge and it is alias-mediated, so under the broad exclusion they
+         do not merely shrink — they VANISH from the report. *)
+      let gm_of path =
+        String.split_on_char '\n' gm
+        |> List.filter_map (fun l ->
+               match String.split_on_char '|' (String.trim l) with
+               | [ p; n ] when Arch_tezt.contains ~needle:path p ->
+                   int_of_string_opt (String.trim n)
+               | _ -> None)
+        |> function
+        | [ n ] -> n
+        | _ -> 0
+      in
+      Batch.eq_int b
+        ~msg:("god-modules counts BOTH of ma_real's in-edges, the alias-mediated one \
+               included (output:\n" ^ gm ^ ")")
+        (gm_of "ma_real.ml") 2 ;
+      Batch.eq_int b
+        ~msg:"a module whose ONLY in-edge is alias-mediated still appears (ma_stub)"
+        (gm_of "ma_stub.ml") 1 ;
+      Batch.eq_int b
+        ~msg:"and the same across files (ma_other)"
+        (gm_of "ma_other.ml") 1) ;
   Lwt.return_unit
 
 let register () =
