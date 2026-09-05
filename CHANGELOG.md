@@ -2,6 +2,35 @@
 
 ## [Unreleased]
 
+### Added
+- **`exported:` is now tested against a FLAT-schema index** (roadmap 4.4). The two schemas spell
+  the API-surface flag differently — MAIN's column is `functions.exposed`, FLAT's is
+  `functions.exported` — and `Arch_graph.load_nodes` has one query per schema reading both into
+  the single field `node.exported`. That reconciliation is what lets `exported:` select through
+  the node instead of through SQL, and it was **asserted in three documents and executed by no
+  test**: every `exported:` assertion in the suite ran against MAIN.
+
+  The fixture inverts reachability against exposure — the UNEXPORTED function is the only route
+  to the excluded target — which is what makes the three failure modes produce three distinct
+  signatures rather than one. Verified by mutating the FLAT branch's `SELECT`, each run against
+  this test **in isolation**, because the suite aborts on its first failure and a mutant that
+  kills an earlier test looks exactly like a mutant this test killed:
+
+  | mutation | expected | observed |
+  |---|---|---|
+  | `COALESCE(exposed,0)` — MAIN's spelling | crash, nothing loads | the reachability control premise fails |
+  | `0` — column not read | nothing exported, empty cone | "a proof, not vacuity" fails |
+  | `1` — everything exported | the wrong population, confidently | "no FLAT entry point reaches it" fails |
+
+  The third is the one the fixture's shape exists for: no crash and no empty set, just a
+  confident answer about the wrong nodes. It is visible only because the unexported function is
+  the one holding the path.
+
+  A premise asserts the **discriminator itself** — `calls.caller_name` present and
+  `calls.caller_id` absent — because `Arch_db.open_ro` picks its schema from that column. A
+  fixture that accidentally satisfied the MAIN predicate would be read through the already-tested
+  branch and pass while proving nothing about FLAT.
+
 ### Fixed
 - **A newer binary reading an older index refuses instead of crashing, and the refusal names what
   is missing.** The class is *any* column or table a tool's query names that the index in front of
