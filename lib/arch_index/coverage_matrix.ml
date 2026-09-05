@@ -47,10 +47,17 @@ let is_executable path =
    parent checkout and find *its* copy instead — this function is a presence
    probe ("is this tool built, here?"), and a stale-but-working sibling
    answers that question with a plausible lie. Unlike [arch_tezt.ml]'s
-   [locate], every caller here already treats "not found" as a legitimate,
-   expected outcome ([Not_analysed]), so the boundary is expressed by
-   returning [None] rather than raising: the honest answer to "is it built"
-   when the search hits the workspace edge is "no", not an exception. *)
+   [locate], the callers of [find_sibling_tool] (this function's only
+   production wrapper — all of them in [compute] below) already treat "not
+   found" as a legitimate, expected outcome ([Not_analysed]), so the
+   boundary is expressed by returning [None] rather than raising: the honest
+   answer to "is it built" when the search hits the workspace edge is "no",
+   not an exception. That tolerance is a property of THOSE callers only, not
+   of every [None] this module can produce: [find_repo_root] below follows
+   the same return-[None] convention but its one production caller
+   ([bin/arch_coverage_matrix/arch_coverage_matrix.ml]'s [run]) turns that
+   [None] into exit 2 — see [find_repo_root]'s own comment, which states
+   why. *)
 let rec find_upwards ~exists ~from rel =
   let candidates =
     [Filename.concat from rel; Filename.concat from (Filename.concat "_build/default" rel)]
