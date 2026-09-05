@@ -81,3 +81,39 @@ Roadmap: `~/notes/2026-09-01-arch-index-roadmap.md`, item 3.13.
 eval "$(opam env --switch=/home/mathias/dev/arch-index --set-switch)"
 dune build && dune test --force
 ```
+
+## Operational facts inherited from the roadmap guardian (2026-09-05, post-spec)
+
+Recorded here so the implementation phase inherits them rather than rediscovering them.
+
+**Base moved.** The branch was rebased from `70cb47f` onto `2ac80eb`. Baseline re-verified on the
+new base in this worktree: build clean, **165/165** tezt cases pass (was 163/163 — the `ext:`
+selector work added two), Quint invariants green over 20 000 samples.
+
+**`Arch_sel.parse` now takes a MANDATORY `~allow`.** Any new verb or command must declare
+explicitly which selector kinds it can serve. A verb that does not declare them inherits the
+default by omission — that is exactly how `Dep` was silently reinterpreting
+`forbid dep from fn:foo to file:bar`. `arch-mutants run` will accept `--tests <selector>`, so it
+must pass an explicit `~allow`.
+
+**Issue #77 — the hazard that would make every mutant read as a survivor.**
+`tezt/lib/arch_tezt.ml`'s `locate` walks ancestor directories from `Sys.getcwd ()` to find a
+binary. A worktree whose `_build` is incomplete therefore runs the **parent checkout's** binary
+instead, silently. For a mutation campaign that failure is maximally bad: the stale binary is
+unmutated, so every mutant survives and the report is a page of false test gaps.
+
+Verified empirically in this worktree rather than assumed: walking every ancestor of
+`/mnt/ssd-external-2to/arch-index-mutation-313` finds exactly one `arch_mutants.exe`, its own.
+Nothing under `/home/mathias/dev` is reachable upwards from here. **Keep the worktree outside the
+checkout for this reason.** Setting `ARCH_MUTANTS` explicitly is the belt-and-braces override,
+since `locate` prefers the environment variable and fails loudly when it points at nothing.
+
+**A run containing at least one RED self-certifies its greens.** A stale binary cannot turn red,
+so any suite that produced a genuine failure was running the code under test. The prove-red
+harness satisfies this by construction: `scripts/check-quint-red.sh` reports 6 reds and 0
+survivors, and its first run reported 1 survivor out of 5 — both runs self-certify.
+
+**Every published number names its corpus, its commit AND its build state.** The same quantity was
+derived three times in one day at 78.5 %, 6.7 % and 3.1 % — a factor of 25, all three correct,
+because the rate measured which units had been *compiled*. Scope is not metadata here, it is the
+result. This applies directly to CHECK-9's key probe and to any campaign count.
