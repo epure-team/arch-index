@@ -2416,7 +2416,30 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels
                  channel — the same carrier check used for functions, just
                  without stripping arrows (a constructor's type never is
                  one). *)
-              (match carrier_of cstr_desc.cstr_res with
+                  (* A node the compiler SYNTHESISED has no source position, and
+                     [Typecore.option_none] synthesises a [None] constructor for every OMITTED
+                     OPTIONAL ARGUMENT. Those are not [None] values a programmer returned: they
+                     are the absence of an argument, recorded as if it were an error origin.
+
+                     Measured on a two-function fixture: a written [None] keeps its real line,
+                     while a call omitting two optional arguments produces TWO origins at line 0
+                     and one omitting a single argument produces one. On proto_alpha the class is
+                     89 % of all origins and 100 % of them are attributable to omitted optionals,
+                     with zero residue on two corpora — [receipt_repr.ml]'s
+                     [balance_and_update_encoding] carries 139 and is a VALUE, so it cannot return
+                     [None] at all; its rows are the [?title]/[?description] omitted from the
+                     [Data_encoding] combinators that build it.
+
+                     Guarded on [pos_lnum > 0] and NOT on [loc_ghost]: ghost is also set on
+                     legitimately desugared nodes and on ppx output that carry a usable position,
+                     so it would drop real origins. A zero line is the compiler saying "this node
+                     has no source", which is exactly the set to exclude.
+
+                     Sound before and after — the class only ever ADDED [None], so nothing
+                     downstream was unsound. It was a precision loss that drowned the real signal
+                     twenty to one. *)
+                  let has_source = expr.exp_loc.Location.loc_start.Lexing.pos_lnum > 0 in
+                  (match carrier_of cstr_desc.cstr_res with
               | Some c -> (
                   match
                     List.find_opt
@@ -2425,13 +2448,22 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels
                   with
                   | None -> ()
                   | Some (opath, 0) ->
+                      (* [note_seen_value_path] stays OUTSIDE the guard, deliberately. It answers
+                         "is this declared path plausible for this corpus", which is a question
+                         about the CONFIG, not about the program's error behaviour — and a
+                         synthetic [None] is still a [None] node the compiler put in the tree.
+                         Skipping it would make [--errors-strict] report a correctly-declared
+                         channel as never observed on a corpus whose only [None]s are synthetic,
+                         which is a false alarm about the config rather than a fact about the
+                         code. *)
                       note_seen_value_path opath ;
-                      Arch_index_errch.add_origin
-                        (!cur).lerrch
-                        ~channel:c.Arch_errors_config.name
-                        ~path:(Some opath)
-                        ~loc:expr.exp_loc
-                        ()
+                      if has_source then
+                        Arch_index_errch.add_origin
+                          (!cur).lerrch
+                          ~channel:c.Arch_errors_config.name
+                          ~path:(Some opath)
+                          ~loc:expr.exp_loc
+                          ()
                   | Some (opath, pos) -> (
                       note_seen_value_path opath ;
                       match List.nth_opt args (pos - 1) with
