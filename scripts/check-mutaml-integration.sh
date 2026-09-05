@@ -13,7 +13,7 @@
 # wrapper, handed to a real runner as its test command, resolves the id the runner exports to the
 # test set the driver computed — and not to the whole suite.
 #
-# EXIT 3 WHEN MUTAML IS ABSENT, NOT 1. An unverified integration and a failed one are different
+# EXIT 3 WHEN THE INTEGRATION CANNOT BE EXERCISED, NOT 1. An unverified integration and a failed one are different
 # facts and must not collapse into one exit code: "we could not check" read as "we checked and it
 # was fine" is how an integration ships unexercised. 3 is this repository's "the callee declined
 # to answer" code, and it is what a caller must propagate rather than fold into a failure.
@@ -22,8 +22,11 @@
 #         MUTAML_RUNNER=<path> overrides the search.
 # Exit:   0 = the wrapper resolved the mutant to the expected test set under a real runner.
 #         1 = the assertion fired: it resolved to something else.
-#         2 = harness error.
-#         3 = mutaml is not available here; the integration is UNVERIFIED, not verified.
+#         2 = harness error: the engine is present, its interface is the one this fixture is
+#             written against, and the run still failed. Something here is broken.
+#         3 = UNVERIFIED, not verified and not failed. Two ways to reach it, both honest
+#             refusals: no mutaml at all, or a mutaml this fixture cannot drive (an engine
+#             that does not declare --build-context).
 
 set -uo pipefail
 
@@ -54,6 +57,30 @@ command -v timeout >/dev/null 2>&1 || {
   echo "check-mutaml-integration: mutaml's runner requires \`timeout\`, which is not installed" >&2
   exit 2
 }
+
+# THE ENGINE BEING PRESENT AND THIS FIXTURE BEING ABLE TO DRIVE IT ARE TWO FACTS, and the exit
+# codes below keep them apart. The absent-engine arm above was the only path to 3, so the moment
+# a real mutaml was named the script could only answer 0, 1 or 2 — and a fixture written against
+# an interface this engine does not have came back as "harness error", which reads like a broken
+# check rather than an unexercised integration. So the interface is probed FIRST: `--muts` is
+# resolved relative to `--build-context` (default `_build/default`), which is why the fixture
+# below passes `--build-context .` and why an engine without that option cannot be driven from a
+# scratch directory at all. An engine that does not declare it is a REFUSAL (3), not an error.
+help="$("$runner" --help 2>&1)"
+case "$help" in
+  *--build-context*) : ;;
+  *)
+    echo "check-mutaml-integration: UNVERIFIED — $runner does not declare --build-context."
+    echo "  The engine is PRESENT; this fixture cannot drive it. mutaml resolves --muts relative"
+    echo "  to the build context, so a catalogue written into a scratch directory is unreachable"
+    echo "  without that option, and the run below would report a wrapper that never ran for a"
+    echo "  reason that has nothing to do with the wrapper."
+    echo "  This is exit 3, deliberately not 2: nothing here is broken and nothing was exercised."
+    echo "  The engine reported:"
+    printf '%s\n' "$help" | sed 's/^/    /'
+    exit 3
+    ;;
+esac
 
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
@@ -97,9 +124,18 @@ export RECORD="$work/record.txt"
 export ARCH_MUTANTS_TEST_CMD="$work/fake-tests.sh"
 : > "$RECORD"
 
-"$runner" --muts lib/x.muts "$WRAPPER" > runner.log 2>&1
+# --build-context . is load-bearing, not tidiness. mutaml-runner resolves --muts INSIDE the
+# build context, whose default is `_build/default`, so `--muts lib/x.muts` alone is read as
+# `_build/default/lib/x.muts` and the runner exits before the wrapper is ever spawned. That one
+# missing flag — not the fixture, not the engine, not the wrapper — is the whole reason this
+# check reported UNVERIFIED against an installed mutaml.
+"$runner" --muts lib/x.muts --build-context . "$WRAPPER" > runner.log 2>&1
 rc=$?
 if [ ! -s "$ARCH_MUTANTS_TRACE" ]; then
+  # Reached only with an engine that DID declare --build-context, so the fixture and the
+  # interface agree and something genuinely went wrong. That is a harness error (2), and it is
+  # distinct from the refusal above: the difference between "we could not ask" and "we asked
+  # correctly and the machinery broke" is the difference AC-20's refusal arm turns on.
   echo "check-mutaml-integration: the runner exited $rc and the wrapper was never invoked." >&2
   sed 's/^/    /' runner.log >&2
   exit 2

@@ -28,7 +28,11 @@
 #
 # Usage:  scripts/check-status-provenance.sh [dir]     (default: bin/arch_mutants)
 # Exit:   0 = no emitter publishes a status without its provenance
-#         1 = at least one does (each is named, with file:line)
+#         1 = at least one does, OR the scan lost its place (an unterminated string, an
+#             unclosed comment or an unclosed `Assoc at end of file). Each is named, with
+#             file:line. A scan that lost its place inspected nothing it could have judged,
+#             so it is a hit and never a pass — see the END block for why that is stated
+#             here rather than left to a reader.
 #         2 = harness error (no directory, no files, no awk)
 
 set -uo pipefail
@@ -63,6 +67,15 @@ for f in $FILES; do
 
     function indent_of(l,   r) { r = l; sub(/[^ \t].*$/, "", r); return length(r) }
 
+    # Does `s` START with an OCaml char literal? Sets RLENGTH to its width. Covers the plain
+    # form and every escape form (backslash-n, backslash-backslash, backslash-quote,
+    # backslash-065, backslash-xE9), and deliberately does NOT match a type variable, which
+    # carries no closing quote. SQ is the apostrophe, built rather than written, because this
+    # whole program lives inside a single-quoted shell word.
+    function charlit(s) {
+      return match(s, "^" SQ "(\\\\.[^" SQ "]{0,2}|[^" SQ "\\\\])" SQ)
+    }
+
     # Close the statement under construction and judge it.
     function flush(   renders_status, names_prov) {
       if (!instmt) return
@@ -75,7 +88,8 @@ for f in $FILES; do
       instmt = 0; sbuf = ""
     }
 
-    BEGIN { top = 0; brdepth = 0; pending = 0; instr = 0; cdepth = 0; nrec = 0; nstmt = 0 }
+    BEGIN { top = 0; brdepth = 0; pending = 0; instr = 0; cdepth = 0; nrec = 0; nstmt = 0
+            SQ = sprintf("%c", 39) }
 
     {
       raw = $0
@@ -108,10 +122,20 @@ for f in $FILES; do
         if (cdepth > 0) {
           if (two == "(*") { cdepth++; i += 2; continue }
           if (two == "*)") { cdepth--; i += 2; continue }
+          # A char literal is ONE token, consumed whole, and the double quote inside one is
+          # not a string delimiter. OCaml lexes char literals inside comments too, which is
+          # where this was found: a doc comment holding a quote-char literal opened a string
+          # that never closed, every later line was swallowed, and the file yielded ZERO
+          # records and a PASS.
+          if (c == SQ && charlit(substr(raw, i))) { i += RLENGTH; continue }
           if (c == "\"") { instr = 1; i++; continue }
           i++; continue
         }
         if (two == "(*") { cdepth = 1; i += 2; continue }
+        if (c == SQ && charlit(substr(raw, i))) {
+          if (top > 0) rbuf[top] = rbuf[top] substr(raw, i, RLENGTH)
+          i += RLENGTH; continue
+        }
         if (c == "\"") { instr = 1; if (top > 0) rbuf[top] = rbuf[top] c; i++; continue }
         if (substr(raw, i, 6) == "`Assoc") {
           pending = 1; pstart = NR
@@ -162,6 +186,17 @@ for f in $FILES; do
         printf "%s:%d: UNCLOSED `Assoc record at end of file — the record scanner lost its place\n", FILENAME, rstart[top]
         judge_record(); top--
       }
+      # The same discipline for the two states that make the scan itself worthless, and for
+      # the same reason scripts/check-no-score.sh emits both: a scanner that ended inside a
+      # string or inside a comment consumed the rest of the file as prose, so it inspected
+      # nothing it could have judged. That is a HIT, not a pass. Reported here rather than
+      # left silent because this check already shipped one vacuous form of exactly this: a
+      # single char literal holding a double quote produced "inspected 0 JSON record(s)" and
+      # PASS. Zero records is only ever a legitimate answer when the scan stayed in step.
+      if (cdepth != 0)
+        printf "%s:%d: UNBALANCED comment depth %d at end of file — the scanner lost its place\n", FILENAME, NR, cdepth
+      if (instr)
+        printf "%s:%d: UNTERMINATED string literal at end of file — the scanner lost its place\n", FILENAME, NR
       printf "#counts\t%d\t%d\n", nrec, nstmt
     }
   ' "$f")
@@ -178,7 +213,8 @@ done
 
 echo "check-status-provenance: inspected $records JSON record(s) and $statements stdout emitter(s) under $DIR"
 if [ "$hits" -gt 0 ]; then
-  echo "check-status-provenance: FAIL — $hits emitter(s) publish a status with no provenance beside it" >&2
+  echo "check-status-provenance: FAIL — $hits site(s): an emitter publishing a status with no" >&2
+  echo "  provenance beside it, or a point where the scan lost its place and judged nothing." >&2
   exit 1
 fi
 # A zero that says what would have made it non-zero: an `Assoc carrying ("engine_status", …)

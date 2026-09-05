@@ -102,6 +102,8 @@ than restated, because a corrected number invites the same comparison a second t
   It returns 0 against a populated campaign database.
 - `scripts/check-mutaml-integration.sh` → **exit 3**: mutaml is absent, so the integration is
   **unverified**. Per AC-20 that is the correct outcome and it must not be read as covered.
+  (Round 3: still exit 3 with no engine on PATH, but with `MUTAML_RUNNER` pointed at mutaml 0.3 it
+  now exits **0** — the integration is verified. See the correction under round 2's table.)
 
 **Prove-red, one mutation at a time**, each restored and re-verified: five mutations in the driver
 each turned exactly one new test red and left the others unchanged. `check-mutant-key.sh` was
@@ -232,6 +234,18 @@ adapter fell into, and the fix is one equality in the adapter rather than a new 
   installed: its own fixture cannot drive the real runner, which wants `.muts` files from a
   ppx-instrumented build. The campaign mechanism has still never been observed end to end.
 
+  > **CORRECTED IN ROUND 3, AND IT WAS WRONG IN BOTH HALVES.** That measurement was taken WITHOUT
+  > exporting `MUTAML_RUNNER`, so it read the absent-engine path and reported the one exit code the
+  > script could produce when it cannot see an engine at all — the sentence "now with a real mutaml
+  > 0.3 installed" describes an installation the run never looked at. With the engine actually
+  > named, the pre-fix script exited **2**, not 3. And the diagnosis was wrong too: the fixture did
+  > not need a ppx-instrumented build. `mutaml-runner` 0.3 resolves `--muts` inside its
+  > `--build-context`, whose default is `_build/default`, so `--muts lib/x.muts` was read as
+  > `_build/default/lib/x.muts`. Adding `--build-context .` makes the check **exit 0 against the
+  > real installed runner** — `wrapper invocations : 2 · lib/x:1 resolved to : t_alpha · lib/x:2
+  > resolved to : t_beta,t_gamma`. AC-20 is verified, not unverified, and the campaign mechanism
+  > HAS now been observed against the real engine.
+
 ## Identified out-of-scope
 
 `mutant_runs.executed_tests` records what the wrapper **intended** to run, not what ran — under a
@@ -314,6 +328,52 @@ this task's own recurring class, in the identity function of its finding ledger.
 | HIGH | `checks/no-score-scans-sql-strings.sh:1:correctness` | THE NINE RATCHET CHECKS ARE NOT IN A FORM THE CONVERGENCE GATE CAN EXECUTE. They are bash scripts; the gate invokes a linked check as `node <path>`, w |
 | LOW | `scripts/check-mutaml-integration.sh:1:spec` | CHECK-8's exit-3 arm is reachable only while the real engine is invisible: with the installed mutaml 0.3 actually named, the script exits 2 (harness e |
 | INFO | `scripts/check-mutaml-integration.sh:100:spec` | CHECK-8's UNVERIFIED is a ONE-FLAG FIX, not a fixture limitation. mutaml-runner 0.3 resolves --muts relative to --build-context, which defaults to _bu |
+
+### Group A — outcome
+
+Each fix carries the control that produced the finding, re-run after the change and required to
+come back RED. A fix whose control was not re-run is why finding one exists: the round-2 repair of
+`scripts/check-status-provenance.sh` was never controlled the same way it was found.
+
+- `scripts/check-status-provenance.sh:161` — **fixed.** Control: a fixture holding
+  `(* a doc comment holding a char literal: '"' *)` above an `` `Assoc `` carrying `engine_status`
+  with no provenance. Before: `inspected 0 JSON record(s)`, `PASS`, exit 0. After: exit 1 naming
+  the record, `inspected 1 JSON record(s)`. The char literal is now one token (in code and inside
+  comments, where OCaml also lexes them), and a non-zero comment depth or an open string at end of
+  file is a HIT, exactly as `scripts/check-no-score.sh:111-114` already did. Ratchet:
+  `checks/status-scan-eof-is-not-a-pass.js`, red-verified against the guard restored from HEAD
+  (exit 1, 4 of 7 cases failing).
+- `scripts/check-mutant-key.sh:84` — **fixed.** Control: a probe schema with the `UNIQUE` line
+  deleted. Before: exit 0, `the key is live and discriminating`, printed over three parse errors.
+  After: exit 1, `a row identical on (file_path, …) was ACCEPTED`. `function_id` is gone from all
+  three statements, and sqlite3's exit status is now checked on every INSERT — `INSERT OR IGNORE`
+  swallows a constraint violation and nothing else, so a non-zero status is exit 2 and never a
+  rejection (verified: a bogus column name now exits 2, not 0). Ratchet:
+  `checks/mutant-key-parse-error-is-not-a-rejection.js`, red-verified against HEAD (exit 1, all
+  three arms failing).
+- `.github/workflows/ci.yml:105` — **fixed as a CI step, not a tezt port**, and the reasoning is a
+  property of these checks rather than a preference. Several of them assert on the behaviour of
+  SHELL artefacts (`mutaml-wrapper.sh`'s exit codes, `check-no-score.sh`'s scanner, the
+  tree-boundary guard under a foreign checkout), so an OCaml rewrite would replace the artefact
+  under test with a reimplementation of it. And their exit vocabulary is wider than pass/fail: 3
+  means "not exercised", which tezt has no way to express and would collapse into a failure —
+  destroying the distinction this branch spends its exit codes maintaining. The new `Ratchet
+  checks` step runs `node checks/run-ratchet.js`, which separates 1 (an assertion fired — fail the
+  build) from ≥2 (a check could not run) and reports 3 without failing. Ratchet:
+  `checks/ratchet-is-wired-into-ci.js`, red-verified twice.
+- `checks/no-score-scans-sql-strings.sh:1` — **fixed by one node-runnable path, not nine shims.**
+  The gate invokes a linked check as `node <path>`; `checks/run-ratchet.js` is node, so a single
+  link reaches all 24 checks and really does execute them. Ratchet:
+  `checks/ratchet-is-node-executable.js`, which carries its own positive control (it requires
+  `node <a bash check>` to FAIL, and reports a control that stopped controlling as a failure).
+- `scripts/check-mutaml-integration.sh:1` and `:100` — **fixed, and this is the one that changes a
+  fact rather than a guard.** `--build-context .` at the runner invocation makes the check exit 0
+  against mutaml 0.3: `wrapper invocations : 2 · lib/x:1 resolved to : t_alpha · lib/x:2 resolved
+  to : t_beta,t_gamma`. AC-20 is verified. The refusal arm survives the engine becoming available:
+  the engine's `--help` is probed for `--build-context` first, so "present but undriveable" is
+  exit 3 and only a matching interface that then fails is exit 2. Red control: a wrapper that
+  ignores `MUTAML_MUTANT` makes the check exit 1 against the real runner. Round 2's claim of exit
+  3 "now with a real mutaml installed" is corrected in place above.
 
 ## Group B — the driver and the wrapper
 

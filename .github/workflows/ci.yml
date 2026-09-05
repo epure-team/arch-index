@@ -125,6 +125,30 @@ jobs:
       # startup with "Unrecognized named-value: 'runner'", so the job never
       # dispatches at all. Per-step `env:` would work but reintroduces the three-way
       # duplication; the default variable avoids both.
+      # THE RATCHET, RUN. Before this step it was wired into nothing: CI ran `dune build` and
+      # `dune test` and no workflow step, dune rule or script referenced `checks/` or
+      # `scripts/check-*` at all, so eleven checks written to stop a regression were eleven
+      # files someone had to remember to run. Measured rather than assumed —
+      # `grep -n 'scripts/check' .github/workflows/ci.yml` and `grep -rn checks --include=dune .`
+      # both returned nothing.
+      #
+      # Why a step and not a port into tezt, which is where this repository moved
+      # must_null_ceiling: several of these checks assert on the behaviour of SHELL artefacts
+      # (mutaml-wrapper.sh's exit codes, check-no-score.sh's scanner, the tree-boundary guard
+      # under a foreign checkout), so an OCaml rewrite would replace the artefact under test
+      # with a reimplementation of it; and their exit vocabulary is wider than pass/fail — 3
+      # means "not exercised", which tezt has no way to express and would collapse into a
+      # failure. checks/run-ratchet.js keeps 1 (an assertion fired, fail the build) apart from
+      # >=2 (a check could not run) and reports 3 without failing, and it is node-runnable, so
+      # the review-convergence gate can link and execute the whole ratchet through one path.
+      #
+      # After Build and after the tests, because several checks drive binaries out of
+      # _build/default. `eval opam env` for the same reason the test step uses it: the checks
+      # shell out to dune, sqlite3 and git on throwaway trees and need them on a bare PATH.
+      - name: Ratchet checks
+        run: |
+          eval "$(opam env)"
+          node checks/run-ratchet.js
       - name: Self-index smoke test
         run: |
           BIN="./_build/default/bin/arch_callgraph_ocaml/arch_callgraph_ocaml.exe"

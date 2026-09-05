@@ -21,7 +21,9 @@
 #         With no argument it looks for the largest `mutants` population among *.db under the tree.
 # Exit:   0 = the key is enforced and discriminating on this population.
 #         1 = the assertion fired: the deliberate duplicate was ACCEPTED, so the key is not live.
-#         2 = harness error (no sqlite3, no migration file, no population to measure).
+#         2 = harness error (no sqlite3, no migration file, no population to measure, or an
+#             INSERT that failed for any reason other than the constraint — a statement that
+#             never reached the key tells you nothing about the key).
 
 set -uo pipefail
 
@@ -73,19 +75,36 @@ SELECT 'distinct lines          : ' || count(DISTINCT line) FROM mutants;
 SELECT 'distinct column spans   : ' || count(DISTINCT col_start || ':' || col_end) FROM mutants;
 SELECT 'distinct replacements   : ' || count(DISTINCT replacement) FROM mutants;
 SELECT 'distinct source hashes  : ' || count(DISTINCT source_hash) FROM mutants;
-SELECT 'rows with NULL function : ' || count(*) FROM mutants WHERE function_id IS NULL;
+SELECT 'rows with NULL function : ' || count(*) FROM mutants WHERE function_name IS NULL;
 SQL
 
 # Re-insert the whole population into the fresh, constrained table. INSERT OR IGNORE lets the
-# constraint reject rather than abort, and total_changes() counts what it ACCEPTED.
-sqlite3 "$probe" <<SQL > "$scratch/accepted"
+# constraint reject rather than abort, and changes() counts what it ACCEPTED.
+#
+# THE COLUMN LIST IS THE ASSERTION'S LOAD-BEARING PART, not boilerplate. This statement named
+# `function_id`, a column deleted from the schema, so sqlite3 aborted the INSERT with a PARSE
+# ERROR before the UNIQUE constraint was ever consulted — and the arithmetic below then read
+# zero accepted rows as "the constraint rejected everything". The control row was rejected the
+# same way, by a parse error, and the script printed "the key is live and discriminating" on a
+# database whose `mutants` table carried NO UNIQUE at all. So sqlite3's own exit status is
+# checked on every statement from here down: `INSERT OR IGNORE` swallows a constraint
+# violation and NOTHING else, so a non-zero status means the probe never ran and this check
+# has measured nothing. That is exit 2, a harness error — never a rejection, and never a pass.
+sqlite3 "$probe" <<SQL > "$scratch/accepted" 2> "$scratch/accepted.err"
 ATTACH DATABASE '$best' AS src;
 INSERT OR IGNORE INTO main.mutants
-  (file_path, line, col_start, col_end, replacement, source_hash, function_id, function_name)
-SELECT file_path, line, col_start, col_end, replacement, source_hash, function_id, function_name
+  (file_path, line, col_start, col_end, replacement, source_hash, function_name)
+SELECT file_path, line, col_start, col_end, replacement, source_hash, function_name
 FROM src.mutants;
 SELECT changes();
 SQL
+rc=$?
+if [ "$rc" -ne 0 ]; then
+  echo "check-mutant-key: the population re-insert FAILED (sqlite3 exited $rc), so the UNIQUE" >&2
+  echo "  constraint was never consulted. This is not a rejection and not a pass:" >&2
+  sed 's/^/    /' "$scratch/accepted.err" >&2
+  exit 2
+fi
 accepted="$(tail -1 "$scratch/accepted")"
 [ -n "$accepted" ] || { echo "check-mutant-key: the re-insert produced no count" >&2; exit 2; }
 rejected=$(( best_n - accepted ))
@@ -99,15 +118,25 @@ if [ "$rejected" -eq 0 ]; then
   echo "      site with different content — the case the key exists to make impossible."
 fi
 
-# The positive control. Re-offer one row that is already in the probe table.
-sqlite3 "$probe" <<'SQL' > "$scratch/control"
+# The positive control. Re-offer one row that is already in the probe table. `function_name` is
+# given a DIFFERENT value on purpose: it is outside the key, so a row that differs only there
+# must still be rejected, and a key that had silently widened to include it would be caught.
+sqlite3 "$probe" <<'SQL' > "$scratch/control" 2> "$scratch/control.err"
 INSERT OR IGNORE INTO mutants
-  (file_path, line, col_start, col_end, replacement, source_hash, function_id, function_name)
-SELECT file_path, line, col_start, col_end, replacement, source_hash, function_id, 'RE-OFFERED'
+  (file_path, line, col_start, col_end, replacement, source_hash, function_name)
+SELECT file_path, line, col_start, col_end, replacement, source_hash, 'RE-OFFERED'
 FROM mutants LIMIT 1;
 SELECT changes();
 SQL
+rc=$?
+if [ "$rc" -ne 0 ]; then
+  echo "check-mutant-key: the control INSERT FAILED (sqlite3 exited $rc). A statement that never" >&2
+  echo "  reached the constraint cannot be read as the constraint rejecting it:" >&2
+  sed 's/^/    /' "$scratch/control.err" >&2
+  exit 2
+fi
 control="$(tail -1 "$scratch/control")"
+[ -n "$control" ] || { echo "check-mutant-key: the control INSERT produced no count" >&2; exit 2; }
 
 echo
 if [ "$control" != "0" ]; then
