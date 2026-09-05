@@ -841,9 +841,20 @@ let () =
      in
      let message_of r =
        let base = Printf.sprintf "%s [%s]: %s" r.rule r.kind r.verdict in
-       match r.note with
-       | Some n -> base ^ " — " ^ n
-       | None -> if r.detail = [] then base else base ^ " — " ^ String.concat ", " r.detail
+       let with_note = match r.note with Some n -> base ^ " — " ^ n | None -> base in
+       (* `dep` and `effect` verdicts carry their evidence as prose rows in `detail`, and
+          `finding_of` (below) deliberately keeps that prose OUT of `locations` — it is not a
+          display label, and stuffing it in there fabricates a bogus SARIF location (H1, round-3
+          review). `message.text` is therefore the ONLY channel left for that evidence, so it must
+          appear even when a NOTE is also present — `dep`'s non-vacuous branch always attaches a
+          fixed advisory note ("declared-dependency check: ..."), and without this the note would
+          silently replace the evidence instead of accompanying it. `reach`/`exported` need no
+          such override: their `detail` is already the SARIF `locations` list, and their notes
+          are the rarer case (an overlap or a vacuity explanation) where the note text alone is
+          already the whole story. *)
+       match r.kind with
+       | ("dep" | "effect") when r.detail <> [] -> with_note ^ " — " ^ String.concat ", " r.detail
+       | _ -> ( match r.note with Some _ -> with_note | None -> if r.detail = [] then with_note else with_note ^ " — " ^ String.concat ", " r.detail)
      in
      let finding_of r : Arch_sarif.finding =
        { rule_id = r.rule; level = level_of r.verdict; message = message_of r;
@@ -865,7 +876,19 @@ let () =
            | "UNKNOWN" -> Some "unknown_top"
            | "UNKNOWN_NO_CONTRACT" -> Some "no_contract"
            | _ -> None);
-         top_reasons = r.top_reasons; locations = r.detail; code_flow = r.witness }
+         top_reasons = r.top_reasons;
+         (* `locations` MUST be display labels from `Arch_graph.label` (see
+            `Arch_sarif.finding.locations`'s doc comment) — `split_label` parses them on that
+            contract, and a mismatch fabricates a bogus `physicalLocation`. Only `reach` and
+            `exported` build `detail` that way (`List.map lbl ...` above); `dep`'s detail rows are
+            "A --kind--> B  (line N)" prose and `effect`'s are "name KIND VALUE" prose — neither
+            is a label, and `dep`'s in particular contains the exact "  (" separator followed by a
+            LINE NUMBER, which `split_label` would parse as a file name. Those two kinds carry
+            their evidence in `message` only (`message_of` above already appends `detail` there
+            when `note` is `None`); `locations` stays empty for them rather than fabricating a
+            `uri` that names no real file. *)
+         locations = (match r.kind with "reach" | "exported" -> r.detail | _ -> []);
+         detail_total = r.detail_total; code_flow = r.witness }
      in
      let findings =
        (* "one result per rule verdict that is not PASS" (roadmap 2.1) — a PASS is a proof, not a

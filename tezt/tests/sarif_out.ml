@@ -626,7 +626,22 @@ let register_not_analysed_becomes_notification () =
                                 (String.concat "; " texts))
                         (not (List.exists (fun t -> contains ~needle:"typescript" t) texts)) ;
                       Batch.eq_int b ~msg:"exactly one notification (the not_analysed row only)"
-                        (List.length notifs) 1
+                        (List.length notifs) 1 ;
+                      (* LOW (round-3 review): descriptor.id had zero coverage — this is SARIF's
+                         own vocabulary for "not analysed", distinct from message.text, and a
+                         consumer filtering on it (rather than string-matching the message) would
+                         see nothing wrong if this regressed silently. *)
+                      (match notifs with
+                      | [ n ] -> (
+                          match Json.member "descriptor" n with
+                          | Some d -> (
+                              match Json.member "id" d with
+                              | Some (`String id) ->
+                                  Batch.eq_string b ~msg:"notification descriptor.id" id
+                                    "not_analysed/callgraph"
+                              | other -> Batch.note b "descriptor.id missing or not a string: %s" (Json.show other))
+                          | None -> Batch.note b "notification has no descriptor at all")
+                      | other -> Batch.note b "expected exactly one notification, got %d" (List.length other))
                   | other -> Batch.note b "invocation has no toolExecutionNotifications: %s" (Json.show other))
               | other -> Batch.note b "run has no singleton invocations: %s" (Json.show other))
           | other -> Batch.note b "sarif output does not have exactly one run: %s" (Json.show other))) ;
@@ -707,7 +722,7 @@ let register_two_runs_distinct_categories () =
   let open Arch_tools in
   let finding rule_id : Arch_sarif.finding =
     { rule_id; level = Arch_sarif.Error; message = "x"; verdict = None; soundness_class = None;
-      soundness = None; top_reasons = []; locations = []; code_flow = [] }
+      soundness = None; top_reasons = []; locations = []; detail_total = 0; code_flow = [] }
   in
   let run1 : Arch_sarif.run =
     { producer = "arch-index"; producer_version = Some "1.0"; category = "arch-index/callgraph";
@@ -802,7 +817,7 @@ let register_split_label_paren_in_filename () =
   let label = "db.write  (/home/me/proj/lib/db/wri#te (x).ts)" in
   let finding : Arch_sarif.finding =
     { rule_id = "r"; level = Arch_sarif.Error; message = "x"; verdict = None; soundness_class = None;
-      soundness = None; top_reasons = []; locations = [ label ]; code_flow = [] }
+      soundness = None; top_reasons = []; locations = [ label ]; detail_total = 1; code_flow = [] }
   in
   let run : Arch_sarif.run =
     { producer = "arch-index"; producer_version = None; category = "arch-index/regression";
@@ -852,7 +867,7 @@ let register_duplicate_category_rejected () =
   let open Arch_tools in
   let finding rule_id : Arch_sarif.finding =
     { rule_id; level = Arch_sarif.Error; message = "x"; verdict = None; soundness_class = None;
-      soundness = None; top_reasons = []; locations = []; code_flow = [] }
+      soundness = None; top_reasons = []; locations = []; detail_total = 0; code_flow = [] }
   in
   let run cat rid : Arch_sarif.run =
     { producer = "arch-index"; producer_version = None; category = cat; findings = [ finding rid ];
@@ -882,7 +897,7 @@ let register_heuristic_soundness_class () =
   let finding : Arch_sarif.finding =
     { rule_id = "semgrep.some-rule"; level = Arch_sarif.Warning; message = "heuristic finding";
       verdict = None; soundness_class = Some "heuristic"; soundness = None; top_reasons = [];
-      locations = []; code_flow = [] }
+      locations = []; detail_total = 0; code_flow = [] }
   in
   let run : Arch_sarif.run =
     { producer = "semgrep"; producer_version = Some "1.2.3"; category = "semgrep/oss";
@@ -905,6 +920,291 @@ let register_heuristic_soundness_class () =
               | None -> Batch.note b "result has no properties bag at all"))) ;
   Lwt.return_unit
 
+(* H1 (round-3 review): `dep`'s `detail` rows are "A --kind--> B  (line N)" PROSE, not
+   `Arch_graph.label` display labels — and that prose contains the EXACT "  (" separator
+   `split_label` searches for, with a line NUMBER after it. Before this fix, `finding_of` passed
+   `r.detail` straight through as `locations` for every rule kind, so `split_label` parsed
+   "line 42" as a file name and fabricated a `physicalLocation` naming a nonexistent file (the
+   round-3 reviewer's H1 finding, reproduced by hand against this exact fixture shape). A wrong
+   fix that reverts to `locations = r.detail` unconditionally would make `results[].locations`
+   reappear with a `logicalLocations[0].fullyQualifiedName` containing "--open-->" and a
+   `physicalLocation.artifactLocation.uri` of "line%2001" — this test fails loudly on that shape
+   by asserting `locations` is either absent or empty AND that no location's `uri` ends in a
+   percent-encoded "line...". *)
+let dep_violation_seed =
+  "INSERT INTO modules(id, path) VALUES (1, 'src/ui/handler.ml'), (2, 'lib/db/writer.ml');\n\
+   INSERT INTO functions(id, module_id, name) VALUES (1, 1, 'noop'), (2, 2, 'noop2');\n\
+   INSERT INTO module_deps(source_module, target_module, target_path, dep_kind, line_number) \
+   VALUES (1, 2, 'lib/db/writer.ml', 'open', 1);\n\
+   INSERT INTO comment_db_meta(key, value) VALUES ('callgraph_contract', 'v1');"
+
+let register_dep_violation_no_fabricated_location () =
+  Test.register ~__FILE__
+    ~title:"sarif: a `dep` VIOLATION does not fabricate results[].locations from its prose detail"
+    ~tags:["sarif"; "rules"; "locations"; "regression"]
+  @@ fun () ->
+  let db = Fixture.main ~name:"sarif_dep_violation" ~seed:dep_violation_seed () in
+  let rf =
+    rule_file "sarif_dep_violation"
+      "rule \"ui must not declare a dep on db\"\n\
+      \  forbid dep from module:src/ui/** to module:lib/db/**\n"
+  in
+  let _, output = rules [db; rf; "--format"; "sarif"] in
+  Batch.run (fun b ->
+      match sarif_json b ~what:"sarif output" output with
+      | None -> ()
+      | Some j -> (
+          match find_result j ~rule_id:"ui must not declare a dep on db" with
+          | None -> Batch.note b "the dep VIOLATION rule has no SARIF result at all"
+          | Some r -> (
+              (* The evidence must not be LOST, only kept out of `locations` — it must still be
+                 readable somewhere, and `message.text` is where `message_of` already puts it. *)
+              (match Json.member "message" r with
+              | Some (`Assoc _ as m) -> (
+                  match Json.member "text" m with
+                  | Some (`String text) ->
+                      Batch.contains b ~msg:"message.text must still carry the dep evidence"
+                        ~haystack:text "writer.ml"
+                  | _ -> Batch.note b "result has no message.text")
+              | _ -> Batch.note b "result has no message object") ;
+              match Json.member "locations" r with
+              | None -> ()
+              | Some (`List []) -> ()
+              | Some (`List locs) ->
+                  List.iter
+                    (fun loc ->
+                      match Json.member "physicalLocation" loc with
+                      | None -> ()
+                      | Some pl -> (
+                          match Json.member "artifactLocation" pl with
+                          | None -> ()
+                          | Some al -> (
+                              match Json.member "uri" al with
+                              | Some (`String uri) ->
+                                  Batch.check b
+                                    ~msg:
+                                      (Printf.sprintf
+                                         "a dep VIOLATION must not fabricate a uri from its \
+                                          'line N' suffix, got %S"
+                                         uri)
+                                    (not (contains ~needle:"line" uri))
+                              | _ -> ())))
+                    locs
+              | other -> Batch.note b "results[].locations is present but not a list: %s" (Json.show other)))) ;
+  Lwt.return_unit
+
+(* M2: `message.text` is the ONLY channel carrying `r.note` for a "nothing proved" verdict — a
+   mutant replacing the whole message with the constant "finding" passes every OTHER assertion in
+   this suite, because nothing checks `message.text`'s actual content on such a verdict. Reuses
+   the UNKNOWN_NO_CONTRACT fixture above (rule name "l"), which has a fixed, distinctive note. *)
+let register_message_text_carries_evidence () =
+  Test.register ~__FILE__
+    ~title:"sarif: a nothing-proved result's message.text names the rule, the verdict, and its note"
+    ~tags:["sarif"; "rules"; "message"]
+  @@ fun () ->
+  let db =
+    Fixture.raw ~name:"sarif_message_text"
+      {|
+CREATE TABLE functions(name TEXT, file_path TEXT, exported INTEGER DEFAULT 0,
+                       line_start INTEGER, line_end INTEGER);
+CREATE TABLE calls(caller_name TEXT, caller_file TEXT, callee_name TEXT, callee_file TEXT,
+                   call_site TEXT);
+INSERT INTO functions(name,file_path) VALUES ('pure.calc','src/pure/calc.ts'),
+                                             ('pure.inner','src/pure/inner.ts'),
+                                             ('db.write','lib/db/write.ts');
+INSERT INTO calls VALUES ('pure.calc','src/pure/calc.ts','pure.inner','src/pure/inner.ts','x:1');
+|}
+  in
+  let rf =
+    rule_file "sarif_message_text" "rule \"l\"\n  forbid reach from file:src/pure/** to file:lib/db/**\n"
+  in
+  let _, output = rules [db; rf; "--format"; "sarif"] in
+  Batch.run (fun b ->
+      match sarif_json b ~what:"sarif output" output with
+      | None -> ()
+      | Some j -> (
+          match find_result j ~rule_id:"l" with
+          | None -> Batch.note b "the UNKNOWN_NO_CONTRACT rule has no SARIF result at all"
+          | Some r -> (
+              match Json.member "message" r with
+              | Some (`Assoc _ as m) -> (
+                  match Json.member "text" m with
+                  | Some (`String text) ->
+                      Batch.contains b ~msg:"message.text must name the rule (\"l\")" ~haystack:text "l" ;
+                      Batch.contains b ~msg:"message.text must name the verdict"
+                        ~haystack:text "UNKNOWN_NO_CONTRACT" ;
+                      Batch.contains b
+                        ~msg:"message.text must carry a fragment of the note explaining WHY"
+                        ~haystack:text "dropped dynamic edge"
+                  | _ -> Batch.note b "result has no message.text — a mutant replacing it with a \
+                                       constant would pass every other assertion in this suite")
+              | _ -> Batch.note b "result has no message object"))) ;
+  Lwt.return_unit
+
+(* M4: the MAIN-schema half of `top_reasons_for` (arch_rules.ml) — the [caller_id] '#'-prefixed
+   key parsing and the `caller_id IN (...)` query — had ZERO coverage: `| Arch_db.Main -> []`
+   passes every existing test, because the only `top_reason` fixture in this suite (and in
+   rules.ml) is FLAT. MAIN is the schema the OCaml `.cmt` backend actually produces. *)
+let main_top_reason_seed =
+  "INSERT INTO modules(id, path) VALUES (1, 'src/m/a.ml'), (2, 'src/m/b.ml'), \
+   (3, 'src/m/target.ml');\n\
+   INSERT INTO functions(id, module_id, name) VALUES (1, 1, 'a_fn'), (2, 2, 'b_fn'), \
+   (3, 3, 'target_fn');\n\
+   INSERT INTO calls(caller_id, callee_id, callee_name, kind) VALUES \
+   (1, 2, 'b_fn', 'MUST');\n\
+   INSERT INTO calls(caller_id, callee_id, callee_name, kind, top_reason) VALUES \
+   (2, NULL, '*TOP*', 'MAY_TOP', 'reflection');\n\
+   INSERT INTO comment_db_meta(key, value) VALUES ('callgraph_contract', 'v1');"
+
+let register_main_schema_top_reasons () =
+  Test.register ~__FILE__
+    ~title:"sarif: a MAIN-schema UNKNOWN result's top_reasons is read via caller_id, not left empty"
+    ~tags:["sarif"; "rules"; "top_reason"; "main_schema"]
+  @@ fun () ->
+  let db = Fixture.main ~name:"sarif_main_top_reason" ~seed:main_top_reason_seed () in
+  let rf =
+    rule_file "sarif_main_top_reason"
+      "rule \"m\"\n  forbid reach from file:src/m/a.ml to file:src/m/target.ml\n"
+  in
+  let _, output = rules [db; rf; "--format"; "sarif"] in
+  Batch.run (fun b ->
+      match sarif_json b ~what:"sarif output" output with
+      | None -> ()
+      | Some j -> (
+          match find_result j ~rule_id:"m" with
+          | None ->
+              Batch.note b
+                "the MAIN-schema rule has no SARIF result at all — expected UNKNOWN (b_fn's own \
+                 MAY_TOP escape); a PASS here would mean this fixture stopped exercising the \
+                 UNKNOWN branch at all"
+          | Some r -> (
+              (match Json.member "properties" r with
+              | Some props ->
+                  Batch.eq_string_opt b ~msg:"properties.verdict must be UNKNOWN on this fixture"
+                    (match Json.member "verdict" props with Some (`String s) -> Some s | _ -> None)
+                    (Some "UNKNOWN")
+              | None -> Batch.note b "result has no properties bag at all") ;
+              match Json.member "properties" r with
+              | Some props -> (
+                  match Json.member "top_reason" props with
+                  | Some (`List [ `String s ]) ->
+                      Batch.eq_string b ~msg:"properties.top_reason[0]" s "reflection"
+                  | other ->
+                      Batch.note b
+                        "properties.top_reason missing or not a singleton list — the MAIN branch \
+                         of top_reasons_for returned [] (its `| Arch_db.Main -> []` stub \
+                         survives): %s"
+                        (Json.show other))
+              | None -> Batch.note b "result has no properties bag at all"))) ;
+  Lwt.return_unit
+
+(* M5: FLAT-schema provenance — `comment_db_meta.producer` and `comment_db_meta.soundness_class`
+   both had zero direct coverage: the only provenance test in this suite exercises MAIN's
+   `producer_runs` path. Every `arch-load` DB writes `soundness_class` unconditionally (defaulting
+   to "heuristic" with no `--soundness-class` flag) — the exact FLAT/heuristic case FR-022's
+   `properties.soundness_class` filter exists for — and `producer` when `--producer` is passed. *)
+let register_flat_provenance_round_trip () =
+  Test.register ~__FILE__
+    ~title:"sarif: a FLAT index's producer/soundness_class round-trip from comment_db_meta"
+    ~tags:["sarif"; "rules"; "provenance"; "flat_schema"]
+  @@ fun () ->
+  let db_name = "sarif_flat_provenance" in
+  let db_path =
+    let p = Temp.file (db_name ^ ".db") in
+    if Sys.file_exists p then Sys.remove p ;
+    p
+  in
+  let code, load_output =
+    run_command ~stdin:layered_stream (arch_load ()) ["--producer=acme-flat"; db_path]
+  in
+  if code <> 0 then Test.fail "building FLAT provenance fixture failed (exit %d):\n%s" code load_output ;
+  let rf = rule_file "sarif_flat_provenance" four_rules in
+  let _, output = rules [db_path; rf; "--format"; "sarif"] in
+  Batch.run (fun b ->
+      match sarif_json b ~what:"sarif output" output with
+      | None -> ()
+      | Some j -> (
+          (match Json.member "runs" j with
+          | Some (`List [ run ]) -> (
+              match Json.member "tool" run with
+              | Some t -> (
+                  match Json.member "driver" t with
+                  | Some d ->
+                      Batch.eq_string_opt b ~msg:"tool.driver.name must come from comment_db_meta('producer')"
+                        (match Json.member "name" d with Some (`String s) -> Some s | _ -> None)
+                        (Some "acme-flat")
+                  | None -> Batch.note b "run has no tool.driver at all")
+              | None -> Batch.note b "run has no tool at all")
+          | other -> Batch.note b "sarif output does not have exactly one run: %s" (Json.show other)) ;
+          match find_result j ~rule_id:"ui must not reach persistence" with
+          | None -> Batch.note b "the VIOLATION rule has no SARIF result at all"
+          | Some r -> (
+              match Json.member "properties" r with
+              | Some props ->
+                  Batch.eq_string_opt b
+                    ~msg:"results[0].properties.soundness_class must be 'heuristic' \
+                          (comment_db_meta's default, unread by a stubbed-out FLAT path)"
+                    (match Json.member "soundness_class" props with Some (`String s) -> Some s | _ -> None)
+                    (Some "heuristic")
+              | None -> Batch.note b "result has no properties bag at all"))) ;
+  Lwt.return_unit
+
+(* M6: `results[].locations` is silently truncated at 20 (arch_rules.ml's `take 20`) with no
+   signal a consumer can use to tell "20 shown" from "20 of N total" — the exact channel
+   asymmetry docs/fitness-functions.md's `detail_total` fitness function exists to close, now
+   reintroduced in the SARIF channel specifically. 25 exported functions, none matched by the
+   rule's selector, so EVERY one is an offender: `locations` truncates to 20 but
+   `properties.detail_total` must still say 25. *)
+let many_offenders_stream =
+  let buf = Buffer.create 1024 in
+  for i = 1 to 25 do
+    Buffer.add_string buf
+      (Printf.sprintf {|{"type":"function","name":"pub.fn%d","file_path":"src/pub/fn%d.ts","exported":true}
+|} i i)
+  done ;
+  (* `arch-load` refuses a call-free stream outright ("0 call edges loaded ... would report
+     EVERYTHING as UNREACHABLE") — one harmless internal call keeps this a normal, non-empty
+     index without adding a 26th exported offender. *)
+  Buffer.add_string buf
+    {|{"type":"function","name":"internal.helper","file_path":"src/internal/helper.ts"}
+{"type":"call","caller_name":"pub.fn1","callee_name":"internal.helper","call_site":"src/pub/fn1.ts:1","kind":"MUST"}
+|} ;
+  Buffer.contents buf
+
+let register_detail_total_property () =
+  Test.register ~__FILE__
+    ~title:"sarif: a truncated results[].locations still carries properties.detail_total"
+    ~tags:["sarif"; "rules"; "locations"; "truncation"]
+  @@ fun () ->
+  let db = Fixture.flat ~name:"sarif_detail_total" many_offenders_stream in
+  let rf =
+    rule_file "sarif_detail_total" "rule \"none exported\"\n  forbid exported outside file:zzzz/nope/**\n"
+  in
+  let _, output = rules [db; rf; "--format"; "sarif"] in
+  Batch.run (fun b ->
+      match sarif_json b ~what:"sarif output" output with
+      | None -> ()
+      | Some j -> (
+          match find_result j ~rule_id:"none exported" with
+          | None -> Batch.note b "the VIOLATION rule has no SARIF result at all"
+          | Some r -> (
+              (match Json.member "locations" r with
+              | Some (`List locs) ->
+                  Batch.eq_int b ~msg:"results[].locations is truncated to 20" (List.length locs) 20
+              | other -> Batch.note b "results[].locations missing or not a list: %s" (Json.show other)) ;
+              match Json.member "properties" r with
+              | Some props -> (
+                  match Json.member "detail_total" props with
+                  | Some (`Int n) ->
+                      Batch.eq_int b
+                        ~msg:"properties.detail_total must be the UNTRUNCATED count (25), not \
+                              List.length locations (20)"
+                        n 25
+                  | other ->
+                      Batch.note b "properties.detail_total missing or not an int: %s" (Json.show other))
+              | None -> Batch.note b "result has no properties bag at all"))) ;
+  Lwt.return_unit
+
 let register () =
   register_schema_valid () ;
   register_pass_excluded () ;
@@ -921,4 +1221,9 @@ let register () =
   register_locations_present () ;
   register_split_label_paren_in_filename () ;
   register_duplicate_category_rejected () ;
-  register_heuristic_soundness_class ()
+  register_heuristic_soundness_class () ;
+  register_dep_violation_no_fabricated_location () ;
+  register_message_text_carries_evidence () ;
+  register_main_schema_top_reasons () ;
+  register_flat_provenance_round_trip () ;
+  register_detail_total_property ()

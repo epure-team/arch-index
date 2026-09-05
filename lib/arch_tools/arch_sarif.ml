@@ -30,9 +30,14 @@ type level = Error | Warning | Note
 
 let level_to_string = function Error -> "error" | Warning -> "warning" | Note -> "note"
 
-(** One SARIF [result]. [rule_id] is the [arch-rules] rule name (or, from a future SARIF-in
-    producer, its own rule id) — {b not** the rule's human title; SARIF's [ruleId] is a stable
-    key, and the message carries the prose.
+(** One SARIF [result]. [rule_id] is the [arch-rules] rule name — TODAY this {e is} the rule's
+    human title, because the [.rules] DSL has no stable-id syntax of its own to give [ruleId]
+    instead. That is a real limitation, not a design choice: renaming a rule's prose therefore
+    closes its GitHub alerts and opens new ones, exactly as if the rule had been deleted and a
+    different one added. A stable id independent of the prose is tracked separately (see the
+    round-2/round-3 review history on roadmap 2.1); until it exists, callers should expect
+    renaming a rule to churn its alert history. A future SARIF-in producer may supply its own
+    stable id here instead.
 
     [locations] are display labels as produced by {!Arch_graph.label} — ["name  (file)"] when a
     file is known, bare ["name"] otherwise. This module does the best it can with what
@@ -40,6 +45,8 @@ let level_to_string = function Error -> "error" | Warning -> "warning" | Note ->
     pair), so a location here becomes a SARIF [logicalLocations] entry always, and a
     [physicalLocation] additionally whenever a file could be parsed out of the label. A future
     producer with real line numbers extends {!location_of_label}'s caller, not this shape.
+    {b The caller, not this module, is responsible for only ever passing genuine display labels
+    here} — see [locations]'s own field comment below for what happens if it does not.
 
     [code_flow] is the witness path (source-to-target order) from roadmap 1.5, rendered as a
     SARIF [codeFlow] with one thread flow location per step. *)
@@ -69,6 +76,14 @@ type finding = {
           finding's cone hit, when known. [[]] when the verdict carries no specific reason
           (e.g. [UNKNOWN_NO_CONTRACT], where the whole index was never ⊤-marked, not one edge). *)
   locations : string list;  (** Primary location(s), as display labels (see above). *)
+  detail_total : int;
+      (** The UNTRUNCATED count `locations` (and, for a kind whose evidence stays in [message]
+          only, `message` itself) was capped from — [arch-rules]' own [detail_total]
+          (docs/fitness-functions.md's "a consumer never has to guess whether '20 shown' means
+          '20 total' or '20 of 200'" fitness function). Stamped into [properties.detail_total]
+          unconditionally, even when it equals [List.length locations] and the field is
+          redundant: a consumer should never have to special-case "is this the truncated case"
+          by counting `locations` itself and comparing. *)
   code_flow : string list;  (** Witness path, source-to-target order, as display labels. *)
 }
 
@@ -190,12 +205,16 @@ let properties_of_finding (f : finding) =
     (match f.verdict with Some v -> [ ("verdict", `String v) ] | None -> [])
     @ (match f.soundness_class with Some s -> [ ("soundness_class", `String s) ] | None -> [])
     @ (match f.soundness with Some s -> [ ("soundness", `String s) ] | None -> [])
-    @
-    match f.top_reasons with
-    | [] -> []
-    | rs -> [ ("top_reason", `List (List.map (fun r -> `String r) rs)) ]
+    @ (match f.top_reasons with
+      | [] -> []
+      | rs -> [ ("top_reason", `List (List.map (fun r -> `String r) rs)) ])
+    (* Unconditional, unlike the fields above: `0` is a meaningful value here (no evidence rows
+       at all), not an absence to omit the way `None` is for the optional fields — a consumer
+       that saw the key missing would have no way to distinguish "0 total" from "this producer
+       never set it". See the field's own doc comment on `detail_total` above the [finding] type. *)
+    @ [ ("detail_total", `Int f.detail_total) ]
   in
-  match base with [] -> [] | fields -> [ ("properties", `Assoc fields) ]
+  [ ("properties", `Assoc base) ]
 
 let result_of_finding (f : finding) =
   `Assoc

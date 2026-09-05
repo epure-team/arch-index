@@ -245,6 +245,33 @@ let register_exit_policy () =
         ["--on-unknown"; "--on-possible"; "--on-vacuous"; "--on-not-computed"]) ;
   Lwt.return_unit
 
+(* M3 (round-3 review): `--format`'s typo refusal was verified by hand at review time but had no
+   test of its own — deleting the guard (`if fmt <> "text" && ... then die ...`) passes every
+   other test in this suite unchanged, the same "safest-looking flag removed the check" class the
+   `--on-possible fial` regression above already has a lock for. `--format` deserves the identical
+   one: exit 2, all four valid values named in the diagnostic, and — unlike the policy flags,
+   which only ever print to stderr — stdout must be EMPTY, because a typo'd `--format sarrif`
+   piped straight into a SARIF or JSON consumer must never hand it a human-readable report
+   instead. *)
+let register_format_typo_refused () =
+  Test.register ~__FILE__ ~title:"rules: a misspelled --format aborts rather than falling back to text"
+    ~tags:["rules"; "policy"; "format"]
+  @@ fun () ->
+  let db = Fixture.flat ~name:"rules_format_typo" layered_stream in
+  let rf = rule_file "format_typo" four_rules in
+  Batch.run (fun b ->
+      let code, stdout, stderr = run_command_split (arch_rules ()) [db; rf; "--format"; "sarrif"] in
+      Batch.eq_int b ~msg:"a misspelled --format must exit 2" code 2 ;
+      Batch.check b ~msg:"a misspelled --format must print NOTHING to stdout (never fall back to text)"
+        (String.trim stdout = "") ;
+      List.iter
+        (fun valid ->
+          Batch.contains b
+            ~msg:(Printf.sprintf "the --format refusal message must name %S as a valid value" valid)
+            ~haystack:stderr valid)
+        ["text"; "md"; "json"; "sarif"]) ;
+  Lwt.return_unit
+
 let register_malformed_rules () =
   Test.register ~__FILE__ ~title:"rules: a rule file it cannot parse aborts the gate"
     ~tags:["rules"; "policy"]

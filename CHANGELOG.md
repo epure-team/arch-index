@@ -16,10 +16,11 @@
   runs sharing `(producer, category)`, since GitHub overwrites a run sharing tool+category with a
   later one rather than merging — ahead of roadmap 2.2 (`arch-report`), the caller that will
   actually emit several runs per log. New vendored schema at `vendor/sarif/` (OASIS SARIF
-  spec, draft-04, unrestricted reuse) and a new CI dependency (`pip install jsonschema`, probed
-  before use) to validate output against it.
+  spec, draft-04; a specification artifact under OASIS's own IPR Policy — RF on RAND Terms Mode
+  for TC-member contributions, the OASIS Feedback License for others — not an OSI open-source
+  licence; see `vendor/sarif/README.md` for the full citation) and a new CI dependency
+  (`pip install jsonschema`, probed before use) to validate output against it.
 
-### Added
 - **`scripts/recalibrate.sh` — attribution-gated recalibration of the pinned constants**, and it
   is now wired to something. The two constants this repository pins (the self-index golden in
   `test/fixtures/self-index-stats.txt`, and `must_null_ceiling.ml`'s `clean_measured` ratchet)
