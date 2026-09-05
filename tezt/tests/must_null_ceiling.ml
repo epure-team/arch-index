@@ -246,6 +246,39 @@ let must_null_query =
    Arch_tezt.Temp.file] — is present in this branch's own measurement. The
    difference between the two files is mechanical, not lucky: #87's helper reaches
    a cross-library [Temp.file], this branch's fixture never leaves [Stdlib]. *)
+
+(* Recalibrated 2026-09-06: 383 -> 403. UNLIKE THE THREE ENTRIES ABOVE, ALL OF
+   THIS IS THIS BRANCH'S OWN, and none of it is undeclared main drift. The
+   split is measured, not apportioned, and it closes to the unit.
+
+   +12 in the new bin/arch_mutants/arch_mutant_db.ml, every one a Sqlite3.*
+   call. This is the INERT class the re-scope note above names alongside
+   Stdlib: Sqlite3 is never part of this index, so such a row carries no signal
+   about a resolver miss. The module makes those calls because Arch_db.open_ro
+   is read-only and a campaign has to write.
+
+   +8 in tezt/tests/mutants.ml, every one an Arch_tezt.Temp.file or
+   Arch_tezt.Temp.dir. THESE ARE NOT THE INERT CLASS and are deliberately not
+   filed with the twelve. Arch_tezt is in this repository, so they are exactly
+   the signal-carrying residue this ratchet exists to notice. They grow a shape
+   main already carries — it holds 5 rows of the same two callees in this very
+   file — so this is an addition to a live class, not a new defect, and saying
+   so is the point of separating them.
+
+   Measured by indexing both trees with the same arch_callgraph_ocaml this test
+   uses, not by counting a diff: main at 4e74c72 reads 383, this branch reads
+   403, and the two modules above hold 20 more rows here than there. Counting
+   the diff would have been wrong for a reason worth recording — a lambda's
+   identity encodes its line, so an insertion higher in a file renames every
+   position-named edge below it, and those renames would have netted against
+   real additions to produce a plausible total nobody could attribute.
+
+   403 is what main will measure once this PR lands, per the rule the 2026-09-05
+   entry states. It does NOT account for arch-index-0e's in-flight #88, which
+   moves the same constant: whichever of the two lands second must RE-DERIVE on
+   the tree that exists rather than add its delta to a remembered number. Two
+   branches editing one baseline is the read-then-bump trap, and it merges
+   without a conflict. *)
 let clean_measured = 383
 
 let headroom = 25
