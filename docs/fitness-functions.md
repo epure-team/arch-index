@@ -157,7 +157,18 @@ origins while appearing to police crashes. An independent reviewer measured 1 / 
 own build of the same tree; both are internally consistent and the gap is corpus COVERAGE, not
 disagreement — which is why a number here names its build state and not just its tree.
 
-An unscoped rule reported an option-typed return as a crash site. Forms are `exn_origins.form`'s own vocabulary — `raise`, `reraise`, `unknown`, `failwith`,
+An unscoped rule reported an option-typed return as a crash site.
+
+**And the `option` count is mostly not even that.** Roadmap 3.14 established that
+the walker records a `None` origin for every **omitted optional argument** — the
+`None` the type-checker synthesises, not one anyone wrote — so 51 % of the
+functions carrying `option` origins have no real-position origin at all. The
+default keeps that class out of the gate entirely. It was chosen because
+`exception` is what a crash-surface rule means; that it also excludes a producer
+artefact nobody had diagnosed yet is luck, and worth saying so rather than
+claiming foresight.
+
+Forms are `exn_origins.form`'s own vocabulary — `raise`, `reraise`, `unknown`, `failwith`,
 `invalid_arg`, `assert`, `partial_match`, `compare`, `division`, `index`, `inferred_bind`. An
 unknown form **aborts**: it would select nothing, and the rule would report a PASS while policing
 an empty population. **So does an unknown `channel:`**, for the identical reason — measured before
@@ -210,19 +221,43 @@ The four fields were specified as a site identity and then tested rather than as
 2026-09-05 with `GROUP BY … HAVING count(*) > 1`, on a table that carries **no** `UNIQUE`
 constraint over these columns — so the probe could legitimately have returned zero, and did not:
 
-| corpus | origins | distinct 4-field identities | rows in colliding groups | worst group |
+| corpus (and build state) | origins | distinct identities | rows in colliding groups | worst group |
 |---|---|---|---|---|
-| proto_alpha | 30 526 | 5 305 | **26 901 (88 %)** | 139 |
-| octez-manager | 18 758 | 6 367 | **15 569 (83 %)** | 118 |
-| whole `src` | 265 217 | 116 684 | **169 525 (64 %)** | 139 |
+| proto_alpha, **all rows** | 30 526 | 5 305 | 26 901 (88 %) | 139 |
+| proto_alpha, **rows with a real position** | 3 344 | 3 147 | **281 (8.4 %)** | **9** |
+| octez-manager, all rows | 18 758 | 6 367 | 15 569 (83 %) | 118 |
+| octez-manager, real position | 3 100 | 2 962 | **218 (7.0 %)** | **7** |
+| whole `src`, all rows | 265 217 | 116 684 | 169 525 (64 %) | 139 |
+| whole `src`, real position | 86 198 | 83 665 | **4 196 (4.9 %)** | **9** |
 
-All three rows were measured from indexes built by `origin/main` `0982a42`:
-proto_alpha from `tezos/_build/default/src/proto_alpha/lib_protocol` and the whole
-tree from `tezos/_build/default/src`, both with `--errors-profile=tezos`;
-octez-manager from its own `_build/default`. **The build state belongs with the
-corpus name here for the same reason it does for resolution rates**: how many
-origins exist at all depends on which units were compiled, so a collision count
-is a joint property of the code and the build's coverage — not of the code alone.
+Indexes built by `origin/main` `0982a42`: proto_alpha (500 `.cmt`) and the whole
+tree from `tezos/_build/default` with `--errors-profile=tezos`, octez-manager from
+its own `_build/default`. Build state belongs beside the corpus name because how
+many origins EXIST depends on which units were compiled.
+
+**Read the second row of each pair, and here is why the first is misleading.** An
+investigation into the `option` channel (roadmap 3.14) established that every
+`line = 0` origin is a **phantom**: the walker records a `None` origin for each
+*omitted optional argument*, the `None` that `Typecore.option_none` synthesises
+during type-checking. Those are not `None` returns anyone wrote. Attribution was
+measured at **100 %, zero residue, on two corpora** — proto_alpha 2 402 / 2 402,
+arch-index 394 / 394.
+
+Within one function every such row collapses to `<fn> | <file>:0 | None`, so
+2 158 functions yield **exactly 2 158 identities** — verified here, not assumed.
+The 139-row worst group is one function's phantoms: `receipt_repr.ml`'s
+`balance_and_update_encoding` is a **value**, not a function (`let … =` with no
+parameter at `receipt_repr.ml:235`), so it cannot return `None` at all. Its 139
+rows are the `?title`/`?description` omitted from the `Data_encoding`
+combinators that build it.
+
+**The decision this table supports is unchanged and the argument for it is now
+narrower.** On rows that describe real code, the identity still collides 5–8 % of
+the time with a worst group of **9** — nine origins sharing function, file, line,
+form and exception. A count is still what stops an entry from being a *set*
+exemption. But the 88 % figure argued the point from a producer artefact, and
+would have become false the day 3.14's fix lands (a measured 2 322 → 402 rows,
+−82.7 %).
 
 **And the column does not rescue it**: 26 901 → 26 786 on proto_alpha, 169 525 → 166 584 on the
 whole tree. Under half a percent. A worst group of 139 origins shares one function, file, line,

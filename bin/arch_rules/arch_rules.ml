@@ -77,9 +77,24 @@ let strip_prefix p s = String.sub s (String.length p) (String.length s - String.
    so a collision count is a joint property of the code and the build's coverage,
    never of the code alone.
 
-     proto_alpha     30526 origins / 5305 distinct / 26901 rows (88%) colliding
-     octez-manager   18758        / 6367        / 15569      (83%)
-     whole src      265217        / 116684      / 169525     (64%)
+                            all rows            rows with a real position
+     proto_alpha     30526 / 26901 colliding    3344 / 281 (8.4%), worst 9
+     octez-manager   18758 / 15569 (83%)        3100 / 218 (7.0%), worst 7
+     whole src      265217 / 169525 (64%)      86198 / 4196 (4.9%), worst 9
+
+   READ THE SECOND COLUMN. Every line = 0 origin is a PHANTOM: the walker records
+   a None origin for each OMITTED OPTIONAL ARGUMENT -- the None Typecore
+   synthesises during type-checking, not one anyone wrote. Attributed at 100%,
+   zero residue, on two corpora (roadmap 3.14). Within a function they all
+   collapse to one identity, so 2158 functions yield exactly 2158 identities
+   (verified). The 139-row worst group is one value's phantoms:
+   receipt_repr.ml's balance_and_update_encoding is a VALUE, not a function, so
+   it cannot return None at all.
+
+   The decision stands on the narrower number: on rows describing real code the
+   identity still collides 5-8% of the time with a worst group of NINE, which is
+   still a set exemption waiting to grow. But the 88% argued it from a producer
+   artefact and would have gone false the day 3.14 lands.
 
    Adding the COLUMN does not rescue it (26901 -> 26786 on proto_alpha): 139
    origins can share a function, file, line, form and exception. So no positional
