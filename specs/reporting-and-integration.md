@@ -56,9 +56,26 @@ and `arch-mcp` (stdio JSON-RPC for agents). Ingest is `arch-load` / `arch-covera
 - **FR-011** `arch-scip-load <index.scip>` imports symbols and references. Call-like references
   become `MAY_ENUMERATED` edges attributed to the SCIP producer. **Never `MUST`** — an indexer's
   reference is not a proof of unique resolution.
-- **FR-012** An adapter that cannot parse its input **fails loudly and writes nothing**. A partial
+- **FR-012** An adapter that cannot parse its input **fails loudly and writes no facts**. A partial
   import is recorded as `status = partial` in `analysis_coverage` with the count of rejected
   records, reusing the per-table rejection attribution already in `Arch_index_db`.
+
+  **Clarified 2026-09-05, because "writes nothing" and CHECK-3 cannot both be met literally.**
+  CHECK-3 asks for *no rows written* **and** a coverage row, and a coverage row is a row. The two
+  scopes differ and the clause now says which: *writes no **facts***. A coverage row is a write
+  about the **failure**, never about the program under analysis — a distinction this requirement
+  already relies on, since its own second sentence mandates writing one in the partial case.
+
+  **"Writes no facts" is a TRANSACTIONAL claim, and the obvious implementation breaks it.**
+  Streaming records and stopping at the bad one leaves every earlier record written. `Arch_db` has
+  no transaction support (no `BEGIN`/`COMMIT`/`ROLLBACK` anywhere in the tree), so the guarantee is
+  met by **parsing the whole input before opening a write**: nothing is written until the input is
+  known good, so a mid-file failure never reaches the writer. Stated as the mechanism rather than
+  left to be chosen, because "stop on error" satisfies the sentence's words and not its intent.
+
+  **Residual, named rather than assumed away:** parse-then-write does not protect against a
+  *write* failing part-way (a constraint violation, a full disk). That needs a transaction, this
+  adapter does not provide one, and it is not closed here.
 - **FR-013** Adapter selection favours free/open-source and fast tools. Reference set: Semgrep OSS,
   clippy, staticcheck, gosec, osv-scanner, Trivy, tree-sitter. CodeQL is out of scope (ADR 002).
 
@@ -112,14 +129,26 @@ and `arch-mcp` (stdio JSON-RPC for agents). Ingest is `arch-load` / `arch-covera
 - **CHECK-2** Index a polyglot fixture with an adapter available for one language only; assert the
   report renders `NOT_ANALYSED` for the other and that no query returns a bare empty result.
 - **CHECK-3** *(roadmap 2.3, the ingest slice — NOT verifiable by 2.2.)* Feed a malformed SARIF;
-  assert non-zero exit, no rows written, and a `partial` or `failed` coverage row. Requires FR-012,
+  assert non-zero exit, **no fact rows written**, and a `failed` coverage row. Requires FR-012,
   which the ingest slice (2.3) owns.
 
-**Which checks 2.2 owns.** CHECK-2, CHECK-4 and CHECK-5 exercise the report; CHECK-1 and CHECK-3
-exercise the ingest adapters. This list previously read as five obligations on one slice, in a
-document that declares the adapters unwritten a few paragraphs above — the kind of contradiction a
-long document sustains because nobody reads it end to end. Stated here so the next reader is not
-the one who discovers it at review time.
+  **Split 2026-09-05.** The original read "a `partial` or `failed` coverage row" for a malformed
+  input, conflating the two situations FR-012 keeps apart: an input that cannot be parsed is
+  `failed`; `partial` belongs to an input that parsed while some records were rejected. Offered as
+  alternatives, an implementation satisfies the check with either — and one of the two would be a
+  lie about what happened.
+
+- **CHECK-3-bis** *(roadmap 2.3, the ingest slice — NOT verifiable by 2.2.)* Feed a SARIF that
+  parses but carries records the adapter refuses (an unknown `level`, a `uri` matching no indexed
+  file); assert exit **0**, the accepted records written, a `partial` coverage row, and a rejected
+  count equal to the number refused. This is the case `partial` exists for; without it, `partial`
+  is a status nothing ever produces.
+
+**Which checks 2.2 owns.** CHECK-2, CHECK-4 and CHECK-5 exercise the report; CHECK-1, CHECK-3 and
+CHECK-3-bis exercise the ingest adapters. This list previously read as five obligations on one
+slice, in a document that declares the adapters unwritten a few paragraphs above — the kind of
+contradiction a long document sustains because nobody reads it end to end. Stated here so the next
+reader is not the one who discovers it at review time.
 - **CHECK-4** `report.sarif` validates against the published 2.1.0 schema.
 - **CHECK-5** Round-trip: every finding in `report.json` appears in `report.sarif` and in the
   rendered HTML, with identical provenance.
