@@ -70,11 +70,29 @@ meant to fire inside the driver too, that is a gap flagged rather than closed qu
 
 ## Quality Gates
 
-Measured in this worktree at branch commit `ec5f23b` plus the uncommitted work, full build, opam
-switch `/home/mathias/dev/arch-index`:
+Re-measured at branch commit `c5ce100` on 2026-09-06T02:55:00+02:00, full build, opam switch
+`/home/mathias/dev/arch-index`:
 
 - Build: `dune build` → exit 0 ✅
-- Tests: `dune test --force` → **193 SUCCESS, 0 FAILURE** ✅ (baseline 188, five new)
+- Tests: **217 of 217 cases executed, 216 SUCCESS, 1 FAILURE.** The single failure is the
+  MUST-with-NULL-callee ceiling at 373 against 372, with `calls=17551` on the same log line. It
+  is main's undeclared drift, not this branch's rows, and #83 clears it.
+
+  **The count required `--keep-going`, and that is not a detail.** `dune test --force` stops at
+  the first failure: it reported exit 1 having run **156 of 217** cases, leaving 61 unexecuted
+  with nothing in the output saying so. Only
+  `./_build/default/tezt/tests/main.exe --keep-going` produced the full 217. The defect is
+  asymmetric — a green run is unaffected, because nothing stopped it — so a **red** run from the
+  standard gate reports a lower bound on failures and says nothing about how many cases never
+  ran. Carried to the roadmap session as a repo-wide gate finding; it is not a 3.13 item and does
+  not travel on this branch.
+
+**An earlier figure in this section is withdrawn, not corrected.** It read
+"`dune test --force` → 193 SUCCESS, 0 FAILURE (baseline 188, five new)", measured at `ec5f23b`.
+That commit is a pre-rebase revision on neither `main` nor this branch, and `main` gained 42
+commits between it and `ba2804a`, absorbed by the rebase. So 193 and 217 are not comparable and
+the growth is main's, not this branch's. It is withdrawn with its commit and its reason rather
+than restated, because a corrected number invites the same comparison a second time.
 - Format: not documented for this project — no `.ocamlformat`, no `ocamlformat` in the switch. No
   gate to satisfy and none to break; not invented.
 - `scripts/check-quint-red.sh` → 6/6 mutations caught ✅
