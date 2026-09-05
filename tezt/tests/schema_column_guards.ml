@@ -5,27 +5,37 @@
 (*                                                                            *)
 (******************************************************************************)
 
-(** Consumers that SELECT a column added at schema 1.8 (or any later schema)
-    without asking whether it exists. On an older index this is not "finds
-    nothing" — Caqti/sqlite raise [no such column]/[no such table], which
-    surfaced as an uncaught {!Arch_tools.Arch_db.Broken}: exit 2, no
-    actionable diagnostic, indistinguishable from a locked or corrupt file.
+(** {b A newer binary reading an older index.} That is the class — not, as this file and
+    its PR first said, "the [channel] column that arrived at schema 1.8". A tool compiled
+    today names columns and tables its query was written against; an index built by an
+    older producer does not have all of them, and Caqti/sqlite answer
+    [no such column]/[no such table]. This is not "finds nothing": it surfaced as an
+    uncaught {!Arch_tools.Arch_db.Broken}, exit 2, with no actionable diagnostic and
+    nothing to tell it apart from a locked or corrupt file.
 
-    Two things are pinned here:
+    [exn_scopes.channel]/[exn_origins.channel] is where the class was FOUND, and five
+    guarded sites is the right count {i for that column}. It is not the count for the
+    class, and the class is not confined to 1.8: the first unguarded column the general
+    backstop catches on the fixture below is [functions.exposed], read by
+    [Arch_graph.load] and far older than the error-channels work. Any prose that scopes
+    this measure to [channel] or to 1.8 is describing the symptom that led here.
 
-    - the two known crash sites ([raises] and [escaping-origins], both
-      driven by [exn_scopes.channel]/[exn_origins.channel], an error-channels
-      column added at schema 1.8) now REFUSE (exit 3) with a message naming what is missing,
-      on a fixture that genuinely lacks the column and genuinely reaches
-      the query — checked by PRAGMA before running the CLI at all, so this
-      test cannot pass by accident on a fixture the guard never sees;
-    - the BACKSTOP in {!Arch_tools.Arch_db.ok}: even a site with no
-      per-command guard at all must convert the raw sqlite error into a
-      {!Arch_tools.Arch_db.Refused} naming the missing column, not crash
-      as {!Arch_tools.Arch_db.Broken}. Exercised directly against the
-      library function, independent of any command-level guard, since the
-      whole point of the backstop is to cover sites nobody has guarded
-      yet. *)
+    Three things are pinned:
+
+    - the two scoped guards ([raises] and [escaping-origins], both driven by the
+      [channel] column) REFUSE (exit 3) with a message naming what is missing, on a
+      fixture that genuinely lacks the column and genuinely reaches the query — checked
+      by PRAGMA before running the CLI at all, so this test cannot pass by accident on a
+      fixture the guard never sees;
+    - the BACKSTOP in {!Arch_tools.Arch_db.ok}: a site with no per-command guard at all
+      must convert the raw sqlite error into a {!Arch_tools.Arch_db.Refused} naming the
+      missing column {i or table} (both branches, separately), not crash as
+      {!Arch_tools.Arch_db.Broken}. Exercised directly against the library function,
+      independent of any command-level guard, since the whole point of the backstop is to
+      cover sites nobody has guarded yet;
+    - the DELIVERY of that message by the four binaries that map a refusal to exit 2
+      ([arch-impact], [arch-rules], [arch-coverage], [arch-mutants]) — which for a
+      query-time refusal used to be no delivery at all. *)
 
 open Arch_tezt
 
@@ -252,7 +262,71 @@ let register_ok_backstop_refuses_unguarded_missing_table () =
       | exception e -> Batch.note b "unexpected exception: %s" (Printexc.to_string e)) ;
   Lwt.return_unit
 
+(* The backstop's message has to REACH a user, and in four binaries it did not.
+
+   [arch-impact], [arch-rules], [arch-coverage] and [arch-mutants] each caught
+   {!Arch_tools.Arch_db.Refused}/[Broken] around [Arch_db.open_ro] and nowhere else, so a
+   refusal raised by any LATER query escaped the process and came out through OCaml's
+   uncaught-exception path: [Fatal error: exception Arch_tools.Arch_db.Refused("…")]. The
+   diagnostic was in there, wrapped in a crash dump, with no tool prefix.
+
+   {b The exit code cannot be the assertion here.} It is 2 with the handler and 2 without
+   it — deliberately, since exit 3 is a contract only [arch-query] and [arch-report] have
+   signed (see the per-binary note in lib/arch_tools/arch_db.ml). A test that checked only
+   the code would be green either way. What discriminates is the RENDERING: the handler
+   prints "[tool]: [message]", the uncaught path prints "Fatal error: exception". Both are
+   asserted, in both directions.
+
+   Each tool is driven to a query that runs AFTER [open_ro] succeeds — all four reach
+   [Arch_graph.load], which selects [functions.exposed], a column this fixture lacks. That
+   is also the point about the class: the escaping column is [exposed], not [channel], and
+   it is far older than schema 1.8. The backstop is not a channel measure; it covers any
+   column a newer binary reads from an older index. *)
+let register_query_time_refusal_is_rendered_not_dumped () =
+  Test.register ~__FILE__
+    ~title:"arch-impact/rules/coverage/mutants: a query-time Refused is rendered as a diagnostic, not dumped as an uncaught exception"
+    ~tags:["arch_db"; "schema"; "regression"; "backstop"; "exit_codes"]
+  @@ fun () ->
+  let db = Fixture.raw ~name:"query_time_refusal" pre_channel_sql in
+  (* The fixture must genuinely lack the column the escaping query reads — otherwise every
+     tool below answers normally and the test passes by never reaching the handler. *)
+  Db.with_db db (fun conn ->
+      let cols = Db.strings conn "SELECT name FROM pragma_table_info('functions')" in
+      if List.mem "exposed" cols then
+        Test.fail "fixture invariant violated: functions.exposed exists, so no query escapes: %s"
+          (String.concat "," cols)) ;
+  let lcov = Temp.file "pre_channel.lcov" in
+  write_file lcov "TN:\nSF:src/a.ml\nDA:1,1\nend_of_record\n" ;
+  let rules = Temp.file "pre_channel_rules.txt" in
+  write_file rules "rule \"no raise origins in g\"\n  forbid origin from fn:g form:raise allow-file:/dev/null\n" ;
+  let cases =
+    [ ("arch-impact", arch_impact (), [db; "--files"; "src/a.ml"]);
+      ("arch-rules", arch_rules (), [db; rules]);
+      ("arch-coverage", arch_coverage (), [db; lcov]);
+      ("arch-mutants", arch_mutants (), ["plan"; db]) ]
+  in
+  Batch.run (fun b ->
+      List.iter
+        (fun (name, prog, args) ->
+          let code, output = run_command prog args in
+          Batch.exit_code b
+            ~msg:(Printf.sprintf "%s: a schema-drift refusal aborts at 2 — exit 3 belongs to \
+                                  arch-query/arch-report alone" name)
+            ~expected:2 (code, output) ;
+          Batch.not_contains b
+            ~msg:(Printf.sprintf "%s: must not reach OCaml's uncaught-exception path" name)
+            ~haystack:output "Fatal error" ;
+          Batch.contains b
+            ~msg:(Printf.sprintf "%s: the refusal must be printed as this tool's own diagnostic" name)
+            ~haystack:output (name ^ ": this index predates column") ;
+          Batch.not_contains b
+            ~msg:(Printf.sprintf "%s: must not surface the raw sqlite error" name)
+            ~haystack:output "no such column")
+        cases) ;
+  Lwt.return_unit
+
 let register () =
+  register_query_time_refusal_is_rendered_not_dumped () ;
   register_raises_refuses_on_pre_channel_index () ;
   register_escaping_origins_refuses_on_pre_channel_index () ;
   register_ok_backstop_refuses_unguarded_missing_column () ;
