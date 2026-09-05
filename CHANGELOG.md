@@ -2,6 +2,38 @@
 
 ## [Unreleased]
 
+### Fixed
+- **A column that arrived in a later schema refuses instead of crashing, and the refusal names
+  what is missing.** `Arch_db.ok` converts the driver's `no such column: …` / `no such table: …`
+  into `Arch_db.Refused` rather than `Arch_db.Broken`, extracting the name and reporting "this
+  index predates column *X*" — a backstop for every query site that has no `has_col` guard of its
+  own, not a replacement for the two scoped guards (`raises`, `escaping-origins`) that give a
+  better-worded refusal. A qualified reference keeps its alias in parentheses
+  (`column channel (written s.channel in the failing query)`): both `exn_scopes` and `exn_origins`
+  carry `channel`, so the bare name alone does not say which of a query's tables was the old one.
+
+  **The conversion improves the MESSAGE everywhere; it does not make every binary exit 3.** Exit 3
+  is a contract each tool signs separately and only `arch-query` and `arch-report` have signed it.
+  `arch-impact` keeps exit 2 because `docs/change-impact.md` pins its exit 3 to the
+  `--fail-on-new-findings` refusal and keeps it in lockstep with the JSON `verdict` field, on the
+  stated ground that exit 2 is the code that prints no stdout to parse; `arch-rules` keeps exit 2
+  because `docs/fitness-functions.md` states it has no process-level sound-refusal path, and its
+  own vocabulary refusals already abort at 2. An earlier revision of this backstop's comment
+  claimed exit 3 for all of them; it now says which four tools get only the better message.
+
+  **In four of those tools the message was not even reaching the user.** `arch-impact`,
+  `arch-rules`, `arch-coverage` and `arch-mutants` caught `Refused`/`Broken` around `open_ro`
+  only, so a refusal raised by any LATER query escaped the binary and came out through OCaml's
+  uncaught-exception path — `Fatal error: exception Arch_tools.Arch_db.Refused("…")`, exit 2.
+  Each now wraps its whole `main`, printing the same `tool: message` line their `open_ro` handler
+  already printed. **No exit code changes**: 2 before, 2 after.
+
+- **`arch-query raises`/`escaping-origins` name the table that is actually missing.** The
+  pre-1.8-schema refusal was built from a conjunction over `exn_scopes` and `exn_origins`, so it
+  named both tables even when only one lacked `channel`, and — because `has_col` also answers
+  `false` for a table that does not exist — reported an absent `exn_scopes` as a column that
+  "predates" schema 1.8. Those are different repairs, and the message now distinguishes them.
+
 ### Added
 - **`arch-report <db> --out <dir>` — one query pass, three artifacts** (roadmap 2.2,
   `specs/reporting-and-integration.md`). Writes `report.json` (the machine contract),

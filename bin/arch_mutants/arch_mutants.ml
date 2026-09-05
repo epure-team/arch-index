@@ -435,7 +435,7 @@ let report (g : Arch_graph.t) mutants test_keys repo fmt maxlist =
 
 (* ------------------------------------------------------------------ *)
 
-let () =
+let main () =
   let args = List.tl (Array.to_list Sys.argv) in
   let opt name default =
     let rec go = function a :: v :: _ when a = name -> v | _ :: tl -> go tl | [] -> default in
@@ -516,3 +516,11 @@ let () =
   | _ ->
       prerr_endline usage ;
       exit 2
+
+(* The [open_ro] handler inside [main] covers exactly one call. A
+   {!Arch_tools.Arch_db.Refused} raised by a LATER query — the schema-drift backstop in
+   [Arch_db.ok] fires at any of them — escaped this binary altogether and was reported by
+   OCaml's uncaught-exception path: a [Fatal error: exception …] dump at exit 2. This
+   tool has no exit-3 contract (see the per-binary note in lib/arch_tools/arch_db.ml), so
+   the code stays 2 and only the rendering changes. *)
+let () = try main () with Arch_db.Refused m | Arch_db.Broken m -> die ("arch-mutants: " ^ m)

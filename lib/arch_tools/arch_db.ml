@@ -102,12 +102,36 @@ open Caqti_request.Infix
    yet — every consumer that skips a [has_col]/[has_table] guard and gets it wrong hits
    this. Left as {!Broken} (exit 2) it is indistinguishable from a locked file or a
    corrupt database: a crash, not an answer. Matching it here converts EVERY such site —
-   including the ones no guard has been written for yet — into a {!Refused} (exit 3)
-   that names the missing column/table and says the index predates it, which is a verdict
-   the CI gates already know how to report. This does not replace a targeted [has_col]
-   guard (which can give a better-scoped message and let the caller answer something else
-   instead of refusing outright) — it is the backstop for what a guard was not written
-   for.
+   including the ones no guard has been written for yet — into a {!Refused} that names
+   the missing column/table and says the index predates it. This does not replace a
+   targeted [has_col] guard (which can give a better-scoped message and let the caller
+   answer something else instead of refusing outright) — it is the backstop for what a
+   guard was not written for.
+
+   {b What this backstop does and does not change, per binary.} It improves the MESSAGE
+   everywhere; it does NOT make every binary exit 3, and an earlier version of this
+   comment claimed it did. Exit 3 is not a repo-wide convention — it is a contract each
+   tool signs separately, and only two have:
+
+   - [arch-query] and [arch-report] map a query-time {!Refused} to exit 3 (see their
+     [die 3] handlers). There the conversion really does turn a crash into a verdict.
+   - [arch-impact] deliberately does not: [docs/change-impact.md] pins exit 3 to the
+     [--fail-on-new-findings] refusal and keeps it in LOCKSTEP with the JSON [verdict]
+     field, on the stated ground that exit 2 is the code with no stdout to parse. A
+     schema-drift exit 3 printing no JSON would be exactly the confusion that section
+     forbids.
+   - [arch-rules] deliberately does not: [docs/fitness-functions.md] states it has no
+     process-level sound-refusal path, and the tool already routes its own
+     refusal-shaped aborts (an unknown [channel:], an undeclared origin [form:]) through
+     [die] at exit 2. One refusal cause exiting 3 while its siblings exit 2 would make
+     the tool's own exit vocabulary incoherent.
+   - [arch-coverage] and [arch-mutants] follow the same [die]-at-2 convention.
+
+   So in those four, a schema-drift {!Refused} is reported as an abort at exit 2 — but
+   with THIS message rather than a raw [Sqlite3.prepare: no such column] or (before the
+   top-level handlers were added alongside this comment) an uncaught
+   [Fatal error: exception Arch_tools.Arch_db.Refused(…)] dump. That is the whole of what
+   the backstop buys them, and it is worth having on its own.
 
    This also catches a genuine SQL typo in repo-authored code (a column name that never
    existed in ANY schema version), reported the same way as a real version-drift miss —
@@ -155,11 +179,23 @@ let missing_schema_ref msg =
   (* sqlite qualifies a column with its table alias ("s.channel") and can qualify a table with
      its schema ("main.nosuch"); report the bare name in both cases. *)
   let bare_name s = match String.rindex_opt s '.' with Some i -> String.sub s (i + 1) (String.length s - i - 1) | None -> s in
+  (* LOW-1: report the bare name AND, when they differ, the qualified token the query
+     actually used. Two tables can carry a column of the same name (both [exn_scopes] and
+     [exn_origins] carry [channel]), so "column channel" alone does not say WHICH of the
+     query's tables was the old one — and the alias is often the only thing in the message
+     that points back at a line of SQL. The bare name stays first because it is the name a
+     reader greps the schema for; the alias is parenthetical because it is a coordinate in
+     the failing query, not a schema fact. *)
+  let describe kind raw =
+    let bare = bare_name raw in
+    if bare = raw then Printf.sprintf "%s %s" kind bare
+    else Printf.sprintf "%s %s (written %s in the failing query)" kind bare raw
+  in
   match token_after "no such column: " with
-  | Some col -> Some (Printf.sprintf "column %s" (bare_name (strip_trailing_dot col)))
+  | Some col -> Some (describe "column" (strip_trailing_dot col))
   | None -> (
       match token_after "no such table: " with
-      | Some tbl -> Some (Printf.sprintf "table %s" (bare_name (strip_trailing_dot tbl)))
+      | Some tbl -> Some (describe "table" (strip_trailing_dot tbl))
       | None -> None)
 
 let ok = function
