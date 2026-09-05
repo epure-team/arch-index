@@ -214,7 +214,10 @@ Top rewrites are the flagship cases: `S.safe_int → Saturation_repr` (1 323),
   key field.
 
 **Precedent in the tree, deliberately followed.** `build_local_alias_stamps`
-(`arch_index_cmt.ml:1004`) already does exactly this shape for *value* aliases:
+in `lib/arch_index/arch_index_cmt.ml` — cited by BINDING rather than by line,
+because the line moved under three rebases the same day this was written, and a
+bare number is a coordinate without a system — already does exactly this shape
+for *value* aliases:
 stamp-keyed, built with `iter_structure_items ~f:(fun ~prefix …)` so nested
 binders are included, and handed to `collect_calls_from_expr` as an optional
 argument. The module-alias table is its sibling and MUST mirror it, so that the
