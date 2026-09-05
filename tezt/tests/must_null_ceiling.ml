@@ -209,6 +209,39 @@ let must_null_query =
    its LINE, and the recalibration above moved every line in this file. Counting would have
    netted the two to +1 and looked right for the wrong reason; re-measured against the tree that
    exists, there is one difference and it is the new one. *)
+(* NOT recalibrated by feat/escaping-origins-exported (PR #88): the delta is ZERO,
+   and this note exists so that zero can be told apart from "nobody measured".
+
+   383 is unchanged from the entry directly above. Evidence, in the order that
+   makes the zero decidable:
+
+   - [scripts/recalibrate.sh --explain] against merge-base 4e74c72 reports 383 in
+     ALL FOUR cells (A = B = C = D), so both the source delta (C - A) and the
+     behaviour delta (B - A) are 0 — this branch changes production code in
+     [bin/arch_query/arch_query.ml], so B = A is a claim worth having, not a
+     formality.
+   - ROW-SET diff, not a count. Against 4e74c72 the branch adds zero rows and removes
+     zero. The one textual difference in the whole 383 is a RENAME, and it is this
+     note's own doing: the [Arch_tezt.Log.info] call inside [register]'s nested
+     lambda below carries a position-encoded name, so inserting prose above it
+     changes its identity without changing anything about the code. A count alone
+     would have read +0 whether that line were a rename or a real addition
+     cancelling a real deletion — which is why the diff is over the row SET.
+     Deliberately cited by BINDING rather than by [<fun:LINE:COL>]: quoting the
+     coordinates would put a number here that this very comment's length decides,
+     and it would be wrong again after the next word added above it.
+
+   The PRESENCE PREMISE, because a metric that never saw the new code reports zero
+   exactly like a metric that saw it and found nothing: [escaping_origins_exported.ml]
+   IS in the index (18 functions, 73 calls). It contributes 13 MUST-with-NULL rows
+   and every one is excluded by name — [Stdlib.Printf.sprintf] x7, [Stdlib.>=] x3,
+   [Stdlib.not] x2, [Stdlib.<>] x1.
+
+   The CONTROL that proves a new test file's row would have been counted: the row
+   this metric gained from #87's new file — [flat_exported_selector.ml:rule_file ->
+   Arch_tezt.Temp.file] — is present in this branch's own measurement. The
+   difference between the two files is mechanical, not lucky: #87's helper reaches
+   a cross-library [Temp.file], this branch's fixture never leaves [Stdlib]. *)
 let clean_measured = 383
 
 let headroom = 25
