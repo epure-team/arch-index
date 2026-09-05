@@ -243,9 +243,16 @@ let take n l = List.filteri (fun i _ -> i < n) l
    ['#'..id], resolved straight back to [calls.caller_id]; [Flat] keys as the function's own
    name, resolved through [calls.caller_name]. Either lookup that finds nothing (a malformed or
    foreign DB, or a key this function cannot parse) degrades to [[]] rather than raising — this
-   is best-effort provenance for a SARIF property bag, never a correctness-critical path. *)
+   is best-effort provenance for a SARIF property bag, never a correctness-critical path.
+
+   [calls.top_reason] itself is roadmap 1.4 (landed after this feature's own MAY_TOP support),
+   so every index built before it — and the FLAT schema's own LSP-backend writer, which never
+   emits [MAY_TOP] today but is one change away — has [kind] and [MAY_TOP] edges with no
+   [top_reason] column at all. Querying a column that does not exist is a `no such column` SQL
+   error, not "finds nothing": gated explicitly via {!Arch_db.has_col}, checked once, ahead of
+   the schema match below, so both branches share the guard. *)
 let top_reasons_for (t : Arch_db.t) (g : Arch_graph.t) keys =
-  if keys = [] then []
+  if keys = [] || not (Arch_db.has_col t "calls" "top_reason") then []
   else
     let distinct_reasons sql json =
       Arch_db.rows t ~params_ty:Arch_db.Ty.string ~shape:Arch_db.Rows.t1 ~to_cells:Arch_db.Rows.c1 sql json
@@ -617,13 +624,19 @@ let producer_info (t : Arch_db.t) =
       | Some p -> (p, Arch_db.meta t "producer_version")
       | None -> ("arch-index", None))
 
-(* Same provenance-read discipline as {!producer_info} (MAIN's [producer_runs] preferred, FLAT's
-   [comment_db_meta] fallback), but for the ADR-002 soundness class rather than the producer
-   identity. Every [arch-load] DB carries this key (it always writes one — see
+(* Reads the ADR-002 soundness class the same two places {!producer_info} reads provenance from
+   (MAIN's [producer_runs], FLAT's [comment_db_meta]) — but WITHOUT that function's fallthrough:
+   [producer_info] tries [producer_runs] first and falls through to [comment_db_meta] when it
+   yields no row; this function does not — on MAIN with a [producer_runs] table present, a query
+   that finds no row (or an empty [soundness_class] cell) returns [None] directly, never checking
+   [comment_db_meta]. Latent today: no in-repo MAIN producer writes [soundness_class] to
+   [comment_db_meta], so the gap has never been observed to lose a real value — but if one ever
+   does, this reads as "no soundness class" rather than falling back the way [producer_info]
+   would. Every [arch-load] DB (FLAT) carries this key unconditionally (see
    [bin/arch_load/arch_load.ml]'s own comment), and the docs advertise
    [properties.soundness_class] for FR-022 filtering; a hardcoded [None] here would silently
-   defeat that filter on every real index. [None] only for a pre-1.2 MAIN index with neither
-   source populated. *)
+   defeat that filter on every real index. [None] otherwise only for a pre-1.2 MAIN index with
+   neither source populated. *)
 let soundness_class_info (t : Arch_db.t) =
   if t.Arch_db.schema = Arch_db.Main && Arch_db.has_table t "producer_runs" then
     match

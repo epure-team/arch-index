@@ -887,8 +887,11 @@ let register_duplicate_category_rejected () =
 (* A future SARIF-in adapter (roadmap 2.3) constructs {!Arch_tools.Arch_sarif.finding} values
    with [soundness_class = Some "heuristic"] directly — this is the writer-level guarantee that
    the field round-trips into `properties.soundness_class` (spec FR-022: "a heuristic fact
-   carries that in its properties bag so a consumer can filter"), checked once here rather than
-   only implicitly through arch-rules, which never sets this field itself. *)
+   carries that in its properties bag so a consumer can filter"), checked once here at the
+   {!Arch_sarif} writer level directly, independent of arch-rules' own soundness_class plumbing
+   (`arch-rules` DOES set this field itself — see `register_flat_provenance_round_trip` below —
+   it is `"heuristic"` on any plain `arch-load` index; this test exists to cover the roadmap 2.3
+   adapter's path through the same writer, not to claim arch-rules never populates it). *)
 let register_heuristic_soundness_class () =
   Test.register ~__FILE__ ~title:"sarif: a finding's soundness_class=heuristic round-trips into properties"
     ~tags:["sarif"; "heuristic"]
@@ -1030,7 +1033,13 @@ INSERT INTO calls VALUES ('pure.calc','src/pure/calc.ts','pure.inner','src/pure/
               | Some (`Assoc _ as m) -> (
                   match Json.member "text" m with
                   | Some (`String text) ->
-                      Batch.contains b ~msg:"message.text must name the rule (\"l\")" ~haystack:text "l" ;
+                      (* "l" alone is a one-character needle almost any message satisfies —
+                         asserting the rule-name channel specifically (the "%s [%s]: " prefix
+                         `message_of` builds) so a mutant dropping the rule name has its own
+                         failing assertion instead of hiding behind the verdict/note checks
+                         below. *)
+                      Batch.contains b ~msg:"message.text must name the rule (\"l\")" ~haystack:text
+                        "l [reach]: " ;
                       Batch.contains b ~msg:"message.text must name the verdict"
                         ~haystack:text "UNKNOWN_NO_CONTRACT" ;
                       Batch.contains b
@@ -1205,6 +1214,91 @@ let register_detail_total_property () =
               | None -> Batch.note b "result has no properties bag at all"))) ;
   Lwt.return_unit
 
+(* BLOCKING (PR #76 round 4) — `top_reasons_for` (arch_rules.ml) queried `calls.top_reason`
+   unconditionally. `calls.top_reason` is roadmap 1.4, landed AFTER MAY_TOP support itself, so any
+   index built before it — every pre-1.4 `arch-load` output on disk, and the FLAT schema is
+   exactly what that producer writes — has `kind` and MAY_TOP edges but no `top_reason` column at
+   all. Querying a column that does not exist is `no such column: top_reason`, an uncaught
+   `Arch_db.Broken` that reaches BOTH `--format sarif` and the default `--format text`: this
+   fixture is built with {!Fixture.raw} (not {!Fixture.flat}/`arch-load`, which always writes the
+   column now), verified below to genuinely lack `top_reason`, and drives the default text path,
+   not sarif, because the crash was never confined to sarif. Before the fix this raised
+   `Arch_tools.Arch_db.Broken("... no such column: top_reason ...")` with exit 2; delete the
+   `Arch_db.has_col` guard in `top_reasons_for` and this goes red again. *)
+let register_top_reasons_missing_column_degrades () =
+  Test.register ~__FILE__
+    ~title:"rules: an UNKNOWN verdict on an index with kind but no top_reason column does not crash"
+    ~tags:["sarif"; "rules"; "top_reason"; "regression"]
+  @@ fun () ->
+  let db =
+    Fixture.raw ~name:"top_reason_missing_column"
+      {|
+CREATE TABLE functions(name TEXT, file_path TEXT, exported INTEGER DEFAULT 0,
+                       line_start INTEGER, line_end INTEGER);
+CREATE TABLE calls(caller_name TEXT, caller_file TEXT, callee_name TEXT, callee_file TEXT,
+                   call_site TEXT, kind TEXT);
+CREATE TABLE comment_db_meta(key TEXT, value TEXT);
+INSERT INTO comment_db_meta VALUES ('callgraph_contract','1');
+INSERT INTO functions(name,file_path) VALUES ('job.run','src/job/run.ts'),
+                                             ('db.write','lib/db/write.ts');
+INSERT INTO calls(caller_name,caller_file,callee_name,callee_file,call_site,kind) VALUES
+  ('job.run','src/job/run.ts','*TOP*',NULL,'src/job/run.ts:3','MAY_TOP');
+|}
+  in
+  (* Guard against the class this brief calls out by name: a fixture whose own filter hides the
+     thing under test. Fail loudly, before running arch-rules at all, if the column exists (the
+     test would then prove nothing) or the seed rows are missing (no MAY_TOP edge means no
+     UNKNOWN, and the crash path is never reached either). *)
+  Db.with_db db (fun conn ->
+      let cols = Db.strings conn "SELECT name FROM pragma_table_info('calls')" in
+      if List.mem "top_reason" cols then
+        Test.fail
+          "fixture invariant violated: 'calls' has a top_reason column after all — this test \
+           would no longer exercise the missing-column path: %s"
+          (String.concat "," cols) ;
+      let n = Db.int conn "SELECT count(*) FROM calls WHERE kind='MAY_TOP'" in
+      if n <> 1 then
+        Test.fail "fixture invariant violated: expected exactly one MAY_TOP edge, got %d" n) ;
+  let rf =
+    rule_file "top_reason_missing_column"
+      "rule \"l\"\n  forbid reach from file:src/job/** to file:lib/db/**\n"
+  in
+  let code, output = rules [db; rf] in
+  Batch.run (fun b ->
+      Batch.exit_code b ~msg:"arch-rules exit code (must not crash on a missing top_reason column)"
+        ~expected:0 (code, output) ;
+      Batch.contains b ~msg:"stdout must show the UNKNOWN verdict" ~haystack:output "[UNKNOWN] l" ;
+      Batch.not_contains b ~msg:"must not raise an uncaught OCaml exception" ~haystack:output
+        "Fatal error" ;
+      Batch.not_contains b ~msg:"must not surface the raw SQL error" ~haystack:output
+        "no such column") ;
+  (* Same fixture, `--format sarif`: the reviewer's finding is that the crash is NOT confined to
+     sarif, but sarif is the format whose `properties.top_reason` this function feeds, so also
+     confirm the sarif path degrades to an absent property rather than crashing. *)
+  let code, output = rules [db; rf; "--format"; "sarif"] in
+  Batch.run (fun b ->
+      Batch.exit_code b ~msg:"arch-rules --format sarif exit code" ~expected:0 (code, output) ;
+      match sarif_json b ~what:"sarif output" output with
+      | None -> ()
+      | Some j -> (
+          match find_result j ~rule_id:"l" with
+          | None -> Batch.note b "the UNKNOWN rule has no SARIF result at all"
+          | Some r -> (
+              match Json.member "properties" r with
+              | None -> Batch.note b "result has no properties bag at all"
+              | Some props ->
+                  Batch.eq_string_opt b ~msg:"properties.verdict"
+                    (match Json.member "verdict" props with Some (`String s) -> Some s | _ -> None)
+                    (Some "UNKNOWN") ;
+                  (match Json.member "top_reason" props with
+                  | None -> ()
+                  | Some other ->
+                      Batch.note b
+                        "properties.top_reason must be ABSENT (the column does not exist to read \
+                         it from), got: %s"
+                        (Json.show (Some other)))))) ;
+  Lwt.return_unit
+
 let register () =
   register_schema_valid () ;
   register_pass_excluded () ;
@@ -1226,4 +1320,5 @@ let register () =
   register_message_text_carries_evidence () ;
   register_main_schema_top_reasons () ;
   register_flat_provenance_round_trip () ;
-  register_detail_total_property ()
+  register_detail_total_property () ;
+  register_top_reasons_missing_column_degrades ()

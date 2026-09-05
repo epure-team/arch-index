@@ -50,7 +50,6 @@
   So the step adds no new way for an ordinary PR to fail, and one new way for a broken measurement
   to be caught.
 
-### Added
 - **`ext:<glob>` — a selector that names external leaves.** `arch-rules` can now write
   `forbid reach from <sel> to ext:<glob>` to forbid reaching a callee with no body in the index
   (an unresolved external, such as `Stdlib.+`), valid only as the target of `forbid reach`. On a

@@ -259,10 +259,13 @@ SARIF emission.
 - The `analysis_coverage` matrix (roadmap 1.3), when present, becomes `run.properties.coverage`;
   a `status = "not_analysed"` row becomes a `toolExecutionNotifications` entry on the run, never
   an absent section (spec FR-024). Its `descriptor.id` is `"not_analysed/<analysis>"`.
-- A finding whose `soundness_class` is `"heuristic"` (roadmap 2.3, not yet wired into
-  `arch-rules` itself — every finding this tool emits today is derived from this repo's own
-  sound-or-⊤-marked index) carries that verbatim in `properties.soundness_class`, so a consumer
-  can filter it out (spec FR-022).
+- `properties.soundness_class` is the ADR-002 class of the INDEX a result was computed against
+  (`heuristic` / `sound_with_top` / `asserted`), read once per run and shared by every finding in
+  it — not a per-finding ingestion fact. `arch-rules` always sets it on any index that carries the
+  value (every plain `arch-load` output does, defaulting to `"heuristic"` with no
+  `--soundness-class` flag): it is `None` only for a pre-1.2 MAIN index with neither
+  `producer_runs.soundness_class` nor `comment_db_meta`'s key populated. A consumer filters on it
+  per FR-022 to drop heuristic-derived findings.
 
 Validated in CI against the vendored schema at `vendor/sarif/sarif-schema-2.1.0.json` (JSON
 Schema draft-04) using python3's `jsonschema` library — see `tezt/tests/sarif_out.ml`'s header
