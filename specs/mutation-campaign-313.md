@@ -1,5 +1,5 @@
 ---
-name: roster-spec
+task: mutation-campaign-313
 type: spec
 status: live
 feature: Executed mutation campaign (roadmap item 3.13)
