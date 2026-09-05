@@ -130,14 +130,23 @@ let register_refuses_an_unmarked_index () =
         (Db.with_db db (fun c ->
              Db.int c "SELECT count(*) FROM exn_origins WHERE form='division'")
         >= 1) ;
-      (* CONTROL, NOT THIS TEST'S SUBJECT — and the distinction is load-bearing enough to
-         be in the title. Exit 3 here is guaranteed by [Arch_db.ok], which converts a raw
-         "no such column: exposed" into a Refused at any site with no guard of its own;
-         measured by deleting the guard below and re-running, where this line still passes
-         and only the two message assertions fail. So a reader who breaks [Arch_db.ok] and
-         finds this test green has NOT been told they are safe: nothing here pins the
-         refusal. What this test owns is the DIAGNOSIS. *)
-      Batch.eq_int b ~msg:(Printf.sprintf "control (owned by Arch_db.ok, not by this test): exit 3:\n%s" out) code 3 ;
+      (* CONTROL, NOT THIS TEST'S SUBJECT. Exit 3 here is NOT this test's to lose: delete the
+         vacuity guard and the generic [n_roots = 0] refusal below it still fires, printing
+         "no module matches --roots 'exported' in this index." Measured, and exactly ONE
+         assertion fails under that mutant — the message one below; [prints no coverage
+         header] stays green too. So a reader who weakens the vacuity guard and finds this
+         line green has NOT been told they are safe. What this test owns is the DIAGNOSIS.
+
+         An earlier version of this comment credited the surviving exit 3 to [Arch_db.ok] and
+         said TWO assertions fail. Both false, and false in a way nothing could catch: the
+         sentence was TRUE of [register_refuses_an_index_predating_exposed] below, written
+         during work that was then reverted, and carried here across the edit. Its fixture
+         does [UPDATE functions SET exposed = 0], so the column EXISTS and [Arch_db.ok] has
+         no missing column to convert — it cannot be the mechanism here, and the badge is now
+         where it belongs. *)
+      Batch.eq_int b
+        ~msg:(Printf.sprintf "control (owned by the generic n_roots=0 refusal, not by this test): exit 3:\n%s" out)
+        code 3 ;
       Batch.check b
         ~msg:(Printf.sprintf "…and says the cone would be empty for want of a root:\n%s" out)
         (contains ~needle:"no function in this index is marked exported" out) ;
@@ -160,6 +169,15 @@ let register_refuses_an_unmarked_index () =
    FLAT producer creates a [modules] table — [bin/arch_load/arch_load.ml],
    [lib/arch_db/arch_load.ml] and [lib/arch_index/runner.ml] each create only
    comment_db_meta/functions/calls (plus decisions/dead_code_sites in the first).
+
+   TWO CAVEATS, stated rather than fixed. (a) This DDL is hand-written and omits the two views
+   [arch_load.ml] creates, and [Arch_db.has_table] counts views ([arch_db.ml:346]) — so the
+   omission sits inside the very mechanism the test depends on. It is faithful on the axis
+   under test ([modules] absent) and approximate elsewhere; the reviewer replicated
+   [arch_load.ml:110-132] verbatim, views and indexes included, and it still stops at the same
+   line. (b) It exercises only PRE-EXISTING code: nothing [--roots exported] added runs before
+   that guard. It is a characterization test of behaviour this branch inherits, not a test of
+   this branch's feature, and it is here because that behaviour is what makes the feature safe.
 
    The first version of this test asserted the [exposed] check's message instead, and passed.
    It passed because its fixture created a [modules] table, which no producer emits — the
@@ -239,7 +257,14 @@ let register_refuses_an_index_predating_exposed () =
         (Db.with_db db (fun c ->
              Db.int c "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='modules'"))
         1 ;
-      Batch.eq_int b ~msg:(Printf.sprintf "refuses with exit 3:\n%s" out) code 3 ;
+      (* CONTROL — and THIS is the one [Arch_db.ok] owns. Delete the guard and exit 3 survives:
+         [Arch_db.ok] converts the raw "no such column: exposed" into a Refused at any site
+         without a guard of its own, printing "this index predates column exposed and should be
+         re-indexed with a newer producer". Measured; exactly one assertion fails under that
+         mutant, the message one below. What this test owns is the DIAGNOSIS, not the refusal. *)
+      Batch.eq_int b
+        ~msg:(Printf.sprintf "control (owned by Arch_db.ok, not by this test): exit 3:\n%s" out)
+        code 3 ;
       Batch.check b
         ~msg:(Printf.sprintf "…and the remedy it names is the one that works here:\n%s" out)
         (contains ~needle:"Re-index with a producer that records exports" out) ;

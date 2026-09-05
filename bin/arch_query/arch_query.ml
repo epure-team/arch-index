@@ -726,6 +726,14 @@ let () =
                    WHERE ('/' || m.path) LIKE ? ESCAPE '\\' AND f.name = ?"
                   (path_pat, root_name)
             in
+            (* DIVERGENCE, DEFERRED KNOWINGLY (review round 1, finding 6). This count has no
+               [modules] join, while the recursive CTE it guards roots at
+               [functions JOIN modules]. A function row with no live [module_id] would be
+               counted here and then reach no root, so a non-zero count could still yield an
+               empty cone — the exact vacuity this guard exists to refuse. It does not occur
+               with the current producer (222 of 222 exported functions join, 0 orphans), so
+               it is left alone rather than fixed speculatively; written here and not only in
+               the PR discussion, because a PR body is not in the repository. *)
             if n_roots = 0 && exported_roots then
               die 3
                 "arch-query: REFUSED — no function in this index is marked exported, so the API \
