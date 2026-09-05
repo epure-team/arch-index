@@ -144,9 +144,14 @@ written to describe, so they are refused rather than accepted and misapplied.
 
 ### `forbid origin` — a regression gate, and why it is an allow-list
 
-`forbid origin from <sel> form:<f1,f2,...> allow-file:<path>` walks the forward cone of `<sel>`
-and reports every escaping `exn_origins` site of the named forms that the allow-file does not
-cover. Forms are `exn_origins.form`'s own vocabulary — `raise`, `reraise`, `unknown`, `failwith`,
+`forbid origin from <sel> form:<f1,f2,...> [channel:<name>] allow-file:<path>` walks the forward
+cone of `<sel>` and reports every escaping `exn_origins` site of the named forms, **on one error
+channel**, that the allow-file does not cover.
+
+**`channel:` defaults to `exception`, and the default is load-bearing.** `exn_origins` holds every
+error channel, not just exceptions — on the `option` channel, "raising" means *returning `None`*.
+Measured on proto_alpha: `form:raise` finds **1** origin on `exception` and **128** on `option`.
+An unscoped rule reported an option-typed return as a crash site. Forms are `exn_origins.form`'s own vocabulary — `raise`, `reraise`, `unknown`, `failwith`,
 `invalid_arg`, `assert`, `partial_match`, `compare`, `division`, `index`, `inferred_bind`. An
 unknown form **aborts**: it would select nothing, and the rule would report a PASS while policing
 an empty population.
@@ -175,6 +180,17 @@ fn | file:line | form | exn | ×N
 Full-line `#` comments only — a trailing-comment rule is what truncates a path at its first `#`,
 and that failure is *by deletion*: the line still parses, just shorter. `×N` may also be written
 `xN`.
+
+The line is split from the **right**: the last four fields are taken as `file:line`, `form`, `exn`
+and the count, and the function name absorbs everything before them. OCaml operator names
+legitimately contain `|` (`( |+| )` exists in this repository), and a left split requiring exactly
+five fields made such a site permanently un-exemptable — worse, since a malformed allow-file
+aborts, one such line copied from the tool's own output took every other rule in the file down
+with it.
+
+A **duplicate identity is refused**, naming both counts. It was previously accepted in silence with
+first-wins, so the order of lines decided the verdict — and in an append-only workflow, which is
+the one this design imposes, a corrected allowance appended at the end was silently ignored.
 
 **The count is load-bearing, and a measurement put it there — a different one from the one this
 document first claimed.**
