@@ -68,7 +68,22 @@ type record = {
   start_line : int option;
 }
 
-type parsed = { tool : string; tool_version : string option; records : record list; refused : int }
+(** One SARIF [run] and the records it carried. A log holds a LIST of runs, each with its own
+    tool, and merging several tools' output into one file is the ordinary shape rather than a
+    corner case — [semgrep --sarif] piped beside [gosec] is what a CI job produces.
+
+    An earlier version flattened them: [tool] and [tool_version] were refs mutated per run and
+    every record was written under ONE producer_runs row, so a log with semgrep then gosec
+    reported BOTH findings as gosec. Worse, [tool_version] was assigned unconditionally while
+    [tool] was not, so the two fields could come from different runs — semgrep's version
+    destroyed by a gosec run that carried none.
+
+    That is provenance decided by POSITION, which is the same defect the sibling report slice was
+    corrected for one round earlier: it decided provenance by whichever row sorted first. Found
+    there, then written here. *)
+type run_group = { tool : string; tool_version : string option; records : record list }
+
+type parsed = { groups : run_group list; refused : int }
 
 let member k = function `Assoc fs -> List.assoc_opt k fs | _ -> None
 let str = function Some (`String s) -> Some s | _ -> None
@@ -85,15 +100,20 @@ let parse (raw : string) : (parsed, string) result =
       match member "runs" json with
       | Some (`List runs) ->
           let refused = ref 0 in
-          let tool = ref "unknown" and tool_version = ref None in
-          let records =
-            List.concat_map
+          let groups =
+            List.map
               (fun run ->
-                (match member "tool" run |> Option.map (member "driver") with
-                | Some (Some driver) ->
-                    (match str (member "name" driver) with Some n -> tool := n | None -> ()) ;
-                    tool_version := str (member "version" driver)
-                | _ -> ()) ;
+                (* Read per run, never accumulated across them. Both fields come from the SAME
+                   driver or neither does — the previous version could pair one run's name with
+                   another's version. *)
+                let tool, tool_version =
+                  match member "tool" run |> Option.map (member "driver") with
+                  | Some (Some driver) ->
+                      ( Option.value ~default:"unknown" (str (member "name" driver)),
+                        str (member "version" driver) )
+                  | _ -> ("unknown", None)
+                in
+                let records =
                 match member "results" run with
                 | Some (`List results) ->
                     List.filter_map
@@ -150,10 +170,12 @@ let parse (raw : string) : (parsed, string) result =
                                     start_line = snd loc }
                             | _ -> incr refused ; None))
                       results
-                | _ -> [])
+                | _ -> []
+                in
+                { tool; tool_version; records })
               runs
           in
-          Ok { tool = !tool; tool_version = !tool_version; records; refused = !refused }
+          Ok { groups; refused = !refused }
       | _ -> Error "no `runs` array — not a SARIF log")
 
 (* -------------------------------------------------------------------------- *)
@@ -268,6 +290,10 @@ let () =
 
          Checked before anything is written, and refused with the same failure accounting a
          malformed input gets: a coverage row about the failure, exit 2. *)
+      (* Every tool in the log, for messages. A merged log has several and naming only one of
+         them is how the provenance defect read from the outside. *)
+      let tools = String.concat ", " (List.sort_uniq compare (List.map (fun g -> g.tool) p.groups)) in
+      let all_records = List.concat_map (fun g -> g.records) p.groups in
       let has_table =
         let stmt =
           Sqlite3.prepare db
@@ -291,33 +317,39 @@ let () =
                 (Printf.sprintf
                    "%s: this index has no imported_findings table (schema 1.12 added it); \
                     re-index before importing"
-                   p.tool))) ;
+                   tools))) ;
         ignore (Sqlite3.db_close db) ;
         die 2
           (Printf.sprintf
              "arch-sarif-load: %s has no `imported_findings` table — this index predates schema \
               1.12. Re-index it before importing; nothing was written."
              db_path)) ;
-      exec db
-        (Printf.sprintf
-           "INSERT INTO producer_runs (producer, producer_version, soundness_class) VALUES \
-            (%s, %s, 'heuristic')"
-           (quote p.tool) (quote_opt p.tool_version)) ;
-      let run_id = Int64.to_int (Sqlite3.last_insert_rowid db) in
+      (* ONE producer_runs ROW PER SARIF RUN, so a finding's provenance is the tool that
+         actually produced it. Flattening the log into a single row attributed every finding to
+         whichever tool happened to be read last. *)
       let unresolved = ref 0 in
       List.iter
-        (fun r ->
-          let module_id = resolve_uri db r.uri in
-          if module_id = None && r.uri <> None then incr unresolved ;
+        (fun g ->
           exec db
             (Printf.sprintf
-               "INSERT INTO imported_findings (producer_run_id, rule_id, level, message, uri, \
-                start_line, module_id, resolution) VALUES (%d, %s, %s, %s, %s, %s, %s, %s)"
-               run_id (quote r.rule_id) (quote r.level) (quote r.message) (quote_opt r.uri)
-               (int_opt r.start_line)
-               (match module_id with Some m -> string_of_int m | None -> "NULL")
-               (quote (if module_id = None then "unresolved" else "resolved"))))
-        p.records ;
+               "INSERT INTO producer_runs (producer, producer_version, soundness_class) VALUES \
+                (%s, %s, 'heuristic')"
+               (quote g.tool) (quote_opt g.tool_version)) ;
+          let run_id = Int64.to_int (Sqlite3.last_insert_rowid db) in
+          List.iter
+            (fun r ->
+              let module_id = resolve_uri db r.uri in
+              if module_id = None && r.uri <> None then incr unresolved ;
+              exec db
+                (Printf.sprintf
+                   "INSERT INTO imported_findings (producer_run_id, rule_id, level, message, \
+                    uri, start_line, module_id, resolution) VALUES (%d, %s, %s, %s, %s, %s, %s, %s)"
+                   run_id (quote r.rule_id) (quote r.level) (quote r.message) (quote_opt r.uri)
+                   (int_opt r.start_line)
+                   (match module_id with Some m -> string_of_int m | None -> "NULL")
+                   (quote (if module_id = None then "unresolved" else "resolved"))))
+            g.records)
+        p.groups ;
       (* [partial] is for an input that PARSED while records were refused — a different state from
          [failed], which is the input that could not be parsed at all. Offering them as
          alternatives, as the spec first did, lets an implementation report either and one would
@@ -329,10 +361,11 @@ let () =
             'sarif_import', %s, %s)"
            (quote status)
            (quote
-              (Printf.sprintf "%s: %d imported, %d refused, %d unresolved location(s)" p.tool
-                 (List.length p.records) p.refused !unresolved))) ;
+              (Printf.sprintf "%s: %d imported, %d refused, %d unresolved location(s)" tools
+                 (List.length all_records) p.refused !unresolved))) ;
       ignore (Sqlite3.db_close db) ;
       Printf.printf
-        "arch-sarif-load: %d finding(s) from %s imported as heuristic (%d refused, %d unresolved)\n"
-        (List.length p.records) p.tool p.refused !unresolved
+        "arch-sarif-load: %d finding(s) from %s imported as heuristic across %d run(s) (%d \
+         refused, %d unresolved)\n"
+        (List.length all_records) tools (List.length p.groups) p.refused !unresolved
   | _ -> die 2 usage
