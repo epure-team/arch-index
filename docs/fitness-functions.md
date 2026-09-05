@@ -146,8 +146,11 @@ keeps that normalisation in one place.
 **`exported:` is granted per position, never inherited.** It lives in `Arch_sel.cone_source`,
 whose two consumers are `forbid reach`'s source and `arch-coverage --roots` — both of which
 genuinely range over a call cone. It is absent from `Arch_sel.structural`, which
-`arch-mutants --tests` passes (test roots, not a cone) along with `forbid exported outside` and
-`forbid effect` inside `arch-rules`.
+`arch-mutants --tests` passes along with `forbid exported outside` and `forbid effect` inside
+`arch-rules`. `--tests` is refused for a **semantic** reason, not a structural one: it does build
+a cone (`arch_mutants.ml:47` closes forward over its roots), but its roots are meant to be the
+test suite, so admitting `exported:` would silently change what the mutation plan measures rather
+than make it unanswerable.
 
 *(An earlier draft of this paragraph said `structural` is "the list `arch-coverage` and
 `arch-mutants` pass" **and** that `arch-coverage --roots` uses `cone_source` — two claims about
