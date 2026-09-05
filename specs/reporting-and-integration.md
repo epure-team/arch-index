@@ -87,8 +87,10 @@ and `arch-mcp` (stdio JSON-RPC for agents). Ingest is `arch-load` / `arch-covera
     document, zero anywhere in the code.
 
   **`PASS_UNDER_HYP` is RESERVED, not removed.** It is FR-004's verdict for a rule evaluated over
-  `heuristic` facts, and those arrive only through the FR-010/FR-011 ingest adapters, neither of
-  which exists (zero files on `main`). It belongs to the discharge ledger (roadmap 3.2), whose
+  `heuristic` facts, and those arrive only through the FR-010/FR-011 ingest adapters. Neither
+  ships in *this* slice: FR-010 (`arch-sarif-load`) is the ingest slice's (2.3) to deliver, and
+  FR-011 (`arch-scip-load`) is unwritten as of this amendment. It belongs to the discharge ledger
+  (roadmap 3.2), whose
   whole guarantee is that it never collapses into `PASS`. Deleting the name here would let 3.2
   reinvent it without the constraint that makes it safe; so it is named, dated, and explained as
   unreachable rather than dropped. A report emitting it before 3.2 lands would be claiming a
@@ -105,12 +107,13 @@ and `arch-mcp` (stdio JSON-RPC for agents). Ingest is `arch-load` / `arch-covera
 
 - **CHECK-1** *(roadmap 2.3, the ingest slice — NOT verifiable by 2.2.)* Import a SARIF file from
   Semgrep OSS; assert every finding lands with `soundness_class = heuristic` and that `arch-rules`
-  over the same scope cannot return `PASS`. Requires FR-010, which does not exist.
+  over the same scope cannot return `PASS`. Requires FR-010, which the ingest slice (2.3) owns —
+  the check is verifiable there, never by the report slice alone.
 - **CHECK-2** Index a polyglot fixture with an adapter available for one language only; assert the
   report renders `NOT_ANALYSED` for the other and that no query returns a bare empty result.
 - **CHECK-3** *(roadmap 2.3, the ingest slice — NOT verifiable by 2.2.)* Feed a malformed SARIF;
   assert non-zero exit, no rows written, and a `partial` or `failed` coverage row. Requires FR-012,
-  which does not exist.
+  which the ingest slice (2.3) owns.
 
 **Which checks 2.2 owns.** CHECK-2, CHECK-4 and CHECK-5 exercise the report; CHECK-1 and CHECK-3
 exercise the ingest adapters. This list previously read as five obligations on one slice, in a
