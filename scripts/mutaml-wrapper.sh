@@ -29,16 +29,39 @@
 #   ARCH_MUTANTS_TRACE      append-only TSV this script writes one line to per invocation:
 #                             <engine id>\t<executed count>\t<executed,…>\t<exit code>
 #
-# Exit: the test command's own exit code, which is what the engine reads (mutaml: 0 =
-#       "passed" = the mutant SURVIVED, 124 = timeout, anything else = killed).
-#       2 = this wrapper could not do its job at all — a missing variable, or a mutant the
-#       driver never catalogued. It refuses rather than running the whole suite, because a
-#       silent fallback to "run everything" would make an unrecognised mutant read as a
-#       correctly-selected one.
+# Exit: the test command's own exit code, which is what the engine reads.
+#
+#       THE REFUSAL CODE IS 99, AND IT HAD TO BE A DISTINCTIVE ONE. mutaml persists the RAW
+#       exit code, not the label it prints: src/runner/runner.ml:109-110 saves
+#       `{ status = ret; mutant }` and src/common/mutaml_common.ml:74 declares
+#       `status : int`, so whatever this script exits with is what lands in
+#       mutaml-report.json and what `arch-mutants` then classifies. The driver's adapter
+#       reads 0 as SURVIVED, 124 as TIMEOUT and EVERY OTHER CODE as KILLED. A refusal that
+#       exited 2 — as this script used to — therefore arrived at the report as a clean
+#       KILL, so a wholly broken selection produced a campaign of kills instead of a
+#       refusal: the single worst reading, because a kill is the one outcome the design
+#       treats as self-certifying proof.
+#
+#       99 is reserved for that and nothing else. The codes already spoken for are 0
+#       (mutaml: "passed" = SURVIVED), 124 (GNU timeout, which mutaml wraps every test in),
+#       127 (command-not-found, which mutaml treats as fatal and exits on), 126 (found but
+#       not executable) and 128+n (killed by signal n, so 129-165 in practice). 99 sits
+#       below 126 and outside every one of those, and no test runner in this repo's
+#       profiles emits it. `arch-mutants` maps exactly 99 — no range, no catch-all — to a
+#       NOT-ATTEMPTED / REFUSED outcome that can never become a kill, can never be
+#       attributed to a test, and leaves the campaign's completed_at NULL.
+#
+#       Every refusal path exits 99: MUTAML_MUTANT unset, an uncatalogued mutant, an unset
+#       or unreadable selection file, a missing test command, a missing trace file. It
+#       refuses rather than running the whole suite, because a silent fallback to "run
+#       everything" would make an unrecognised mutant read as a correctly-selected one.
 
 set -uo pipefail
 
-fail() { printf 'mutaml-wrapper: %s\n' "$1" >&2; exit 2; }
+# Keep this in step with `refusal_exit_code` in bin/arch_mutants/arch_mutants.ml.
+ARCH_MUTANTS_REFUSAL_EXIT=99
+
+fail() { printf 'mutaml-wrapper: %s (refusing, exit %d)\n' "$1" "$ARCH_MUTANTS_REFUSAL_EXIT" >&2; exit "$ARCH_MUTANTS_REFUSAL_EXIT"; }
 
 [ -n "${ARCH_MUTANTS_SELECTION-}" ] || fail "ARCH_MUTANTS_SELECTION is not set"
 [ -r "${ARCH_MUTANTS_SELECTION}" ] || fail "cannot read the selection file ${ARCH_MUTANTS_SELECTION}"
@@ -71,7 +94,18 @@ if [ "${#tests[@]}" -eq 0 ]; then
 else
   case "$ARCH_MUTANTS_TEST_CMD" in
     *"{tests}"*)
-      cmd="${ARCH_MUTANTS_TEST_CMD//\{tests\}/${tests[*]}}"
+      # The names substituted here come from the ANALYSED REPOSITORY'S OWN SOURCE — they are
+      # function names the index harvested, not operator input — and they are spliced into a
+      # string handed to `sh -c`. Interpolating them raw made a campaign over an untrusted
+      # checkout arbitrary command execution: a test named `a;touch /tmp/PWNED;echo x` ran the
+      # touch. Each name is single-quoted before substitution, with any embedded quote closed
+      # and reopened the POSIX way ('\''), so the shell sees one word per name and no operator.
+      # The sibling branch below was already safe; only this one was not.
+      quoted=""
+      for t in "${tests[@]}"; do
+        quoted="$quoted '${t//\'/\'\\\'\'}'"
+      done
+      cmd="${ARCH_MUTANTS_TEST_CMD//\{tests\}/${quoted# }}"
       sh -c "$cmd"
       rc=$?
       ;;

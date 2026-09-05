@@ -683,6 +683,291 @@ let register_run_interrupted () =
    that should have produced it — a legend, a header, a help line. A tag whose
    value distinguishes `uncertified_no_kill` from `uncertified_all_errored`
    cannot. *)
+(* CHECK-24 / FR-031. A wrapper REFUSAL is not an outcome, so it is not an
+   attempt: no run row, no attribution, and the campaign stays open.
+
+   The chain this closes is worth spelling out, because it crosses three
+   programs. mutaml persists the RAW exit code of its test command rather than
+   the label it prints (src/runner/runner.ml:109-110 saves `{ status = ret; … }`
+   over a `status : int` in src/common/mutaml_common.ml:74), and the driver's
+   adapter reads 0 as SURVIVED, 124 as TIMEOUT and every other code as KILLED.
+   The wrapper used to refuse with `exit 2`, so a selection that was wholly
+   broken produced a campaign of clean KILLS — the one outcome this design
+   treats as self-certifying proof. The wrapper now refuses with 99 and the
+   driver maps exactly that value.
+
+   Asserted on counts and on table contents, never on a word in prose: the
+   refusal already has legends in this tool's own output. *)
+let register_run_wrapper_refusal_is_not_a_kill () =
+  Test.register ~__FILE__
+    ~title:"mutants: a wrapper refusal is never a kill and leaves the campaign open"
+    ~tags:["mutants"; "run"; "refusal"]
+  @@ fun () ->
+  let db, work, _run, run_json =
+    campaign_setup ~name:"mutants_refusal" ~engine_body:(stub_engine ["m1"; "m2"; "m3"])
+      ~report:
+        {|{"file":"lib/x.ml","line":15,"status":"SURVIVED","id":"m1"}
+{"file":"lib/y.ml","line":35,"status":"REFUSED","id":"m2"}
+{"file":"lib/z.ml","line":55,"status":"KILLED","id":"m3"}
+|}
+  in
+  Batch.run (fun b ->
+      let code, out, _ = run_json ["--format"; "json"] in
+      ignore code ;
+      Batch.eq_int b ~msg:"the wrapper still ran once per mutant"
+        (List.length (trace_rows work)) 3 ;
+      (match Batch.expect b (Json.parse ~what:"refusal run" out) with
+      | None -> ()
+      | Some j ->
+          List.iter
+            (fun (key, expected) ->
+              Option.iter
+                (fun n -> Batch.eq_int b ~msg:("refusal run: " ^ key) n expected)
+                (Batch.expect b (Json.int ~what:key key j)))
+            [ (* m2 refused: counted apart, and in NONE of the four outcome buckets. *)
+              ("mutants_refused_by_wrapper", 1);
+              ("killed", 1); ("survived", 1); ("timed_out", 0); ("errored", 0);
+              (* Two mutants were attempted, one was not, so one is PENDING. *)
+              ("mutants_attempted", 2); ("mutants_pending", 1);
+              (* m3 died under the singleton t_beta; m2 contributes nothing. *)
+              ("attributions_recorded", 1) ] ;
+          Option.iter
+            (fun c -> Batch.eq_string b ~msg:"a refusal must leave the campaign incomplete"
+                (string_of_bool c) "false")
+            (Batch.expect b (Json.bool ~what:"completed" "completed" j))) ;
+      Db.with_db db (fun conn ->
+          Batch.eq_int b ~msg:"a refused mutant gets no run row"
+            (Db.int conn "SELECT count(*) FROM mutant_runs") 2 ;
+          (* The decisive negative: nothing anywhere may record m2 as killed. *)
+          Batch.eq_int b ~msg:"no run row may carry a KILLED status for the refused site"
+            (Db.int conn
+               "SELECT count(*) FROM mutant_runs r JOIN mutants m ON m.id = r.mutant_id \
+                WHERE m.file_path = 'lib/y.ml' AND r.engine_status = 'KILLED'")
+            0 ;
+          Batch.eq_string_opt b ~msg:"only m3's test may be named as a killer"
+            (Db.string_opt conn "SELECT group_concat(test_name) FROM mutant_kills")
+            (Some "t_beta") ;
+          Batch.eq_int b ~msg:"completed_at must stay NULL while a mutant was refused"
+            (Db.int conn "SELECT count(*) FROM mutant_campaigns WHERE completed_at IS NOT NULL")
+            0)) ;
+  Lwt.return_unit
+
+(* CHECK-25 / FR-007. A mutant for which the wrapper wrote NO trace line has an
+   UNOBSERVED executed set, and an unobserved set is never an attribution.
+
+   The old code read the trace with
+   `Option.value ~default:sel.sel_executed (Hashtbl.find_opt …)`, so a missing
+   line silently substituted the PLANNED set and recorded it as what ran. When
+   that planned set was a singleton — which m2's is here, `other` being reached
+   by t_gamma alone — it then wrote a `mutant_kills` row with
+   `attribution = singleton_executed_set` naming a test nobody ever saw run: a
+   fabricated attribution from the one table that exists to keep attribution
+   honest.
+
+   The fixture makes the buggy path REACHABLE rather than merely present: the
+   engine skips m2 and only m2, and the report claims m2 was killed. *)
+let register_run_unobserved_executed_set () =
+  Test.register ~__FILE__
+    ~title:"mutants: a mutant with no trace line is attributed to nobody"
+    ~tags:["mutants"; "run"; "attribution"]
+  @@ fun () ->
+  let db, work, _run, run_json =
+    campaign_setup ~name:"mutants_unobserved"
+      (* m2 is deliberately absent: the engine never invokes the wrapper for it. *)
+      ~engine_body:(stub_engine ["m1"; "m3"])
+      ~report:
+        {|{"file":"lib/x.ml","line":15,"status":"SURVIVED","id":"m1"}
+{"file":"lib/y.ml","line":35,"status":"KILLED","id":"m2"}
+{"file":"lib/z.ml","line":55,"status":"SURVIVED","id":"m3"}
+|}
+  in
+  Batch.run (fun b ->
+      let code, out, _ = run_json ["--format"; "json"] in
+      ignore code ;
+      (* The premise, asserted rather than assumed: m2 really has no trace line,
+         and m2's planned set really is the singleton the defect needed. *)
+      Batch.eq_int b ~msg:"only two of the three mutants reached the wrapper"
+        (List.length (trace_rows work)) 2 ;
+      Batch.eq_string_opt b ~msg:"m2 must have written no trace line"
+        (executed_for work "m2") None ;
+      (match Batch.expect b (Json.parse ~what:"unobserved run" out) with
+      | None -> ()
+      | Some j ->
+          List.iter
+            (fun (key, expected) ->
+              Option.iter
+                (fun n -> Batch.eq_int b ~msg:("unobserved run: " ^ key) n expected)
+                (Batch.expect b (Json.int ~what:key key j)))
+            [ ("mutants_unobserved_executed_set", 1);
+              ("mutants_attempted", 2); ("mutants_pending", 1);
+              (* m2's KILLED is the only kill in the report, and it is unobserved,
+                 so the campaign has none. *)
+              ("killed", 0); ("survived", 2); ("attributions_recorded", 0) ] ;
+          Option.iter
+            (fun c ->
+              Batch.eq_string b
+                ~msg:"an unobserved executed set must leave the campaign incomplete"
+                (string_of_bool c) "false")
+            (Batch.expect b (Json.bool ~what:"completed" "completed" j))) ;
+      Db.with_db db (fun conn ->
+          Batch.eq_int b ~msg:"an unobserved mutant gets no run row"
+            (Db.int conn "SELECT count(*) FROM mutant_runs") 2 ;
+          (* The one the pre-fix code invented. Named, not merely counted, so a
+             regression is legible without re-deriving the fixture. *)
+          Batch.eq_string_opt b ~msg:"t_gamma must never be named as a killer"
+            (Db.string_opt conn
+               "SELECT ifnull(group_concat(test_name), '(none)') FROM mutant_kills")
+            (Some "(none)") ;
+          Batch.eq_int b
+            ~msg:"completed_at must stay NULL while an executed set was never observed"
+            (Db.int conn "SELECT count(*) FROM mutant_campaigns WHERE completed_at IS NOT NULL")
+            0)) ;
+  Lwt.return_unit
+
+(* CHECK-26 / AC-24 / FR-030. The ancestor walk must not leave the working tree.
+
+   `locate_wrapper` and `locate_impact` find their artefact by walking up from
+   the working directory, so a checkout nested inside another one resolves the
+   PARENT's wrapper — silently, with plausible output. The parent's binary is
+   unmutated, every mutant survives, and the report becomes a page of false test
+   gaps that reads exactly like a real finding. That is issue #77.
+
+   Both polarities are asserted here, because only the second can tell a correct
+   guard from one that refuses everything: the outer wrapper is refused, and the
+   same fixture with an `ARCH_MUTANTS_WRAPPER` the operator named is honoured —
+   the exemption FR-030 states, and the one this repo's own suite depends on. *)
+let register_run_refuses_outside_tree () =
+  Test.register ~__FILE__
+    ~title:"mutants: run refuses a wrapper resolved outside the working tree"
+    ~tags:["mutants"; "run"; "provenance"]
+  @@ fun () ->
+  let db = load_fixture "mutants_outside_tree" campaign_stream in
+  let root = Temp.dir "mutants_outside_tree_nest" in
+  let outer = Filename.concat root "outer" in
+  let inner = Filename.concat outer "inner" in
+  let outer_wrapper = Filename.concat outer "scripts/mutaml-wrapper.sh" in
+  (* [write_exec] creates the file but not its directory, and the nesting IS the
+     fixture, so the two levels are made explicitly. *)
+  if Sys.command (Printf.sprintf "mkdir -p %s %s" (Filename.quote (Filename.concat outer "scripts")) (Filename.quote inner)) <> 0 then
+    Test.fail "could not lay out the nested checkout fixture" ;
+  write_exec outer_wrapper "#!/bin/sh\nexit 0\n" ;
+  (* The inner directory must be its own working tree, or the boundary under test
+     would be the enclosing one and the fixture would prove nothing. *)
+  let git_code, git_out = run_command ~cwd:inner "git" ["init"; "-q"; "."] in
+  if git_code <> 0 then Test.fail "could not make the inner tree a repository:\n%s" git_out ;
+  let plan_file = Filename.concat inner "plan.json" in
+  let _, plan_out = mutants ["plan"; db; "--tests"; "file:test/**"; "--format"; "json"] in
+  write_file plan_file plan_out ;
+  let catalogue = Filename.concat inner "catalogue.ndjson" in
+  write_file catalogue campaign_catalogue ;
+  let report_file = Filename.concat inner "report.ndjson" in
+  write_file report_file all_survived ;
+  let engine = Filename.concat inner "engine.sh" in
+  write_exec engine "#!/bin/sh\nexit 0\n" ;
+  let argv =
+    ["run"; db; "--plan"; plan_file; "--engine"; engine; "--test-cmd"; "true";
+     "--catalogue"; catalogue; "--report"; report_file; "--tests"; "file:test/**"]
+  in
+  (* `env -u` rather than an empty assignment: the driver REFUSES an override that
+     names a path which does not exist, so blanking the variable would test a
+     different refusal than the one under test. *)
+  (* The assignments go into `env`'s OWN argument list, after the `-u`s. Passing
+     them through [run_command]'s ~env would put them BEFORE the `env -u` that
+     then strips them again — which is exactly what the second probe below
+     caught on its first run. *)
+  let invoke assignments =
+    run_command ~cwd:inner "/usr/bin/env"
+      (["-u"; "ARCH_MUTANTS_WRAPPER"; "-u"; "ARCH_IMPACT"; "-u"; "ARCH_MUTANTS"]
+      @ assignments
+      @ (arch_mutants () :: argv))
+  in
+  Batch.run (fun b ->
+      let code, output = invoke [] in
+      Batch.exit_code b
+        ~msg:"a wrapper resolved outside the working tree must be REFUSED with exit 1"
+        ~expected:1 (code, output) ;
+      (* An exit code alone cannot tell a fired guard from an unrelated failure,
+         so the message must name the artefact it declined to run. *)
+      Batch.contains b ~msg:"the refusal must name the outside path" ~haystack:output
+        outer_wrapper ;
+      Db.with_db db (fun conn ->
+          Batch.eq_int b
+            ~msg:"a refused campaign must leave no campaign table behind"
+            (Db.int conn
+               "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='mutant_campaigns'")
+            0) ;
+      (* The other polarity. Same nested fixture, same outside path — the only
+         difference is that the operator named it, which FR-030 exempts. A guard
+         that refuses here has broken every harness that points the driver at a
+         built artefact outside its own tree on purpose. *)
+      let code, output = invoke ["ARCH_MUTANTS_WRAPPER=" ^ outer_wrapper] in
+      Batch.eq_string b
+        ~msg:"an explicitly named wrapper outside the tree must NOT be refused"
+        (string_of_bool (code = 1)) "false" ;
+      Batch.not_contains b ~msg:"an operator-named override must not trip the boundary"
+        ~haystack:output "OUTSIDE the working tree") ;
+  Lwt.return_unit
+
+(* The MEDIUM alongside FR-031. A test name is a function name harvested from the
+   ANALYSED REPOSITORY'S OWN SOURCE, and it used to be spliced unquoted into the
+   string the wrapper hands to `sh -c`, so a campaign over an untrusted checkout
+   was arbitrary command execution. The wrapper now quotes; this asserts the
+   second half of that fix, which is that a name carrying shell metacharacters is
+   refused where selection.tsv is WRITTEN — at the point the bad name enters the
+   pipeline, naming it, rather than where it would detonate. *)
+let register_run_rejects_unsafe_test_name () =
+  Test.register ~__FILE__
+    ~title:"mutants: a test name carrying shell metacharacters is refused, not written"
+    ~tags:["mutants"; "run"; "selection"]
+  @@ fun () ->
+  let evil = "t_evil;touch /tmp/arch-mutants-pwned" in
+  let stream =
+    Printf.sprintf
+      {|{"type":"function","name":%S,"file_path":"test/evil_test.ml","line_start":1,"line_end":5}
+{"type":"function","name":"covered","file_path":"lib/x.ml","line_start":10,"line_end":20}
+{"type":"call","caller_name":%S,"caller_file":"test/evil_test.ml","callee_name":"covered","callee_file":"lib/x.ml","call_site":"test/evil_test.ml:2","kind":"MUST"}
+|}
+      evil evil
+  in
+  let db = load_fixture "mutants_unsafe_name" stream in
+  let dir = Temp.dir "mutants_unsafe_name_campaign" in
+  let plan_file = Filename.concat dir "plan.json" in
+  let _, plan_out = mutants ["plan"; db; "--tests"; "file:test/**"; "--format"; "json"] in
+  write_file plan_file plan_out ;
+  let catalogue = Filename.concat dir "catalogue.ndjson" in
+  write_file catalogue
+    {|{"id":"m1","file":"lib/x.ml","line":15,"col_start":3,"col_end":9,"replacement":"true"}
+|} ;
+  let report_file = Filename.concat dir "report.ndjson" in
+  write_file report_file
+    {|{"file":"lib/x.ml","line":15,"status":"SURVIVED","id":"m1"}
+|} ;
+  let engine = Filename.concat dir "engine.sh" in
+  write_exec engine "#!/bin/sh\nexit 0\n" ;
+  let work = Filename.concat dir "work" in
+  Batch.run (fun b ->
+      let code, output =
+        run_command
+          ~env:[("ARCH_MUTANTS_WORKDIR", work); ("ARCH_MUTANTS_WRAPPER", wrapper_path ())]
+          (arch_mutants ())
+          ["run"; db; "--plan"; plan_file; "--engine"; engine; "--test-cmd"; "true";
+           "--catalogue"; catalogue; "--report"; report_file; "--tests"; "file:test/**"]
+      in
+      Batch.exit_code b ~msg:"an unsafe test name must abort the campaign" ~expected:2
+        (code, output) ;
+      Batch.contains b ~msg:"the refusal must name the offending test" ~haystack:output evil ;
+      (* The verifiable half: the selection file the wrapper reads was never
+         written, so the name never reached a command line at all. *)
+      Batch.eq_string b ~msg:"selection.tsv must not exist after the refusal"
+        (string_of_bool (Sys.file_exists (Filename.concat work "selection.tsv")))
+        "false" ;
+      Db.with_db db (fun conn ->
+          Batch.eq_int b ~msg:"no campaign row may be written"
+            (Db.int conn
+               "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='mutant_campaigns'")
+            0)) ;
+  Lwt.return_unit
+
 let register_run_self_uncertified () =
   Test.register ~__FILE__
     ~title:"mutants: a campaign with no kills is self-uncertified, and says WHY it has none"

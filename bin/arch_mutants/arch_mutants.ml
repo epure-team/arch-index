@@ -63,6 +63,13 @@ Generic mutant format (NDJSON, one object per line):
    "id":"7","mutation":"a && b -> a || b"}|}
 
 let die msg = prerr_endline msg ; exit 2
+
+(** A REFUSAL, distinct from [die]'s error. Exit 1 is FR-030's code: the campaign was
+    well-formed and the operator's request understood, and the tool declined to act because
+    acting would have produced a plausible-looking answer about the wrong tree. It is kept
+    apart from 2 (a malformed request or an unusable environment) and from 3 (a callee
+    refusing to answer us) so a caller can tell the three apart without parsing prose. *)
+let refuse msg = prerr_endline msg ; exit 1
 let take n l = if n <= 0 then l else List.filteri (fun i _ -> i < n) l
 
 let test_re name path =
@@ -290,6 +297,37 @@ let plan (t : Arch_db.t) (g : Arch_graph.t) test_keys heuristic fmt maxlist =
 
 (* ------------------------------------------------------------------ *)
 
+(* ------------------------------------------------------------------ *)
+(* THE WRAPPER'S REFUSAL — FR-031.                                     *)
+(*                                                                    *)
+(* `scripts/mutaml-wrapper.sh` exits 99, and only 99, when it cannot   *)
+(* do its job: MUTAML_MUTANT unset, a mutant the driver never          *)
+(* catalogued, an unset or unreadable selection file. It needs a code  *)
+(* of its own because mutaml persists the RAW exit code rather than    *)
+(* the label it prints — src/runner/runner.ml:109-110 saves            *)
+(* `{ status = ret; mutant }` over a `status : int`                    *)
+(* (src/common/mutaml_common.ml:74) — and [load_mutaml] below reads 0  *)
+(* as SURVIVED, 124 as TIMEOUT and EVERY OTHER CODE as KILLED. The     *)
+(* wrapper used to exit 2, so a refusal arrived as a clean KILL and a  *)
+(* wholly broken selection produced a campaign of kills: the worst     *)
+(* possible reading, because a kill is the one outcome this design     *)
+(* treats as self-certifying proof.                                    *)
+(*                                                                    *)
+(* 99 collides with nothing already spoken for: 0 (passed), 124 (GNU   *)
+(* timeout, which mutaml wraps every test in), 126 (not executable),   *)
+(* 127 (command not found, fatal to mutaml) and 128+n (signals). The   *)
+(* mapping below is EXACT — a single value, no range and no catch-all  *)
+(* — so a runner that happens to exit 98 or 100 is still a kill and    *)
+(* not a silent not-attempted.                                         *)
+(* ------------------------------------------------------------------ *)
+
+let refusal_exit_code = 99
+
+(** The status string a refusal is carried as, from the report adapters through to the
+    run loop. It is deliberately NOT one of the four engine statuses: a refusal is not an
+    outcome the engine produced, it is the absence of an attempt. *)
+let refused_status = "REFUSED"
+
 type mutant = { file : string; line : int; status : string; id : string; mutation : string option }
 
 let load_generic path =
@@ -335,12 +373,17 @@ let load_mutaml path =
                 match List.assoc_opt "status" a with
                 | Some (`Int 0) -> "SURVIVED"
                 | Some (`Int 124) -> "TIMEOUT"
+                (* FR-031: exactly the wrapper's reserved code, tested by equality against
+                   the one constant, never by a range. Placed BEFORE the catch-all int arm
+                   because that arm is what used to swallow it into KILLED. *)
+                | Some (`Int c) when c = refusal_exit_code -> refused_status
                 | Some (`Int _) -> "KILLED"
                 | Some (`String s) -> (
                     match String.lowercase_ascii s with
                     | "passed" -> "SURVIVED"
                     | "timeout" -> "TIMEOUT"
                     | "failed" -> "KILLED"
+                    | "refused" -> refused_status
                     | _ ->
                         die
                           (Printf.sprintf
@@ -390,10 +433,14 @@ let report (g : Arch_graph.t) mutants test_keys repo fmt maxlist =
      equal width — so a reversed bucket silently picks a different function for every tie. *)
   Hashtbl.iter (fun k v -> Hashtbl.replace by_file k (List.rev v)) (Hashtbl.copy by_file) ;
   let survivors = ref [] and killed = ref 0 and errored = ref 0 and unmapped = ref [] in
+  (* A wrapper refusal is not an engine error and above all not a kill: nothing was tested,
+     so the mutant is counted apart and never lands in either bucket. *)
+  let refused = ref 0 in
   List.iter
     (fun m ->
       let st = String.uppercase_ascii m.status in
-      if st = "KILLED" || st = "TIMEOUT" then incr killed
+      if st = refused_status then incr refused
+      else if st = "KILLED" || st = "TIMEOUT" then incr killed
       else if st <> "SURVIVED" then incr errored
       else
         let best = ref None in
@@ -438,6 +485,9 @@ let report (g : Arch_graph.t) mutants test_keys repo fmt maxlist =
                          ("reaching_tests", `List (List.map (fun s -> `String s) reaching)) ])
                    survivors));
              ("killed", `Int !killed); ("errored", `Int !errored);
+             (* Never folded into `killed` or `errored`: the wrapper declined to run this
+                mutant's tests at all, so no verdict of any kind was reached. *)
+             ("refused_by_wrapper", `Int !refused);
              (* The WHOLE record, not just its location: a survivor that could not be mapped is
                 still a defect, and dropping its id and mutation makes it unactionable. *)
              ("unmapped",
@@ -455,6 +505,11 @@ let report (g : Arch_graph.t) mutants test_keys repo fmt maxlist =
     Printf.printf "  • %d mutant(s) in the report: %d survived, %d killed%s\n" (List.length mutants)
       (List.length survivors) !killed
       (if !errored > 0 then Printf.sprintf ", %d errored (counted neither way)" !errored else "") ;
+    if !refused > 0 then
+      Printf.printf
+        "  • %d mutant(s) REFUSED by the wrapper (exit %d): their tests were never run, so \
+         these are neither killed nor survived nor errored\n"
+        !refused refusal_exit_code ;
     if unmapped <> [] then (
       Printf.printf
         "  • %d survivor(s) could not be mapped to an indexed function — reported here rather \
@@ -508,6 +563,30 @@ let report (g : Arch_graph.t) mutants test_keys repo fmt maxlist =
     have killed into a survivor, which is a false accusation against a real test. *)
 
 module MDb = Arch_mutant_db
+
+(** Every string a report adapter can hand the run loop, classified TOTALLY (FR-031).
+
+    Three arms and no catch-all, because each has a different consequence and folding any
+    two together loses a fact the campaign is built on: a refusal was never attempted, an
+    engine status is an outcome, and an unrecognised string must ABORT rather than be
+    guessed — guessing inverts a verdict, and a survivor read as killed is a defect
+    silently deleted. *)
+type engine_class =
+  | Wrapper_refused  (** the wrapper exited [refusal_exit_code]: nothing ran *)
+  | Engine_status of MDb.status  (** one of the four values the schema's CHECK allows *)
+  | Unrecognised_status of string  (** neither: abort at the call site *)
+
+let classify_engine_status s =
+  let up = String.uppercase_ascii (String.trim s) in
+  if up = refused_status then Wrapper_refused
+  else
+    match MDb.status_of_string up with
+    | Some st -> Engine_status st
+    | None -> Unrecognised_status s
+
+let is_wrapper_refusal s = match classify_engine_status s with
+  | Wrapper_refused -> true
+  | Engine_status _ | Unrecognised_status _ -> false
 
 (** The profile's addressing granularity. [case] is one test case; [group] is the coarser
     unit a runner can actually name (alcotest addresses tests by group regex plus a
@@ -779,6 +858,82 @@ let resolve_binary cmd =
     (try Sys.remove out with Sys_error _ -> ()) ;
     if code = 0 && value <> "" then Some value else None
 
+(* ------------------------------------------------------------------ *)
+(* FR-030 / AC-24 — THE TREE BOUNDARY (issue #77).                     *)
+(*                                                                    *)
+(* [locate_wrapper] and [locate_impact] both find their artefact by    *)
+(* walking ancestor directories from the working directory. A checkout *)
+(* placed INSIDE another checkout therefore resolves the PARENT's      *)
+(* wrapper and the PARENT's arch-impact, silently, with entirely       *)
+(* plausible output. For a mutation campaign that is the worst         *)
+(* available failure: the parent's binary is unmutated, so every       *)
+(* mutant survives and the report becomes a page of false test gaps    *)
+(* that reads exactly like a real finding.                             *)
+(*                                                                    *)
+(* The boundary is the WORKING TREE the command was invoked from —     *)
+(* `git rev-parse --show-toplevel`, falling back to the working        *)
+(* directory itself where there is no repository, which is the         *)
+(* narrower and therefore safer answer. An artefact resolved outside   *)
+(* it is REFUSED and the outside path is NAMED, because an exit code   *)
+(* on its own cannot tell a fired guard from an unrelated failure.     *)
+(*                                                                    *)
+(* An environment override naming a path that EXISTS is exempt, and    *)
+(* deliberately so: there the operator named the path, and refusing it *)
+(* would break every harness that points the driver at a built binary  *)
+(* outside its own tree on purpose.                                    *)
+(* ------------------------------------------------------------------ *)
+
+let real_path p = try Unix.realpath p with Unix.Unix_error _ -> p
+
+(** The working tree, resolved ONCE. Computed lazily so a campaign that never walks an
+    ancestor never pays for a subprocess, and so the value cannot drift between the two
+    call sites that consult it. *)
+let working_tree_root =
+  lazy
+    (let cwd = Sys.getcwd () in
+     let out = Filename.temp_file "arch-mutants-toplevel" ".txt" in
+     let code =
+       Sys.command
+         (Printf.sprintf "git rev-parse --show-toplevel > %s 2>/dev/null" (Filename.quote out))
+     in
+     let value =
+       match open_in out with
+       | exception Sys_error _ -> ""
+       | ic ->
+           let v = try String.trim (input_line ic) with End_of_file -> "" in
+           close_in_noerr ic ;
+           v
+     in
+     (try Sys.remove out with Sys_error _ -> ()) ;
+     real_path (if code = 0 && value <> "" then value else cwd))
+
+let inside_tree path =
+  let root = Lazy.force working_tree_root in
+  let p = real_path path in
+  let prefix = if String.length root > 0 && root.[String.length root - 1] = '/' then root else root ^ "/" in
+  p = root
+  || (String.length p >= String.length prefix
+     && String.sub p 0 (String.length prefix) = prefix)
+
+(** [what] names the artefact in the refusal, so the message says which of the two walks
+    fired. The path is reported EXACTLY as the walk built it, not as [Unix.realpath]
+    rewrote it, because that is the path the operator can go and look at. *)
+let guard_inside_tree ~what path =
+  if inside_tree path then path
+  else
+    refuse
+      (Printf.sprintf
+         "arch-mutants: %s resolved to %s, which is OUTSIDE the working tree %s.\n\
+          It was reached by walking ancestor directories, so this checkout is nested inside \
+          another one and the campaign was about to run the OUTER tree's artefact. That is \
+          issue #77: the outer tree's binary is unmutated, every mutant survives, and the \
+          report becomes a page of false test gaps that reads exactly like a real finding. \
+          Refusing rather than producing it.\n\
+          What would make this work: build the artefact inside %s, or name the one you mean \
+          explicitly with ARCH_MUTANTS_WRAPPER / ARCH_IMPACT — an override that names an \
+          existing path is honoured, because there you chose it."
+         what path (Lazy.force working_tree_root) (Lazy.force working_tree_root))
+
 (** The wrapper the engine will call once per mutant. [ARCH_MUTANTS_WRAPPER] overrides;
     otherwise it is found by walking up from the working directory, the same resolution
     the test harness uses. An override that names a path which does not exist is refused
@@ -796,7 +951,11 @@ let locate_wrapper () =
           let parent = Filename.dirname d in
           if parent = d then None else up parent
       in
-      up (Sys.getcwd ())
+      (* FR-030: the walk may leave the tree, and a wrapper from the enclosing checkout is
+         not a fallback, it is a different campaign. *)
+      Option.map
+        (guard_inside_tree ~what:"the per-mutant wrapper scripts/mutaml-wrapper.sh")
+        (up (Sys.getcwd ()))
 
 let mkdir_p d =
   let rec go d =
@@ -884,7 +1043,12 @@ let locate_impact () =
           let parent = Filename.dirname d in
           if parent = d then None else up parent
       in
-      match up (Sys.getcwd ()) with Some p -> Some p | None -> resolve_binary "arch-impact")
+      (* FR-030 again. Only the ANCESTOR WALK is guarded: a PATH hit is an installed
+         binary the operator put there on purpose, which is the same kind of explicit
+         choice as an environment override, whereas an ancestor hit is one nobody made. *)
+      match up (Sys.getcwd ()) with
+      | Some p -> Some (guard_inside_tree ~what:"arch-impact" p)
+      | None -> resolve_binary "arch-impact")
 
 (** One entry of `arch-impact --format json`'s [touched] array. [how] is carried because it
     says at what granularity the mapping was made — ["line"] is a span hit, anything else is
@@ -1299,6 +1463,44 @@ let run_campaign (t : Arch_db.t) (g : Arch_graph.t) test_keys ~db_path ~plan_pat
   mkdir_p work ;
   let selection_file = Filename.concat work "selection.tsv" in
   let trace_file = Filename.concat work "wrapper-trace.tsv" in
+  (* A test name is not operator input: it is a function name harvested from the ANALYSED
+     REPOSITORY'S OWN SOURCE, and it is about to be written into a TSV the wrapper splits
+     on tabs and commas and then splices into a command line. So it is checked HERE, where
+     it is named, rather than left to detonate in the wrapper — the wrapper quotes it now,
+     but a name carrying a comma or a tab would still silently split into two tests, and a
+     campaign over an untrusted checkout should be refused at the point the bad name enters
+     the pipeline.
+
+     An ALLOWLIST, not a blocklist: a blocklist over shell metacharacters has to be right
+     about every shell, and being wrong once is arbitrary command execution. The set below
+     covers the test names of every language this index handles — `Test_x.case 1`,
+     `tests::foo::bar`, `pkg/foo.TestBar`, `t_alpha` — and nothing that is a separator in
+     the TSV or an operator in `sh`. *)
+  let name_is_safe n =
+    n <> ""
+    && String.for_all
+         (fun c ->
+           (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
+           || String.contains "_-.:/+@= " c)
+         n
+  in
+  List.iter
+    (fun sel ->
+      List.iter
+        (fun n ->
+          if not (name_is_safe n) then
+            die
+              (Printf.sprintf
+                 "arch-mutants: the test name %S, reaching mutant %s at %s:%d, carries a \
+                  character outside the allowed set (letters, digits, space and _-.:/+@=). \
+                  It would be written into the selection the wrapper reads and then spliced \
+                  into a command line, so a name like this is a code-execution vector from \
+                  the analysed repository's own source, and a comma or tab in it would \
+                  silently split one test into two. No campaign row was written. Fix the \
+                  name in the index, or exclude the test with --tests."
+                 n sel.sel_site.s_id sel.sel_site.s_file sel.sel_site.s_line))
+        (sel.sel_intended @ sel.sel_executed))
+    selections ;
   write_file selection_file
     (String.concat ""
        (List.map
@@ -1401,31 +1603,69 @@ let run_campaign (t : Arch_db.t) (g : Arch_graph.t) test_keys ~db_path ~plan_pat
           attempted := (sel, m) :: !attempted
       | None -> incr unmatched)
     outcomes ;
-  let attempted = List.rev !attempted in
+  let matched = List.rev !attempted in
+  (* 8b. THREE populations, separated before anything is persisted. Each was previously
+     folded into "attempted", and each fold destroyed a different fact.
+
+     REFUSED (FR-031). The wrapper exited [refusal_exit_code]; its tests never ran. This is
+     not an outcome, so it is not an attempt: no run row, no kill row, no status. It counts
+     towards PENDING, which is exactly the schema's own encoding for "no verdict" — the
+     ABSENCE of a `mutant_runs` row inside a campaign whose completed_at is NULL — and so
+     needs no fifth engine_status value and no widening of a vocabulary the rest of the
+     codebase depends on being closed.
+
+     UNOBSERVED. The wrapper wrote no trace line for this mutant, so NOTHING is known about
+     which tests ran. The old code substituted the PLANNED set here and recorded it as what
+     executed; when that planned set happened to be a singleton it then wrote a
+     `mutant_kills` row with attribution `singleton_executed_set`, naming a test nobody ever
+     saw run — a fabricated attribution from the one table that exists to keep attribution
+     honest. There is no defensible number to store for `executed_tests`, so again the
+     honest record is the absence of the row.
+
+     ATTEMPTED. A trace line exists, so the executed set is carried alongside the outcome as
+     a plain [string list]. The lookup is gone from the three places downstream that used to
+     redo it with a default, which is why it can no longer silently succeed. *)
+  let refused_runs, engine_reported =
+    List.partition (fun (_, (m : mutant)) -> is_wrapper_refusal m.status) matched
+  in
+  let unobserved_runs, attempted =
+    List.partition_map
+      (fun (sel, m) ->
+        match Hashtbl.find_opt executed_by_id sel.sel_site.s_id with
+        | None -> Either.Left (sel, m)
+        | Some executed -> Either.Right (sel, m, executed))
+      engine_reported
+  in
+  let n_refused = List.length refused_runs and n_unobserved = List.length unobserved_runs in
   (* 9. Persist one run row per ATTEMPTED mutant. A mutant with no row is PENDING by that
      absence — never SURVIVED. *)
   let killed = ref 0 and survived = ref 0 and timed_out = ref 0 and errored = ref 0 in
   let kills_written = ref 0 in
   List.iter
-    (fun (sel, (m : mutant)) ->
-      match MDb.status_of_string m.status with
-      | None ->
+    (fun (sel, (m : mutant), executed) ->
+      match classify_engine_status m.status with
+      | Wrapper_refused ->
+          (* Unreachable: refusals were partitioned out above. Spelled out rather than
+             folded into a catch-all so that adding a fourth population cannot land here
+             silently (FR-031). *)
+          Printf.eprintf
+            "arch-mutants: internal error — a refused mutant reached the persistence loop \
+             for %s:%d\n"
+            m.file m.line ;
+          ignore (finish 2 : 'a)
+      | Unrecognised_status _ ->
           Printf.eprintf
             "arch-mutants: %s reports status %S for %s:%d, which is not one of \
              KILLED|SURVIVED|TIMEOUT|ERROR. Refusing to guess — a mis-read status inverts \
              the verdict.\n"
             report_path m.status m.file m.line ;
           ignore (finish 2 : 'a)
-      | Some status ->
+      | Engine_status status ->
           (match status with
           | MDb.Killed -> incr killed
           | MDb.Survived -> incr survived
           | MDb.Timeout -> incr timed_out
           | MDb.Errored -> incr errored) ;
-          let executed =
-            Option.value ~default:sel.sel_executed
-              (Hashtbl.find_opt executed_by_id sel.sel_site.s_id)
-          in
           Option.iter
             (fun mutant_id ->
               (try
@@ -1452,8 +1692,15 @@ let run_campaign (t : Arch_db.t) (g : Arch_graph.t) test_keys ~db_path ~plan_pat
     attempted ;
   let catalogued = List.length selections in
   let n_attempted = List.length attempted in
+  (* Refused and unobserved mutants are NOT attempted, so they are inside `pending` by
+     arithmetic. The two extra conjuncts are not redundancy for its own sake: they state the
+     rule the reviewer asked for directly, so a later change to how `pending` is computed
+     cannot quietly stamp a campaign complete while a mutant was never tested or its
+     executed set was never seen. *)
   let pending = catalogued - n_attempted in
-  let complete = (not refused) && engine_code = 0 && pending = 0 in
+  let complete =
+    (not refused) && engine_code = 0 && pending = 0 && n_refused = 0 && n_unobserved = 0
+  in
   (* Parenthesised, and it matters: without them the trailing `;` binds INSIDE the `with`
      handler, so every line below would run only on a write failure and a successful
      campaign would print nothing at all — while still typechecking, because the handler's
@@ -1554,6 +1801,47 @@ let run_campaign (t : Arch_db.t) (g : Arch_graph.t) test_keys ~db_path ~plan_pat
              ("selection_caveat", `String (MDb.provenance_caveat provenance));
              ("mutants_catalogued", `Int catalogued); ("mutants_attempted", `Int n_attempted);
              ("mutants_pending", `Int pending);
+             (* FR-031: the wrapper declined to run these mutants' tests, so they have no
+                outcome of any kind. Never folded into killed/survived/errored. *)
+             ("mutants_refused_by_wrapper", `Int n_refused);
+             (* The wrapper wrote no trace line, so what ran is UNKNOWN. Reported as its own
+                number rather than papered over with the planned set. *)
+             ("mutants_unobserved_executed_set", `Int n_unobserved);
+             ( "refused_by_wrapper",
+               `List
+                 (List.map
+                    (fun (sel, _) ->
+                      `Assoc
+                        [ ("engine_mutant_id", `String sel.sel_site.s_id);
+                          ("file", `String sel.sel_site.s_file);
+                          ("line", `Int sel.sel_site.s_line) ])
+                    refused_runs) );
+             ( "unobserved_executed_set",
+               `List
+                 (List.map
+                    (fun (sel, (m : mutant)) ->
+                      `Assoc
+                        [ ("engine_mutant_id", `String sel.sel_site.s_id);
+                          ("file", `String sel.sel_site.s_file);
+                          ("line", `Int sel.sel_site.s_line);
+                          ("engine_status", `String (String.uppercase_ascii m.status));
+                          (* FR-013: the key travels with engine_status here too. The
+                             provenance describes the SELECTION, which was computed for this
+                             mutant whether or not it was ever observed to run, so omitting
+                             it would publish a status naked — the one thing FR-013 forbids. *)
+                          ("selection_provenance", `String (MDb.provenance_to_string provenance));
+                          (* Explicitly null, never the planned set: the planned set is what
+                             SHOULD have run, and printing it here as `executed_tests` was
+                             the defect. *)
+                          ("executed_tests", `Null);
+                          ("intended_tests",
+                           `List (List.map (fun t -> `String t) sel.sel_intended));
+                          ("note",
+                           `String
+                             "the wrapper wrote no trace line for this mutant, so no test is \
+                              known to have run. No run row and no attribution were recorded, \
+                              and the campaign is not complete") ])
+                    unobserved_runs) );
              ("report_entries_unmatched", `Int !unmatched);
              ("completed", `Bool complete); ("engine_exit", `Int engine_code);
              ("engine_refused", `Bool refused);
@@ -1570,11 +1858,7 @@ let run_campaign (t : Arch_db.t) (g : Arch_graph.t) test_keys ~db_path ~plan_pat
              ( "runs",
                `List
                  (List.map
-                    (fun (sel, (m : mutant)) ->
-                      let executed =
-                        Option.value ~default:sel.sel_executed
-                          (Hashtbl.find_opt executed_by_id sel.sel_site.s_id)
-                      in
+                    (fun (sel, (m : mutant), executed) ->
                       `Assoc
                         [ ("engine_mutant_id", `String sel.sel_site.s_id);
                           ("file", `String sel.sel_site.s_file); ("line", `Int sel.sel_site.s_line);
@@ -1682,6 +1966,42 @@ let run_campaign (t : Arch_db.t) (g : Arch_graph.t) test_keys ~db_path ~plan_pat
       Printf.printf
         "  • %d report entry/entries matched no catalogued mutant — counted, not dropped\n"
         !unmatched ;
+    if n_refused = 0 then
+      print_endline
+        "  • 0 mutant(s) REFUSED by the wrapper. What would have made this non-zero: the \
+         wrapper exiting 99 — an unset MUTAML_MUTANT, a mutant it was never given, or a \
+         selection file it could not read"
+    else (
+      Printf.printf
+        "  • %d mutant(s) REFUSED by the wrapper (exit %d): their tests were NEVER RUN. \
+         Not killed, not survived, not errored — no run row and no attribution was written \
+         for any of them, and the campaign is NOT complete:\n"
+        n_refused refusal_exit_code ;
+      List.iter
+        (fun (sel, _) -> Printf.printf "      %s:%d\n" sel.sel_site.s_file sel.sel_site.s_line)
+        (take maxlist refused_runs)) ;
+    if n_unobserved = 0 then
+      print_endline
+        "  • 0 mutant(s) with an UNOBSERVED executed set. What would have made this \
+         non-zero: a mutant the engine reported an outcome for while the wrapper wrote no \
+         trace line, so nothing could say which tests ran"
+    else (
+      Printf.printf
+        "  • %d mutant(s) with an UNOBSERVED executed set: the engine reported an outcome \
+         but the wrapper wrote NO trace line, so no test is known to have run. The planned \
+         set is NOT substituted — that substitution is what once produced a per-test \
+         attribution naming a test nobody saw run. No run row, no attribution, campaign \
+         NOT complete:\n"
+        n_unobserved ;
+      List.iter
+        (fun (sel, (m : mutant)) ->
+          (* FR-013 again: a status is never rendered without its selection provenance. *)
+          Printf.printf "      %-8s [%s] %s:%d (planned %d test(s), executed UNKNOWN)\n"
+            (String.uppercase_ascii m.status)
+            (MDb.provenance_to_string provenance)
+            sel.sel_site.s_file sel.sel_site.s_line
+            (List.length sel.sel_intended))
+        (take maxlist unobserved_runs)) ;
     Printf.printf "  • outcomes: %d KILLED, %d SURVIVED, %d TIMEOUT, %d ERROR\n" !killed
       !survived !timed_out !errored ;
     if !kills_written = 0 then
@@ -1698,11 +2018,7 @@ let run_campaign (t : Arch_db.t) (g : Arch_graph.t) test_keys ~db_path ~plan_pat
     print_endline "" ;
     print_endline "-- runs (engine status ALWAYS with its selection provenance)" ;
     List.iter
-      (fun (sel, (m : mutant)) ->
-        let executed =
-          Option.value ~default:sel.sel_executed
-            (Hashtbl.find_opt executed_by_id sel.sel_site.s_id)
-        in
+      (fun (sel, (m : mutant), executed) ->
         Printf.printf "  • %-8s [%s]  %s:%d  in %s\n" (String.uppercase_ascii m.status)
           (MDb.provenance_to_string provenance) sel.sel_site.s_file sel.sel_site.s_line
           (match sel.sel_fn with Some f -> f | None -> "(unmapped — persisted, not dropped)") ;

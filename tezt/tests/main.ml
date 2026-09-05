@@ -39,6 +39,10 @@ let () =
   Mutants.register_run_missing_engine () ;
   Mutants.register_run_interrupted () ;
   Mutants.register_run_self_uncertified () ;
+  Mutants.register_run_wrapper_refusal_is_not_a_kill () ;
+  Mutants.register_run_unobserved_executed_set () ;
+  Mutants.register_run_refuses_outside_tree () ;
+  Mutants.register_run_rejects_unsafe_test_name () ;
   Mutants.register_verdict_three_indexes () ;
   Mutants.register_verdict_killed_under_top () ;
   Mutants.register_verdict_pending () ;
