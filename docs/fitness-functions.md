@@ -111,6 +111,9 @@ rule "the validate phase must not mutate global state"
 
 rule "core must not declare a dependency on the web framework"
   forbid dep from module:lib/core/** to module:Web.**
+
+rule "protocol entry points gain no new fatal origin"
+  forbid origin from file:src/proto_alpha/**/main.ml form:assert,division allow-file:crash-allow.txt
 ```
 
 A malformed rule file **aborts** (exit 2). A rule that silently fails to parse is a gate that
@@ -123,6 +126,8 @@ silently stops gating.
 | `file:<glob>` | the function's file path |
 | `fn:<glob>` | the function's name |
 | `module:<glob>` | file path, except in `forbid dep` where it is the declared module path |
+
+`forbid origin` accepts `file:` and `fn:` only; `module:` and `ext:` abort (exit 2).
 | `ext:<glob>` | the name of an external leaf (a callee with no body in the index) — valid only as the **target** of `forbid reach` |
 
 Globs: `*` stops at `/`, `**` crosses it, and `**/` matches **whole directory components** — so
@@ -137,6 +142,75 @@ only selector kind whose reading of a `dep` operand matches what the syntax prom
 `fn:` would be silently reinterpreted as module-path globs against a population they were never
 written to describe, so they are refused rather than accepted and misapplied.
 
+### `forbid origin` — a regression gate, and why it is an allow-list
+
+`forbid origin from <sel> form:<f1,f2,...> allow-file:<path>` walks the forward cone of `<sel>`
+and reports every escaping `exn_origins` site of the named forms that the allow-file does not
+cover. Forms are `exn_origins.form`'s own vocabulary — `raise`, `reraise`, `unknown`, `failwith`,
+`invalid_arg`, `assert`, `partial_match`, `compare`, `division`, `index`, `inferred_bind`. An
+unknown form **aborts**: it would select nothing, and the rule would report a PASS while policing
+an empty population.
+
+Selector kinds: **`file:` and `fn:` only.** An origin belongs to a function in a file; a module is
+not a root a cone starts from, and an external leaf has no body to hold one.
+
+**It is an allow-list, not a baseline, and there is deliberately no `--regenerate` flag.** A site
+list can grow for three different reasons — a real regression, *widened coverage*, or a proof that
+strengthened `MAY → MUST` — and a line-diff conflates all three. Only a person can tell them apart,
+so the gate's job is to force the person, not to automate an excuse. An allow-list that a command
+can regenerate is a baseline with extra ceremony: people run it blindly and the review property
+evaporates. Extending the list must cost a deliberate edit.
+
+Because the human always adjudicates, the failure message reports a **coverage figure** alongside
+the sites — cone size, origins found, sites, and how many allow-entries matched nothing. Without it
+a widened-coverage failure reads as a regression, and the third time that happens someone disables
+the rule.
+
+#### Allow-file format
+
+```
+fn | file:line | form | exn | ×N
+```
+
+Full-line `#` comments only — a trailing-comment rule is what truncates a path at its first `#`,
+and that failure is *by deletion*: the line still parses, just shorter. `×N` may also be written
+`xN`.
+
+**The count is load-bearing, and it is there because a measurement said so.** The four fields were
+specified as a site identity and then tested rather than assumed: on the full Octez population of
+25 479 origins they collide **1 150 times**, and adding the column still leaves 139 —
+`Make_Module.mul` at `poseidon_utils.ml:114` form `index` appears **eight** times (eight array
+accesses on one line), and a nested `a.(i).(j)` puts two `index` origins at one column. So no
+positional identity is unique. Without a count, an entry is a *set* exemption whose membership can
+grow after review: a ninth access on an already-exempted line would inherit the decision taken
+about the first eight.
+
+It would have looked correct on proto_alpha, where the 37 sites collide **zero** times. A format
+that is a key on the demo corpus and not on the real one is exactly the shape that survives review.
+
+The count is brittle to reformatting — but so is the line number it accompanies, and both fail
+loud. Line-based identity is a known and accepted property of this class of gate.
+
+#### Reading the output
+
+Offender lines lead with their marker (`[new]`, `[was ×N]`) and end with the identity, so the
+line a reviewer copies into the allow-file is the tail. That order is a safety property: a sloppy
+paste that keeps the marker corrupts the *function name*, which simply fails to match and stays an
+offender. Had the marker trailed, a sloppy paste would corrupt the **count** — the one field that
+decides how much a line exempts.
+
+#### What a PASS does and does not claim
+
+On a real index the cone almost always escapes through a ⊤ edge, so this rule normally reports
+`UNKNOWN`, not `PASS`, and says how many ⊤ edges it escaped through. That is the honest verdict:
+the gate proves *no new site among those it can see*, never *no fatal origin exists*. `VIOLATION`
+fails the gate regardless of ⊤, which is what makes it useful as a regression gate even when
+completeness is out of reach.
+
+An `exn_origins` table that is present but **empty** reports `NOT_COMPUTED` with its own message,
+distinct from the absent-table case: an empty table is what a producer killed before the exception
+pass looks like, and it must not read the same as a codebase with genuinely no origins.
+
 ## Which rules work on which backend
 
 The rule language, the evaluator and the reporter are pure consumers — agnostic. The **facts**
@@ -148,6 +222,7 @@ they quantify over are not uniformly available:
 | `forbid exported outside` | `functions.exported` | ✅ | ✅ | needs no reachability, so it is **exact** on any backend that records exports |
 | `forbid effect` | `function_effects` | ❌ | ✅ | reports `NOT_COMPUTED` elsewhere, never a false clean |
 | `forbid dep` | `module_deps` | ❌ | ✅ | this is the *declared-import* check — the syntactic one every other tool does |
+| `forbid origin` | `exn_origins` | ❌ | ✅ | the crash-surface regression gate; `NOT_COMPUTED` elsewhere |
 
 The split is worth noticing: the two forms that work everywhere today are the two that carry the
 differentiator, because both hinge on the ⊤ frontier. `forbid dep` — the one that needs a

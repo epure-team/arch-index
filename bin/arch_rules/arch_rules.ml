@@ -51,17 +51,118 @@ Rule syntax (line-oriented, # comments, one statement per rule):
   rule "validate must not mutate global state"
     forbid effect from file:src/validate/** kind:GlobalVar
   rule "core must not declare a dep on the web framework"
-    forbid dep from module:lib/core/** to module:Web.**|}
+    forbid dep from module:lib/core/** to module:Web.**
+  rule "protocol entry points gain no new fatal origin"
+    forbid origin from file:src/proto_alpha/**/main.ml form:assert,division allow-file:crash-allow.txt|}
 
 let die msg =
   prerr_endline msg ;
   exit 2
+
+let has_prefix p s = String.length s >= String.length p && String.sub s 0 (String.length p) = p
+
+let strip_prefix p s = String.sub s (String.length p) (String.length s - String.length p)
+
+(* An allow-list entry. [ident] is the four declared fields joined by "|":
+   [fn | file:line | form | exn]. [count] is the number of origins that identity
+   is permitted to carry.
+
+   The count is not decoration. MEASURED on the full Octez exception population
+   (25 479 origins): the four fields alone collide 1 150 times, and adding the
+   column still leaves 139 — `Make_Module.mul` at poseidon_utils.ml:114 form
+   `index` appears EIGHT times (eight array accesses on one line), and
+   dal_common.ml:189:30 carries two `index` origins at the identical position,
+   which is what a nested `a.(i).(j)` produces. So no positional identity is
+   unique, and without a count an exemption is a SET exemption whose membership
+   can grow after review — a ninth access on an already-exempted line would be
+   covered silently by the decision taken about the first eight.
+
+   It would have looked correct on proto_alpha, where the 37 sites collide zero
+   times. A format that is a key on the demo corpus and not on the real one is
+   exactly the shape that survives review. *)
+type origin_allow = { al_path : string; al_entries : (string * int) list }
+
+(* The identity, built in ONE place so the allow-list reader and the site
+   collector cannot drift into two spellings of it. *)
+let origin_ident ~fn ~file ~line ~form ~exn =
+  Printf.sprintf "%s | %s:%d | %s | %s" fn file line form
+    (if exn = "" then "-" else exn)
+
+(* Reading happens at PARSE time, not at evaluation time: a malformed allow-list
+   must abort the run exactly as a malformed rules file does. A gate that starts
+   evaluating and then discovers it cannot read its own exemptions has already
+   printed half a verdict. *)
+let read_origin_allow path lineno =
+  let ic =
+    try open_in path
+    with Sys_error e ->
+      die
+        (Printf.sprintf
+           "arch-rules: line %d: cannot read allow-file %S: %s. The path is resolved relative to \
+            the working directory, not to the rules file."
+           lineno path e)
+  in
+  let entries = ref [] and n = ref 0 in
+  (try
+     while true do
+       let raw = input_line ic in
+       incr n ;
+       let line = String.trim raw in
+       (* FULL-LINE comments only, deliberately. Trailing-comment stripping is
+          what truncates a rules-file path at its first '#', and that failure is
+          BY DELETION — the line still parses, just shorter. An allow-list is
+          read by humans in review, so it gets comments; it does not get the
+          failure mode. *)
+       if line <> "" && line.[0] <> '#' then
+         match String.split_on_char '|' line |> List.map String.trim with
+         | [ fn; loc; form; exn; count ] ->
+             let c =
+               let d =
+                 (* Both spellings accepted: the multiplication sign is correct
+                    and awkward to type, and a gate whose file is painful to
+                    edit is a gate people route around. *)
+                 if has_prefix "\xc3\x97" count then strip_prefix "\xc3\x97" count
+                 else if has_prefix "x" count then strip_prefix "x" count
+                 else count
+               in
+               match int_of_string_opt (String.trim d) with
+               | Some c when c > 0 -> c
+               | _ ->
+                   die
+                     (Printf.sprintf
+                        "arch-rules: %s line %d: last field must be a positive count (\xc3\x97N or xN), \
+                         got %S"
+                        path !n count)
+             in
+             entries :=
+               (Printf.sprintf "%s | %s | %s | %s" fn loc form (if exn = "" then "-" else exn), c)
+               :: !entries
+         | _ ->
+             die
+               (Printf.sprintf
+                  "arch-rules: %s line %d: expected five |-separated fields \
+                   (fn | file:line | form | exn | \xc3\x97N), got %d in %S"
+                  path !n
+                  (List.length (String.split_on_char '|' line))
+                  line)
+     done
+   with End_of_file -> ()) ;
+  close_in ic ;
+  { al_path = path; al_entries = List.rev !entries }
 
 type body =
   | Reach of Arch_sel.t * Arch_sel.t
   | Dep of Arch_sel.t * Arch_sel.t
   | Exported of Arch_sel.t
   | Effect of Arch_sel.t * string
+  (* 3.12: the crash-surface regression gate. [Arch_sel.t] is the ROOT, the string
+     list is the set of origin forms to police, and the last string is the path of
+     the ALLOW-LIST file — not a baseline. See briefs/rules-origin-verb-design.md
+     for why an allow-list rather than a regenerable baseline: a site list can grow
+     for three different reasons (a real regression, widened coverage, a proof that
+     strengthened MAY→MUST) and only a human can tell them apart, so the gate must
+     force the human rather than automate an excuse. *)
+  | Origin of Arch_sel.t * string list * origin_allow
 
 type rule = { name : string; body : body }
 
@@ -72,6 +173,7 @@ let kind_of = function
   | Dep _ -> "dep"
   | Exported _ -> "exported"
   | Effect _ -> "effect"
+  | Origin _ -> "origin"
 
 (* ------------------------------------------------------------------ *)
 (* parsing — a malformed rule file ABORTS                              *)
@@ -89,6 +191,20 @@ let with_ext = Arch_sel.[ File; Fn; Module; Ext ]
    [Module] is the only kind whose reading of a `dep` operand matches what a rule author would
    expect from the syntax; the other three would be silently reinterpreted as module-path globs. *)
 let dep_allow = Arch_sel.[ Module ]
+
+(* `forbid origin` names its kinds explicitly, because the alternative is what the #73 review
+   found in `Dep`: a verb that does not declare them inherits a silent reinterpretation by
+   omission. An origin belongs to a FUNCTION in a FILE — `module:` is not a root a cone starts
+   from here, and `ext:` names a leaf with no body, hence no origin to hold. *)
+let origin_sel_allow = Arch_sel.[ File; Fn ]
+
+(* The `form` vocabulary is exn_origins.form's CHECK constraint, verbatim. Kept as data rather
+   than accepted as free text: a typo like `form:asserts` would otherwise select nothing and the
+   rule would report a PASS it never earned — the same vacuous green this tool exists to refuse. *)
+let origin_forms =
+  [ "raise"; "reraise"; "unknown"; "failwith"; "invalid_arg"; "assert"; "partial_match";
+    "compare"; "division"; "index"; "inferred_bind" ]
+
 
 let sel ~allow tok line =
   match Arch_sel.parse ~allow tok with
@@ -153,6 +269,57 @@ let parse_rules path =
                  | [ "forbid"; "effect"; "from"; a; k ]
                    when String.length k > 5 && String.sub k 0 5 = "kind:" ->
                      Effect (sel ~allow:structural a !lineno, String.sub k 5 (String.length k - 5))
+                 | [ "forbid"; "origin"; "from"; a; f; al ]
+                   when has_prefix "form:" f && has_prefix "allow-file:" al ->
+                     let forms =
+                       String.split_on_char ',' (strip_prefix "form:" f)
+                       |> List.filter (fun x -> x <> "")
+                     in
+                     (* An unknown form selects nothing, so it would make the rule PASS while
+                        policing an empty population. Refused at PARSE time, where the author is
+                        looking, rather than surfacing later as a green. *)
+                     List.iter
+                       (fun x ->
+                         if not (List.mem x origin_forms) then
+                           die
+                             (Printf.sprintf
+                                "arch-rules: line %d: unknown origin form %S. Known forms: %s"
+                                !lineno x (String.concat ", " origin_forms)))
+                       forms ;
+                     if forms = [] then
+                       die
+                         (Printf.sprintf
+                            "arch-rules: line %d: form: lists no form — the rule would police \
+                             nothing and report a PASS it never earned"
+                            !lineno) ;
+                     (* THE '#' TRAP, refused rather than documented. Comment
+                        stripping above is [String.index_opt raw '#'] — the
+                        FIRST '#', wherever it sits — so [allow-file:sites#1.txt]
+                        arrives here as [allow-file:sites] and the rule loads a
+                        file that does not exist, or worse, one that does. It
+                        fails BY DELETION: the line still parses, just shorter.
+                        A documented impossibility is still a silent truncation
+                        for whoever did not read the doc.
+
+                        Detected on the RAW line, since by this point the
+                        evidence has been stripped away. A '#' preceded by
+                        whitespace is an ordinary trailing comment and stays
+                        legal; only a GLUED one indicates a truncated token. *)
+                     (match String.index_opt raw '#' with
+                     | Some i when i > 0 && raw.[i - 1] <> ' ' && raw.[i - 1] <> '\t' ->
+                         die
+                           (Printf.sprintf
+                              "arch-rules: line %d: this line contains a '#' with no space \
+                               before it, and comment stripping removes everything from the \
+                               FIRST '#' onwards — so the rule was parsed with a TRUNCATED \
+                               token. A '#' cannot appear in an allow-file path. Rename the \
+                               file, or put a space before the '#' if it was meant as a comment."
+                              !lineno)
+                     | _ -> ()) ;
+                     Origin
+                       ( sel ~allow:origin_sel_allow a !lineno,
+                         forms,
+                         read_origin_allow (strip_prefix "allow-file:" al) !lineno )
                  | _ ->
                      die
                        (Printf.sprintf
@@ -160,7 +327,13 @@ let parse_rules path =
                           \    forbid reach from <sel> to <sel>\n\
                           \    forbid dep from <sel> to <sel>\n\
                           \    forbid exported outside <sel>\n\
-                          \    forbid effect from <sel> kind:<VALUE_KIND>"
+                          \    forbid effect from <sel> kind:<VALUE_KIND>\n\
+                          \    forbid origin from <sel> form:<f1,f2,...> allow-file:<path>\n\
+                           \n\
+                           If the body above looks right, check for a SPACE in a path: the \
+                           parser splits the line on spaces, so a path containing one arrives \
+                           as an extra token and lands here. Paths with spaces are not \
+                           supported."
                           !lineno line)
                in
                pending := Some (n, Some b, ln)
@@ -504,6 +677,158 @@ let eval (t : Arch_db.t) (g : Arch_graph.t) ~sound r =
           { rule = r.name; kind = kind_of r.body; exact = false;
             verdict = (if sound then "PASS" else "UNKNOWN_NO_CONTRACT");
             detail = []; detail_total = 0; note = None; sizes = None; witness = []; top_reasons = [] }
+  | Origin (s, forms, allow) ->
+      (* Selected once and reused, for the reason [Effect] gives: the vacuity guard and the cone
+         must read the SAME set, or the guard passes on one selection and the cone is built from
+         another. *)
+      let origin_src = lazy (Arch_sel.select g s) in
+      if (not (Arch_db.has_table t "exn_origins")) || t.schema = Arch_db.Flat then
+        { rule = r.name; kind = kind_of r.body; exact = false; verdict = "NOT_COMPUTED"; detail = [];
+          detail_total = 0; sizes = None; witness = []; top_reasons = [];
+          note =
+            Some
+              "this index carries no exn_origins — 'no fatal origin found' would be a lie, not a \
+               result. Origins are produced by the OCaml .cmt backend; the flat schema has no \
+               such table." }
+      else if not (Arch_db.nonempty t "exn_origins") then
+        (* Distinct from the branch above ON PURPOSE. A table that exists and is EMPTY is what a
+           producer killed before the exception pass looks like, and it would otherwise report
+           the same PASS as a codebase with genuinely no origins. See the completion-marker
+           class: the two must not print the same thing. *)
+        { rule = r.name; kind = kind_of r.body; exact = false; verdict = "NOT_COMPUTED"; detail = [];
+          detail_total = 0; sizes = None; witness = []; top_reasons = [];
+          note =
+            Some
+              "exn_origins exists but holds no rows — the exception pass produced nothing, so \
+               this rule was never evaluated against anything." }
+      else if SS.is_empty (Lazy.force origin_src) then
+        { rule = r.name; kind = kind_of r.body; exact = false; verdict = "NO_SOURCE"; detail = [];
+          detail_total = 0; sizes = None; witness = []; top_reasons = [];
+          note =
+            Some
+              (Printf.sprintf
+                 "selector %s matched nothing — the rule is VACUOUS. An empty cone contains no \
+                  origins by construction, which is not a result about your code."
+                 (Arch_sel.to_string s)) }
+      else
+        let src = Lazy.force origin_src in
+        let cone = SS.union src (Arch_graph.closure src g.fwd) in
+        (* Keyed on the function ID, never on its NAME. Two modules legitimately define
+           [handle_error]; matching by name would police origins in files the root never
+           reaches and report them as this root's regressions. [Arch_graph]'s key is
+           ['#' || f.id], so the id is recovered by dropping the marker. *)
+        let ids =
+          SS.fold
+            (fun k acc ->
+              if String.length k > 1 && k.[0] = '#' then
+                match int_of_string_opt (String.sub k 1 (String.length k - 1)) with
+                | Some i -> `Int i :: acc
+                | None -> acc
+              else acc)
+            cone []
+        in
+        let ids_json = Yojson.Safe.to_string (`List ids) in
+        let forms_json = Yojson.Safe.to_string (`List (List.map (fun f -> `String f) forms)) in
+        let hits =
+          Arch_db.rows t
+            ~params_ty:Arch_db.Ty.(t2 string string)
+            ~shape:Arch_db.Rows.t5' ~to_cells:Arch_db.Rows.c5
+            "SELECT f.name, COALESCE(m.path,'?'), o.form, COALESCE(o.exn_path,''), \
+             CAST(o.line AS TEXT) \
+             FROM exn_origins o JOIN functions f ON o.function_id = f.id \
+             LEFT JOIN modules m ON f.module_id = m.id \
+             WHERE o.escapes = 1 AND o.form IN (SELECT value FROM json_each(?)) \
+             AND o.function_id IN (SELECT value FROM json_each(?))"
+            (forms_json, ids_json)
+        in
+        (* Group into site identities and COUNT. The count is the whole reason this is not a
+           plain set difference — see [origin_allow]: a ninth array access on an
+           already-exempted line must fail loud, not inherit the decision taken about the
+           first eight. *)
+        let tbl = Hashtbl.create 64 in
+        List.iter
+          (fun row ->
+            match List.map Arch_db.string_of_cell row with
+            | [ fn; file; form; exn; line ] ->
+                let id =
+                  origin_ident ~fn ~file
+                    ~line:(Option.value ~default:0 (int_of_string_opt line))
+                    ~form ~exn
+                in
+                Hashtbl.replace tbl id (1 + Option.value ~default:0 (Hashtbl.find_opt tbl id))
+            | _ -> ())
+          hits ;
+        let sites = Hashtbl.fold (fun k n acc -> (k, n) :: acc) tbl [] |> List.sort compare in
+        let offenders =
+          List.filter_map
+            (fun (id, n) ->
+              (* The marker goes FIRST, and that is a safety property rather than a layout
+                 taste. This line is the artefact a reviewer copies into the allow-file, so a
+                 sloppy paste must not produce a VALID entry that says something else. With the
+                 marker trailing, a paste corrupts the COUNT — the one field that decides how
+                 much a line exempts. With it leading, a paste corrupts the function name, which
+                 simply fails to match and stays an offender. Both fail; only one fails safe. *)
+              match List.assoc_opt id allow.al_entries with
+              | None -> Some (Printf.sprintf "[new]          %s | \xc3\x97%d" id n)
+              | Some k ->
+                  if n > k then
+                    Some (Printf.sprintf "[was \xc3\x97%d]       %s | \xc3\x97%d" k id n)
+                  else None)
+            sites
+        in
+        (* A stale entry does not FAIL — it exempts nothing, so it cannot hide a regression. But
+           it is reported, because the usual cause is that the coverage it was written for went
+           away, and that is worth a look before someone concludes the gate is fine. *)
+        let stale =
+          List.filter (fun (id, _) -> not (Hashtbl.mem tbl id)) allow.al_entries |> List.length
+        in
+        let escaping = SS.filter (fun k -> Arch_graph.SM.mem k g.tops) cone in
+        (* THE COVERAGE DELTA, reported on every verdict and not only on failure. The design
+           note names this as the condition for the gate surviving contact with people: a new
+           site can appear because the code regressed, because coverage WIDENED, or because a
+           proof strengthened — and a failure message that shows only the new sites reads as
+           the first cause, whichever it was. Someone then disables the rule. *)
+        let coverage =
+          Printf.sprintf "coverage: %d node(s) in cone, %d origin(s) of form %s, %d site(s); \
+                          allow-file %s has %d entr%s (%d matching nothing)"
+            (SS.cardinal cone) (List.length hits) (String.concat "," forms)
+            (List.length sites) allow.al_path
+            (List.length allow.al_entries)
+            (if List.length allow.al_entries = 1 then "y" else "ies")
+            stale
+        in
+        if offenders <> [] then
+          { rule = r.name; kind = kind_of r.body; exact = false; verdict = "VIOLATION";
+            sizes = None; witness = []; top_reasons = [];
+            (* 200, not the 20 every other verdict uses, and the difference is not an
+               inconsistency to tidy away. Elsewhere `detail` is a SAMPLE of offenders: you read
+               a few, you fix the code. Here the list IS the artefact the workflow consumes — a
+               reviewer transcribes it into the allow-file — and there is deliberately no
+               `--regenerate` flag to produce it another way. Capping at 20 on a root with 32
+               sites would make the intended workflow impossible while looking like it worked.
+               `detail_total` still reports the truth if 200 is ever exceeded. *)
+            detail = take 200 offenders;
+            detail_total = List.length offenders;
+            note =
+              Some
+                (coverage
+               ^ ". A site listed here is not necessarily a REGRESSION: it is a site the \
+                  allow-file does not cover. Compare the coverage figure above with the one \
+                  from the run that produced the allow-file before concluding the code got \
+                  worse.") }
+        else if not (SS.is_empty escaping) then
+          { rule = r.name; kind = kind_of r.body; exact = false; verdict = "UNKNOWN"; detail = [];
+            detail_total = 0; sizes = None; witness = []; top_reasons = [];
+            note =
+              Some
+                (Printf.sprintf
+                   "%s. Every site found is allowed, but the cone escapes through %d \xe2\x8a\xa4 edge(s) \
+                    \xe2\x80\x94 an origin could sit behind one, so this is not a proof that none was missed"
+                   coverage (SS.cardinal escaping)) }
+        else
+          { rule = r.name; kind = kind_of r.body; exact = false;
+            verdict = (if sound then "PASS" else "UNKNOWN_NO_CONTRACT");
+            detail = []; detail_total = 0; sizes = None; witness = []; top_reasons = []; note = Some coverage }
   | Dep (s, d) ->
       if (not (Arch_db.has_table t "module_deps")) || t.schema = Arch_db.Flat then
         { rule = r.name; kind = kind_of r.body; exact = false; verdict = "NOT_COMPUTED"; detail = [];
