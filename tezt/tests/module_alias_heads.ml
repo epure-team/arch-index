@@ -297,9 +297,12 @@ let register_rewrite () =
       (* THE THREE EMISSION SITES, each asserted to RESOLVE and not merely to be
          marked. Two of them had no coverage at all: replacing alias_rewrite with
          (fun _ -> None) at the argument-escape site removed 72 rewrites and 18
-         resolutions on octez with the suite still green, and at add_path_call
-         removed 48 and 6 — while making the N6 precedence line, which is
-         reachable ONLY through that site, dead code that N6 still "pins".
+         resolutions with the suite still green, and at add_path_call removed 48
+         and 6 — while making the N6 precedence line, which is reachable ONLY
+         through that site, dead code that N6 still "pins". (Those four figures
+         are a reviewer's, measured on their own octez build; I reproduced the
+         GREEN and the killed mutants here, not the edge counts, so the deltas
+         carry their scope and not mine.)
 
          Marking is the cheap half. A site that emits a marked edge which never
          acquires a callee_id has done nothing a consumer can use, so the
@@ -346,7 +349,10 @@ let register_rewrite () =
                    built on 2026-09-05 — 41 622 rewrites, 32 664 with a callee
             6.7 %  a reviewer's independent build (4 992 .cmt), where the
                    CALLERS compiled but saturation_repr.cmt did not
-            3.1 %  a third independent measurement
+            3.1 %  a third measurement, whose corpus and build state I do not
+                   know — it reached me through a relay that dropped the
+                   qualification its measurer had attached. Kept, and labelled,
+                   because deleting it would hide that it exists
 
          A factor of 25, and it is not a disagreement about code: it is corpus
          COVERAGE. `module S = Saturation_repr` resolves only if that unit's
