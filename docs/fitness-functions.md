@@ -123,11 +123,19 @@ silently stops gating.
 | `file:<glob>` | the function's file path |
 | `fn:<glob>` | the function's name |
 | `module:<glob>` | file path, except in `forbid dep` where it is the declared module path |
+| `ext:<glob>` | the name of an external leaf (a callee with no body in the index) — valid only as the **target** of `forbid reach` |
 
 Globs: `*` stops at `/`, `**` crosses it, and `**/` matches **whole directory components** — so
 `**/parser.ml` matches `lib/parser.ml` and `parser.ml`, but never `lib/my_parser.ml`. That
 boundary is not cosmetic: a rule aimed at one file silently covering a differently-named sibling
 produces false verdicts in both directions.
+
+**`forbid dep` only accepts `module:` on either side — `file:` and `fn:` abort (exit 2).**
+`forbid dep` never consults the call graph: both operands are globbed straight against strings
+read out of `module_deps`, a table of declared module-to-module dependencies. `module:` is the
+only selector kind whose reading of a `dep` operand matches what the syntax promises; `file:` and
+`fn:` would be silently reinterpreted as module-path globs against a population they were never
+written to describe, so they are refused rather than accepted and misapplied.
 
 ## Which rules work on which backend
 
