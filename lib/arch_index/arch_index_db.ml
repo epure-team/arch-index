@@ -51,7 +51,7 @@ let schema_path =
    [current_flat_schema_version] below, which runner.ml now uses instead. *)
 (* Bumped 1.9 -> 1.10 for [calls.edge_form] (specs/point-free-aliases.md).
    NOT a decimal: the minor component is an integer, [parse_schema_version]
-   splits on '.' and compares [(major, minor)] as ints, so 1.10 > 1.9.
+   splits on '.' and compares [(major, minor)] as ints, so 1.13 > 1.11 > 1.9.
 
    Bumped 1.10 -> 1.11 for [calls.edge_form]'s widened CHECK, which now admits
    'module_alias' (specs/reexport-resolution.md D1-quater). Additive by the rule
@@ -86,8 +86,21 @@ let schema_path =
    invisible to tooling. Two sessions applying the protocol correctly collided
    twice in two hours. The fix is to assign the version AT MERGE, not at write;
    until then, a number taken from a grep is a guess, and the roadmap owner
-   assigns. *)
-let current_schema_version = "1.12"
+   assigns.
+
+    Bumped 1.12 -> 1.13 for the executed-mutation-campaign tables
+    (mutants-schema-migration.sql, specs/mutation-campaign-313.md).
+
+    THIS SLICE FIRST WROTE 1.13 AS A SKIP, AND THAT WAS WRONG BY THE TIME IT
+    REBASED. It read 1.12 as claimed by a branch not yet merged and documented a
+    deliberate gap. That branch has since landed, so 1.12 is [imported_findings]
+    on main and 1.13 follows it directly with no hole. The earlier claim survives
+    only in this paragraph, because the way it was found is the point: a rebase
+    conflict, not a test. Nothing in this repository reads docs/schema.md, so a
+    branch that overwrites main's row for a SHIPPED version deletes the record of
+    a live schema and no gate notices. The first resolution of this very conflict
+    did exactly that and was caught only by re-reading both parents. *)
+let current_schema_version = "1.13"
 
 (* The flat schema (runner.ml's own inline 3-table [schema_sql]) — distinct
    version identity from [current_schema_version] above: the two schemas are

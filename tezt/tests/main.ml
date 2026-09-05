@@ -34,6 +34,11 @@ let () =
   Mutants.register_attribution () ;
   Mutants.register_mutaml () ;
   Mutants.register_soundness_flag () ;
+  Mutants.register_run_per_mutant () ;
+  Mutants.register_run_group_superset () ;
+  Mutants.register_run_missing_engine () ;
+  Mutants.register_run_interrupted () ;
+  Mutants.register_run_self_uncertified () ;
   Decision_lint.register_aliases () ;
   Decision_lint.register_smt_noise () ;
   Decision_lint.register_smt_mute () ;

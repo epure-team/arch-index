@@ -373,3 +373,365 @@ let register_soundness_flag () =
                 (not sound))
             (expect b (Json.bool ~what:"plan" "sound_targeting" plan))) ;
   Lwt.return_unit
+
+(* ------------------------------------------------------------------------ *)
+(* `arch-mutants run` — driving and persisting one campaign.                 *)
+(*                                                                          *)
+(* THE EXECUTION MODEL, because every assertion below depends on reading it  *)
+(* the same way the driver does:                                             *)
+(*                                                                          *)
+(*   driver → engine (ONCE) → wrapper (ONCE PER MUTANT) → the selected tests *)
+(*                                                                          *)
+(* The stub engine here plays the part mutaml's runner plays: it loops over  *)
+(* its own mutants and calls the wrapper once per mutant with MUTAML_MUTANT  *)
+(* set. So nothing below asserts "the engine ran twice" — that would assert  *)
+(* the wrong thing. The unit of observation is the WRAPPER's invocation,     *)
+(* recorded in the trace file it appends to.                                 *)
+(* ------------------------------------------------------------------------ *)
+
+(* t_alpha and t_gamma share a FILE, which is what makes the group-granularity
+   case observable: a `group` profile must widen {t_alpha} to {t_alpha,t_gamma}
+   and say it did. t_beta lives elsewhere so a widening that swallowed the whole
+   suite would be distinguishable from one that stopped at the group. *)
+let campaign_stream =
+  {|{"type":"function","name":"t_alpha","file_path":"test/alpha_test.ml","line_start":1,"line_end":5}
+{"type":"function","name":"t_gamma","file_path":"test/alpha_test.ml","line_start":7,"line_end":9}
+{"type":"function","name":"t_beta","file_path":"test/beta_test.ml","line_start":1,"line_end":5}
+{"type":"function","name":"covered","file_path":"lib/x.ml","line_start":10,"line_end":20}
+{"type":"function","name":"other","file_path":"lib/y.ml","line_start":30,"line_end":40}
+{"type":"function","name":"shared","file_path":"lib/z.ml","line_start":50,"line_end":60}
+{"type":"call","caller_name":"t_alpha","caller_file":"test/alpha_test.ml","callee_name":"covered","callee_file":"lib/x.ml","call_site":"test/alpha_test.ml:2","kind":"MUST"}
+{"type":"call","caller_name":"t_gamma","caller_file":"test/alpha_test.ml","callee_name":"other","callee_file":"lib/y.ml","call_site":"test/alpha_test.ml:8","kind":"MUST"}
+{"type":"call","caller_name":"t_beta","caller_file":"test/beta_test.ml","callee_name":"shared","callee_file":"lib/z.ml","call_site":"test/beta_test.ml:2","kind":"MUST"}
+|}
+
+(* The engine's own catalogue of what it will attempt: three mutants, one per
+   target function, so each has a DIFFERENT intended test set. A wrapper that
+   ignored MUTAML_MUTANT and always emitted one set would satisfy a
+   single-mutant fixture perfectly. *)
+let campaign_catalogue =
+  {|{"id":"m1","file":"lib/x.ml","line":15,"col_start":3,"col_end":9,"replacement":"true"}
+{"id":"m2","file":"lib/y.ml","line":35,"col_start":1,"col_end":4,"replacement":"false"}
+{"id":"m3","file":"lib/z.ml","line":55,"col_start":2,"col_end":7,"replacement":"0"}
+|}
+
+let wrapper_path () = Filename.concat (repo_root ()) "scripts/mutaml-wrapper.sh"
+
+(* One campaign harness: build the index, derive the plan through the real CLI,
+   write the catalogue/report/engine, and hand back a runner plus the work
+   directory the wrapper writes its trace into. *)
+let campaign_setup ~name ~engine_body ~report =
+  let db = load_fixture name campaign_stream in
+  let dir = Temp.dir (name ^ "_campaign") in
+  let plan_file = Filename.concat dir "plan.json" in
+  let _, plan_out = mutants ["plan"; db; "--tests"; "file:test/**"; "--format"; "json"] in
+  write_file plan_file plan_out ;
+  let catalogue = Filename.concat dir "catalogue.ndjson" in
+  write_file catalogue campaign_catalogue ;
+  let report_file = Filename.concat dir "report.ndjson" in
+  write_file report_file report ;
+  let engine = Filename.concat dir "engine.sh" in
+  write_exec engine engine_body ;
+  let work = Filename.concat dir "work" in
+  let env =
+    [("ARCH_MUTANTS_WORKDIR", work); ("ARCH_MUTANTS_WRAPPER", wrapper_path ())]
+  in
+  let argv extra =
+    ["run"; db; "--plan"; plan_file; "--engine"; engine; "--test-cmd"; "true";
+     "--catalogue"; catalogue; "--report"; report_file; "--tests"; "file:test/**"]
+    @ extra
+  in
+  let run extra = run_command ~env (arch_mutants ()) (argv extra) in
+  (* The JSON surface is read through the SPLIT runner. The driver routes the
+     engine's own chatter to stderr precisely so stdout stays one parseable
+     object; merging the two back together here would undo that and make the
+     assertion fail for a reason that has nothing to do with the code. *)
+  let run_json extra = run_command_split ~env (arch_mutants ()) (argv extra) in
+  (db, work, run, run_json)
+
+(* The wrapper's trace: one line per invocation, "<id>\t<n>\t<executed,…>\t<rc>". *)
+let trace_rows work =
+  let path = Filename.concat work "wrapper-trace.tsv" in
+  if not (Sys.file_exists path) then []
+  else
+    String.split_on_char '\n' (read_file path)
+    |> List.filter (fun l -> String.trim l <> "")
+    |> List.map (fun l -> String.split_on_char '\t' l)
+
+let executed_for work id =
+  List.find_map
+    (function id' :: _ :: executed :: _ when id' = id -> Some executed | _ -> None)
+    (trace_rows work)
+
+let stub_engine ids =
+  "#!/bin/sh\n"
+  ^ String.concat ""
+      (List.map (fun m -> Printf.sprintf "MUTAML_MUTANT=%s \"$1\" || true\n" m) ids)
+  ^ "exit 0\n"
+
+let all_survived =
+  {|{"file":"lib/x.ml","line":15,"status":"SURVIVED","id":"m1"}
+{"file":"lib/y.ml","line":35,"status":"SURVIVED","id":"m2"}
+{"file":"lib/z.ml","line":55,"status":"SURVIVED","id":"m3"}
+|}
+
+(* CHECK-1 / AC-1. The claim is about the WRAPPER, not the engine, and it is
+   asserted with counts and exact sets rather than by grepping the report for a
+   word: a word survives a great many wrong implementations because it can be
+   present for reasons unrelated to the branch that should have produced it. A
+   count cannot. *)
+let register_run_per_mutant () =
+  Test.register ~__FILE__
+    ~title:"mutants: run drives the wrapper once per mutant with the declared set"
+    ~tags:["mutants"; "run"]
+  @@ fun () ->
+  let db, work, run, _ =
+    campaign_setup ~name:"mutants_run" ~engine_body:(stub_engine ["m1"; "m2"; "m3"])
+      ~report:
+        {|{"file":"lib/x.ml","line":15,"status":"SURVIVED","id":"m1"}
+{"file":"lib/y.ml","line":35,"status":"KILLED","id":"m2"}
+{"file":"lib/z.ml","line":55,"status":"SURVIVED","id":"m3"}
+|}
+  in
+  Batch.run (fun b ->
+      Batch.exit_code b ~msg:"a completed campaign must exit 0" ~expected:0 (run []) ;
+      (* Three mutants, three wrapper invocations — not one, which is what the
+         ENGINE got. *)
+      Batch.eq_int b ~msg:"the wrapper must be invoked once per mutant"
+        (List.length (trace_rows work)) 3 ;
+      Batch.eq_string_opt b ~msg:"m1's executed set must be exactly covered's reaching tests"
+        (executed_for work "m1") (Some "t_alpha") ;
+      Batch.eq_string_opt b ~msg:"m2's executed set must be exactly other's reaching tests"
+        (executed_for work "m2") (Some "t_gamma") ;
+      Batch.eq_string_opt b ~msg:"m3's executed set must be exactly shared's reaching tests"
+        (executed_for work "m3") (Some "t_beta") ;
+      Db.with_db db (fun conn ->
+          Batch.eq_int b ~msg:"one campaign row" (Db.int conn "SELECT count(*) FROM mutant_campaigns") 1 ;
+          Batch.eq_int b ~msg:"one mutant site row per catalogued mutant"
+            (Db.int conn "SELECT count(*) FROM mutants") 3 ;
+          Batch.eq_int b ~msg:"one run row per attempted mutant"
+            (Db.int conn "SELECT count(*) FROM mutant_runs") 3 ;
+          Batch.eq_int b
+            ~msg:"a completed campaign must stamp completed_at"
+            (Db.int conn "SELECT count(*) FROM mutant_campaigns WHERE completed_at IS NOT NULL") 1 ;
+          (* FR-013: a status is never stored without its provenance, and this
+             fixture's cone is closed with a contract, so it is proved_superset. *)
+          Batch.eq_int b ~msg:"every run row must carry a selection provenance"
+            (Db.int conn
+               "SELECT count(*) FROM mutant_runs WHERE selection_provenance = 'proved_superset'")
+            3 ;
+          (* FR-007: m2 was killed under a SINGLETON executed set, so its
+             attribution is known; nothing else is. *)
+          Batch.eq_int b ~msg:"exactly one attribution is knowable here"
+            (Db.int conn "SELECT count(*) FROM mutant_kills") 1 ;
+          Batch.eq_string_opt b ~msg:"the attributed test must be the one that actually ran"
+            (Db.string_opt conn "SELECT test_name FROM mutant_kills") (Some "t_gamma")) ;
+      (* A second campaign over unchanged code adds campaign and run rows and NO
+         mutant site rows (AC-5). *)
+      Batch.exit_code b ~msg:"a re-run must succeed" ~expected:0 (run []) ;
+      Db.with_db db (fun conn ->
+          Batch.eq_int b ~msg:"a re-run inserts a new campaign, never updating the old one"
+            (Db.int conn "SELECT count(*) FROM mutant_campaigns") 2 ;
+          Batch.eq_int b ~msg:"a re-run over unchanged code adds NO mutant site rows"
+            (Db.int conn "SELECT count(*) FROM mutants") 3 ;
+          Batch.eq_int b ~msg:"a re-run doubles the run rows"
+            (Db.int conn "SELECT count(*) FROM mutant_runs") 6)) ;
+  Lwt.return_unit
+
+(* CHECK-2 / AC-2. "Once per mutant with exactly the reaching tests" is
+   unsatisfiable when the runner can only address a group, so the criterion is
+   restated in terms of the EXECUTED set: it must be a superset, and both sizes
+   must be recorded. Over-selection is sound; under-selection is not. *)
+let register_run_group_superset () =
+  Test.register ~__FILE__
+    ~title:"mutants: a group-granularity profile executes a superset and says so"
+    ~tags:["mutants"; "run"]
+  @@ fun () ->
+  let db, work, run, _ =
+    campaign_setup ~name:"mutants_group" ~engine_body:(stub_engine ["m1"; "m2"; "m3"])
+      ~report:all_survived
+  in
+  Batch.run (fun b ->
+      Batch.exit_code b ~msg:"the campaign must run" ~expected:0 (run ["--profile"; "alcotest"]) ;
+      (* covered is reached by t_alpha alone, but t_gamma shares its FILE, so a
+         group-addressing runner cannot avoid running it too. The executed set is
+         that widened pair, in sorted order — and NOT the whole suite, which
+         would also be a superset but a different (and needlessly expensive) one. *)
+      Batch.eq_string_opt b ~msg:"a group profile must widen m1's set to its whole group"
+        (executed_for work "m1") (Some "t_alpha,t_gamma") ;
+      Batch.eq_string_opt b ~msg:"m3's group holds only itself, so its set must not widen"
+        (executed_for work "m3") (Some "t_beta") ;
+      Db.with_db db (fun conn ->
+          Batch.eq_int b ~msg:"the campaign must record the declared granularity"
+            (Db.int conn "SELECT count(*) FROM mutant_campaigns WHERE granularity = 'group'") 1 ;
+          (* The INTENDED set is preserved alongside the executed one: 1 and 2,
+             worked out by hand from the fixture, not read back from the tool. *)
+          Batch.eq_int b ~msg:"m1's run must record intended 1 and executed 2, flagged a superset"
+            (Db.int conn
+               "SELECT count(*) FROM mutant_runs r JOIN mutants m ON m.id = r.mutant_id \
+                WHERE m.file_path = 'lib/x.ml' AND r.intended_tests = 1 AND r.executed_tests = 2 \
+                AND r.executed_superset = 1")
+            1 ;
+          (* Worked out by hand from the fixture, and it is NOT symmetric: m1
+             (covered ← t_alpha) and m2 (other ← t_gamma) both widen, because
+             t_alpha and t_gamma share alpha_test.ml. Only m3 (shared ← t_beta,
+             alone in beta_test.ml) has a group of one and must stay unflagged.
+             So 2 supersets and 1 not — a count the tool cannot satisfy by
+             flagging everything, nor by flagging nothing. *)
+          Batch.eq_int b ~msg:"exactly the two mutants whose group holds a second test widen"
+            (Db.int conn "SELECT count(*) FROM mutant_runs WHERE executed_superset = 1") 2 ;
+          Batch.eq_int b
+            ~msg:"the mutant whose group holds only its own test must NOT be flagged a superset"
+            (Db.int conn
+               "SELECT count(*) FROM mutant_runs r JOIN mutants m ON m.id = r.mutant_id \
+                WHERE m.file_path = 'lib/z.ml' AND r.executed_superset = 0")
+            1)) ;
+  Lwt.return_unit
+
+(* CHECK-3 / AC-3. Exit 2 is asserted TOGETHER with a fact no message can
+   simulate: the database must hold no campaign table at all. An empty campaign
+   row would read as "nothing survived", which is the whole reason this refuses. *)
+let register_run_missing_engine () =
+  Test.register ~__FILE__ ~title:"mutants: run with no engine exits 2 and writes no campaign"
+    ~tags:["mutants"; "run"]
+  @@ fun () ->
+  let db = load_fixture "mutants_no_engine" campaign_stream in
+  let dir = Temp.dir "mutants_no_engine_campaign" in
+  let plan_file = Filename.concat dir "plan.json" in
+  let _, plan_out = mutants ["plan"; db; "--tests"; "file:test/**"; "--format"; "json"] in
+  write_file plan_file plan_out ;
+  let catalogue = Filename.concat dir "catalogue.ndjson" in
+  write_file catalogue campaign_catalogue ;
+  let report_file = Filename.concat dir "report.ndjson" in
+  write_file report_file all_survived ;
+  Batch.run (fun b ->
+      let code, output =
+        run_command
+          ~env:[("ARCH_MUTANTS_WORKDIR", Filename.concat dir "work");
+                ("ARCH_MUTANTS_WRAPPER", wrapper_path ())]
+          (arch_mutants ())
+          ["run"; db; "--plan"; plan_file; "--engine"; "arch-mutants-no-such-engine";
+           "--test-cmd"; "true"; "--catalogue"; catalogue; "--report"; report_file;
+           "--tests"; "file:test/**"]
+      in
+      Batch.exit_code b ~msg:"an unresolvable engine must abort with exit 2" ~expected:2
+        (code, output) ;
+      (* The verifiable half. The driver opens the database for writing only
+         AFTER the engine resolves, so an aborted run leaves it without the
+         campaign tables entirely — a fact no wording can fake. *)
+      Db.with_db db (fun conn ->
+          Batch.eq_int b
+            ~msg:"a refused campaign must not create the campaign table, let alone a row in it"
+            (Db.int conn
+               "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='mutant_campaigns'")
+            0)) ;
+  Lwt.return_unit
+
+(* CHECK-5 / AC-11. The engine dies after one of three mutants. The campaign
+   stays OPEN and the two it never reached have no run row — PENDING by that
+   absence. Reporting them as SURVIVED would be a false accusation against two
+   tests that were never given the chance. *)
+let register_run_interrupted () =
+  Test.register ~__FILE__ ~title:"mutants: an interrupted campaign reports PENDING, never SURVIVED"
+    ~tags:["mutants"; "run"]
+  @@ fun () ->
+  let db, work, run, _ =
+    campaign_setup ~name:"mutants_interrupted"
+      ~engine_body:"#!/bin/sh\nMUTAML_MUTANT=m1 \"$1\" || true\nexit 1\n"
+      ~report:{|{"file":"lib/x.ml","line":15,"status":"SURVIVED","id":"m1"}
+|}
+  in
+  Batch.run (fun b ->
+      let code, output = run [] in
+      ignore code ;
+      Batch.eq_int b ~msg:"only the mutant the engine reached invoked the wrapper"
+        (List.length (trace_rows work)) 1 ;
+      Db.with_db db (fun conn ->
+          Batch.eq_int b ~msg:"an interrupted campaign must leave completed_at NULL"
+            (Db.int conn "SELECT count(*) FROM mutant_campaigns WHERE completed_at IS NULL") 1 ;
+          (* All three sites are catalogued and persisted; only one was
+             attempted. The other two are PENDING by the ABSENCE of a run row,
+             which is why the count is 1 and not 3. *)
+          Batch.eq_int b ~msg:"every catalogued mutant is still persisted as a site"
+            (Db.int conn "SELECT count(*) FROM mutants") 3 ;
+          Batch.eq_int b ~msg:"only the attempted mutant gets a run row"
+            (Db.int conn "SELECT count(*) FROM mutant_runs") 1 ;
+          Batch.eq_int b
+            ~msg:"the two unattempted mutants must not appear as SURVIVED"
+            (Db.int conn
+               "SELECT count(*) FROM mutant_runs r JOIN mutants m ON m.id = r.mutant_id \
+                WHERE m.file_path IN ('lib/y.ml','lib/z.ml')")
+            0) ;
+      ignore output) ;
+  Lwt.return_unit
+
+(* FR-027/FR-029 / AC-21, AC-23. A campaign with no kills is SELF-UNCERTIFIED,
+   and the three ways of having no kill are three different facts.
+
+   Asserted on the TAG the driver computes and on hand-counted per-status
+   numbers, never by grepping the rendered report for the word
+   "self-uncertified". A word survives a great many wrong implementations,
+   because it can be present for a reason that has nothing to do with the branch
+   that should have produced it — a legend, a header, a help line. A tag whose
+   value distinguishes `uncertified_no_kill` from `uncertified_all_errored`
+   cannot. *)
+let register_run_self_uncertified () =
+  Test.register ~__FILE__
+    ~title:"mutants: a campaign with no kills is self-uncertified, and says WHY it has none"
+    ~tags:["mutants"; "run"]
+  @@ fun () ->
+  let survivors_case =
+    campaign_setup ~name:"mutants_uncert_surv"
+      ~engine_body:(stub_engine ["m1"; "m2"; "m3"]) ~report:all_survived
+  in
+  let errors_case =
+    campaign_setup ~name:"mutants_uncert_err" ~engine_body:(stub_engine ["m1"; "m2"; "m3"])
+      ~report:
+        {|{"file":"lib/x.ml","line":15,"status":"ERROR","id":"m1"}
+{"file":"lib/y.ml","line":35,"status":"ERROR","id":"m2"}
+{"file":"lib/z.ml","line":55,"status":"ERROR","id":"m3"}
+|}
+  in
+  let killed_case =
+    campaign_setup ~name:"mutants_uncert_kill" ~engine_body:(stub_engine ["m1"; "m2"; "m3"])
+      ~report:
+        {|{"file":"lib/x.ml","line":15,"status":"KILLED","id":"m1"}
+{"file":"lib/y.ml","line":35,"status":"SURVIVED","id":"m2"}
+{"file":"lib/z.ml","line":55,"status":"SURVIVED","id":"m3"}
+|}
+  in
+  let tag_and_counts b ~what (_, _, _, run_json) =
+    match Batch.expect b (Json.parse ~what (let _, out, _ = run_json ["--format"; "json"] in out)) with
+    | None -> None
+    | Some j -> Some j
+  in
+  Batch.run (fun b ->
+      let check ~what case ~tag ~killed ~survived ~errored =
+        match tag_and_counts b ~what case with
+        | None -> ()
+        | Some j ->
+            Option.iter
+              (fun s ->
+                Batch.eq_string b ~msg:(what ^ ": certification tag") s tag)
+              (Batch.expect b
+                 (match Json.member "certification" j with
+                 | Some (`String s) -> Ok s
+                 | other -> Error (what ^ ": certification is " ^ Json.show other))) ;
+            List.iter
+              (fun (key, expected) ->
+                Option.iter
+                  (fun n -> Batch.eq_int b ~msg:(what ^ ": " ^ key) n expected)
+                  (Batch.expect b (Json.int ~what key j)))
+              [("killed", killed); ("survived", survived); ("errored", errored)]
+      in
+      (* Mutants ran, none died: the picture an unmutated binary also produces. *)
+      check ~what:"all survivors" survivors_case ~tag:"uncertified_no_kill" ~killed:0
+        ~survived:3 ~errored:0 ;
+      (* Also zero kills, for an entirely different reason — nothing meaningfully
+         ran — and it must NOT be reported in the same words. *)
+      check ~what:"all errored" errors_case ~tag:"uncertified_all_errored" ~killed:0
+        ~survived:0 ~errored:3 ;
+      (* One kill is enough: a stale, unmutated binary cannot produce one. *)
+      check ~what:"one kill" killed_case ~tag:"self_certifying" ~killed:1 ~survived:2
+        ~errored:0) ;
+  Lwt.return_unit
