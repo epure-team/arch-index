@@ -1,0 +1,4 @@
+(executable
+ (name arch_sarif_load)
+ (public_name arch_sarif_load)
+ (libraries arch_index arch_tools yojson sqlite3))

@@ -62,6 +62,21 @@ let schema_path =
    it carries no CHECK on this column, so nothing about its structure changed. *)
 let current_schema_version = "1.11"
 
+   splits on '.' and compares [(major, minor)] as ints, so 1.10 > 1.9. *)
+(* Bumped 1.10 -> 1.12 for [imported_findings] (roadmap 2.3,
+   specs/reporting-and-integration.md FR-010): findings imported from a foreign
+   analyser, carrying their soundness class by reference to their producer_run
+   rather than by a column of their own.
+   NOT 1.11, and the gap is deliberate rather than an accident: 1.11 is claimed
+   by the module-alias slice (specs/reexport-resolution.md), which is open and
+   ahead of this one. Two branches numbering the same version would produce two
+   incompatible schemas both calling themselves 1.11, and docs/schema.md's own
+   history records why that is worse than a hole — a version LOWER than main's
+   while carrying strictly more schema breaks every >= comparison. So this slice
+   takes 1.12 and DEPENDS on 1.11 landing first; if that branch is dropped, this
+   one renumbers rather than silently filling the gap. *)
+let current_schema_version = "1.12"
+
 (* The flat schema (runner.ml's own inline 3-table [schema_sql]) — distinct
    version identity from [current_schema_version] above: the two schemas are
    structurally incomparable, and conflating them under one version number is

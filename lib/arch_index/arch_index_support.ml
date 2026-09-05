@@ -107,6 +107,17 @@ let schema_tables_to_drop =
        a re-index of the same database accumulates one orphaned row per
        invocation, and [SELECT * FROM producer_runs] stops answering "what
        produced THIS index" (roadmap 1.2). *)
+    (* Imported foreign findings (roadmap 2.3). Dropped, and dependents-first:
+       every row carries a [module_id] into a table this run is about to
+       recreate, so a survivor would point at a module from a DIFFERENT walk —
+       the same unsoundness the exception tables above describe, with a
+       foreign tool's name on it.
+
+       The cost is real and is the right trade: a re-index discards imports and
+       they must be re-run. Keeping them would mean re-resolving every uri
+       against the new module ids, which is a bigger design than this slice, and
+       silently keeping them with stale ids is not a third option. *)
+    "imported_findings";
     "producer_runs";
   ]
 

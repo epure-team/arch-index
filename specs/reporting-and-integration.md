@@ -123,9 +123,22 @@ and `arch-mcp` (stdio JSON-RPC for agents). Ingest is `arch-load` / `arch-covera
 ## Verification
 
 - **CHECK-1** *(roadmap 2.3, the ingest slice — NOT verifiable by 2.2.)* Import a SARIF file from
-  Semgrep OSS; assert every finding lands with `soundness_class = heuristic` and that `arch-rules`
-  over the same scope cannot return `PASS`. Requires FR-010, which the ingest slice (2.3) owns —
-  the check is verifiable there, never by the report slice alone.
+  Semgrep OSS; assert every finding lands with `soundness_class = heuristic` and that the import
+  **changes no verdict and no edge**. Requires FR-010, which the ingest slice (2.3) owns.
+
+  **Amended 2026-09-05.** The original said *"`arch-rules` over the same scope cannot return
+  `PASS`"*, which is FR-004's behaviour and needs `PASS_UNDER_HYP` — a verdict no tool can emit
+  until the discharge ledger (roadmap 3.2) exists. As written, the check could not be run.
+
+  What 2.3 can verify is **stronger in the safe direction** and is what the design guarantees:
+  an imported fact cannot *downgrade* a verdict because it cannot *reach* one. Imported findings
+  land in `imported_findings`, a table no reachability or effect query reads; they create no
+  `calls` row, no `callee_id` and no edge kind. So the assertion is that the call graph is
+  byte-identical across an import — measured: total, resolved and `MAY_TOP` counts unchanged after
+  importing findings that name indexed files. A fact that cannot discharge a ⊤ *through* anything
+  is a safer guarantee than one that is merely forbidden from doing so, and it is checkable today.
+
+  The `PASS_UNDER_HYP` half returns with 3.2, which is where the verdict is defined.
 - **CHECK-2** Index a polyglot fixture with an adapter available for one language only; assert the
   report renders `NOT_ANALYSED` for the other and that no query returns a bare empty result.
 - **CHECK-3** *(roadmap 2.3, the ingest slice — NOT verifiable by 2.2.)* Feed a malformed SARIF;
