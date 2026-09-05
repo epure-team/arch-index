@@ -185,6 +185,7 @@ floats. Absence of data is stated, never implied.
 | `results[].detail` | array of string | the offending call paths / functions / dependencies, capped at 20 |
 | `results[].detail_total` | int | the untruncated count `detail` was capped from — equal to `len(detail)` when nothing was cut, so a consumer never has to guess whether "20 shown" means "20 total" or "20 of 200" |
 | `results[].witness` | array of string | for a `reach` rule verdicted `VIOLATION`/`POSSIBLE`/`UNKNOWN`, the concrete call path (source-to-target order) that produced the verdict — `VIOLATION` walks the same MUST-only edges its own proof used, `POSSIBLE` the wider MUST ∪ MAY_ENUMERATED cone, `UNKNOWN` the path to the nearest ⊤-holding caller (the same function `detail`'s first entry names). `[]` on every other verdict and every non-`reach` rule form, since none of those carry a reachability claim a path could illustrate |
+| `results[].top_reasons` | array of string | for a `reach` rule verdicted `UNKNOWN`, the distinct `top_reason` values (roadmap 1.4's ⊤-anchor taxonomy) recorded on the `MAY_TOP` edge(s) the escaping cone hit. `[]` when no reason was recorded (or the verdict is anything else, including `UNKNOWN_NO_CONTRACT` — no specific edge is at fault there, the whole index was never ⊤-marked) |
 | `failed` | array of string | rule names counted failing — `failing` is its length, kept as a separate int field so a gate does not need to count an array |
 
 `proved`, `violations`, `possible`, `unknown_escaping`, `unknown_no_contract`, `vacuous` and
@@ -198,3 +199,47 @@ index does not abort the whole run — it degrades the *individual rules that ne
 policies decide whether that counts as failing. A workflow gate consuming `arch-rules` output
 should treat `failing == 0` as the pass condition and never expect a third verdict value from this
 tool.
+
+## SARIF output (`--format sarif`)
+
+`--format sarif` emits a single-run [SARIF 2.1.0](https://sarifweb.azurewebsites.net/) document —
+the same information as `--format json`, in the shape GitHub code scanning (and any other SARIF
+consumer) expects. This is roadmap item 2.1; the writer itself lives in
+`lib/arch_tools/arch_sarif.ml` so item 2.2's `arch-report` reuses it rather than reimplementing
+SARIF emission.
+
+- **One `result` per rule verdict that is not `PASS`.** A `PASS` is a proof, not a finding, and
+  putting proofs in the same list as violations is what CodeQL-style tools do that this project's
+  design explicitly rejects.
+- `ruleId` is the `arch-rules` rule name. `level`: `VIOLATION` → `error`, `POSSIBLE` → `warning`,
+  every other verdict (`UNKNOWN`, `UNKNOWN_NO_CONTRACT`, `NOT_COMPUTED`, `NO_SOURCE`, `NO_TARGET`)
+  → `note` — none of these is a proof of anything, but FR-024's "never silence" discipline applies
+  to a single rule's own verdict too, not just to a whole language's coverage.
+- An `UNKNOWN` result carries `properties.soundness = "unknown_top"` and, when known,
+  `properties.top_reason` — the ⊤-anchor taxonomy values (see `results[].top_reasons` above) for
+  the edge the cone actually hit.
+- A rule's witness path (roadmap 1.5) becomes a `codeFlows` entry — one thread flow, one location
+  per step — rather than a flat string, so a SARIF viewer renders it as a clickable path.
+- `driver.name`/`driver.version` come from this index's own provenance
+  (`producer_runs` on the main schema, `comment_db_meta` on the flat one — see `docs/schema.md`'s
+  Provenance section), falling back to `"arch-index"` on a pre-1.2 index that recorded neither.
+- **The ⊤ frontier is a count, in `run.properties.top_frontier` — never a member of `results`.**
+  A real corpus's ⊤ frontier is orders of magnitude past GitHub's 25 000-result cap (Octez alone
+  carries 286k+ such edges); putting it in `results` would either get silently truncated or make
+  every upload fail.
+- `run.properties.category` and `automationDetails.id` are both stamped
+  `"arch-index/rules"` — GitHub stopped merging SARIF runs that share `tool.driver.name` +
+  category in one upload as of July 2025, so a caller emitting several analyses from one producer
+  (2.2's `arch-report`, which calls the same `Arch_sarif` writer once per analysis) must give each
+  a distinct category, or a second upload overwrites the first rather than merging with it.
+- The `analysis_coverage` matrix (roadmap 1.3), when present, becomes `run.properties.coverage`;
+  a `status = "not_analysed"` row becomes a `toolExecutionNotifications` entry on the run, never
+  an absent section (spec FR-024).
+- A finding whose `soundness_class` is `"heuristic"` (roadmap 2.3, not yet wired into
+  `arch-rules` itself — every finding this tool emits today is derived from this repo's own
+  sound-or-⊤-marked index) carries that verbatim in `properties.soundness_class`, so a consumer
+  can filter it out (spec FR-022).
+
+Validated in CI against the vendored schema at `vendor/sarif/sarif-schema-2.1.0.json` (JSON
+Schema draft-04) using python3's `jsonschema` library — see `tezt/tests/sarif_out.ml`'s header
+comment for why that validator was chosen over the opam package of the same name.

@@ -39,7 +39,7 @@ module SS = Arch_graph.SS
 let usage =
   {|arch-rules — architecture fitness functions over a sound call graph.
 
-Usage: arch-rules <db> [rules-file] [--format text|md|json]
+Usage: arch-rules <db> [rules-file] [--format text|md|json|sarif]
                   [--on-unknown warn|fail] [--on-possible fail|warn] [--on-vacuous fail|warn]
                   [--on-not-computed fail|warn]
 
@@ -198,6 +198,11 @@ type result = {
      this is the path, checkable by a reviewer without re-deriving it by hand. Every other
      verdict form carries no reachability claim, so [[]] there. *)
   witness : string list;
+  (* Roadmap 1.4's ⊤-anchor taxonomy, for an UNKNOWN reach verdict: the distinct [top_reason]
+     values recorded on the MAY_TOP edge(s) the escaping cone actually hit. [[]] for every other
+     verdict, and for UNKNOWN_NO_CONTRACT (no specific edge is at fault there — the whole index
+     was never ⊤-marked). Feeds `--format sarif`'s [properties.top_reason] (spec FR-022). *)
+  top_reasons : string list;
 }
 
 (** Order matters: a definite path is VIOLATION even when the source ALSO reaches a ⊤ edge.
@@ -228,6 +233,54 @@ let reach_verdict (g : Arch_graph.t) ~sound src dst =
 
 let take n l = List.filteri (fun i _ -> i < n) l
 
+(* Roadmap 1.4's ⊤-anchor taxonomy, looked up for a specific set of ESCAPING node keys — the
+   [hit] list [reach_verdict] already returns for UNKNOWN. Distinct [top_reason] values only,
+   over the [MAY_TOP] edges those nodes themselves hold, so this is honest about scope: it names
+   the reason(s) for the ⊤ edge the cone actually stopped at, not every ⊤ reason anywhere in the
+   index.
+
+   The two schemas key nodes differently (see Arch_graph's module doc): [Main] keys as
+   ['#'..id], resolved straight back to [calls.caller_id]; [Flat] keys as the function's own
+   name, resolved through [calls.caller_name]. Either lookup that finds nothing (a malformed or
+   foreign DB, or a key this function cannot parse) degrades to [[]] rather than raising — this
+   is best-effort provenance for a SARIF property bag, never a correctness-critical path. *)
+let top_reasons_for (t : Arch_db.t) (g : Arch_graph.t) keys =
+  if keys = [] then []
+  else
+    let distinct_reasons sql json =
+      Arch_db.rows t ~params_ty:Arch_db.Ty.string ~shape:Arch_db.Rows.t1 ~to_cells:Arch_db.Rows.c1 sql json
+      |> List.filter_map (function
+           | [ c ] -> ( match Arch_db.string_of_cell c with "" -> None | s -> Some s)
+           | _ -> None)
+    in
+    match t.Arch_db.schema with
+    | Arch_db.Flat ->
+        let names =
+          List.filter_map
+            (fun k -> Option.map (fun (n : Arch_graph.node) -> n.name) (Arch_graph.SM.find_opt k g.nodes))
+            keys
+        in
+        if names = [] then []
+        else
+          distinct_reasons
+            "SELECT DISTINCT top_reason FROM calls WHERE caller_name IN (SELECT value FROM \
+             json_each(?)) AND kind = 'MAY_TOP' AND top_reason IS NOT NULL"
+            (Yojson.Safe.to_string (`List (List.map (fun n -> `String n) names)))
+    | Arch_db.Main ->
+        let ids =
+          List.filter_map
+            (fun k ->
+              if String.length k > 1 && k.[0] = '#' then int_of_string_opt (String.sub k 1 (String.length k - 1))
+              else None)
+            keys
+        in
+        if ids = [] then []
+        else
+          distinct_reasons
+            "SELECT DISTINCT top_reason FROM calls WHERE caller_id IN (SELECT value FROM \
+             json_each(?)) AND kind = 'MAY_TOP' AND top_reason IS NOT NULL"
+            (Yojson.Safe.to_string (`List (List.map (fun i -> `Int i) ids)))
+
 let eval (t : Arch_db.t) (g : Arch_graph.t) ~sound r =
   let lbl k = Arch_graph.label g k in
   match r.body with
@@ -250,7 +303,7 @@ let eval (t : Arch_db.t) (g : Arch_graph.t) ~sound r =
          rather than silently returning an empty match on the common case. It fails the gate by
          default. *)
       { rule = r.name; kind = kind_of r.body; exact = false; verdict = "NOT_COMPUTED"; detail = [];
-        detail_total = 0; sizes = None; witness = [];
+        detail_total = 0; sizes = None; witness = []; top_reasons = [];
         note =
           Some
             (Printf.sprintf
@@ -332,8 +385,10 @@ let eval (t : Arch_db.t) (g : Arch_graph.t) ~sound r =
             | [] -> [])
         | _ -> []
       in
+      let top_reasons = if v = "UNKNOWN" then top_reasons_for t g hit else [] in
       { rule = r.name; kind = kind_of r.body; exact = false; verdict = v; detail = List.map lbl (take 20 hit);
-        detail_total = List.length hit; note; sizes = Some (SS.cardinal src, SS.cardinal dst); witness }
+        detail_total = List.length hit; note; sizes = Some (SS.cardinal src, SS.cardinal dst); witness;
+        top_reasons }
   | Exported s ->
       let allowed = Arch_sel.select g s in
       let offenders =
@@ -354,7 +409,7 @@ let eval (t : Arch_db.t) (g : Arch_graph.t) ~sound r =
       let exported_total =
         List.length (List.filter (fun (n : Arch_graph.node) -> n.exported) (Arch_graph.nodes g))
       in
-      { rule = r.name; kind = kind_of r.body; exact = true; witness = [];
+      { rule = r.name; kind = kind_of r.body; exact = true; witness = []; top_reasons = [];
         sizes = Some (SS.cardinal allowed, exported_total);
         verdict =
           (if exported_total = 0 then "NO_SOURCE"
@@ -382,7 +437,7 @@ let eval (t : Arch_db.t) (g : Arch_graph.t) ~sound r =
       let effect_src = lazy (Arch_sel.select g s) in
       if not (Arch_db.nonempty t "function_effects") then
         { rule = r.name; kind = kind_of r.body; exact = false; verdict = "NOT_COMPUTED"; detail = [];
-          detail_total = 0; sizes = None; witness = [];
+          detail_total = 0; sizes = None; witness = []; top_reasons = [];
           note =
             Some
               "this index has no effects data — 'no effect found' would be a lie. Effects are \
@@ -395,7 +450,7 @@ let eval (t : Arch_db.t) (g : Arch_graph.t) ~sound r =
           (* `sizes = None` like every other Effect branch: an effect rule's JSON row has never
              carried source_size/target_size, and making one verdict the exception would be a
              schema a consumer cannot rely on. The note carries the evidence instead. *)
-          detail_total = 0; sizes = None; witness = [];
+          detail_total = 0; sizes = None; witness = []; top_reasons = [];
           note =
             Some
               (Printf.sprintf
@@ -424,14 +479,14 @@ let eval (t : Arch_db.t) (g : Arch_graph.t) ~sound r =
         in
         let escaping = SS.filter (fun k -> Arch_graph.SM.mem k g.tops) cone in
         if hits <> [] then
-          { rule = r.name; kind = kind_of r.body; exact = false; verdict = "VIOLATION"; sizes = None; witness = [];
+          { rule = r.name; kind = kind_of r.body; exact = false; verdict = "VIOLATION"; sizes = None; witness = []; top_reasons = [];
             detail =
               take 20
                 (List.map (fun row -> String.concat " " (List.map Arch_db.string_of_cell row)) hits);
             detail_total = List.length hits; note = None }
         else if not (SS.is_empty escaping) then
           { rule = r.name; kind = kind_of r.body; exact = false; verdict = "UNKNOWN"; detail = [];
-            detail_total = 0; sizes = None; witness = [];
+            detail_total = 0; sizes = None; witness = []; top_reasons = [];
             note =
               Some
                 (Printf.sprintf
@@ -441,11 +496,11 @@ let eval (t : Arch_db.t) (g : Arch_graph.t) ~sound r =
         else
           { rule = r.name; kind = kind_of r.body; exact = false;
             verdict = (if sound then "PASS" else "UNKNOWN_NO_CONTRACT");
-            detail = []; detail_total = 0; note = None; sizes = None; witness = [] }
+            detail = []; detail_total = 0; note = None; sizes = None; witness = []; top_reasons = [] }
   | Dep (s, d) ->
       if (not (Arch_db.has_table t "module_deps")) || t.schema = Arch_db.Flat then
         { rule = r.name; kind = kind_of r.body; exact = false; verdict = "NOT_COMPUTED"; detail = [];
-          detail_total = 0; sizes = None; witness = [];
+          detail_total = 0; sizes = None; witness = []; top_reasons = [];
           note =
             Some
               "this index has no module_deps — declared-dependency rules are produced today only by \
@@ -499,7 +554,7 @@ let eval (t : Arch_db.t) (g : Arch_graph.t) ~sound r =
                  | _ -> false)
                module_paths)
         in
-        { rule = r.name; kind = kind_of r.body; exact = true; witness = [];
+        { rule = r.name; kind = kind_of r.body; exact = true; witness = []; top_reasons = [];
           verdict =
             (if source_size = 0 then "NO_SOURCE" else if hits = [] then "PASS" else "VIOLATION");
           detail = take 20 hits; detail_total = List.length hits;
@@ -528,6 +583,56 @@ let symbol = function
   | "NOT_COMPUTED" -> "n/a"
   | "NO_SOURCE" | "NO_TARGET" -> "VACUOUS"
   | v -> v
+
+(* ------------------------------------------------------------------ *)
+(* --format sarif (roadmap 2.1)                                        *)
+(* ------------------------------------------------------------------ *)
+
+(* Roadmap 1.2 (ADR 002): [driver.name]/[driver.version]. The MAIN schema's provenance lives in
+   [producer_runs] (one row per producer invocation); the FLAT schema's (arch-load, runner.ml)
+   lives in [comment_db_meta] instead — see that table's own comment for why the two writers
+   disagree. Tried in that order so a MAIN-schema DB that also happens to carry a stray
+   [comment_db_meta] producer key (it should not, but nothing enforces that) still prefers its
+   own authoritative table. Falls back to a fixed, honest default rather than an empty string:
+   SARIF's [driver.name] is not optional, and "arch-index" is true of every index this repo's own
+   pipeline writes even when neither provenance mechanism was populated (a pre-1.2 index). *)
+let producer_info (t : Arch_db.t) =
+  let of_producer_runs () =
+    if t.Arch_db.schema = Arch_db.Main && Arch_db.has_table t "producer_runs" then
+      match
+        Arch_db.rows t ~params_ty:Arch_db.Ty.unit ~shape:Arch_db.Rows.t2' ~to_cells:Arch_db.Rows.c2
+          "SELECT producer, producer_version FROM producer_runs ORDER BY id DESC LIMIT 1" ()
+      with
+      | [ [ p; v ] ] -> (
+          match Arch_db.string_of_cell p with
+          | "" -> None
+          | producer -> Some (producer, match Arch_db.string_of_cell v with "" -> None | s -> Some s))
+      | _ -> None
+    else None
+  in
+  match of_producer_runs () with
+  | Some pv -> pv
+  | None -> (
+      match Arch_db.meta t "producer" with
+      | Some p -> (p, Arch_db.meta t "producer_version")
+      | None -> ("arch-index", None))
+
+(* Roadmap 1.3's coverage matrix, read straight off [analysis_coverage] — absent on any DB
+   predating that roadmap item, in which case this is [[]] and the run simply carries no
+   coverage/notifications, never a fabricated "covered" claim. *)
+let coverage_rows (t : Arch_db.t) : Arch_sarif.coverage_row list =
+  if not (Arch_db.has_table t "analysis_coverage") then []
+  else
+    Arch_db.rows t ~params_ty:Arch_db.Ty.unit ~shape:Arch_db.Rows.t4' ~to_cells:Arch_db.Rows.c4
+      "SELECT language, analysis, status, detail FROM analysis_coverage" ()
+    |> List.filter_map (fun row ->
+           match row with
+           | [ lang; analysis; status; detail ] ->
+               let opt c = match Arch_db.string_of_cell c with "" -> None | s -> Some s in
+               Some
+                 { Arch_sarif.language = opt lang; analysis = Arch_db.string_of_cell analysis;
+                   status = Arch_db.string_of_cell status; detail = opt detail }
+           | _ -> None)
 
 let () =
   let args = List.tl (Array.to_list Sys.argv) in
@@ -682,6 +787,7 @@ let () =
                            ("detail", `List (List.map (fun d -> `String d) r.detail));
                            ("detail_total", `Int r.detail_total);
                            ("witness", `List (List.map (fun w -> `String w) r.witness));
+                           ("top_reasons", `List (List.map (fun tr -> `String tr) r.top_reasons));
                            ("note", (match r.note with Some n -> `String n | None -> `Null)) ]
                          @ (match (r.sizes, r.kind) with
                            (* `exported` and `dep` size their SOURCE population only; neither has
@@ -693,6 +799,62 @@ let () =
                          @ (if r.exact then [ ("exact", `Bool true) ] else [])))
                      results) );
               ("failed", `List (List.map (fun n -> `String n) failed_names)) ]))
+   else if fmt = "sarif" then (
+     (* One `run`, category "arch-index/rules": every result this invocation produced is a
+        `forbid ...` rule verdict, a single (producer, analysis) pair in roadmap 2.1's sense.
+        `arch-report` (2.2), which reuses Arch_sarif, is what emits several runs with distinct
+        categories in one log — this binary only ever has the one. *)
+     let producer, producer_version = producer_info t in
+     let level_of = function
+       | "VIOLATION" -> Arch_sarif.Error
+       | "POSSIBLE" -> Arch_sarif.Warning
+       (* UNKNOWN, UNKNOWN_NO_CONTRACT, NOT_COMPUTED, NO_SOURCE, NO_TARGET: none of these is a
+          proof of anything, but none is silence either — FR-024's discipline applied to a
+          single rule's own verdict, not just to a whole language's coverage. `note` carries
+          which of the five it is. *)
+       | _ -> Arch_sarif.Note
+     in
+     let message_of r =
+       let base = Printf.sprintf "%s [%s]: %s" r.rule r.kind r.verdict in
+       match r.note with
+       | Some n -> base ^ " — " ^ n
+       | None -> if r.detail = [] then base else base ^ " — " ^ String.concat ", " r.detail
+     in
+     let finding_of r : Arch_sarif.finding =
+       { rule_id = r.rule; level = level_of r.verdict; message = message_of r;
+         (* `arch-rules` never ingests a heuristic fact itself (that is roadmap 2.3's job); every
+            finding it produces is derived straight from this repo's own sound-or-⊤-marked
+            index, so [soundness_class] stays [None] here. A future SARIF-in adapter constructs
+            [Arch_sarif.finding] values with [soundness_class = Some "heuristic"] directly. *)
+         soundness_class = None;
+         soundness_unknown_top = r.verdict = "UNKNOWN" || r.verdict = "UNKNOWN_NO_CONTRACT";
+         top_reasons = r.top_reasons; locations = r.detail; code_flow = r.witness }
+     in
+     let findings =
+       (* "one result per rule verdict that is not PASS" (roadmap 2.1) — a PASS is a proof, not a
+          finding, and putting proofs in the same list as violations is what CodeQL-style tools
+          do that this repo's own design explicitly rejects. *)
+       List.filter_map (fun r -> if r.verdict = "PASS" then None else Some (finding_of r)) results
+     in
+     let top_frontier = Arch_graph.SM.fold (fun _ n acc -> acc + n) g.tops 0 in
+     let coverage = coverage_rows t in
+     let notifications =
+       List.filter_map
+         (fun (c : Arch_sarif.coverage_row) ->
+           if c.status = "not_analysed" then
+             Some
+               { Arch_sarif.language = c.language; analysis = c.analysis;
+                 message =
+                   Printf.sprintf "%s: not analysed%s" c.analysis
+                     (match c.language with Some l -> " for language " ^ l | None -> "") }
+           else None)
+         coverage
+     in
+     let run : Arch_sarif.run =
+       { producer; producer_version; category = "arch-index/rules"; findings; coverage;
+         top_frontier = Some top_frontier; notifications }
+     in
+     print_endline (Arch_sarif.to_string [ run ]))
    else
      let md = fmt = "md" in
      print_endline (if md then "# Architecture rules" else "== Architecture rules") ;
