@@ -70,7 +70,7 @@ meant to fire inside the driver too, that is a gap flagged rather than closed qu
 
 ## Quality Gates
 
-Re-measured at branch commit `c5ce100` on 2026-09-06T02:55:00+02:00, full build, opam switch
+Re-measured at branch commit `c5ce100`, full build, opam switch
 `/home/mathias/dev/arch-index`:
 
 - Build: `dune build` → exit 0 ✅
@@ -133,3 +133,97 @@ assertion is for.
   extracted because `run` needed it, which removes one duplication; the `reaching` duplication
   between `plan` and `report` remains and belongs to slice 2.
 - No mutation score, ratio or threshold anywhere, per `docs/mutation-testing.md`.
+
+---
+
+# Round 2 — the review's nine HIGH findings
+
+**Date:** 2026-09-06T00:18:45+02:00 · **Status: COMPLETED** · Base `4e74c72`, HEAD `8ab712d`.
+
+Round 1 returned NO-GO on 9 HIGH. All nine are fixed. Each fix was accepted only because the
+positive control that exposed the defect turns the repaired code red — a fix whose control was
+not re-run is not a fix, and three of these findings were themselves gates that had been reported
+green all day on their exit codes alone.
+
+## Ratchet
+
+Every HIGH finding carries a **new, self-contained** check under `checks/`, directly runnable and
+honouring the convention `0 = passes · 1 = assertion fired · ≥2 = error`. Modifying an existing
+assertion would not have satisfied the ratchet. Each was proven red by restoring its own target
+from HEAD into a copy — **`git stash` was never used**, on any of them.
+
+| Finding | Check | Red command | Proven red |
+|---|---|---|---|
+| `check-no-score.sh` scanned 789 of 2215 lines — `count(*)` in a SQL string opened a phantom OCaml comment | `checks/no-score-scans-sql-strings.sh` (CHECK-21) | `bash checks/no-score-scans-sql-strings.sh` | exit 1 with the guard restored from HEAD; the reverted guard reported `inspected 11 line(s)` while passing |
+| `check-status-provenance.sh` judged the file, not the enclosing record | `checks/status-provenance-per-record.sh` (CHECK-22) | ditto | exit 1; the reverted guard reported `1 JSON record(s)` and PASS |
+| `check-binary-provenance.sh` probed four hardcoded paths and never invoked the driver | `checks/binary-provenance-invokes-driver.sh` (CHECK-23) | ditto | exit 1; the reverted guard printed `0 of 1 resolved binaries lie outside the tree` without invoking a driver |
+| a wrapper refusal (`exit 2`) was read by the engine as a clean KILL | `checks/wrapper-refusal-not-a-kill.sh` (CHECK-24) | ditto | exit 1: `expected "status":99, got "status":2` and `a refusal is not a kill — expected 0, got 1` |
+| a trace-less mutant had its PLANNED set recorded as executed, and could receive a kill attribution | `checks/unobserved-executed-set-is-not-an-attribution.sh` (CHECK-25) | ditto | exit 1 on three assertions, incl. `t_gamma is never named as a killer — got t_gamma` |
+| FR-030/AC-24 unimplemented: both resolvers walked ancestors with no tree boundary | `checks/tree-boundary-refusal.sh` (CHECK-26) | ditto | exit 1 on probe 1 (refusal from a subdirectory) while probes 2 and 3 stayed green — which is what makes probe 1 attributable |
+| `report` published survivors with no provenance and gated CI on them | `checks/report-survivor-carries-its-provenance.sh` (CHECK-27) | ditto | exit 1, 9 assertions fired; the negative control (`--fail-on-survivors` *does* fire on a proved survivor) stayed green |
+| `prior_mutants` read a status without its provenance | `checks/prior-status-read-with-its-provenance.sh` (CHECK-28) | ditto | exit 1: `a ⊤-bounded survivor is UN-RECHECKABLE, a proved one is not`; the other five assertions stayed green |
+| `load_generic` accepted any status string; `report` bucketed the rest as errors | `checks/generic-status-vocabulary-is-closed.sh` (CHECK-29) | ditto | exit 1: `a misspelled status aborts rather than being counted — expected 2, got 0` |
+
+`checks/mid-caller-shadow-attribution.js` is **main's**, not this branch's.
+
+**All nine executed at `8ab712d`: exit 0.** `checks/` was added to the file manifest for this round.
+
+## Decisions taken on a measurement, not a preference
+
+**The two never-populated columns were DELETED, and the probe is why.** `mutants.function_id` and
+`mutant_campaigns.producer_run_id` were passed `None` unconditionally by the only writer.
+Populating them requires `PRAGMA foreign_keys = ON`; with the pragma on, an INSERT into `mutants`
+against a **flat** index fails with `foreign key mismatch` **even binding NULL**, because
+`arch-load`'s `functions` table has no `id` column, and `producer_runs` does not exist there at
+all. So the columns cannot work on half this tool's inputs. Removed with their index and the EC-4
+paragraph that documented a transition no run could produce. The pragma is now enabled, and it is
+meaningful *because* every remaining foreign key points at a table this migration creates.
+
+**The wrapper's refusal is a reserved exit code, not a side channel.** The review proposed a
+parallel trace file. Reading mutaml 0.3's source showed `save_test_outcome` persists
+`{ status = ret }` with `status : int` — the raw exit code; `passed`/`failed` are printed only.
+Verified at runtime: `mutaml-runner` **printed** `Testing mutant lib_x:1 ... failed` while
+**writing** `{"status":99}`. The label and the persisted integer disagreeing is the gap the old
+adapter fell into, and the fix is one equality in the adapter rather than a new channel.
+
+## Quality gates, measured at `8ab712d`
+
+- `dune build` → exit 0
+- `./_build/default/tezt/tests/main.exe --keep-going` → **243 of 243 executed, 243 SUCCESS, 0
+  FAILURE**. `dune test --force` was NOT used: it aborts at the first failure, and reported 156 of
+  217 earlier in this task while 61 cases never ran.
+- ratchet: **403 against a ceiling of 428**, published although it passes. `clean_measured` moved
+  383 → 403 in this branch, attributed 12 inert + 8 signal-carrying, measured by indexing both
+  trees rather than counting a diff.
+- `scripts/check-mutaml-integration.sh` → **exit 3, still UNVERIFIED**, now with a real mutaml 0.3
+  installed: its own fixture cannot drive the real runner, which wants `.muts` files from a
+  ppx-instrumented build. The campaign mechanism has still never been observed end to end.
+
+## Identified out-of-scope
+
+`mutant_runs.executed_tests` records what the wrapper **intended** to run, not what ran — under a
+first-failure runner some of the N never execute. It compounds with the review's LOW finding that
+`executed_superset` compares lengths instead of testing inclusion: **a reader who fixes only the
+comparison will believe the item closed, and it will not be.** Filed as its own slice, not folded
+in here. Slices 4 and 5 remain deferred by instruction and are now marked so in the spec.
+
+
+## A note on this file's own timestamps
+
+**Every hand-written date in this brief was unreliable, and one was in the future.** The round-1
+re-measurement was recorded as happening "on 2026-09-06T02:55:00+02:00"; the commit carrying that
+sentence was made at **2026-09-06T00:04:26+02:00** — the stated time was 2h51m ahead of the writing
+of it. The dates are now either generated or omitted, and the commit sha is left to carry the
+"when", since it is the value with a mechanism behind it.
+
+This surfaced from a ledger anomaly worth recording rather than smoothing. `implement/COMPLETED`
+carried 22:00 while `review/NO-GO` carried 21:55, so the array order and the timestamps disagreed.
+I first called that clerical — which silently trusted the hand-written value and discarded the
+generated one, the opposite of what the evidence supports. **Settled by measurement rather than by
+preference:** the review's own generated date is 21:54:37 and its `reviewed_sha` `91e95b6` was
+committed at 21:33:08, twenty-one minutes earlier and as the tip; no commit on this branch carries
+a timestamp between 21:55 and 22:05. So nothing landed between the review and the implement event's
+claimed time, and **the review is not stale by construction** — its findings describe the tree that
+round 2 then fixed. The conclusion was right; the reasoning that first reached it was not, and the
+other reading (a review closing over an object that had not stopped changing) would have meant the
+round-2 gate closing on findings unattributable to the code that now exists.
