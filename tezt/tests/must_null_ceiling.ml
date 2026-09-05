@@ -279,7 +279,16 @@ let must_null_query =
    the tree that exists rather than add its delta to a remembered number. Two
    branches editing one baseline is the read-then-bump trap, and it merges
    without a conflict. *)
-let clean_measured = 383
+(* RE-DERIVED after #88 merged, not carried: 403 again, and the sameness is exactly why
+   it was measured. #88 inserted 37 comment lines directly above this constant, in the
+   one file whose lambdas encode their own positions, so every [<fun:LINE:COL>] below
+   the insertion was renamed. A count subtracted from a remembered 403 would have netted
+   those renames against real rows and produced a plausible total nobody could
+   attribute. Measured instead on the rebased tree with the same arch_callgraph_ocaml
+   the test itself uses: [calls] moved 18743 -> 18915 with #88's code present, and the
+   MUST-with-NULL-callee figure held at 403. An expected number is the one nobody
+   re-derives, which is the reason to re-derive it. *)
+let clean_measured = 403
 
 let headroom = 25
 
