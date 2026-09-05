@@ -617,6 +617,23 @@ let producer_info (t : Arch_db.t) =
       | Some p -> (p, Arch_db.meta t "producer_version")
       | None -> ("arch-index", None))
 
+(* Same provenance-read discipline as {!producer_info} (MAIN's [producer_runs] preferred, FLAT's
+   [comment_db_meta] fallback), but for the ADR-002 soundness class rather than the producer
+   identity. Every [arch-load] DB carries this key (it always writes one — see
+   [bin/arch_load/arch_load.ml]'s own comment), and the docs advertise
+   [properties.soundness_class] for FR-022 filtering; a hardcoded [None] here would silently
+   defeat that filter on every real index. [None] only for a pre-1.2 MAIN index with neither
+   source populated. *)
+let soundness_class_info (t : Arch_db.t) =
+  if t.Arch_db.schema = Arch_db.Main && Arch_db.has_table t "producer_runs" then
+    match
+      Arch_db.rows t ~params_ty:Arch_db.Ty.unit ~shape:Arch_db.Rows.t1 ~to_cells:Arch_db.Rows.c1
+        "SELECT soundness_class FROM producer_runs ORDER BY id DESC LIMIT 1" ()
+    with
+    | [ [ s ] ] -> ( match Arch_db.string_of_cell s with "" -> None | s -> Some s)
+    | _ -> None
+  else Arch_db.meta t "soundness_class"
+
 (* Roadmap 1.3's coverage matrix, read straight off [analysis_coverage] — absent on any DB
    predating that roadmap item, in which case this is [[]] and the run simply carries no
    coverage/notifications, never a fabricated "covered" claim. *)
@@ -663,6 +680,13 @@ let () =
         exit 2
   in
   let fmt = opt "--format" "text" in
+  (* A typo'd `--format` used to fall through to the text/md renderer silently — exactly the
+     `--on-possible fial`-style footgun the policy flags below are guarded against, but worse: a
+     CI pipeline piping this straight into a SARIF or JSON consumer would get a human-readable
+     report instead, which the consumer either chokes on or (worse) silently ignores. Refuse
+     loudly instead of guessing. *)
+  (if fmt <> "text" && fmt <> "md" && fmt <> "json" && fmt <> "sarif" then
+     die (Printf.sprintf "arch-rules: --format takes 'text', 'md', 'json' or 'sarif', got %S" fmt)) ;
   (* A misspelled policy used to be read as "not fail" and silently disabled the gate:
      `--on-possible fial` turned a failing rule green. A policy flag that can be typo'd into
      permissiveness is worse than no flag. *)
@@ -805,6 +829,7 @@ let () =
         `arch-report` (2.2), which reuses Arch_sarif, is what emits several runs with distinct
         categories in one log — this binary only ever has the one. *)
      let producer, producer_version = producer_info t in
+     let soundness_class = soundness_class_info t in
      let level_of = function
        | "VIOLATION" -> Arch_sarif.Error
        | "POSSIBLE" -> Arch_sarif.Warning
@@ -822,12 +847,24 @@ let () =
      in
      let finding_of r : Arch_sarif.finding =
        { rule_id = r.rule; level = level_of r.verdict; message = message_of r;
-         (* `arch-rules` never ingests a heuristic fact itself (that is roadmap 2.3's job); every
-            finding it produces is derived straight from this repo's own sound-or-⊤-marked
-            index, so [soundness_class] stays [None] here. A future SARIF-in adapter constructs
-            [Arch_sarif.finding] values with [soundness_class = Some "heuristic"] directly. *)
-         soundness_class = None;
-         soundness_unknown_top = r.verdict = "UNKNOWN" || r.verdict = "UNKNOWN_NO_CONTRACT";
+         verdict = Some r.verdict;
+         (* The ADR-002 class of the INDEX this verdict was computed against (heuristic /
+            sound_with_top / asserted), not a per-finding ingestion fact — `arch-rules` never
+            ingests a heuristic fact itself (that is roadmap 2.3's job, where a future SARIF-in
+            adapter constructs findings with a class of its own choosing). Every finding from
+            THIS binary shares the one index's class, read once above. *)
+         soundness_class;
+         (* UNKNOWN and UNKNOWN_NO_CONTRACT are NOT the same soundness gap and must not collapse
+            onto one value (arch_rules.ml's own `census` above draws exactly this line): UNKNOWN
+            means this cone's own witness escaped through a real ⊤ edge; UNKNOWN_NO_CONTRACT
+            means the whole index was never ⊤-marked, so nothing was proved for ANY rule. A SARIF
+            consumer reading `properties.soundness` needs the same distinction the JSON channel
+            already gives it. *)
+         soundness =
+           (match r.verdict with
+           | "UNKNOWN" -> Some "unknown_top"
+           | "UNKNOWN_NO_CONTRACT" -> Some "no_contract"
+           | _ -> None);
          top_reasons = r.top_reasons; locations = r.detail; code_flow = r.witness }
      in
      let findings =
@@ -852,7 +889,11 @@ let () =
      in
      let run : Arch_sarif.run =
        { producer; producer_version; category = "arch-index/rules"; findings; coverage;
-         top_frontier = Some top_frontier; notifications }
+         top_frontier = Some top_frontier; notifications;
+         (* Mirrors the `--format json` channel's own top-level `contract_ok`/`computed`/`proved`
+            fields (see above) — without these, an all-PASS run and a run that evaluated nothing
+            both produce a document with an empty `results` list and no way to tell them apart. *)
+         contract_ok = Some contract_ok; computed = Some true; proved = Some proved }
      in
      print_endline (Arch_sarif.to_string [ run ]))
    else

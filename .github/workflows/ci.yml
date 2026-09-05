@@ -90,6 +90,11 @@ jobs:
       # PR. ubuntu-latest ships python3 and pip already; this only adds the one library.
       - name: Install SARIF schema validator (python3 jsonschema)
         run: pip install --user 'jsonschema==4.26.0'
+      # Every other tool installed above is PROBED BY RUNNING IT (ocamllsp --version, gopls
+      # version, ...) so an install that silently did nothing is caught here rather than as an
+      # unrelated test failure downstream. `pip install --user` had no such probe; add one.
+      - name: Verify python3 jsonschema is importable
+        run: python3 -c "import jsonschema; print(jsonschema.__version__)"
       - name: Build
         run: opam exec -- dune build --root .
       # `dune test` also runs the Tezt suite under tezt/, which covers the CMT

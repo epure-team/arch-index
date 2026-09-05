@@ -241,24 +241,147 @@ let register_unknown_carries_soundness_and_top_reason () =
                   Batch.eq_string_opt b ~msg:"properties.soundness"
                     (match Json.member "soundness" props with Some (`String s) -> Some s | _ -> None)
                     (Some "unknown_top") ;
+                  (* H3: the verdict must survive verbatim, not only as prose in message.text —
+                     a machine reading `level=note` alone cannot tell UNKNOWN from NOT_COMPUTED
+                     from NO_SOURCE, all four of which map to the same SARIF severity. *)
+                  Batch.eq_string_opt b ~msg:"properties.verdict"
+                    (match Json.member "verdict" props with Some (`String s) -> Some s | _ -> None)
+                    (Some "UNKNOWN") ;
                   (match Json.member "top_reason" props with
                   | Some (`List [ `String r ]) ->
                       Batch.eq_string b ~msg:"properties.top_reason[0]" r "reflection"
                   | other -> Batch.note b "properties.top_reason is not a singleton list: %s" (Json.show other))))) ;
   Lwt.return_unit
 
-let register_witness_becomes_code_flow () =
-  Test.register ~__FILE__ ~title:"sarif: a rule's witness path becomes a codeFlow with one location per step"
-    ~tags:["sarif"; "rules"; "witness"]
+(* H3: UNKNOWN and UNKNOWN_NO_CONTRACT are DIFFERENT soundness gaps with different fixes (the
+   engine's own `census` comment in arch_rules.ml draws exactly this line: one means "this cone's
+   witness escaped through a real ⊤ edge", the other means "the whole index was never ⊤-marked, so
+   nothing was proved for ANY rule") — a mutant collapsing both onto `soundness=unknown_top` (the
+   PR #70 defect class this brief names) would still pass the test above, since that fixture only
+   ever produces a plain UNKNOWN. This fixture is un-⊤-marked (no `callgraph_contract` meta key),
+   so its one rule must come back UNKNOWN_NO_CONTRACT with `soundness=no_contract`, never
+   `unknown_top`. *)
+let register_unknown_no_contract_distinct_soundness () =
+  Test.register ~__FILE__
+    ~title:"sarif: UNKNOWN_NO_CONTRACT carries properties.soundness=no_contract, not unknown_top"
+    ~tags:["sarif"; "rules"; "soundness"]
   @@ fun () ->
-  let db = fixture_db () in
-  let rf = rule_file "sarif_codeflow" four_rules in
+  (* `arch-load` REFUSES to write a call edge with no/invalid `kind` — it is the enforcement
+     point that guarantees a ⊤-marked DB is never a lie — so an un-⊤-marked index cannot be built
+     through it at all; every flat fixture built via {!Fixture.flat} is contract_ok=true. The way
+     every other UNKNOWN_NO_CONTRACT test in this suite (see rules.ml's `register_no_contract`)
+     gets there is the same one used here: a legacy pre-contract schema built with
+     {!Fixture.raw}, which has no `kind` column and no `callgraph_contract` meta key at all.
+     `pure.calc` reaches `pure.inner`, never `db.write`, so nothing is reachable and nothing
+     escapes through a ⊤ edge either — only the missing contract forces UNKNOWN_NO_CONTRACT. *)
+  let db =
+    Fixture.raw ~name:"sarif_no_contract"
+      {|
+CREATE TABLE functions(name TEXT, file_path TEXT, exported INTEGER DEFAULT 0,
+                       line_start INTEGER, line_end INTEGER);
+CREATE TABLE calls(caller_name TEXT, caller_file TEXT, callee_name TEXT, callee_file TEXT,
+                   call_site TEXT);
+INSERT INTO functions(name,file_path) VALUES ('pure.calc','src/pure/calc.ts'),
+                                             ('pure.inner','src/pure/inner.ts'),
+                                             ('db.write','lib/db/write.ts');
+INSERT INTO calls VALUES ('pure.calc','src/pure/calc.ts','pure.inner','src/pure/inner.ts','x:1');
+|}
+  in
+  let rf =
+    rule_file "sarif_no_contract" "rule \"l\"\n  forbid reach from file:src/pure/** to file:lib/db/**\n"
+  in
   let _, output = rules [db; rf; "--format"; "sarif"] in
   Batch.run (fun b ->
       match sarif_json b ~what:"sarif output" output with
       | None -> ()
       | Some j -> (
-          match find_result j ~rule_id:"ui must not reach persistence" with
+          match find_result j ~rule_id:"l" with
+          | None -> Batch.note b "the UNKNOWN_NO_CONTRACT rule has no SARIF result at all"
+          | Some r -> (
+              match Json.member "properties" r with
+              | None -> Batch.note b "UNKNOWN_NO_CONTRACT result has no properties bag at all"
+              | Some props ->
+                  Batch.eq_string_opt b ~msg:"properties.verdict"
+                    (match Json.member "verdict" props with Some (`String s) -> Some s | _ -> None)
+                    (Some "UNKNOWN_NO_CONTRACT") ;
+                  Batch.eq_string_opt b ~msg:"properties.soundness must be no_contract, not unknown_top"
+                    (match Json.member "soundness" props with Some (`String s) -> Some s | _ -> None)
+                    (Some "no_contract")))) ;
+  Lwt.return_unit
+
+(* H4: `results[].top_reasons` in `--format json` had ZERO coverage anywhere in the suite —
+   replacing its emission with `List [] passed the whole 175-test suite. Documented at
+   docs/fitness-functions.md:188, user-visible, and this file already has the one fixture that
+   carries a `top_reason` (reflection, on util.helper's MAY_TOP edge) — reused here rather than
+   asserting only through the SARIF channel, which is a different code path entirely
+   (arch_rules.ml's `--format json` branch, not `--format sarif`'s). *)
+let register_json_top_reasons () =
+  Test.register ~__FILE__
+    ~title:"json: an UNKNOWN result's top_reasons carries the ⊤-anchor taxonomy value"
+    ~tags:["rules"; "json"; "top_reason"]
+  @@ fun () ->
+  let db = fixture_db () in
+  let rf = rule_file "json_top_reasons" four_rules in
+  let _, output = rules [db; rf; "--format"; "json"] in
+  Batch.run (fun b ->
+      match Json.strict_object ~what:"json output" output with
+      | Error e -> Batch.note b "%s" e
+      | Ok j -> (
+          match Json.member "results" j with
+          | Some (`List rs) -> (
+              let jobs_result =
+                List.find_opt
+                  (function
+                    | `Assoc f -> List.assoc_opt "rule" f = Some (`String "jobs must not reach persistence")
+                    | _ -> false)
+                  rs
+              in
+              match jobs_result with
+              | None -> Batch.note b "the UNKNOWN rule has no json result at all"
+              | Some (`Assoc f) -> (
+                  match List.assoc_opt "top_reasons" f with
+                  | Some (`List [ `String r ]) ->
+                      Batch.eq_string b ~msg:"results[].top_reasons[0]" r "reflection"
+                  | other ->
+                      Batch.note b "results[].top_reasons is not the singleton [\"reflection\"]: %s"
+                        (Json.show other))
+              | Some _ -> Batch.note b "the UNKNOWN result is not a JSON object")
+          | other -> Batch.note b "json output has no results list: %s" (Json.show other))) ;
+  Lwt.return_unit
+
+(* chain.a --MUST--> chain.mid --MUST--> chain.target   the ONLY all-MUST path, 2 hops (3 nodes)
+   chain.a --MAY_ENUMERATED--> chain.target              a shorter, mixed-kind shortcut, 1 hop
+   Reused verbatim from rules.ml's `adjacency_stream` (same fixture, same comment there) — this
+   file needs the SAME property that fixture was built for (a real ≥3-node witness whose three
+   names are all distinct, so a reversed order is observably different from the correct one), not
+   a different one. A 2-hop fixture (the old `ui.handle -> db.write` case, 2 locations) cannot
+   catch a reversed witness: with only two symmetric endpoints, `List.rev` and the identity
+   produce sets that "contains" checks alone cannot tell apart order-wise without also checking
+   POSITION, which is what this test now does. *)
+let adjacency_stream =
+  {|{"type":"function","name":"chain.a","file_path":"src/chain/a.ts"}
+{"type":"function","name":"chain.mid","file_path":"src/chain/mid.ts"}
+{"type":"function","name":"chain.target","file_path":"src/chain/target.ts"}
+{"type":"call","caller_name":"chain.a","caller_file":"src/chain/a.ts","callee_name":"chain.mid","callee_file":"src/chain/mid.ts","call_site":"src/chain/a.ts:2","kind":"MUST"}
+{"type":"call","caller_name":"chain.mid","caller_file":"src/chain/mid.ts","callee_name":"chain.target","callee_file":"src/chain/target.ts","call_site":"src/chain/mid.ts:2","kind":"MUST"}
+{"type":"call","caller_name":"chain.a","caller_file":"src/chain/a.ts","callee_name":"chain.target","callee_file":"src/chain/target.ts","call_site":"src/chain/a.ts:5","kind":"MAY_ENUMERATED"}
+|}
+
+let register_witness_becomes_code_flow () =
+  Test.register ~__FILE__
+    ~title:"sarif: a rule's witness path becomes a codeFlow with one location per step, IN ORDER"
+    ~tags:["sarif"; "rules"; "witness"]
+  @@ fun () ->
+  let db = Fixture.flat ~name:"sarif_codeflow" adjacency_stream in
+  let rf =
+    rule_file "sarif_codeflow" "rule \"chain\"\n  forbid reach from fn:chain.a to fn:chain.target\n"
+  in
+  let _, output = rules [db; rf; "--format"; "sarif"] in
+  Batch.run (fun b ->
+      match sarif_json b ~what:"sarif output" output with
+      | None -> ()
+      | Some j -> (
+          match find_result j ~rule_id:"chain" with
           | None -> Batch.note b "the VIOLATION rule has no SARIF result at all"
           | Some r -> (
               match Json.member "codeFlows" r with
@@ -267,10 +390,35 @@ let register_witness_becomes_code_flow () =
                   | Some (`List [ tf ]) -> (
                       match Json.member "locations" tf with
                       | Some (`List locs) ->
-                          (* ui.handle -> db.write: exactly two steps. A mutant that emitted the
-                             witness as a single collapsed string (rather than per-step
-                             locations) would make this 1, not 2. *)
-                          Batch.eq_int b ~msg:"codeFlow location count" (List.length locs) 2
+                          (* chain.a -> chain.mid -> chain.target: exactly three steps. A mutant
+                             that emitted the witness as a single collapsed string (rather than
+                             per-step locations) would make this 1, not 3. *)
+                          Batch.eq_int b ~msg:"codeFlow location count" (List.length locs) 3 ;
+                          let fqn_of loc =
+                            match Json.member "location" loc with
+                            | Some l -> (
+                                match Json.member "logicalLocations" l with
+                                | Some (`List [ ll ]) -> (
+                                    match Json.member "fullyQualifiedName" ll with
+                                    | Some (`String s) -> Some s
+                                    | _ -> None)
+                                | _ -> None)
+                            | None -> None
+                          in
+                          (* Source-to-target order (roadmap 1.5's own contract, restated on the
+                             SARIF finding's doc comment): the FIRST codeFlow location must be the
+                             source, chain.a, and the LAST must be the target, chain.target. A
+                             `List.rev` mutant would swap these two — this fixture's three names
+                             are pairwise distinct, so a reversal is observable at both ends,
+                             unlike the old 2-hop symmetric fixture. *)
+                          (match locs with
+                          | first :: rest when rest <> [] ->
+                              let last = List.nth rest (List.length rest - 1) in
+                              Batch.eq_string_opt b ~msg:"codeFlow first location is the source, chain.a"
+                                (fqn_of first) (Some "chain.a") ;
+                              Batch.eq_string_opt b ~msg:"codeFlow last location is the target, chain.target"
+                                (fqn_of last) (Some "chain.target")
+                          | _ -> Batch.note b "codeFlow has fewer than 2 locations, cannot check order")
                       | other -> Batch.note b "threadFlow has no locations list: %s" (Json.show other))
                   | other -> Batch.note b "codeFlow has no singleton threadFlows: %s" (Json.show other))
               | other -> Batch.note b "VIOLATION result has no singleton codeFlows: %s" (Json.show other)))) ;
@@ -312,7 +460,22 @@ let register_run_shape_and_category () =
                      every OTHER assertion in this file, which is why it gets its own check. *)
                   (match Json.member "top_frontier" p with
                   | Some (`Int n) -> Batch.check b ~msg:"top_frontier must be >= 1" (n >= 1)
-                  | other -> Batch.note b "run.properties.top_frontier missing or not an int: %s" (Json.show other))
+                  | other -> Batch.note b "run.properties.top_frontier missing or not an int: %s" (Json.show other)) ;
+                  (* H3: `contract_ok`/`computed`/`proved` have no SARIF counterpart at all in the
+                     original PR, so an all-PASS run and a run that evaluated nothing produce
+                     identical documents. Mirrored from the same `--format json` channel's own
+                     top-level fields. *)
+                  (match Json.member "contract_ok" p with
+                  | Some (`Bool true) -> ()
+                  | other -> Batch.note b "run.properties.contract_ok is not `true`: %s" (Json.show other)) ;
+                  (match Json.member "computed" p with
+                  | Some (`Bool true) -> ()
+                  | other -> Batch.note b "run.properties.computed is not `true`: %s" (Json.show other)) ;
+                  (* four_rules: exactly one of the four ("pure code must not reach persistence")
+                     is a PASS. *)
+                  (match Json.member "proved" p with
+                  | Some (`Int n) -> Batch.eq_int b ~msg:"run.properties.proved" n 1
+                  | other -> Batch.note b "run.properties.proved missing or not an int: %s" (Json.show other))
               | None -> Batch.note b "run has no properties bag at all") ;
               (match Json.member "automationDetails" run with
               | Some ad ->
@@ -345,6 +508,16 @@ let register_json_sarif_round_trip () =
           | Error e -> Batch.note b "%s" e
           | Ok rs ->
               let sarif_rule_ids = List.map fst (results_by_rule sj) in
+              (* H3: level alone is not enough — UNKNOWN/UNKNOWN_NO_CONTRACT/NOT_COMPUTED/
+                 NO_SOURCE/NO_TARGET all map to the same `note`, so the expected level here is
+                 keyed on the SARIF severity vocabulary, and `properties.verdict` is checked
+                 separately against the exact json verdict string, which is the part `level`
+                 cannot express. *)
+              let expected_level = function
+                | "VIOLATION" -> "error"
+                | "POSSIBLE" -> "warning"
+                | _ -> "note"
+              in
               List.iter
                 (fun r ->
                   match (Json.member "rule" r, Json.member "verdict" r) with
@@ -352,7 +525,26 @@ let register_json_sarif_round_trip () =
                       Batch.check b
                         ~msg:(Printf.sprintf "non-PASS rule %S (verdict %s) must appear in sarif results, got [%s]"
                                 rule verdict (String.concat "; " sarif_rule_ids))
-                        (List.mem rule sarif_rule_ids)
+                        (List.mem rule sarif_rule_ids) ;
+                      (match find_result sj ~rule_id:rule with
+                      | None -> ()
+                      | Some sr ->
+                          Batch.eq_string_opt b
+                            ~msg:(Printf.sprintf "rule %S: sarif level must match verdict %s" rule verdict)
+                            (match Json.member "level" sr with Some (`String s) -> Some s | _ -> None)
+                            (Some (expected_level verdict)) ;
+                          (* The verdict itself must round-trip verbatim into properties.verdict —
+                             `level` alone cannot distinguish the five verdicts that all map to
+                             `note`. *)
+                          (match Json.member "properties" sr with
+                          | Some props ->
+                              Batch.eq_string_opt b
+                                ~msg:(Printf.sprintf "rule %S: properties.verdict must equal the json verdict" rule)
+                                (match Json.member "verdict" props with Some (`String s) -> Some s | _ -> None)
+                                (Some verdict)
+                          | None ->
+                              Batch.note b "rule %S: sarif result has no properties bag to carry properties.verdict"
+                                rule))
                   | Some (`String rule), Some (`String "PASS") ->
                       Batch.check b ~msg:(Printf.sprintf "PASS rule %S must NOT appear in sarif results" rule)
                         (not (List.mem rule sarif_rule_ids))
@@ -369,12 +561,17 @@ let register_not_analysed_becomes_notification () =
   (* analysis_coverage (roadmap 1.3) is not part of arch-load's flat schema — added here the way
      a coverage-writing producer (arch-coverage-matrix) would, so the SARIF writer's read path is
      exercised the same way it would be on a real polyglot index. *)
+  (* A COVERED row alongside the not_analysed one — required to catch the "not_analysed
+     inversion" mutant: replacing `if c.status = "not_analysed"` with `if true` would turn this
+     covered row into a spurious notification too, and a fixture carrying only the not_analysed
+     row could never observe that, since there would be nothing else to wrongly include. *)
   Db.with_db_rw db (fun conn ->
       Db.exec conn
         "CREATE TABLE analysis_coverage(id INTEGER PRIMARY KEY, language TEXT, analysis TEXT NOT \
          NULL, status TEXT NOT NULL, detail TEXT);
          INSERT INTO analysis_coverage(language, analysis, status, detail) VALUES \
-         ('rust', 'callgraph', 'not_analysed', 'no rust producer configured');") ;
+         ('rust', 'callgraph', 'not_analysed', 'no rust producer configured'), \
+         ('typescript', 'callgraph', 'covered', 'fully analysed');") ;
   let rf = rule_file "sarif_notanalysed" four_rules in
   let _, output = rules [db; rf; "--format"; "sarif"] in
   Batch.run (fun b ->
@@ -382,8 +579,26 @@ let register_not_analysed_becomes_notification () =
       | None -> ()
       | Some j -> (
           match Json.member "runs" j with
-          | Some (`List [ run ]) -> (
-              match Json.member "invocations" run with
+          | Some (`List [ run ]) ->
+              (* MEDIUM: run.properties.coverage (roadmap 1.3) — dropping it silently regresses a
+                 promise `docs/fitness-functions.md:227` makes. Both rows must appear here,
+                 covered included: this is the full matrix, not just the not_analysed subset. *)
+              (match Json.member "properties" run with
+              | Some p -> (
+                  match Json.member "coverage" p with
+                  | Some (`List rows) ->
+                      let statuses =
+                        List.filter_map
+                          (fun r -> match Json.member "status" r with Some (`String s) -> Some s | _ -> None)
+                          rows
+                      in
+                      Batch.eq_int b ~msg:"run.properties.coverage must carry both rows"
+                        (List.length statuses) 2 ;
+                      Batch.check b ~msg:"run.properties.coverage must include the covered row"
+                        (List.mem "covered" statuses)
+                  | other -> Batch.note b "run.properties.coverage missing or not a list: %s" (Json.show other))
+              | None -> Batch.note b "run has no properties bag at all") ;
+              (match Json.member "invocations" run with
               | Some (`List [ inv ]) -> (
                   match Json.member "toolExecutionNotifications" inv with
                   | Some (`List notifs) ->
@@ -398,9 +613,83 @@ let register_not_analysed_becomes_notification () =
                       Batch.check b
                         ~msg:(Printf.sprintf "a not_analysed notification mentioning 'rust' must be present, got: [%s]"
                                 (String.concat "; " texts))
-                        (List.exists (fun t -> contains ~needle:"rust" t) texts)
+                        (List.exists (fun t -> contains ~needle:"rust" t) texts) ;
+                      (* The inversion mutant, caught directly: a covered row's OWN analysis name
+                         must never surface as a notification. `rust`'s analysis name is also
+                         "callgraph", so this checks the language-qualified `typescript` mention
+                         specifically, not just absence of the string "callgraph" (which the rust
+                         notification legitimately contains). *)
+                      Batch.check b
+                        ~msg:(Printf.sprintf
+                                "a covered row (typescript/callgraph) must NOT produce a \
+                                 notification, got: [%s]"
+                                (String.concat "; " texts))
+                        (not (List.exists (fun t -> contains ~needle:"typescript" t) texts)) ;
+                      Batch.eq_int b ~msg:"exactly one notification (the not_analysed row only)"
+                        (List.length notifs) 1
                   | other -> Batch.note b "invocation has no toolExecutionNotifications: %s" (Json.show other))
               | other -> Batch.note b "run has no singleton invocations: %s" (Json.show other))
+          | other -> Batch.note b "sarif output does not have exactly one run: %s" (Json.show other))) ;
+  Lwt.return_unit
+
+(* MEDIUM: provenance read path. The old fixture wrote no `producer` key at all, so the assertion
+   there only ever observed the fallback constant "arch-index" — the SAME value whether or not the
+   MAIN-schema `producer_runs`/FLAT-schema `comment_db_meta` read paths work at all.
+   `driver.version` was never emitted in ANY tested scenario. This exercises the MAIN-schema path
+   the reviewer verified by hand: a real `producer_runs` row with a distinct producer/version,
+   read back through {!Arch_rules.producer_info}. *)
+let provenance_seed =
+  "INSERT INTO producer_runs(producer, producer_version, invocation_digest, soundness_class) \
+   VALUES ('acme-analyzer', '9.9.9', 'deadbeef', 'sound_with_top'); \
+   INSERT INTO modules(path, lines) VALUES ('src/prov/a.ml', 10), ('src/prov/b.ml', 10); \
+   INSERT INTO functions(module_id, name, producer_run_id) VALUES \
+     (1, 'prov.a', (SELECT id FROM producer_runs WHERE producer = 'acme-analyzer')), \
+     (2, 'prov.b', (SELECT id FROM producer_runs WHERE producer = 'acme-analyzer')); \
+   INSERT INTO calls(caller_id, callee_id, callee_name, kind, producer_run_id) VALUES \
+     (1, 2, 'prov.b', 'MUST', (SELECT id FROM producer_runs WHERE producer = 'acme-analyzer')); \
+   INSERT OR REPLACE INTO comment_db_meta(key, value) VALUES ('callgraph_contract', 'v1');"
+
+let register_provenance_read_path () =
+  Test.register ~__FILE__
+    ~title:"sarif: tool.driver.name/version are read from a real producer_runs row, not just the fallback"
+    ~tags:["sarif"; "rules"; "provenance"]
+  @@ fun () ->
+  let db = Fixture.main ~name:"sarif_provenance" ~seed:provenance_seed () in
+  let rf =
+    rule_file "sarif_provenance" "rule \"prov\"\n  forbid reach from file:src/prov/a.ml to file:src/prov/b.ml\n"
+  in
+  let _, output = rules [db; rf; "--format"; "sarif"] in
+  Batch.run (fun b ->
+      match sarif_json b ~what:"sarif output" output with
+      | None -> ()
+      | Some j -> (
+          match Json.member "runs" j with
+          | Some (`List [ run ]) -> (
+              match Json.member "tool" run with
+              | Some t -> (
+                  match Json.member "driver" t with
+                  | Some d ->
+                      Batch.eq_string_opt b ~msg:"tool.driver.name must come from producer_runs, not the fallback"
+                        (match Json.member "name" d with Some (`String s) -> Some s | _ -> None)
+                        (Some "acme-analyzer") ;
+                      Batch.eq_string_opt b ~msg:"tool.driver.version must come from producer_runs"
+                        (match Json.member "version" d with Some (`String s) -> Some s | _ -> None)
+                        (Some "9.9.9")
+                  | None -> Batch.note b "run has no tool.driver at all")
+              | None -> Batch.note b "run has no tool at all") ;
+              (* LOW: the index-level soundness_class (read the same way, from producer_runs) must
+                 also round-trip into the finding's own properties.soundness_class — arch_rules.ml
+                 used to hardcode `None` here despite the docs advertising this field for FR-022
+                 filtering. *)
+              (match Json.member "results" run with
+              | Some (`List (r :: _)) -> (
+                  match Json.member "properties" r with
+                  | Some props ->
+                      Batch.eq_string_opt b ~msg:"results[0].properties.soundness_class"
+                        (match Json.member "soundness_class" props with Some (`String s) -> Some s | _ -> None)
+                        (Some "sound_with_top")
+                  | None -> Batch.note b "result has no properties bag at all")
+              | other -> Batch.note b "run has no results to check soundness_class on: %s" (Json.show other))
           | other -> Batch.note b "sarif output does not have exactly one run: %s" (Json.show other))) ;
   Lwt.return_unit
 
@@ -417,16 +706,18 @@ let register_two_runs_distinct_categories () =
   @@ fun () ->
   let open Arch_tools in
   let finding rule_id : Arch_sarif.finding =
-    { rule_id; level = Arch_sarif.Error; message = "x"; soundness_class = None;
-      soundness_unknown_top = false; top_reasons = []; locations = []; code_flow = [] }
+    { rule_id; level = Arch_sarif.Error; message = "x"; verdict = None; soundness_class = None;
+      soundness = None; top_reasons = []; locations = []; code_flow = [] }
   in
   let run1 : Arch_sarif.run =
     { producer = "arch-index"; producer_version = Some "1.0"; category = "arch-index/callgraph";
-      findings = [ finding "r1" ]; coverage = []; top_frontier = None; notifications = [] }
+      findings = [ finding "r1" ]; coverage = []; top_frontier = None; notifications = [];
+      contract_ok = None; computed = None; proved = None }
   in
   let run2 : Arch_sarif.run =
     { producer = "arch-index"; producer_version = Some "1.0"; category = "arch-index/effects";
-      findings = [ finding "r2" ]; coverage = []; top_frontier = None; notifications = [] }
+      findings = [ finding "r2" ]; coverage = []; top_frontier = None; notifications = [];
+      contract_ok = None; computed = None; proved = None }
   in
   let log_text = Arch_sarif.to_string [ run1; run2 ] in
   Batch.run (fun b ->
@@ -459,6 +750,125 @@ let register_two_runs_distinct_categories () =
           | other -> Batch.note b "expected exactly two runs, got: %s" (Json.show other))) ;
   Lwt.return_unit
 
+(* MEDIUM: `results[].locations` — dropping the whole array SURVIVES unless something asserts
+   its presence and content directly (as opposed to `codeFlows`, which is a distinct SARIF
+   section covering the witness path, not the primary finding location). *)
+let register_locations_present () =
+  Test.register ~__FILE__ ~title:"sarif: a VIOLATION result carries results[].locations with the source's fullyQualifiedName"
+    ~tags:["sarif"; "rules"; "locations"]
+  @@ fun () ->
+  let db = fixture_db () in
+  let rf = rule_file "sarif_locations" four_rules in
+  let _, output = rules [db; rf; "--format"; "sarif"] in
+  Batch.run (fun b ->
+      match sarif_json b ~what:"sarif output" output with
+      | None -> ()
+      | Some j -> (
+          match find_result j ~rule_id:"ui must not reach persistence" with
+          | None -> Batch.note b "the VIOLATION rule has no SARIF result at all"
+          | Some r -> (
+              match Json.member "locations" r with
+              | Some (`List (_ :: _ as locs)) ->
+                  let fqns =
+                    List.filter_map
+                      (fun loc ->
+                        match Json.member "logicalLocations" loc with
+                        | Some (`List [ ll ]) -> (
+                            match Json.member "fullyQualifiedName" ll with Some (`String s) -> Some s | _ -> None)
+                        | _ -> None)
+                      locs
+                  in
+                  Batch.check b
+                    ~msg:(Printf.sprintf "results[].locations must name the offending detail entry, got [%s]"
+                            (String.concat "; " fqns))
+                    (List.exists (fun s -> contains ~needle:"db.write" s) fqns)
+              | other -> Batch.note b "results[].locations missing or empty: %s" (Json.show other)))) ;
+  Lwt.return_unit
+
+(* MEDIUM: `split_label` fabricating a path from a filename containing a parenthesis — the
+   concrete case the reviewer measured: a file `wri#te (x).ts` used to make `String.rindex_opt`
+   pick the WRONG `(` (the one inside the file name), splitting the label into a bogus
+   `fullyQualifiedName` and a `uri` naming a file that does not exist. The fix searches for the
+   exact "  (" separator {!Arch_graph.label} inserts, leftmost occurrence, so this exercises that
+   separator search directly against {!Arch_tools.Arch_sarif}'s writer rather than through the
+   whole pipeline (arch-rules has no selector that lets a test control the exact display label
+   the way a raw finding's `locations` field can). *)
+let register_split_label_paren_in_filename () =
+  Test.register ~__FILE__
+    ~title:"sarif: a file name containing a parenthesis does not fabricate a bogus location"
+    ~tags:["sarif"; "locations"; "regression"]
+  @@ fun () ->
+  let open Arch_tools in
+  let label = "db.write  (/home/me/proj/lib/db/wri#te (x).ts)" in
+  let finding : Arch_sarif.finding =
+    { rule_id = "r"; level = Arch_sarif.Error; message = "x"; verdict = None; soundness_class = None;
+      soundness = None; top_reasons = []; locations = [ label ]; code_flow = [] }
+  in
+  let run : Arch_sarif.run =
+    { producer = "arch-index"; producer_version = None; category = "arch-index/regression";
+      findings = [ finding ]; coverage = []; top_frontier = None; notifications = [];
+      contract_ok = None; computed = None; proved = None }
+  in
+  let text = Arch_sarif.to_string [ run ] in
+  Batch.run (fun b ->
+      match Json.strict_object ~what:"split_label regression log" text with
+      | Error e -> Batch.note b "%s" e
+      | Ok j -> (
+          match find_result j ~rule_id:"r" with
+          | None -> Batch.note b "the finding has no SARIF result at all"
+          | Some r -> (
+              match Json.member "locations" r with
+              | Some (`List [ loc ]) ->
+                  let fqn =
+                    match Json.member "logicalLocations" loc with
+                    | Some (`List [ ll ]) -> ( match Json.member "fullyQualifiedName" ll with Some (`String s) -> Some s | _ -> None)
+                    | _ -> None
+                  in
+                  Batch.eq_string_opt b ~msg:"logicalLocations.fullyQualifiedName must be the whole name, not a truncated fragment"
+                    fqn (Some "db.write") ;
+                  let uri =
+                    match Json.member "physicalLocation" loc with
+                    | Some pl -> (
+                        match Json.member "artifactLocation" pl with
+                        | Some al -> ( match Json.member "uri" al with Some (`String s) -> Some s | _ -> None)
+                        | None -> None)
+                    | None -> None
+                  in
+                  (* The full, correctly-percent-encoded file path — not a fragment ending at the
+                     wrong '(', and '#' must not survive raw (it is a URI fragment delimiter that
+                     GitHub's SARIF viewer would otherwise split the path on). *)
+                  Batch.eq_string_opt b ~msg:"artifactLocation.uri must be the full path, percent-encoded, not a truncated fragment"
+                    uri (Some "/home/me/proj/lib/db/wri%23te%20%28x%29.ts")
+              | other -> Batch.note b "expected exactly one location: %s" (Json.show other)))) ;
+  Lwt.return_unit
+
+(* MEDIUM: category collision. `Arch_sarif.log` must reject two runs sharing (producer, category)
+   NOW, before 2.2 (`arch-report`) exists to emit several runs and trip over this in production —
+   GitHub overwrites a run sharing tool+category with a later one rather than merging. *)
+let register_duplicate_category_rejected () =
+  Test.register ~__FILE__ ~title:"sarif: two runs sharing (producer, category) are rejected, not silently emitted"
+    ~tags:["sarif"; "category"; "regression"]
+  @@ fun () ->
+  let open Arch_tools in
+  let finding rule_id : Arch_sarif.finding =
+    { rule_id; level = Arch_sarif.Error; message = "x"; verdict = None; soundness_class = None;
+      soundness = None; top_reasons = []; locations = []; code_flow = [] }
+  in
+  let run cat rid : Arch_sarif.run =
+    { producer = "arch-index"; producer_version = None; category = cat; findings = [ finding rid ];
+      coverage = []; top_frontier = None; notifications = []; contract_ok = None; computed = None;
+      proved = None }
+  in
+  Batch.run (fun b ->
+      let raised =
+        try
+          ignore (Arch_sarif.to_string [ run "arch-index/rules" "r1"; run "arch-index/rules" "r2" ]) ;
+          false
+        with Invalid_argument _ -> true
+      in
+      Batch.check b ~msg:"Arch_sarif.log must reject two runs sharing (producer, category)" raised) ;
+  Lwt.return_unit
+
 (* A future SARIF-in adapter (roadmap 2.3) constructs {!Arch_tools.Arch_sarif.finding} values
    with [soundness_class = Some "heuristic"] directly — this is the writer-level guarantee that
    the field round-trips into `properties.soundness_class` (spec FR-022: "a heuristic fact
@@ -471,12 +881,13 @@ let register_heuristic_soundness_class () =
   let open Arch_tools in
   let finding : Arch_sarif.finding =
     { rule_id = "semgrep.some-rule"; level = Arch_sarif.Warning; message = "heuristic finding";
-      soundness_class = Some "heuristic"; soundness_unknown_top = false; top_reasons = [];
+      verdict = None; soundness_class = Some "heuristic"; soundness = None; top_reasons = [];
       locations = []; code_flow = [] }
   in
   let run : Arch_sarif.run =
     { producer = "semgrep"; producer_version = Some "1.2.3"; category = "semgrep/oss";
-      findings = [ finding ]; coverage = []; top_frontier = None; notifications = [] }
+      findings = [ finding ]; coverage = []; top_frontier = None; notifications = [];
+      contract_ok = None; computed = None; proved = None }
   in
   let text = Arch_sarif.to_string [ run ] in
   Batch.run (fun b ->
@@ -499,9 +910,15 @@ let register () =
   register_pass_excluded () ;
   register_level_mapping () ;
   register_unknown_carries_soundness_and_top_reason () ;
+  register_unknown_no_contract_distinct_soundness () ;
+  register_json_top_reasons () ;
   register_witness_becomes_code_flow () ;
   register_run_shape_and_category () ;
   register_json_sarif_round_trip () ;
   register_not_analysed_becomes_notification () ;
+  register_provenance_read_path () ;
   register_two_runs_distinct_categories () ;
+  register_locations_present () ;
+  register_split_label_paren_in_filename () ;
+  register_duplicate_category_rejected () ;
   register_heuristic_soundness_class ()

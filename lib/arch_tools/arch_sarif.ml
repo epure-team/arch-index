@@ -47,10 +47,23 @@ type finding = {
   rule_id : string;
   level : level;
   message : string;
+  verdict : string option;
+      (** The producer's own verdict string verbatim (e.g. ["UNKNOWN_NO_CONTRACT"],
+          ["NOT_COMPUTED"]), mirrored into [properties.verdict]. [level] alone collapses several
+          distinct verdicts onto the same SARIF severity (every one of [UNKNOWN],
+          [UNKNOWN_NO_CONTRACT], [NOT_COMPUTED], [NO_SOURCE], [NO_TARGET] is [note]) — this field
+          is what lets a machine consumer tell them apart without re-parsing [message.text].
+          [None] for a producer that has no verdict vocabulary of its own (e.g. a future SARIF-in
+          heuristic finding). *)
   soundness_class : string option;  (** ADR-002 vocabulary, e.g. ["heuristic"] *)
-  soundness_unknown_top : bool;
-      (** Set for a verdict that stopped at an unresolvable (⊤) edge: stamps
-          [properties.soundness = "unknown_top"] (spec FR-022 / roadmap 1.4). *)
+  soundness : string option;
+      (** The ADR-002 / FR-022 soundness-gap vocabulary verbatim, e.g. [Some "unknown_top"] for a
+          verdict that stopped at an unresolvable (⊤) edge, or [Some "no_contract"] for a verdict
+          reached because the whole index was never ⊤-marked at all (a DIFFERENT cause: nothing
+          was ruled out for any rule, not just this one's cone). [None] when the verdict is not a
+          soundness gap (e.g. [VIOLATION], [POSSIBLE], [PASS]). Stamped into
+          [properties.soundness] verbatim — never collapsed to a single "unknown_top" value the
+          way a bare boolean would. *)
   top_reasons : string list;
       (** The ⊤-anchor taxonomy vocabulary (roadmap 1.4) for the escaping edge(s) this
           finding's cone hit, when known. [[]] when the verdict carries no specific reason
@@ -78,6 +91,16 @@ type run = {
   coverage : coverage_row list;
   top_frontier : int option;
   notifications : notification list;
+  contract_ok : bool option;
+      (** Mirrors [arch-rules]' own [contract_ok] (whether the index carries a ⊤-marking
+          contract) into [run.properties]. [None] for a caller with no such concept. *)
+  computed : bool option;
+      (** Mirrors [arch-rules]' own [computed] (whether the analysis ran at all, as opposed to
+          refusing outright) into [run.properties]. Without this, an all-PASS run and a run that
+          evaluated nothing both produce a document with an empty [results] and no way to tell
+          them apart. *)
+  proved : int option;
+      (** Count of verdicts the producer proved (PASS), mirrored into [run.properties]. *)
 }
 
 let schema_uri =
@@ -87,17 +110,48 @@ let sarif_version = "2.1.0"
 
 let opt_field name = function None -> [] | Some v -> [ (name, v) ]
 
+(** The exact separator {!Arch_graph.label} inserts between name and file — two spaces, then
+    an open paren. Not just ["("] : a file name can itself contain a parenthesis (e.g.
+    ["wri#te (x).ts"]), and splitting on the RIGHTMOST bare ['('] then picks a paren inside the
+    file name instead of the real separator, fabricating both halves. The name a producer indexes
+    is never expected to contain this exact two-space-then-paren sequence, so the LEFTMOST
+    occurrence of the full separator is the real one. *)
+let label_sep = "  ("
+
+(** First index of [needle] in [haystack], or [None]. No [Str]/substring search in [Stdlib]. *)
+let find_substring haystack needle =
+  let hn = String.length haystack and nn = String.length needle in
+  let rec go i = if i + nn > hn then None else if String.sub haystack i nn = needle then Some i else go (i + 1) in
+  go 0
+
 (** A display label from {!Arch_graph.label} is either ["name"] or ["name  (file)"]. Split it so
     a finding can carry both a [logicalLocations] entry (always meaningful — it names the
     function) and a [physicalLocation] (only when a file was recorded). Never fails: an
-    unparseable label degrades to a logical-only location rather than being dropped. *)
+    unparseable label degrades to a logical-only location rather than being dropped — and
+    "unparseable" means "does not end in [')']", not "picked the wrong paren", which is why this
+    searches for the exact separator rather than any ['(']. *)
 let split_label label =
-  match String.rindex_opt label '(' with
-  | Some i when i > 0 && String.length label > 0 && label.[String.length label - 1] = ')' ->
-      let name = String.trim (String.sub label 0 i) in
-      let file = String.sub label (i + 1) (String.length label - i - 2) in
+  match find_substring label label_sep with
+  | Some i when String.length label > 0 && label.[String.length label - 1] = ')' ->
+      let name = String.sub label 0 i in
+      let file_start = i + String.length label_sep in
+      let file = String.sub label file_start (String.length label - file_start - 1) in
       if file = "" then (label, None) else (name, Some file)
   | _ -> (label, None)
+
+(** Percent-encode the characters a raw file path can legally contain that are otherwise
+    significant in a URI — most importantly ['#'], a fragment delimiter GitHub's SARIF viewer
+    will otherwise split the path on, mapping the finding to no file at all. *)
+let uri_encode s =
+  let buf = Buffer.create (String.length s) in
+  String.iter
+    (fun c ->
+      match c with
+      | 'A' .. 'Z' | 'a' .. 'z' | '0' .. '9' | '-' | '_' | '.' | '~' | '/' | ':' ->
+          Buffer.add_char buf c
+      | c -> Buffer.add_string buf (Printf.sprintf "%%%02X" (Char.code c)))
+    s ;
+  Buffer.contents buf
 
 let location_of_label label =
   let name, file = split_label label in
@@ -108,7 +162,7 @@ let location_of_label label =
     | None -> []
     | Some f ->
         [ ("physicalLocation",
-           `Assoc [ ("artifactLocation", `Assoc [ ("uri", `String f) ]) ]) ])
+           `Assoc [ ("artifactLocation", `Assoc [ ("uri", `String (uri_encode f)) ]) ]) ])
 
 (** A [codeFlow] with exactly one thread flow, one location per witness step — the shape a SARIF
     viewer (GitHub included) renders as a clickable path. [[]] when there is no witness, which
@@ -133,8 +187,9 @@ let code_flows_of_witness = function
 
 let properties_of_finding (f : finding) =
   let base =
-    (match f.soundness_class with Some s -> [ ("soundness_class", `String s) ] | None -> [])
-    @ (if f.soundness_unknown_top then [ ("soundness", `String "unknown_top") ] else [])
+    (match f.verdict with Some v -> [ ("verdict", `String v) ] | None -> [])
+    @ (match f.soundness_class with Some s -> [ ("soundness_class", `String s) ] | None -> [])
+    @ (match f.soundness with Some s -> [ ("soundness", `String s) ] | None -> [])
     @
     match f.top_reasons with
     | [] -> []
@@ -192,6 +247,9 @@ let run_json (r : run) : Yojson.Safe.t =
     [ ("category", `String r.category) ]
     @ (match r.top_frontier with Some n -> [ ("top_frontier", `Int n) ] | None -> [])
     @ (match r.coverage with [] -> [] | rows -> [ ("coverage", coverage_json rows) ])
+    @ (match r.contract_ok with Some b -> [ ("contract_ok", `Bool b) ] | None -> [])
+    @ (match r.computed with Some b -> [ ("computed", `Bool b) ] | None -> [])
+    @ (match r.proved with Some n -> [ ("proved", `Int n) ] | None -> [])
   in
   `Assoc
     ([ ( "tool",
@@ -221,9 +279,30 @@ let run_json (r : run) : Yojson.Safe.t =
               ] )
         ])
 
+(** Every (producer, category) pair a caller emits must be distinct — see the module-level note:
+    GitHub OVERWRITES a run sharing tool+category with a later one rather than merging, so two
+    runs colliding on this pair in one log is a defect worth refusing NOW, before 2.2
+    (`arch-report`, the caller that actually emits several runs per log) exists to trip over it
+    for the first time in production. *)
+let check_distinct_categories (runs : run list) =
+  let seen = Hashtbl.create 8 in
+  List.iter
+    (fun (r : run) ->
+      let key = (r.producer, r.category) in
+      if Hashtbl.mem seen key then
+        invalid_arg
+          (Printf.sprintf
+             "Arch_sarif.log: two runs share (producer, category) = (%S, %S) — GitHub overwrites \
+              a run sharing tool+category with a later one rather than merging; give them \
+              distinct categories"
+             r.producer r.category)
+      else Hashtbl.add seen key ())
+    runs
+
 (** [log runs] wraps one or more {!run}s into a complete SARIF 2.1.0 document — the top-level
     object [$schema]/[version]/[runs] every consumer (GitHub included) expects. *)
 let log (runs : run list) : Yojson.Safe.t =
+  check_distinct_categories runs ;
   `Assoc
     [ ("$schema", `String schema_uri); ("version", `String sarif_version);
       ("runs", `List (List.map run_json runs)) ]
