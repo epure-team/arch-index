@@ -1001,7 +1001,7 @@ let register_run_self_uncertified () =
   Batch.run (fun b ->
       let check ~what case ~tag ~killed ~survived ~errored =
         match tag_and_counts b ~what case with
-        | None -> ()
+        | None -> None
         | Some j ->
             Option.iter
               (fun s ->
@@ -1015,18 +1015,83 @@ let register_run_self_uncertified () =
                 Option.iter
                   (fun n -> Batch.eq_int b ~msg:(what ^ ": " ^ key) n expected)
                   (Batch.expect b (Json.int ~what key j)))
-              [("killed", killed); ("survived", survived); ("errored", errored)]
+              [("killed", killed); ("survived", survived); ("errored", errored)] ;
+            Some j
       in
       (* Mutants ran, none died: the picture an unmutated binary also produces. *)
-      check ~what:"all survivors" survivors_case ~tag:"uncertified_no_kill" ~killed:0
-        ~survived:3 ~errored:0 ;
+      let survivors_json =
+        check ~what:"all survivors" survivors_case ~tag:"uncertified_no_kill" ~killed:0
+          ~survived:3 ~errored:0
+      in
       (* Also zero kills, for an entirely different reason — nothing meaningfully
          ran — and it must NOT be reported in the same words. *)
-      check ~what:"all errored" errors_case ~tag:"uncertified_all_errored" ~killed:0
-        ~survived:0 ~errored:3 ;
+      ignore
+        (check ~what:"all errored" errors_case ~tag:"uncertified_all_errored" ~killed:0
+           ~survived:0 ~errored:3) ;
       (* One kill is enough: a stale, unmutated binary cannot produce one. *)
-      check ~what:"one kill" killed_case ~tag:"self_certifying" ~killed:1 ~survived:2
-        ~errored:0) ;
+      ignore
+        (check ~what:"one kill" killed_case ~tag:"self_certifying" ~killed:1 ~survived:2
+           ~errored:0) ;
+      (* ---- AC-22 / FR-028: the campaign NAMES the binaries it resolved ----------------
+         This is the half of CHECK-14 that was declared and never asserted. AC-21's
+         certification tag alone does not close issue #77's failure mode: the all-survivor
+         picture above is EXACTLY what an unmutated binary from an enclosing checkout
+         produces, and the only thing that tells the two apart is which file actually ran.
+         So the resolved paths are asserted against the fixture's OWN stub — not merely
+         checked to be non-empty, which a hardcoded "/usr/bin/false" would satisfy — and
+         the stored row is asserted to agree with the JSON, because a reader who opens the
+         database gets the row and not the report. *)
+      let db_of (db, _, _, _) = db in
+      let stub_engine_path =
+        Filename.concat (Temp.dir "mutants_uncert_surv_campaign") "engine.sh"
+      in
+      Batch.check b
+        ~msg:
+          (Printf.sprintf
+             "the fixture's engine stub must exist at %s, or the assertion below compares \
+              two values neither of which is the binary that ran"
+             stub_engine_path)
+        (Sys.file_exists stub_engine_path) ;
+      let json_string ~what key j =
+        match Json.member key j with
+        | Some (`String v) -> Some v
+        | other ->
+            Batch.note b "%s: %s is %s" what key (Json.show other) ;
+            None
+      in
+      (match survivors_json with
+      | None -> Batch.note b "all survivors: no JSON to read the resolved paths from"
+      | Some j ->
+          Option.iter
+            (fun p ->
+              Batch.eq_string b
+                ~msg:"the report names the engine binary that actually ran" p
+                stub_engine_path)
+            (json_string ~what:"all survivors" "engine_path" j) ;
+          Option.iter
+            (fun p ->
+              (* --test-cmd is `true`, and the claim is that the tool recorded what
+                 RESOLUTION produced rather than echoing the operator's word back. So it
+                 is compared against the answer this test resolves for itself, through
+                 the same `command -v` the driver uses. On this machine `true` is a shell
+                 builtin and that answer is the bare word — which is exactly why the
+                 assertion is a comparison against an independently resolved value and
+                 not "must look like a path": the latter would fail here for a reason
+                 that has nothing to do with FR-028. *)
+              Batch.eq_string b ~msg:"the report names the test runner AS RESOLVED"
+                p (which "true"))
+            (json_string ~what:"all survivors" "test_runner_path" j) ;
+          (* And the STORED row, which is what a later reader of the database sees. *)
+          Db.with_db (db_of survivors_case) (fun conn ->
+              Batch.eq_string_opt b
+                ~msg:"the stored campaign row carries the same engine_path as the report"
+                (Db.string_opt conn "SELECT engine_path FROM mutant_campaigns ORDER BY id")
+                (json_string ~what:"all survivors" "engine_path" j) ;
+              Batch.eq_string_opt b
+                ~msg:"the stored campaign row carries the same test_runner_path"
+                (Db.string_opt conn
+                   "SELECT test_runner_path FROM mutant_campaigns ORDER BY id")
+                (json_string ~what:"all survivors" "test_runner_path" j)))) ;
   Lwt.return_unit
 
 (* ------------------------------------------------------------------------ *)
@@ -1880,4 +1945,253 @@ let register_verdict_refuses_unscopable_pending () =
           Batch.eq_string_opt b ~msg:"the unattempted site is PENDING on a scopable database"
             (finding_field fs ~file:"lib/y.ml" "published_verdict")
             (Some "PENDING")) ;
+  Lwt.return_unit
+
+(* ------------------------------------------------------------------------ *)
+(* `report` — the OTHER surface a status is published on.                    *)
+(*                                                                          *)
+(* `run` and `verdict` were built around FR-011 and FR-013; `report` was     *)
+(* not, and it is the subcommand a CI pipeline actually invokes. It answers  *)
+(* about an engine's own report file with no campaign row behind it, but a   *)
+(* backward test-closure is a LOWER BOUND there too — MAY_TOP edges are      *)
+(* never traversed — so the same rule holds: SURVIVED publishes as SURVIVED  *)
+(* only under `proved_superset`.                                            *)
+(* ------------------------------------------------------------------------ *)
+
+(* One SURVIVED inside `covered` (lib/x.ml:10-20), replayed over two indexes that
+   differ in exactly one edge. The engine's report is BYTE-IDENTICAL in both arms,
+   so any difference below is the index's and nothing else's. *)
+let one_survivor_report =
+  {|{"file":"lib/x.ml","line":15,"status":"SURVIVED","id":"m1","mutation":"a && b -> a || b"}
+|}
+
+let register_report_provenance () =
+  Test.register ~__FILE__
+    ~title:"mutants: report publishes no survivor without its provenance, and its gate \
+            follows the verdict"
+    ~tags:["mutants"; "report"]
+  @@ fun () ->
+  let closed = load_fixture "mutants_report_closed" campaign_stream in
+  let bounded = load_fixture "mutants_report_bounded" campaign_stream_top in
+  let report = Temp.file "mutants_report_provenance.ndjson" in
+  write_file report one_survivor_report ;
+  Batch.run (fun b ->
+      let arm ~what db ~provenance ~verdict ~gate =
+        (match
+           mutants_json b ~what
+             ["report"; db; report; "--tests"; "file:test/**"; "--format"; "json"]
+         with
+        | None -> ()
+        | Some j ->
+            let str key =
+              match Json.member key j with
+              | Some (`String v) -> Some v
+              | other ->
+                  Batch.note b "%s: %s is %s" what key (Json.show other) ;
+                  None
+            in
+            Batch.eq_string_opt b ~msg:(what ^ ": the document names its provenance")
+              (str "selection_provenance") (Some provenance) ;
+            (* And on the SURVIVOR RECORD itself, which is the line a reader copies
+               out of the report. A provenance living only at the top of the document
+               does not travel with it. *)
+            (match expect b (Json.list ~what "survivors" j) with
+            | None -> ()
+            | Some [ `Assoc f ] ->
+                Batch.eq_string_opt b
+                  ~msg:(what ^ ": the survivor record carries its own provenance")
+                  (match List.assoc_opt "selection_provenance" f with
+                  | Some (`String v) -> Some v
+                  | _ -> None)
+                  (Some provenance) ;
+                Batch.eq_string_opt b
+                  ~msg:(what ^ ": the survivor record publishes the DERIVED verdict")
+                  (match List.assoc_opt "verdict" f with
+                  | Some (`String v) -> Some v
+                  | _ -> None)
+                  (Some verdict)
+            | Some l ->
+                Batch.note b "%s: expected exactly one survivor, got %d" what
+                  (List.length l))) ;
+        (* The gate. A defect list is a list of things genuinely SURVIVED; a mutant
+           whose reaching tests may never have run is not one, and failing a build
+           on it is a false accusation against a real test. *)
+        Batch.exit_code b ~msg:(what ^ ": --fail-on-survivors") ~expected:gate
+          (mutants ["report"; db; report; "--tests"; "file:test/**"; "--fail-on-survivors"])
+      in
+      (* The ⊤-free index: the closure is complete, so the survivor is a real gap and
+         the gate must fire. Without this arm, "never fail" would satisfy the other. *)
+      arm ~what:"closed cone" closed ~provenance:"proved_superset" ~verdict:"SURVIVED"
+        ~gate:1 ;
+      (* One ⊤ edge inside the test cone, and the same engine report: UNKNOWN, and the
+         gate must NOT fire. *)
+      arm ~what:"⊤ inside the cone" bounded ~provenance:"top_bounded" ~verdict:"UNKNOWN"
+        ~gate:0) ;
+  Lwt.return_unit
+
+(* FR-031. `load_mutaml` has always died on an unrecognised status; `load_generic`
+   read the field as a bare string and `report`'s bucketing ended in a catch-all,
+   so a misspelled status was counted as an ENGINE ERROR — a defect removed from the
+   defect list with no crash and no log, and a gate that still exits 0.
+   Asserted on the EXIT CODE and on the offending string being NAMED, plus the
+   negative control that the five legal values still load: without the latter,
+   refusing every report would pass. *)
+let register_report_status_vocabulary () =
+  Test.register ~__FILE__
+    ~title:"mutants: report refuses a status outside the closed vocabulary, never counts it"
+    ~tags:["mutants"; "report"]
+  @@ fun () ->
+  let db = load_fixture "mutants_report_vocab" campaign_stream in
+  let write name body = let p = Temp.file name in write_file p body ; p in
+  let typo = write "mutants_vocab_typo.ndjson"
+      {|{"file":"lib/x.ml","line":15,"status":"SURVIVE","id":"m1"}
+|}
+  in
+  let future = write "mutants_vocab_future.ndjson"
+      {|{"file":"lib/x.ml","line":15,"status":"SKIPPED","id":"m1"}
+|}
+  in
+  let legal = write "mutants_vocab_legal.ndjson"
+      {|{"file":"lib/x.ml","line":15,"status":"SURVIVED","id":"m1"}
+{"file":"lib/x.ml","line":16,"status":"KILLED","id":"m2"}
+{"file":"lib/x.ml","line":17,"status":"TIMEOUT","id":"m3"}
+{"file":"lib/x.ml","line":18,"status":"ERROR","id":"m4"}
+{"file":"lib/x.ml","line":19,"status":"REFUSED","id":"m5"}
+|}
+  in
+  Batch.run (fun b ->
+      let code, out =
+        mutants ["report"; db; typo; "--tests"; "file:test/**"; "--format"; "json"]
+      in
+      Batch.eq_int b ~msg:"a misspelled status aborts rather than being bucketed" code 2 ;
+      Batch.contains b ~msg:"the refusal names the offending string" ~haystack:out "SURVIVE" ;
+      Batch.not_contains b
+        ~msg:"nothing was counted on the way out — no report was printed at all"
+        ~haystack:out "\"errored\"" ;
+      Batch.exit_code b ~msg:"the gate cannot pass on a report it did not understand"
+        ~expected:2
+        (mutants ["report"; db; typo; "--tests"; "file:test/**"; "--fail-on-survivors"]) ;
+      Batch.exit_code b
+        ~msg:"a value added to the vocabulary elsewhere aborts here too" ~expected:2
+        (mutants ["report"; db; future; "--tests"; "file:test/**"; "--format"; "json"]) ;
+      (* NEGATIVE CONTROL. Without it, a `report` that refused every input would
+         satisfy every assertion above. *)
+      (* Read through the SPLIT runner. `report` writes its errored-mutant NOTE to
+         stderr precisely so stdout stays one parseable object; merging them back
+         together here would break the parse for a reason unrelated to the code. *)
+      let json_stdout ~what args =
+        let code, out, err = run_command_split (arch_mutants ()) args in
+        if code <> 0 then (
+          Batch.note b "%s: arch-mutants exited %d:\n%s" what code err ;
+          None)
+        else Batch.expect b (Json.parse ~what out)
+      in
+      match
+        json_stdout ~what:"legal vocabulary"
+          ["report"; db; legal; "--tests"; "file:test/**"; "--format"; "json"]
+      with
+      | None -> ()
+      | Some j ->
+          List.iter
+            (fun (key, expected) ->
+              Option.iter
+                (fun n -> Batch.eq_int b ~msg:("legal vocabulary: " ^ key) n expected)
+                (expect b (Json.int ~what:"legal vocabulary" key j)))
+            [("killed", 2); ("errored", 1); ("refused_by_wrapper", 1); ("total", 5)] ;
+          Option.iter
+            (fun l ->
+              Batch.eq_int b ~msg:"SURVIVED is the only survivor" (List.length l) 1)
+            (expect b (Json.list ~what:"legal vocabulary" "survivors" j))) ;
+  Lwt.return_unit
+
+(* FR-013 / FR-018. `prior_mutants` read `engine_status` with no
+   `selection_provenance` beside it and collapsed the row to a boolean, so a
+   SURVIVED recorded under a ⊤-BOUNDED selection — UNKNOWN everywhere else in this
+   tool — was treated here as a PROVEN non-kill and dropped from the un-recheckable
+   list.
+
+   The seed carries all three polarities under one completed campaign:
+     lib/x.ml:15  KILLED / proved_superset, ONE kill row naming a test the index no
+                  longer carries → re-checked, and the reason `deleted_tests` is
+                  non-empty at all;
+     lib/y.ml:35  SURVIVED / top_bounded, no kill row → UN-RECHECKABLE;
+     lib/z.ml:55  SURVIVED / proved_superset, no kill row → NOT un-recheckable, the
+                  negative control without which "call every survivor un-recheckable"
+                  would pass. *)
+let seed_prior_bounded_survivor ~name =
+  let db = load_fixture name campaign_stream in
+  let migration = read_file (Filename.concat (repo_root ()) "mutants-schema-migration.sql") in
+  Db.with_db_rw db (fun conn ->
+      Db.exec conn migration ;
+      Db.exec conn
+        {|INSERT INTO mutants(file_path,line,col_start,col_end,replacement,source_hash,function_name)
+            VALUES ('lib/x.ml',15,3,9,'true','prior-x','covered'),
+                   ('lib/y.ml',35,1,4,'false','prior-y','other'),
+                   ('lib/z.ml',55,2,7,'0','prior-z','shared');
+          INSERT INTO mutant_campaigns(engine,engine_path,test_runner_path,granularity,completed_at)
+            VALUES ('stub','/bin/true','/bin/true','case','2026-09-05T00:00:00Z');
+          INSERT INTO mutant_runs(campaign_id,mutant_id,engine_status,selection_provenance,
+                                  intended_tests,executed_tests)
+            SELECT 1, id, 'KILLED', 'proved_superset', 1, 1 FROM mutants WHERE file_path='lib/x.ml';
+          INSERT INTO mutant_runs(campaign_id,mutant_id,engine_status,selection_provenance,
+                                  intended_tests,executed_tests)
+            SELECT 1, id, 'SURVIVED', 'top_bounded', 1, 1 FROM mutants WHERE file_path='lib/y.ml';
+          INSERT INTO mutant_runs(campaign_id,mutant_id,engine_status,selection_provenance,
+                                  intended_tests,executed_tests)
+            SELECT 1, id, 'SURVIVED', 'proved_superset', 1, 1 FROM mutants WHERE file_path='lib/z.ml';
+          INSERT INTO mutant_kills(campaign_id,mutant_id,test_name,attribution)
+            SELECT 1, id, 't_deleted', 'singleton_executed_set' FROM mutants
+             WHERE file_path = 'lib/x.ml';|}) ;
+  db
+
+let register_diff_bounded_survivor_unrecheckable () =
+  Test.register ~__FILE__
+    ~title:
+      "mutants: a ⊤-bounded prior SURVIVED is un-recheckable, never a proven non-kill"
+    ~tags:["mutants"; "run"; "diff"]
+  @@ fun () ->
+  Fixture.git_project ~name:"mutants_diff_bounded" ~files:diff_files @@ fun root ->
+  let db = seed_prior_bounded_survivor ~name:"mutants_diff_bounded" in
+  let _, _, _, run_json =
+    campaign_setup_on ~extra_env:(impact_env ()) ~db ~tests:"file:test/**"
+      ~name:"mutants_diff_bounded" ~engine_body:(stub_engine ["m1"; "m2"; "m3"])
+      ~report:all_survived ()
+  in
+  write_file (Filename.concat root "README.md") "readme, revised\n" ;
+  Fixture.git_commit ~cwd:root "documentation only" ;
+  Batch.run (fun b ->
+      (* PRECONDITION, read off the database rather than off the tool under test: the two
+         SURVIVED rows must really differ in provenance and neither may carry a kill row.
+         Without that contrast every assertion below would pass vacuously. *)
+      Db.with_db db (fun conn ->
+          Batch.eq_string b ~msg:"the seed holds one bounded and one proved survivor"
+            (String.concat "|"
+               (Db.strings conn
+                  "SELECT r.selection_provenance FROM mutant_runs r JOIN mutants m ON \
+                   m.id = r.mutant_id WHERE r.engine_status = 'SURVIVED' ORDER BY \
+                   m.file_path"))
+            "top_bounded|proved_superset" ;
+          Batch.eq_int b ~msg:"neither survivor carries a kill row"
+            (Db.int conn
+               "SELECT count(*) FROM mutant_kills k JOIN mutant_runs r ON r.mutant_id = \
+                k.mutant_id WHERE r.engine_status = 'SURVIVED'")
+            0) ;
+      match
+        scope_of b ~what:"bounded survivor" run_json
+          ["--repo"; root; "--diff"; "HEAD~1..HEAD"]
+      with
+      | None -> ()
+      | Some (_, ds) ->
+          (* Rules 1 and 2 contribute nothing, so nothing below can have come from them. *)
+          Batch.eq_string b ~msg:"a documentation-only range touches no indexed function"
+            (joined b ~what:"scope" "touched_functions" ds) "" ;
+          Batch.eq_string b ~msg:"only the absent test counts as deleted"
+            (joined b ~what:"scope" "deleted_tests" ds) "t_deleted" ;
+          Batch.eq_string b ~msg:"the mutant a deleted test killed ALONE is re-selected"
+            (sites b ~what:"scope" "rechecked_for_deleted_tests" ds) "lib/x.ml:15" ;
+          (* THE FINDING, together with its negative control in one assertion: the
+             ⊤-bounded survivor is named, the proved one is not. *)
+          Batch.eq_string b
+            ~msg:"a ⊤-bounded SURVIVED is un-recheckable; a proved one is not"
+            (sites b ~what:"scope" "unrecheckable" ds) "lib/y.ml:35") ;
   Lwt.return_unit

@@ -52,6 +52,9 @@ let () =
   Mutants.register_diff_test_helper () ;
   Mutants.register_diff_deleted_test () ;
   Mutants.register_diff_impact_refuses () ;
+  Mutants.register_report_provenance () ;
+  Mutants.register_report_status_vocabulary () ;
+  Mutants.register_diff_bounded_survivor_unrecheckable () ;
   Decision_lint.register_aliases () ;
   Decision_lint.register_smt_noise () ;
   Decision_lint.register_smt_mute () ;

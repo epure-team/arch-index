@@ -183,7 +183,6 @@ let step_done db ~what stmt =
 let text v = Sqlite3.Data.TEXT v
 let int v = Sqlite3.Data.INT (Int64.of_int v)
 let opt_text = function None -> Sqlite3.Data.NULL | Some v -> text v
-let opt_int = function None -> Sqlite3.Data.NULL | Some v -> int v
 
 let bind_all db stmt values =
   List.iteri
@@ -223,6 +222,13 @@ let query_int db sql values =
 let open_and_migrate db_path =
   if not (Sys.file_exists db_path) then fail "no such db: %s" db_path ;
   let db = Sqlite3.db_open db_path in
+  (* OFF by default, and PER CONNECTION: without this line not one of the migration's
+     declared referential actions ever fires on the connection that does the writing, and
+     `ON DELETE CASCADE` is a comment. Issued BEFORE the DDL because the pragma is a no-op
+     inside a transaction, and it is safe on every schema only because no foreign key in
+     that DDL leaves the four tables it creates — see the migration's header for the
+     measurement that forced that. *)
+  exec db "PRAGMA foreign_keys = ON" ;
   exec db ddl ;
   db
 
@@ -238,13 +244,13 @@ let close db = ignore (Sqlite3.db_close db : bool)
 
     Called only AFTER the engine has been resolved: an unresolvable engine writes no
     campaign row at all, because an empty campaign must never read as "no survivors". *)
-let insert_campaign db ~engine ~engine_version ~seed ~producer_run_id ~engine_path
-    ~test_runner_path ~profile ~granularity =
+let insert_campaign db ~engine ~engine_version ~seed ~engine_path ~test_runner_path
+    ~profile ~granularity =
   run db ~what:"mutant_campaigns"
-    "INSERT INTO mutant_campaigns(engine, engine_version, seed, producer_run_id, \
-     engine_path, test_runner_path, profile, granularity) VALUES (?,?,?,?,?,?,?,?)"
-    [ text engine; opt_text engine_version; opt_text seed; opt_int producer_run_id;
-      text engine_path; text test_runner_path; opt_text profile; text granularity ] ;
+    "INSERT INTO mutant_campaigns(engine, engine_version, seed, engine_path, \
+     test_runner_path, profile, granularity) VALUES (?,?,?,?,?,?,?)"
+    [ text engine; opt_text engine_version; opt_text seed; text engine_path;
+      text test_runner_path; opt_text profile; text granularity ] ;
   Int64.to_int (Sqlite3.last_insert_rowid db)
 
 (** The site row. [INSERT OR IGNORE] then read the id back, so a re-run over unchanged
@@ -255,15 +261,15 @@ let insert_campaign db ~engine ~engine_version ~seed ~producer_run_id ~engine_pa
     the second campaign it would hand back whatever unrelated row was last written — the
     silent-misattribution failure [Arch_index_db.exec_stmt_rowid] exists to prevent. *)
 let insert_mutant db ~file_path ~line ~col_start ~col_end ~replacement ~source_hash
-    ~function_id ~function_name =
+    ~function_name =
   let key =
     [ text file_path; int line; int col_start; int col_end; text replacement;
       text source_hash ]
   in
   run db ~what:"mutants"
     "INSERT OR IGNORE INTO mutants(file_path, line, col_start, col_end, replacement, \
-     source_hash, function_id, function_name) VALUES (?,?,?,?,?,?,?,?)"
-    (key @ [ opt_int function_id; opt_text function_name ]) ;
+     source_hash, function_name) VALUES (?,?,?,?,?,?,?)"
+    (key @ [ opt_text function_name ]) ;
   match
     query_int db
       "SELECT id FROM mutants WHERE file_path=? AND line=? AND col_start=? AND col_end=? \

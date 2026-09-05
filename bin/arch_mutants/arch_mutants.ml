@@ -21,8 +21,8 @@ Usage: arch-mutants plan   <db> [--tests <selector>] [--format text|json|lines] 
                                  [--repo DIR] [--format text|json]
                                  [--fail-on-survivors] [--fail-on-errored]
        arch-mutants run    <db> --plan <plan.json> --engine <cmd> --test-cmd <cmd>
-                                 [--tests <selector>] [--profile <name>]
-                                 [--catalogue <file>] [--report <file>]
+                                 --catalogue <file>
+                                 [--tests <selector>] [--profile <name>] [--report <file>]
                                  [--from generic|mutaml] [--seed S] [--engine-version V]
                                  [--diff <git-range>]
                                  [--repo DIR] [--format text|json] [--max-list N]
@@ -328,6 +328,32 @@ let refusal_exit_code = 99
     outcome the engine produced, it is the absence of an attempt. *)
 let refused_status = "REFUSED"
 
+module MDb = Arch_mutant_db
+
+(** Every string a report adapter can hand the run loop, classified TOTALLY (FR-031).
+
+    Three arms and no catch-all, because each has a different consequence and folding any
+    two together loses a fact the campaign is built on: a refusal was never attempted, an
+    engine status is an outcome, and an unrecognised string must ABORT rather than be
+    guessed — guessing inverts a verdict, and a survivor read as killed is a defect
+    silently deleted. *)
+type engine_class =
+  | Wrapper_refused  (** the wrapper exited [refusal_exit_code]: nothing ran *)
+  | Engine_status of MDb.status  (** one of the four values the schema's CHECK allows *)
+  | Unrecognised_status of string  (** neither: abort at the call site *)
+
+let classify_engine_status s =
+  let up = String.uppercase_ascii (String.trim s) in
+  if up = refused_status then Wrapper_refused
+  else
+    match MDb.status_of_string up with
+    | Some st -> Engine_status st
+    | None -> Unrecognised_status s
+
+let is_wrapper_refusal s = match classify_engine_status s with
+  | Wrapper_refused -> true
+  | Engine_status _ | Unrecognised_status _ -> false
+
 type mutant = { file : string; line : int; status : string; id : string; mutation : string option }
 
 let load_generic path =
@@ -345,6 +371,22 @@ let load_generic path =
              let status = str "status" in
              (match (file, line, status) with
              | Some f, Some l, Some s ->
+                 (* The SAME refusal [load_mutaml] makes, for the same reason: the status is
+                    the input to a closed four-value vocabulary, and a misspelled or
+                    newly-added one read as anything at all is a defect removed from the
+                    defect list with no crash and no log (FR-031). It is checked HERE, where
+                    the string enters, so every downstream consumer can match totally. *)
+                 (match classify_engine_status s with
+                 | Wrapper_refused | Engine_status _ -> ()
+                 | Unrecognised_status bad ->
+                     die
+                       (Printf.sprintf
+                          "arch-mutants: %s:%d: mutant record has unrecognised status %S; the \
+                           vocabulary is KILLED | SURVIVED | TIMEOUT | ERROR (and %s for a \
+                           wrapper refusal). Refusing to guess — a mis-read status inverts the \
+                           verdict, and a survivor counted as anything else is a defect \
+                           silently deleted."
+                          path !n bad refused_status)) ;
                  acc := { file = f; line = l; status = s;
                           id = Option.value ~default:(string_of_int !n) (str "id");
                           mutation = str "mutation" } :: !acc
@@ -419,7 +461,29 @@ let load_mutaml path =
         entries
   | _ -> die (Printf.sprintf "arch-mutants: %s: expected a JSON array of mutaml test_result objects" path)
 
-let report (g : Arch_graph.t) mutants test_keys repo fmt maxlist =
+(** [report] answers about an ENGINE'S OWN report file, with no campaign row behind it. It
+    still owes the reader the same thing [run] and [verdict] owe: FR-013, never a status
+    without its selection provenance, in either format.
+
+    A backward test-closure is only a LOWER BOUND — MAY_TOP edges are never traversed — so a
+    SURVIVED read off a report is a real test gap ONLY under [proved_superset]. Under
+    [top_bounded] or [no_contract] the tests that would have killed it may never have run,
+    and calling it a survivor accuses a test that was never given the chance. The provenance
+    is therefore computed from the SAME two bindings [run] uses ([cone_escapes] and
+    [Arch_db.contract_ok]), never from a second copy of the rule. *)
+let report (t : Arch_db.t) (g : Arch_graph.t) mutants test_keys repo fmt maxlist =
+  let _, escapes = cone_escapes g test_keys in
+  let sound = Arch_db.contract_ok t "mutants" in
+  let provenance =
+    if not sound then MDb.No_contract
+    else if escapes <> [] then MDb.Top_bounded
+    else MDb.Proved_superset
+  in
+  (* Every survivor in this report shares one selection, so they share one verdict — but it
+     is DERIVED through [published_verdict] rather than spelled out here, so `report` cannot
+     drift from `verdict`'s rule. *)
+  let survivor_outcome = { MDb.o_status = MDb.Survived; o_provenance = provenance } in
+  let survivor_verdict = MDb.published_verdict survivor_outcome in
   let nodes = Arch_graph.nodes g in
   let resolver = Arch_path.make ~repo (List.filter_map (fun (n : Arch_graph.node) -> n.file) nodes) in
   let by_file = Hashtbl.create 64 in
@@ -438,11 +502,24 @@ let report (g : Arch_graph.t) mutants test_keys repo fmt maxlist =
   let refused = ref 0 in
   List.iter
     (fun m ->
-      let st = String.uppercase_ascii m.status in
-      if st = refused_status then incr refused
-      else if st = "KILLED" || st = "TIMEOUT" then incr killed
-      else if st <> "SURVIVED" then incr errored
-      else
+      (* FR-031: TOTAL over the closed vocabulary, no catch-all. The old chain ended in
+         `else if st <> "SURVIVED" then incr errored`, so a misspelled or newly-added status
+         was counted as an engine error — a defect removed from the defect list with no
+         crash and no log. [load_generic] and [load_mutaml] both refuse an unrecognised
+         status before it reaches here; the arm below is what makes that refusal
+         structural rather than a convention. *)
+      match classify_engine_status m.status with
+      | Unrecognised_status bad ->
+          die
+            (Printf.sprintf
+               "arch-mutants: mutant %s (%s:%d) carries status %S, which is neither one of \
+                KILLED | SURVIVED | TIMEOUT | ERROR nor %s. Refusing to guess: counting it \
+                as anything at all deletes a defect from the list."
+               m.id m.file m.line bad refused_status)
+      | Wrapper_refused -> incr refused
+      | Engine_status (MDb.Killed | MDb.Timeout) -> incr killed
+      | Engine_status MDb.Errored -> incr errored
+      | Engine_status MDb.Survived ->
         let best = ref None in
         Arch_path.SS.iter
           (fun db ->
@@ -482,8 +559,20 @@ let report (g : Arch_graph.t) mutants test_keys repo fmt maxlist =
                        [ ("file", `String m.file); ("line", `Int m.line); ("id", `String m.id);
                          ("mutation", match m.mutation with Some x -> `String x | None -> `Null);
                          ("function", `String fn);
+                         (* FR-013: the status this record carries is SURVIVED, so its
+                            selection provenance and the verdict derived from the pair
+                            travel WITH it. A reader copies one survivor object out of this
+                            list; a provenance living only at the top of the document would
+                            not travel with it. *)
+                         ("selection_provenance",
+                          `String (MDb.provenance_to_string provenance));
+                         ("verdict", `String (MDb.verdict_to_string survivor_verdict));
+                         ("verdict_basis", `String (MDb.verdict_basis survivor_outcome));
                          ("reaching_tests", `List (List.map (fun s -> `String s) reaching)) ])
                    survivors));
+             ("selection_provenance", `String (MDb.provenance_to_string provenance));
+             ("selection_caveat", `String (MDb.provenance_caveat provenance));
+             ("survivors_publish_as", `String (MDb.verdict_to_string survivor_verdict));
              ("killed", `Int !killed); ("errored", `Int !errored);
              (* Never folded into `killed` or `errored`: the wrapper declined to run this
                 mutant's tests at all, so no verdict of any kind was reached. *)
@@ -502,6 +591,11 @@ let report (g : Arch_graph.t) mutants test_keys repo fmt maxlist =
              ("total", `Int (List.length mutants)) ]))
   else (
     print_endline "== Surviving mutants" ;
+    (* FR-013 in the text format too. Printed BEFORE the counts, because the counts are what
+       a reader acts on and a caveat arriving after them arrives too late. *)
+    Printf.printf "  • selection provenance: %s — %s\n"
+      (MDb.provenance_to_string provenance)
+      (MDb.provenance_caveat provenance) ;
     Printf.printf "  • %d mutant(s) in the report: %d survived, %d killed%s\n" (List.length mutants)
       (List.length survivors) !killed
       (if !errored > 0 then Printf.sprintf ", %d errored (counted neither way)" !errored else "") ;
@@ -523,9 +617,17 @@ let report (g : Arch_graph.t) mutants test_keys repo fmt maxlist =
          this code — check `arch-mutants plan` before celebrating." ;
     List.iter
       (fun (m, fn, reaching) ->
-        Printf.printf "  • SURVIVED %s:%d%s\n" m.file m.line
+        (* The VERDICT, not the engine status: under a ⊤-bounded or contract-less selection
+           the engine's SURVIVED publishes as UNKNOWN, and printing the raw status here
+           would be the naked status FR-013 forbids. *)
+        Printf.printf "  • %s %s:%d%s\n"
+          (MDb.verdict_to_string survivor_verdict)
+          m.file m.line
           (match m.mutation with Some x -> Printf.sprintf "  (%s)" x | None -> "") ;
         Printf.printf "      in %s\n" fn ;
+        Printf.printf "      engine status SURVIVED under %s — %s\n"
+          (MDb.provenance_to_string provenance)
+          (MDb.verdict_basis survivor_outcome) ;
         if reaching <> [] then
           Printf.printf "      %d test(s) reach it and none killed it: %s%s\n" (List.length reaching)
             (String.concat ", " (take 5 reaching))
@@ -534,7 +636,7 @@ let report (g : Arch_graph.t) mutants test_keys repo fmt maxlist =
       (take maxlist survivors) ;
     if maxlist > 0 && List.length survivors > maxlist then
       Printf.printf "  … and %d more (--max-list 0 for all)\n" (List.length survivors - maxlist)) ;
-  (survivors, unmapped, !errored)
+  (survivors, unmapped, !errored, survivor_outcome)
 
 (* ------------------------------------------------------------------ *)
 (* run — drive ONE campaign through an engine, and persist it          *)
@@ -561,32 +663,6 @@ let report (g : Arch_graph.t) mutants test_keys repo fmt maxlist =
     The per-mutant executed set is always a {b superset} of the reaching set the plan
     declares, never a subset: under-selection can turn a mutant an excluded test would
     have killed into a survivor, which is a false accusation against a real test. *)
-
-module MDb = Arch_mutant_db
-
-(** Every string a report adapter can hand the run loop, classified TOTALLY (FR-031).
-
-    Three arms and no catch-all, because each has a different consequence and folding any
-    two together loses a fact the campaign is built on: a refusal was never attempted, an
-    engine status is an outcome, and an unrecognised string must ABORT rather than be
-    guessed — guessing inverts a verdict, and a survivor read as killed is a defect
-    silently deleted. *)
-type engine_class =
-  | Wrapper_refused  (** the wrapper exited [refusal_exit_code]: nothing ran *)
-  | Engine_status of MDb.status  (** one of the four values the schema's CHECK allows *)
-  | Unrecognised_status of string  (** neither: abort at the call site *)
-
-let classify_engine_status s =
-  let up = String.uppercase_ascii (String.trim s) in
-  if up = refused_status then Wrapper_refused
-  else
-    match MDb.status_of_string up with
-    | Some st -> Engine_status st
-    | None -> Unrecognised_status s
-
-let is_wrapper_refusal s = match classify_engine_status s with
-  | Wrapper_refused -> true
-  | Engine_status _ | Unrecognised_status _ -> false
 
 (** The profile's addressing granularity. [case] is one test case; [group] is the coarser
     unit a runner can actually name (alcotest addresses tests by group regex plus a
@@ -1117,16 +1193,25 @@ let run_impact ~impact ~db_path ~repo ~range =
              impact)
 
 (** One mutant as a PRIOR campaign left it: the latest campaign that ran it, that run's
-    engine status, and how many `mutant_kills` rows that campaign holds for it.
+    OUTCOME, and how many `mutant_kills` rows that campaign holds for it.
+
+    The outcome is an {!MDb.outcome} and never a boolean. A [pk_killed : bool] read off
+    [engine_status] ALONE is the exact shape FR-011 exists to forbid: a SURVIVED recorded
+    under a ⊤-bounded selection publishes as UNKNOWN everywhere else in this tool, and
+    collapsing it to "not killed" here made it a PROVEN non-kill — which is what decided
+    that it needed no re-check when a test was deleted. Status and provenance are read
+    from the same row, in the projection below, and every consumer branches on
+    {!MDb.published_verdict}.
 
     "Alone" is [pk_kills = 1] together with [pk_sole_test]. Attribution "never known" is
-    [pk_kills = 0] on a mutant that was killed — the executed set was larger than one and
-    no engine named the killer, so nothing can say whether the deleted test was the only
-    one catching it. *)
+    [pk_kills = 0] on a mutant whose verdict is not a proved SURVIVED — the executed set
+    was larger than one and no engine named the killer, or the selection cannot be shown
+    to have run the reaching tests at all, so nothing can say whether the deleted test was
+    the only one catching it. *)
 type prior_mutant = {
   pk_file : string;
   pk_line : int;
-  pk_killed : bool;
+  pk_outcome : MDb.outcome;
   pk_kills : int;
   pk_sole_test : string option;
 }
@@ -1137,12 +1222,41 @@ module Prior_shape = struct
   let s = Rows.s
   let i = Rows.i
 
-  (* file_path, line, engine_status, one kill row's test_name, kill count *)
-  let row = Ty.(t2 (t3 s i s) (t2 s i))
+  (* file_path, line, engine_status, selection_provenance, one kill row's test_name,
+     kill count. The provenance travels in the SAME projection as the status: this is the
+     only place either is read, so there is no second site at which they could be paired
+     with a value from a different row (FR-013, FR-033). *)
+  let row = Ty.(t2 (t3 s i s) (t3 s s i))
 
-  let cells ((file, line, status), (test, kills)) =
-    [ text_cell file; int_cell line; text_cell status; text_cell test; int_cell kills ]
+  let cells ((file, line, status), (prov, test, kills)) =
+    [ text_cell file; int_cell line; text_cell status; text_cell prov; text_cell test;
+      int_cell kills ]
 end
+
+(** What a prior outcome lets us conclude about ATTRIBUTION, which is the only question
+    the deleted-test rule asks of it. Total over the published verdict, so a sixth verdict
+    cannot be dropped here silently. *)
+type prior_attribution =
+  | Pa_no_test_kills_it
+      (** verdict SURVIVED: every reaching test ran and none killed it, so no deleted test
+          can have been the one catching it. Safe from the deletion, provably. *)
+  | Pa_known of string  (** killed, and exactly one kill row names the killer *)
+  | Pa_never_known
+      (** nothing can be said: a kill with no attribution, or a verdict of UNKNOWN /
+          UNKNOWN_NO_CONTRACT / ERROR, where the reaching tests may never have run at
+          all. Reported as UN-RECHECKABLE rather than silently skipped. *)
+
+let prior_attribution p =
+  match MDb.published_verdict p.pk_outcome with
+  | MDb.V_survived -> Pa_no_test_kills_it
+  | MDb.V_killed -> (
+      match p.pk_sole_test with Some tn when p.pk_kills = 1 -> Pa_known tn | _ -> Pa_never_known)
+  (* UNKNOWN, UNKNOWN_NO_CONTRACT and ERROR all mean the same thing HERE: no run of any
+     test was proved, so the deletion cannot be shown to be harmless. V_pending cannot
+     reach this — [published_verdict] never returns it and a prior_mutant is built from a
+     run row that exists — and is named rather than caught so a future change is a
+     compile error. *)
+  | MDb.V_unknown | MDb.V_unknown_no_contract | MDb.V_error | MDb.V_pending -> Pa_never_known
 
 let prior_mutants (t : Arch_db.t) =
   if not (Arch_db.has_table t "mutant_runs" && Arch_db.has_table t "mutant_kills") then None
@@ -1151,7 +1265,7 @@ let prior_mutants (t : Arch_db.t) =
       (List.filter_map
          (fun row ->
            match row with
-           | [ file_c; line_c; status_c; test_c; kills_c ] ->
+           | [ file_c; line_c; status_c; prov_c; test_c; kills_c ] ->
                let text = function
                  | Arch_db.Text s -> Some s
                  | Arch_db.Nul | Arch_db.Int _ | Arch_db.Real _ -> None
@@ -1161,10 +1275,9 @@ let prior_mutants (t : Arch_db.t) =
                  | Arch_db.Nul | Arch_db.Text _ | Arch_db.Real _ -> None
                in
                let kills = Option.value ~default:0 (int_of kills_c) in
-               let killed =
+               let status =
                  match Option.map MDb.status_of_string (text status_c) with
-                 | Some (Some MDb.Killed) | Some (Some MDb.Timeout) -> true
-                 | Some (Some MDb.Survived) | Some (Some MDb.Errored) -> false
+                 | Some (Some st) -> st
                  | Some None | None ->
                      die
                        (Printf.sprintf
@@ -1174,16 +1287,32 @@ let prior_mutants (t : Arch_db.t) =
                            re-check set."
                           (Option.value ~default:"NULL" (text status_c)))
                in
+               (* Read here and nowhere else, from the same row as the status above, and
+                  refused on the same terms: defaulting it to proved_superset is precisely
+                  what would turn an UNKNOWN into a proven non-kill. *)
+               let provenance =
+                 match Option.map MDb.provenance_of_string (text prov_c) with
+                 | Some (Some pr) -> pr
+                 | Some None | None ->
+                     die
+                       (Printf.sprintf
+                          "arch-mutants: a prior mutant_runs row holds selection_provenance \
+                           %S, which is not one of proved_superset|top_bounded|no_contract. \
+                           Refusing to guess: defaulting it would publish a bounded SURVIVED \
+                           as a proved non-kill and drop the mutant from the re-check set."
+                          (Option.value ~default:"NULL" (text prov_c)))
+               in
                Some
                  { pk_file = Option.value ~default:"" (text file_c);
                    pk_line = Option.value ~default:0 (int_of line_c);
-                   pk_killed = killed;
+                   pk_outcome = { MDb.o_status = status; o_provenance = provenance };
                    pk_kills = kills;
                    pk_sole_test = (if kills = 1 then text test_c else None) }
            | _ -> None)
          (Arch_db.rows t ~params_ty:Arch_db.Ty.unit ~shape:Prior_shape.row
             ~to_cells:Prior_shape.cells
-            "SELECT m.file_path, m.line, r.engine_status, (SELECT k.test_name FROM \
+            "SELECT m.file_path, m.line, r.engine_status, r.selection_provenance, (SELECT \
+             k.test_name FROM \
              mutant_kills k WHERE k.mutant_id = m.id AND k.campaign_id = l.cid ORDER BY \
              k.test_name LIMIT 1), (SELECT count(*) FROM mutant_kills k WHERE k.mutant_id = \
              m.id AND k.campaign_id = l.cid) FROM mutants m JOIN (SELECT mutant_id AS mid, \
@@ -1300,14 +1429,20 @@ let compute_diff_scope (t : Arch_db.t) (g : Arch_graph.t) test_keys ~db_path ~re
     | Some rows ->
         if deleted_tests = [] then ([], [])
         else
+          (* One traversal, one match, so the two halves cannot disagree about a row: a
+             mutant is re-checked, provably safe, or un-recheckable, and never two of
+             those. *)
           ( List.filter_map
               (fun p ->
-                match p.pk_sole_test with
-                | Some tn when SS.mem tn deleted_set -> Some (p.pk_file, p.pk_line)
-                | Some _ | None -> None)
+                match prior_attribution p with
+                | Pa_known tn when SS.mem tn deleted_set -> Some (p.pk_file, p.pk_line)
+                | Pa_known _ | Pa_no_test_kills_it | Pa_never_known -> None)
               rows,
             List.filter_map
-              (fun p -> if p.pk_killed && p.pk_kills = 0 then Some (p.pk_file, p.pk_line) else None)
+              (fun p ->
+                match prior_attribution p with
+                | Pa_never_known -> Some (p.pk_file, p.pk_line)
+                | Pa_known _ | Pa_no_test_kills_it -> None)
               rows )
   in
   { ds_range = range;
@@ -1523,8 +1658,8 @@ let run_campaign (t : Arch_db.t) (g : Arch_graph.t) test_keys ~db_path ~plan_pat
   in
   let campaign_id =
     try
-      MDb.insert_campaign db ~engine ~engine_version ~seed ~producer_run_id:None
-        ~engine_path ~test_runner_path:runner_path ~profile:profile_name
+      MDb.insert_campaign db ~engine ~engine_version ~seed ~engine_path
+        ~test_runner_path:runner_path ~profile:profile_name
         ~granularity:(granularity_to_string granularity)
     with MDb.Write_failed m ->
       prerr_endline ("arch-mutants: " ^ m) ;
@@ -1537,7 +1672,7 @@ let run_campaign (t : Arch_db.t) (g : Arch_graph.t) test_keys ~db_path ~plan_pat
       match
         MDb.insert_mutant db ~file_path:s.s_file ~line:s.s_line ~col_start:s.s_col_start
           ~col_end:s.s_col_end ~replacement:s.s_repl ~source_hash:sel.sel_hash
-          ~function_id:None ~function_name:sel.sel_fn
+          ~function_name:sel.sel_fn
       with
       | id -> Hashtbl.replace mutant_ids s.s_id id
       | exception MDb.Write_failed m -> prerr_endline ("arch-mutants: " ^ m))
@@ -2502,13 +2637,40 @@ let main () =
       let mfile = match extra with m :: _ -> m | [] -> die "arch-mutants: report needs a mutant report path" in
       let mutants = if opt "--from" "generic" = "mutaml" then load_mutaml mfile else load_generic mfile in
       if fmt = "lines" then die "arch-mutants: --format lines is only meaningful for `plan`" ;
-      let survivors, unmapped, errored =
-        report g mutants test_keys (opt "--repo" ".") fmt maxlist
+      let survivors, unmapped, errored, survivor_outcome =
+        report t g mutants test_keys (opt "--repo" ".") fmt maxlist
       in
-      if List.mem "--fail-on-survivors" args && (survivors <> [] || unmapped <> []) then (
-        Printf.eprintf "arch-mutants: FAIL — %d surviving mutant(s)\n"
-          (List.length survivors + List.length unmapped) ;
-        exit 1) ;
+      let n_survivors = List.length survivors + List.length unmapped in
+      (* The gate fails on a DEFECT LIST, and a mutant only lands on that list when its
+         derived verdict is genuinely V_survived. Under `top_bounded` or `no_contract` the
+         same engine status publishes as UNKNOWN — the tests that would have killed it may
+         never have run — and failing a build on that is a false accusation against a test
+         nobody gave the chance. The verdict is matched TOTALLY: a gate that silently
+         declined to fire would be worse than one that over-fires, so each arm says which
+         it is. *)
+      if List.mem "--fail-on-survivors" args && n_survivors > 0 then (
+        match MDb.published_verdict survivor_outcome with
+        | MDb.V_survived ->
+            Printf.eprintf "arch-mutants: FAIL — %d surviving mutant(s)\n" n_survivors ;
+            exit 1
+        | MDb.V_unknown | MDb.V_unknown_no_contract ->
+            Printf.eprintf
+              "arch-mutants: --fail-on-survivors did NOT fail, and here is why: the %d \
+               mutant(s) the engine reported SURVIVED publish as %s under \
+               selection_provenance %s — %s. Fix the selection (close the test cone, or \
+               give the index a soundness contract) before treating this list as a defect \
+               list.\n"
+              n_survivors
+              (MDb.verdict_to_string (MDb.published_verdict survivor_outcome))
+              (MDb.provenance_to_string survivor_outcome.MDb.o_provenance)
+              (MDb.provenance_caveat survivor_outcome.MDb.o_provenance)
+        (* [report] derives this verdict from a SURVIVED status, so no other arm can be
+           reached. They are spelled out rather than caught, because a catch-all here is
+           what would let a later fifth verdict pass the gate unnoticed. *)
+        | MDb.V_killed | MDb.V_error | MDb.V_pending ->
+            die
+              "arch-mutants: internal — a survivor list produced a verdict that is not a \
+               survivor verdict") ;
       (* An ERRORED mutant is one the engine could not build or run. It is neither killed nor
          survived, so it could never fail --fail-on-survivors — and a green gate on a report
          where most mutants errored says nothing about the tests. It stays out of the default

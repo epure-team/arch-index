@@ -15,6 +15,23 @@
 --     it is the ABSENCE of a `mutant_runs` row in a campaign whose `completed_at` is NULL.
 --     Storing either would widen a vocabulary that `bin/arch_mutants/arch_mutants.ml`'s
 --     bucketing depends on being closed.
+--
+-- NO FOREIGN KEY LEAVES THESE FOUR TABLES, and that is a measurement rather than a
+-- preference. `mutants.function_id REFERENCES functions(id)` and
+-- `mutant_campaigns.producer_run_id REFERENCES producer_runs(id)` were both here and both
+-- unpopulated. They could not be made to work: this tool reads BOTH schemas
+-- (`Arch_db.Flat` and `Arch_db.Main`), and the flat schema `arch-load` writes — the one
+-- every test and every check in this campaign uses — has a `functions` table with NO `id`
+-- column and no `producer_runs` table at all. With `PRAGMA foreign_keys = ON`, SQLite then
+-- rejects the INSERT outright ("foreign key mismatch", "no such table: main.producer_runs")
+-- even when the value bound is NULL. So the choice was between a column whose declared
+-- referential action can never fire on half this tool's inputs, and no column. The link a
+-- reader actually needs is `mutants.function_name`, which the writer DOES populate.
+--
+-- What remains — campaign_id and mutant_id — points only at tables this file creates, so it
+-- resolves on every schema, and `Arch_mutant_db.open_and_migrate` issues
+-- `PRAGMA foreign_keys = ON` (OFF by default, per connection) so those CASCADEs genuinely
+-- fire instead of being documentation.
 
 -- =============================================================================
 -- One campaign: one execution of one engine over one index.
@@ -30,10 +47,6 @@ CREATE TABLE IF NOT EXISTS mutant_campaigns (
     -- which the report must say IN WORDS rather than rendering as an empty value, the
     -- same discipline arch-coverage applies to `no_data` (never printed as 0%).
     seed TEXT,
-
-    -- The producer run this campaign was driven against, when the index has one.
-    -- Nullable: a flat-schema index has no `producer_runs` table at all.
-    producer_run_id INTEGER REFERENCES producer_runs(id) ON DELETE SET NULL,
 
     -- FR-028: which artefacts ACTUALLY ran. A campaign whose engine or test runner
     -- resolved to a binary from an enclosing checkout produces a page of survivors that
@@ -72,13 +85,15 @@ CREATE TABLE IF NOT EXISTS mutants (
     source_hash TEXT NOT NULL,
 
     -- NULLABLE ON PURPOSE: a mutant the index cannot map to a function is PERSISTED,
-    -- not dropped. docs/mutation-testing.md already requires an unmapped survivor to be
-    -- reported; dropping it one layer lower, in storage, would contradict that rule
-    -- where nobody would ever see it happen.
-    function_id INTEGER REFERENCES functions(id) ON DELETE SET NULL,
-    -- Denormalised so a flat-schema index (no function row ids) can still name the
-    -- function, and so EC-4 works: when the function is later deleted the row is
-    -- retained and reads as stale rather than as an error.
+    -- not dropped, with this column NULL. docs/mutation-testing.md already requires an
+    -- unmapped survivor to be reported; dropping it one layer lower, in storage, would
+    -- contradict that rule where nobody would ever see it happen.
+    --
+    -- A NAME and not a row id, for the reason given in the header: a `functions(id)`
+    -- reference cannot resolve on the flat schema. The name is also what makes EC-4 work
+    -- without any referential action — when the function is later deleted the row is
+    -- retained and its name simply no longer resolves in the index, which reads as stale
+    -- rather than as an error, and is the same fact a nulled-out id would have carried.
     function_name TEXT,
 
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
@@ -87,7 +102,7 @@ CREATE TABLE IF NOT EXISTS mutants (
 );
 
 CREATE INDEX IF NOT EXISTS idx_mutants_file ON mutants(file_path);
-CREATE INDEX IF NOT EXISTS idx_mutants_fnid ON mutants(function_id);
+CREATE INDEX IF NOT EXISTS idx_mutants_fn   ON mutants(function_name);
 
 -- =============================================================================
 -- One row per (campaign, mutant) ACTUALLY ATTEMPTED. A mutant the campaign never
