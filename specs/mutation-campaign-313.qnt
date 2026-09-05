@@ -204,6 +204,13 @@ module mutation_campaign_313 {
   val p3UnattemptedIsPendingNotSurvived: bool =
     (not(runRowWritten) and not(campaignCompleted)) implies (verdict == "PENDING")
 
+  // US-6 / P2 stated as a genuine TEMPORAL property rather than as a state invariant over a
+  // shadow variable. The shadow form below is kept because the simulator can check it cheaply,
+  // but it is equivalent only as long as every action maintains the shadow — this form has no
+  // such precondition. Checked by `quint verify --temporal`, not by `quint run`.
+  temporal p2ExecutedIsMonotoneOverTime =
+    always(executed.subseteq(next(executed)))
+
   // The conjunction the formal gate checks.
   val allInvariants: bool = and {
     p1SurvivorNeedsProvedSuperset,

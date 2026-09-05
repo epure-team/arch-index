@@ -64,6 +64,40 @@ run_mutation "PENDING becomes a storable engine status" \
   "p3PendingIsNeverStored" \
   's/oneOf(Set("KILLED", "SURVIVED", "TIMEOUT", "ERROR"))/oneOf(Set("KILLED", "SURVIVED", "TIMEOUT", "ERROR", "PENDING"))/'
 
+# --- temporal properties ------------------------------------------------------
+# The shadow-variable invariant p2ExecutedNeverShrinks can be WEAKENED without going red
+# (an action that updates the shadow to the new value keeps it trivially true), which is why
+# P2 also exists as a genuine temporal property. That one must also prove it can fail.
+run_temporal_mutation() {
+  local name="$1" prop="$2" sedexpr="$3"
+  total=$((total+1))
+  local f="$TMP/mut_t.qnt"
+  sed "$sedexpr" "$SPEC" > "$f"
+  if cmp -s "$f" "$SPEC"; then
+    echo "  ✗ $name — the sed matched NOTHING, so this mutation tested nothing"
+    fails=$((fails+1)); return
+  fi
+  local out
+  out=$(yes | timeout 600 quint verify "$f" --temporal="$prop" --max-steps=6 2>&1)
+  if printf '%s' "$out" | grep -q "No violation found"; then
+    echo "  ✗ $name — SURVIVED: $prop stayed green (vacuous temporal property)"
+    fails=$((fails+1))
+  elif printf '%s' "$out" | grep -qiE "violation|error|Counterexample"; then
+    echo "  ✓ $name — caught by $prop"
+  else
+    echo "  ✗ $name — neither a violation nor a green result:"
+    printf '%s\n' "$out" | tail -3 | sed 's/^/      /'
+    fails=$((fails+1))
+  fi
+}
+
+echo "check-quint-red: temporal properties (Apalache; its temporal support is documented as"
+echo "  experimental, and TLC rejects this shape because a [] over an action needs the [A]_v form)"
+
+run_temporal_mutation "a dynamic source that REMOVES a test (temporal form)" \
+  "p2ExecutedIsMonotoneOverTime" \
+  's/executed\.union(Set(t))/executed.exclude(Set(t))/'
+
 echo
 if [ "$fails" -eq 0 ]; then
   echo "check-quint-red: $total/$total mutations caught — every invariant can fail."
