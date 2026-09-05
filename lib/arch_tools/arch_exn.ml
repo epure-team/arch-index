@@ -205,6 +205,20 @@ let not_analysed_channel channel error_contract =
     channel
     (match error_contract with Some s -> s | None -> "<absent>")
 
+(* FIX (review round: HIGH-1/MEDIUM-4 fallout): distinct from {!not_analysed} /
+   {!not_analysed_channel}. Those two mean "the producer never emitted this at all" — the
+   right advice is "rebuild with a producer that does". This one means "the producer DID
+   emit sites, but on an index built before error-channels (schema 1.8) added the
+   [channel] column" — conflating the two previously told a user with a real,
+   populated [exn_origins] table that "this index has no exception sites", which they
+   could (and did, per the review) disprove with a one-line COUNT query. Re-indexing is
+   still the fix, but the reason is a stale schema, not an unanalysed index. *)
+let predates_channel_col channel =
+  Printf.sprintf
+    "REFUSED: this index's exn_scopes/exn_origins tables predate the error-channels \
+     column (channel, schema 1.8) — channel %s needs it. Re-index with a newer producer."
+    channel
+
 let load ?(channel = "exception") ?(use_builtin_summaries = false) (t : Arch_db.t) =
   (* FIX (review round 1, MEDIUM): {!not_analysed} is worded for the
      exception channel — it names [raises]/[raisers-of]/[exn-stats]. Reaching
@@ -217,25 +231,33 @@ let load ?(channel = "exception") ?(use_builtin_summaries = false) (t : Arch_db.
     else Arch_db.refuse "%s" (not_analysed_channel channel (Arch_db.meta t "error_contract"))
   in
   (* A version is what a database CLAIMS; a column is what it HAS. [exn_scopes.channel]
-     and [exn_origins.channel] are schema-1.3 columns (see architecture-schema.sql) — an
-     index built before them has [exn_origins] (so [has_table] passes) but querying
-     [channel] on either table raises a bare [Sqlite3.prepare: no such column]. Guard on
-     the column itself, not on [exn_contract] or a schema-version number, either of which
-     can be set (or absent) independently of whether the column was ever added. *)
+     and [exn_origins.channel] are error-channels columns, schema 1.8 (see
+     architecture-schema.sql) — an index built before them has [exn_origins] (so
+     [has_table] passes) but querying [channel] on either table raises a bare
+     [Sqlite3.prepare: no such column]. Guard on the column itself, not on [exn_contract]
+     or a schema-version number, either of which can be set (or absent) independently of
+     whether the column was ever added. *)
   let has_channel_col () =
     Arch_db.has_col t "exn_scopes" "channel" && Arch_db.has_col t "exn_origins" "channel"
   in
+  let table_exists = Arch_db.has_table t "exn_origins" in
   if t.schema = Arch_db.Flat then refuse_not_analysed () ;
   if channel = "exception" then
     match Arch_db.meta t "exn_contract" with
-    | Some _ when Arch_db.has_table t "exn_origins" && has_channel_col () -> ()
+    | Some _ when table_exists && has_channel_col () -> ()
+    (* the producer DID emit exception sites ([exn_contract] set, [exn_origins]
+       present) — the only thing missing is the column an older schema predates. *)
+    | Some _ when table_exists -> Arch_db.refuse "%s" (predates_channel_col channel)
     | _ -> Arch_db.refuse "%s" not_analysed
   else (
     (* A value channel's contract lives in [error_contract]
        ("v1:exception,result,option,…") — FR-032: a channel absent there
        MUST refuse NOT_ANALYSED, distinctly from the [exception] channel's
-       own (unchanged) check above. *)
-    if not (Arch_db.has_table t "exn_origins" && has_channel_col ()) then refuse_not_analysed () ;
+       own (unchanged) check above. Same table/column split as above: no
+       [exn_origins] table at all is a genuine "never analysed"; the table present but
+       missing [channel] is a stale schema, not an unanalysed index. *)
+    if not table_exists then refuse_not_analysed ()
+    else if not (has_channel_col ()) then Arch_db.refuse "%s" (predates_channel_col channel) ;
     let ec = Arch_db.meta t "error_contract" in
     let emitted =
       match ec with

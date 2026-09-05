@@ -107,7 +107,21 @@ open Caqti_request.Infix
    the CI gates already know how to report. This does not replace a targeted [has_col]
    guard (which can give a better-scoped message and let the caller answer something else
    instead of refusing outright) — it is the backstop for what a guard was not written
-   for. *)
+   for.
+
+   This also catches a genuine SQL typo in repo-authored code (a column name that never
+   existed in ANY schema version), reported the same way as a real version-drift miss —
+   "predates X, re-index with a newer producer" is then bad advice. Deliberately NOT
+   distinguishing the two here: by the time [ok] sees the error, the query has already run
+   against THIS connection, so [has_col_conn]/[has_table_conn] on it would only confirm
+   what the driver already told us (the column is absent here) — there is no way to ask
+   from inside this function whether the name was ever valid on any OTHER schema version,
+   which is the only fact that would actually discriminate a typo from real drift. A typo
+   in a query that runs unconditionally (no [has_col] guard in front of it) is instead
+   caught by the test suite, which runs the whole CLI against the CURRENT schema on every
+   build — a typo'd column name that is not the deliberate output of some future migration
+   fails a real test with a wrong exit code, immediately, rather than lurking. Under-catch
+   (syntax errors, [no such function], truncated SQL) is unaffected and stays {!Broken}. *)
 let missing_schema_ref msg =
   let find_substring ~needle hay =
     let nlen = String.length needle and hlen = String.length hay in
@@ -128,11 +142,25 @@ let missing_schema_ref msg =
         done ;
         Some (String.sub rest 0 !j)
   in
-  (* sqlite qualifies a column with its table alias ("s.channel"); report the bare name. *)
+  (* Caqti/sqlite terminate the whole clause with a sentence period before " Query: …" (e.g.
+     ["no such column: nonexistent_col. Query: …"]) — [token_after]'s stop set does not include
+     ['.'], so the captured token carries that trailing period. Strip it before anything else
+     touches the token, or a table/column name that happens to contain no dot of its own (the
+     common case) still comes out looking dot-terminated, and [bare_name]'s [rindex_opt '.']
+     below then finds THAT period as the "qualifier" separator and returns the empty string. *)
+  let strip_trailing_dot s =
+    let n = String.length s in
+    if n > 0 && s.[n - 1] = '.' then String.sub s 0 (n - 1) else s
+  in
+  (* sqlite qualifies a column with its table alias ("s.channel") and can qualify a table with
+     its schema ("main.nosuch"); report the bare name in both cases. *)
   let bare_name s = match String.rindex_opt s '.' with Some i -> String.sub s (i + 1) (String.length s - i - 1) | None -> s in
   match token_after "no such column: " with
-  | Some col -> Some (Printf.sprintf "column %s" (bare_name col))
-  | None -> ( match token_after "no such table: " with Some tbl -> Some (Printf.sprintf "table %s" tbl) | None -> None)
+  | Some col -> Some (Printf.sprintf "column %s" (bare_name (strip_trailing_dot col)))
+  | None -> (
+      match token_after "no such table: " with
+      | Some tbl -> Some (Printf.sprintf "table %s" (bare_name (strip_trailing_dot tbl)))
+      | None -> None)
 
 let ok = function
   | Ok v -> v
@@ -140,9 +168,12 @@ let ok = function
       let msg = Caqti_error.show e in
       match missing_schema_ref msg with
       | Some what ->
-          refuse
-            "this index predates %s and should be re-indexed with a newer producer (%s)"
-            what msg
+          (* Do not append the raw Caqti/sqlite message here: the two per-command guards
+             (escaping-origins, Arch_exn.load) are tested on the assumption that a refusal
+             never surfaces "no such column" to the user (see
+             tezt/tests/schema_column_guards.ml), and this backstop exists to give every
+             OTHER site the same contract, not a laxer one. *)
+          refuse "this index predates %s and should be re-indexed with a newer producer" what
       | None -> broken "%s" msg)
 
 let collect t req p =

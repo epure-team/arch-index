@@ -14,8 +14,8 @@
     Two things are pinned here:
 
     - the two known crash sites ([raises] and [escaping-origins], both
-      driven by [exn_scopes.channel]/[exn_origins.channel], a schema-1.3
-      column) now REFUSE (exit 3) with a message naming what is missing,
+      driven by [exn_scopes.channel]/[exn_origins.channel], an error-channels
+      column added at schema 1.8) now REFUSE (exit 3) with a message naming what is missing,
       on a fixture that genuinely lacks the column and genuinely reaches
       the query — checked by PRAGMA before running the CLI at all, so this
       test cannot pass by accident on a fixture the guard never sees;
@@ -92,6 +92,20 @@ let register_raises_refuses_on_pre_channel_index () =
   Batch.run (fun b ->
       Batch.exit_code b ~msg:"raises on a pre-channel index must REFUSE, not crash" ~expected:3
         (code, output) ;
+      (* Behavioural, not cosmetic: this is the SCOPED guard message
+         ({!Arch_tools.Arch_exn.predates_channel_col}), distinct from both the generic
+         "no exception sites" wording (reached when [exn_contract] itself is absent — a
+         REAL never-analysed index, a different cause) and from the generic backstop's
+         "this index predates column X" (reached only when no per-command guard exists at
+         all). Deleting/weakening this guard falls through to the generic message, which
+         does NOT contain this phrase — so unlike a leak-only check, this dies if the
+         guard is removed. *)
+      Batch.contains b ~msg:"must give the SCOPED predates-channel-column reason, not the \
+                             generic \"no exception sites\" one"
+        ~haystack:output "predate the error-channels column" ;
+      Batch.not_contains b ~msg:"must not claim the producer emitted nothing (it did — only \
+                                 the column is missing, MEDIUM-4)"
+        ~haystack:output "its producer did not emit them" ;
       Batch.not_contains b ~msg:"must not surface the raw sqlite error" ~haystack:output
         "no such column" ;
       Batch.not_contains b ~msg:"must not raise an uncaught OCaml exception" ~haystack:output
@@ -117,6 +131,16 @@ let register_escaping_origins_refuses_on_pre_channel_index () =
       Batch.exit_code b ~msg:"escaping-origins on a pre-channel index must REFUSE, not crash"
         ~expected:3 (code, output) ;
       Batch.contains b ~msg:"the refusal must name the channel column" ~haystack:output "channel" ;
+      (* Behavioural, not cosmetic: "escaping-origins needs it" only appears in THIS
+         command's own [has_col] guard message (bin/arch_query/arch_query.ml). If that
+         guard is deleted, the query proceeds, hits the raw sqlite error, and gets
+         reported instead by {!Arch_tools.Arch_db.ok}'s generic backstop — a real
+         REFUSED at the same exit code, naming the same column, but without this phrase.
+         A leak-only check (below) cannot tell the two apart since neither leaks the raw
+         sqlite error; this one can. *)
+      Batch.contains b ~msg:"must give the escaping-origins-SCOPED reason, not the generic \
+                             backstop's"
+        ~haystack:output "escaping-origins needs it" ;
       Batch.not_contains b ~msg:"must not surface the raw sqlite error" ~haystack:output
         "no such column" ;
       Batch.not_contains b ~msg:"must not raise an uncaught OCaml exception" ~haystack:output
@@ -151,10 +175,22 @@ let register_ok_backstop_refuses_unguarded_missing_column () =
       | (_ : Arch_tools.Arch_db.cell list list) ->
           Batch.note b "expected Arch_db.Refused, got a successful result — the column exists?"
       | exception Arch_tools.Arch_db.Refused msg ->
+          (* FIX (review HIGH-1/HIGH-2/HIGH-3): {!Arch_tools.Arch_db.ok} no longer appends
+             the raw Caqti/sqlite message to the refusal (that leaked "no such column"
+             regardless of what the extraction produced, which is exactly why the OLD
+             version of this assertion survived a mutant that swapped the extracted name
+             for a constant — the needle was in the haystack independent of the thing
+             under test). [msg] here is now ONLY the constructed phrase, so this
+             genuinely exercises [bare_name]/[token_after]'s extraction. *)
           Batch.contains b ~msg:"the Refused message must name the missing column"
             ~haystack:msg "nonexistent_col" ;
           Batch.contains b ~msg:"the Refused message must say the index predates it"
-            ~haystack:msg "predates"
+            ~haystack:msg "predates" ;
+          Batch.not_contains b ~msg:"must not leak the raw sqlite error" ~haystack:msg
+            "no such column" ;
+          Batch.not_contains b ~msg:"must not carry a trailing sentence period from the \
+                                     driver's message onto the extracted name"
+            ~haystack:msg "nonexistent_col."
       | exception Arch_tools.Arch_db.Broken msg ->
           Batch.note b "a missing column must raise Refused (exit 3), not Broken (exit 2): %s" msg
       | exception e -> Batch.note b "unexpected exception: %s" (Printexc.to_string e)) ;
