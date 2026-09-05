@@ -933,14 +933,39 @@ let eval (t : Arch_db.t) (g : Arch_graph.t) ~sound r =
             detail_total = 0; sizes = None; witness = []; top_reasons = [];
             note =
               Some
+                (* LEADS with what the run DID establish. On a real index the
+                   cone almost always escapes, so this is the verb's NORMAL
+                   verdict rather than a degraded one — and a note that opens on
+                   what is unproved reads as a tool failure to someone who has
+                   just run a gate that worked. It proves "no NEW site among
+                   those it can see"; it never proves "no fatal origin exists",
+                   and both halves belong in the sentence. *)
                 (Printf.sprintf
-                   "%s. Every site found is allowed, but the cone escapes through %d \xe2\x8a\xa4 edge(s) \
-                    \xe2\x80\x94 an origin could sit behind one, so this is not a proof that none was missed"
+                   "%s. GATE HELD: every site in view is covered by the allow-file, so no new \
+                    fatal origin appeared among the ones this run could see. It is NOT a proof \
+                    that none exists: the cone still escapes through %d \xe2\x8a\xa4 edge(s) and an \
+                    origin could sit behind one. This verdict is the expected outcome on a \
+                    real index, not a failure of the check \xe2\x80\x94 a VIOLATION fails the gate \
+                    regardless of \xe2\x8a\xa4, which is what makes the rule useful while \
+                    completeness is out of reach"
                    coverage (SS.cardinal escaping)) }
         else
           { rule = r.name; kind = kind_of r.body; exact = false;
             verdict = (if sound then "PASS" else "UNKNOWN_NO_CONTRACT");
             detail = []; detail_total = 0; sizes = None; witness = []; top_reasons = []; note = Some coverage }
+
+            detail = []; detail_total = 0; sizes = None; witness = [];
+            (* Says the same thing the UNKNOWN branch says, minus the caveat it
+               has earned the right to drop: here the cone is closed, so "no new
+               fatal origin among those in view" IS "no new fatal origin". Both
+               verdicts state the guarantee rather than leaving a reader to infer
+               it from the absence of findings. *)
+            note =
+              Some
+                (coverage
+               ^ ". GATE HELD: every site is covered by the allow-file and the cone does not \
+                  escape through any \xe2\x8a\xa4 edge, so no fatal origin of these forms is reachable \
+                  from this root and unaccounted for") }
   | Dep (s, d) ->
       if (not (Arch_db.has_table t "module_deps")) || t.schema = Arch_db.Flat then
         { rule = r.name; kind = kind_of r.body; exact = false; verdict = "NOT_COMPUTED"; detail = [];

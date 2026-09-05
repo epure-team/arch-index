@@ -132,6 +132,13 @@ let d25 a b = a / b
    every channel would produce identical output and no assertion could see it —
    which would be worse than the bug it replaced. *)
 let maybe_div a b = if b = 0 then None else Some (a / b)
+
+(* A CALLBACK, which the walker cannot resolve, so the cone escapes through a ⊤
+   edge. Without it this fixture's cone is closed and the verb can only ever
+   reach its PASS branch — leaving the UNKNOWN note, which is the verdict a real
+   index almost always produces and therefore the one people actually read,
+   with no coverage at all. *)
+let via_callback f x = f x
 |} );
     ( "ro_main.ml",
       {|let entry a b c =
@@ -139,6 +146,7 @@ let maybe_div a b = if b = 0 then None else Some (a / b)
   let y = Ro_leaf.piped_div x a in
   let z = Ro_leaf.caught_div y b in
   let _ = Ro_leaf.maybe_div x b in
+  let _ = Ro_leaf.via_callback (fun v -> v / b) x in
   let _ = Ro_leaf.d01 x b + Ro_leaf.d02 x b + Ro_leaf.d03 x b + Ro_leaf.d04 x b
           + Ro_leaf.d05 x b + Ro_leaf.d06 x b + Ro_leaf.d07 x b + Ro_leaf.d08 x b
           + Ro_leaf.d09 x b + Ro_leaf.d10 x b + Ro_leaf.d11 x b + Ro_leaf.d12 x b
@@ -514,6 +522,35 @@ let register_coverage_and_scope () =
         (listed > 20) ;
       Batch.check b ~msg:"and how many allow-entries matched nothing"
         (Arch_tezt.contains ~needle:"matching nothing" out) ;
+      (* THE UNKNOWN NOTE LEADS WITH WHAT WAS ESTABLISHED. On a real index the
+         cone almost always escapes through a ⊤ edge, so UNKNOWN is this verb's
+         NORMAL verdict — and a note that opens on what is unproved reads as a
+         tool failure to someone who has just run a gate that worked. A peer
+         reading the output made exactly that inversion, which is what this
+         assertion exists to keep closed. *)
+      let allow_all =
+        allow_file "roc_all"
+          (String.concat ""
+             (String.split_on_char '\n' out
+             |> List.filter_map (fun l ->
+                    let l = String.trim l in
+                    if not (Arch_tezt.contains ~needle:"[new]" l) then None
+                    else
+                      match String.index_opt l ']' with
+                      | Some i ->
+                          Some (String.trim (String.sub l (i + 1) (String.length l - i - 1)) ^ "\n")
+                      | None -> None)))
+      in
+      let _, out_held =
+        rules [db; rule_file "roc_all" (origin_rule ~forms:"division" ~allow:allow_all)]
+      in
+      Batch.check b
+        ~msg:("with every site allowed, the note states the guarantee BEFORE the caveat \
+               (output:\n" ^ out_held ^ ")")
+        (Arch_tezt.contains ~needle:"GATE HELD" out_held) ;
+      Batch.check b
+        ~msg:"and still says plainly that it is not a proof that none exists"
+        (Arch_tezt.contains ~needle:"NOT a proof that none exists" out_held) ;
       (* THE CHANNEL SCOPE. exn_origins holds every error channel, not just
          exceptions. Measured on proto_alpha's lib_protocol (500 .cmt), indexed from
          origin/main 0982a42 with --errors-profile=tezos: `form:raise` from
