@@ -21,6 +21,28 @@
   licence; see `vendor/sarif/README.md` for the full citation) and a new CI dependency
   (`pip install jsonschema`, probed before use) to validate output against it.
 
+- **`arch-rules` gains `forbid origin` — a crash-surface regression gate** (roadmap 3.12).
+  `forbid origin from <sel> form:<f1,f2,...> [channel:<name>] allow-file:<path>` walks the forward
+  cone of `<sel>` and reports every escaping `exn_origins` site of the named forms, on one error
+  channel, that the allow-file does not cover.
+  **An allow-list, not a baseline, and deliberately no `--regenerate` flag.** A site list can grow
+  for three reasons — a real regression, widened coverage, or a proof that strengthened
+  `MAY → MUST` — and a line-diff conflates all three, so the gate forces a human rather than
+  automating an excuse. A **coverage figure** is printed on every verdict for the same reason:
+  without it, a widened-coverage failure reads as a regression and the rule gets disabled.
+  **Allow-file format is `fn | file:line | form | exn | ×N`**, and the count is load-bearing: the
+  four fields alone are not a key, so without it an entry is a *set* exemption whose membership can
+  grow after review. Lines are split from the right so an OCaml operator name containing `|` does
+  not break the file; a duplicate identity is refused rather than silently first-winning.
+  **`channel:` defaults to `exception`, and the default matters**: `exn_origins` holds every error
+  channel, and on `option` "raising" means returning `None`. On proto_alpha `form:raise` sees 1
+  origin on `exception` against 75 on `option` and 161 on `tzresult` — an unscoped rule quantified
+  over 237 origins while appearing to police crashes.
+  **What a PASS claims:** on a real index the cone almost always escapes through a ⊤ edge, so the
+  rule normally reports `UNKNOWN` and says how many. It proves *no new site among those it can
+  see*, never *no fatal origin exists*. `VIOLATION` fails regardless of ⊤, which is what makes it
+  useful while completeness is out of reach.
+### Added
 - **`scripts/recalibrate.sh` — attribution-gated recalibration of the pinned constants**, and it
   is now wired to something. The two constants this repository pins (the self-index golden in
   `test/fixtures/self-index-stats.txt`, and `must_null_ceiling.ml`'s `clean_measured` ratchet)

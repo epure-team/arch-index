@@ -126,9 +126,9 @@ silently stops gating.
 | `file:<glob>` | the function's file path |
 | `fn:<glob>` | the function's name |
 | `module:<glob>` | file path, except in `forbid dep` where it is the declared module path |
+| `ext:<glob>` | the name of an external leaf (a callee with no body in the index) — valid only as the **target** of `forbid reach` |
 
 `forbid origin` accepts `file:` and `fn:` only; `module:` and `ext:` abort (exit 2).
-| `ext:<glob>` | the name of an external leaf (a callee with no body in the index) — valid only as the **target** of `forbid reach` |
 
 Globs: `*` stops at `/`, `**` crosses it, and `**/` matches **whole directory components** — so
 `**/parser.ml` matches `lib/parser.ml` and `parser.ml`, but never `lib/my_parser.ml`. That
@@ -154,7 +154,12 @@ Measured on proto_alpha: `form:raise` finds **1** origin on `exception` and **12
 An unscoped rule reported an option-typed return as a crash site. Forms are `exn_origins.form`'s own vocabulary — `raise`, `reraise`, `unknown`, `failwith`,
 `invalid_arg`, `assert`, `partial_match`, `compare`, `division`, `index`, `inferred_bind`. An
 unknown form **aborts**: it would select nothing, and the rule would report a PASS while policing
-an empty population.
+an empty population. **So does an unknown `channel:`**, for the identical reason — measured before
+it was fixed, `channel:banana` and `channel:result` produced byte-identical `[UNKNOWN] 0 origin(s)`
+verdicts at exit 0, so a misspelling was indistinguishable from a genuinely clean channel. Unlike
+`form:`, the vocabulary is not a schema `CHECK`: `exn_origins.channel` is free text whose members
+come from the errors profile the **index** was built with, so the accepted set is the set of
+channels that database contains, and the refusal lists them.
 
 Selector kinds: **`file:` and `fn:` only.** An origin belongs to a function in a file; a module is
 not a root a cone starts from, and an external leaf has no body to hold one.
