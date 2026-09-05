@@ -24,6 +24,22 @@ let run project db_path lcov allow_partial verbose =
   let repo_root =
     match Arch_index.Coverage_matrix.find_repo_root ~from_dir:(Filename.dirname Sys.executable_name) with
     | Some root -> root
+    (* An INSTALLED copy of this binary reaches here unconditionally, and
+       that is deliberate. [find_repo_root] searches upward from
+       [Sys.executable_name] only, and stops at the enclosing [dune-project]:
+       an install prefix ([~/.opam/<switch>/bin], [/usr/local/bin], ...) holds
+       no [architecture-schema.sql]+[_build] pair anywhere above it, so the
+       search correctly reports "none". The [Sys.getcwd ()] fallback removed
+       in the same change used to make `cd <a-checkout> && arch_coverage_matrix`
+       work by accident — and that is exactly the escape the boundary exists
+       to close, since a CWD-rooted search is unbounded and could just as
+       easily have landed in a SIBLING checkout's root and probed the wrong
+       installation's Go/Rust drivers. Measured, not reasoned: `dune install
+       --prefix <tmp>` then running <tmp>/bin/arch_coverage_matrix with the
+       CWD inside a built checkout exits 2 here, where the pre-change binary
+       at the same path exited 0. Consequence: Go/Rust callgraph detection is
+       a repo-checkout-only capability today. Loudly, on stderr, with a
+       distinct exit code — never a silent [Not_analysed]. *)
     | None ->
         Printf.eprintf
           "arch-coverage-matrix: could not locate this arch-index checkout's own root \
