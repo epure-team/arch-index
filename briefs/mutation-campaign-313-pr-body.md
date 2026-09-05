@@ -129,9 +129,22 @@ mattering. Findings handed to the roadmap session separately.
 ## What a GO on this branch can and cannot mean
 
 **No campaign has ever run.** Measured, not assumed: no database under `~/dev` or
-`/mnt/ssd-external-2to` carries a `mutants` table, and `scripts/check-mutaml-integration.sh`
-returns **3 — unverified**. There are no kills, no survivors, no attributions. The machinery's
-intended output has never been observed by anyone.
+`/mnt/ssd-external-2to` carries a `mutants` table. There are no kills, no survivors, no
+attributions. The machinery's intended output has never been observed by anyone.
+
+**But the mechanism underneath it now has been, and that is new since round 3.** This section
+first said `check-mutaml-integration.sh` returns 3 — unverified — and that the premise everything
+rests on was established by reading the engine's source. That is no longer true. The unverified
+state was a missing `--build-context` flag, not a fixture limitation: mutaml-runner resolves
+`--muts` under its build context. Supplied, the check passes against the real mutaml 0.3 —
+**runner exit 0, the wrapper invoked twice, once per mutant and not once per engine run, with
+`lib/x:1` resolving to `t_alpha` and `lib/x:2` to `t_beta,t_gamma`, each its declared set.**
+AC-20 is verified. The honest-refusal arm survives the engine becoming available: with no runner
+on PATH the check still returns 3, and it now probes the runner's `--help` for the flag so that
+"engine present, fixture cannot drive it" stays 3 rather than collapsing into a harness error.
+
+So the per-mutant selection mechanism — the one thing this whole design rests on — has been
+**observed**, not argued. What has still never happened is a campaign over real code.
 
 **Three review rounds have produced 96 findings on that machinery.** Every one read code, gates,
 schemas, provenance or specs; none read a campaign result, because none exists. That is the
@@ -145,14 +158,10 @@ who sees a passing verdict on a mutation-campaign branch will assume kills have 
 They have not.
 
 **What would change this, and what would not.** Running a campaign to satisfy a review is how the
-review stops measuring the thing, so that is not the answer. What is: the review found that
-`check-mutaml-integration.sh`'s unverified state is a **missing `--build-context` flag** rather
-than a fixture limitation — mutaml-runner resolves `--muts` under its build context, and supplying
-it makes the check pass against the real installed engine. That turns one unverified integration
-into a verified one, and it is in this round's scope. It still would not produce a campaign
-result; it would only mean the wrapper mechanism has been observed working end to end, which is
-the premise everything else rests on and which is currently established by reading the engine's
-source.
+review stops measuring the thing, so that is not the answer. That was done in round 3, and it is
+recorded above: the flag was supplied, the check passes against the real engine, and the wrapper
+mechanism is now observed rather than read. It produced no campaign result, exactly as expected —
+it moved the premise from argued to measured and nothing else.
 
 Until a pilot runs on a real corpus — the miaou measurement, deliberately sequenced after this
 merges — the honest summary is: **the selection rule is sound, the persistence is sound, the
