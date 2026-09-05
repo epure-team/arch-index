@@ -207,6 +207,10 @@ node; a language with no profile yields `not_analysed` rather than an empty camp
   **self-uncertified**, and the report MUST state that such a campaign cannot distinguish a weak
   test suite from a stale or wrong binary. A campaign containing at least one kill is
   self-certifying, because a stale binary is unmutated and therefore cannot produce a kill.
+- **FR-029** [US-1]: A campaign with no kills MUST distinguish "ran and everything survived" from
+  "nothing meaningfully ran" — a campaign composed entirely of `ERROR` outcomes, or of mutants
+  never attempted, has zero kills for a different reason and MUST NOT be reported in the same
+  words as an all-survivor campaign.
 - **FR-028** [US-1]: The campaign record MUST carry the resolved engine binary path and the
   resolved test-runner binary path, so a reader can tell which artefact actually ran.
 
@@ -234,6 +238,7 @@ node; a language with no profile yields `not_analysed` rather than an empty camp
 - AC-20 [C-22]: the mutaml integration is exercised against a real mutaml, or the report states it is unverified — never silently assumed.
 - AC-21 [FR-027]: an all-survivor campaign prints "self-uncertified" and names the reason → an entirely green campaign never reads as evidence.
 - AC-22 [FR-028]: the campaign record names the resolved engine and runner paths → a reader can tell which binary ran.
+- AC-23 [FR-029]: an all-ERROR campaign and an all-survivor campaign print different reasons for having no kills → "didn't really run" is never dressed as "ran and found nothing".
 
 ## Edge Cases
 
@@ -259,7 +264,7 @@ and the shared `Fixture.flat` / `Fixture.malformed_contract` helpers.
 - CHECK-1 [AC-1] (authentic-success-path): `dune test --force` — the new tezt case `mutants: run drives the engine once per mutant with the declared set` asserts the stub's recorded argv.
 - CHECK-2 [AC-2]: `dune test --force` — `mutants: a group-granularity profile executes a superset and says so`.
 - CHECK-3 [AC-3] (fail-closed-path): `dune test --force` — `mutants: run with no engine exits 2 and writes no campaign`.
-- CHECK-4 [AC-7, AC-8, AC-9]: `dune test --force` — `mutants: one engine report, three indexes, three published verdicts`, reusing `Fixture.malformed_contract` for the `no_contract` arm.
+- CHECK-4 [AC-7, AC-8, AC-9]: `dune test --force` — `mutants: one engine report, three indexes, three published verdicts`, reusing `Fixture.malformed_contract` for the `no_contract` arm. **Each arm must be proved reachable by its own fixture, and red-verified separately**: removing the expected verdict from ONE arm must fail that arm's assertion and no other. A three-arm assertion over a fixture that can only produce one arm passes while checking one third of what it claims — this failure mode was observed the same day in a peer's gate, where a closed-cone fixture made the `UNKNOWN` branch, the one every real index produces, unreachable by the test that claimed to cover it.
 - CHECK-5 [AC-11]: `dune test --force` — `mutants: an interrupted campaign reports PENDING, never SURVIVED`.
 - CHECK-6 [AC-14, AC-15, AC-16]: `dune test --force` — `mutants: the killed-nothing list excludes unproven tests and states its criterion when empty`.
 - CHECK-7 [AC-10]: `scripts/check-status-provenance.sh` — greps every emitter in `bin/arch_mutants/` for a status field written without a provenance field in the same record; exit 1 on any hit. Self-contained, no test runner.

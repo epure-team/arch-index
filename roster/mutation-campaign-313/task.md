@@ -134,19 +134,35 @@ after two recorded collisions: read the base, bump the minor by one, add the row
 load-bearing, not hygiene — see the previous section for why a stale binary is the worst possible
 failure for a mutation campaign specifically.
 
-**Key-identity precedent from item 3.14, and it is the strongest one yet for CHECK-9.** On the
-`option` error channel, `line = 0` on 95 % of rows *and* every rendered `None` is unqualified.
-The combination makes roughly **28 500 origins share a single identity string**. That is not a
-collision rate, it is a collapse: an identity that distinguishes nothing at all over most of the
-population.
+**RETRACTED, 2026-09-05 — the 3.14 precedent as first recorded here was wrong in both halves,
+and the corrected version is more useful.** It was recorded as: on the `option` channel ~28 500
+origins share one identity string, therefore the grouping probe must yield to a reject count. The
+investigation, once finished, refuted both claims.
 
-Two consequences for this item, both already in the spec but now with a measured precedent behind
-them. First, the `mutants` key must include the column span and the source content hash, not just
-`file:line`, precisely because a line number can be absent or degenerate for a whole class of
-rows. Second, CHECK-9 must run on the largest available population and count **rejected inserts**
-under the UNIQUE constraint, because a probe that groups rows cannot see a duplicate the
-constraint already refused. A key that looks perfect on a fixture is the normal outcome; the two
-recorded precedents are 1 150 collisions out of 25 479, and 28 500 rows sharing one string.
+- **The grouping probe is valid there.** `exn_origins` has an autoincrement primary key and **no**
+  UNIQUE constraint, a single non-unique index, a plain `INSERT INTO` with no `OR IGNORE`, and no
+  deduplication on the write path. So `GROUP BY … HAVING count(*) > 1` measures the data there, not
+  the schema, and a reject count is unnecessary. The reject-count rule still applies to **our own**
+  `mutants` table, because we are the ones declaring a UNIQUE constraint on it — but it is a
+  consequence of our schema choice, not a general law.
+- **The identity is not globally degenerate.** It is degenerate *within* a function: 2 158 distinct
+  identities over 27 182 rows, one per function, because every `None` in a function collapses onto
+  the same string. A key that includes the function is not ruined; it loses all resolution *below*
+  the function.
+
+**The precedent worth keeping is a different one, and it is sharper.** `line = 0` there is neither
+a lost position nor a sentinel: it is the compiler saying the node has no source, because the
+walker records an origin for every **omitted optional argument** — the `None` values the
+type-checker synthesises. Attribution 100 %, zero residue, on two corpora. So roughly 94 % of that
+population is **fabricated by the producer**, and a collision rate computed over it would be a
+correct number describing an artefact rather than the system.
+
+**Consequence for CHECK-9.** A key can be perfectly discriminating and still measure a fabricated
+population. Before measuring a key, ask **what the population is made of**, not only how it is
+counted. The campaign's own analogue is direct: a survivor count means nothing without saying which
+mutants the engine could actually build, and a key probe means nothing without saying which rows
+are real sites rather than producer artefacts. This is the same discipline as naming the build
+state, applied one level further in.
 
 **Every published number names its corpus, its commit AND its `.cmt` count.** Three derivations of
 one quantity in a single day gave 78.5 %, 6.7 % and 3.1 % — a factor of 25, all three correct,
