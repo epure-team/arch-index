@@ -104,6 +104,48 @@ line of work argued against gating on either. This tool reports surviving mutant
 the tests that should have killed them, and will never print a ratio. `--fail-on-survivors` is a
 defect list being non-empty — not a threshold to tune.
 
+The published verdicts make this sharper rather than looser: two of the six — `UNKNOWN` and
+`UNKNOWN_NO_CONTRACT` — say *we do not know*. Any fraction built over them silently decides what
+an unknown counts as, and whichever way it decides it is wrong for half its readers.
+`scripts/check-no-score.sh` enforces the absence.
+
+## `verdict` — what is actually published
+
+```
+arch-mutants verdict <db> [--campaign N] [--format text|json] [--max-list N]
+```
+
+`run` stores what the **engine** said. `verdict` publishes what the **tool** is willing to claim,
+and the two are not the same value. The published verdict is **derived on every read and stored
+nowhere**:
+
+| stored `engine_status` | stored `selection_provenance` | published verdict |
+|---|---|---|
+| `KILLED` or `TIMEOUT` | any of the three | `KILLED` |
+| `ERROR` | any of the three | `ERROR` |
+| `SURVIVED` | `proved_superset` | `SURVIVED` |
+| `SURVIVED` | `top_bounded` | `UNKNOWN` |
+| `SURVIVED` | `no_contract` | `UNKNOWN_NO_CONTRACT` |
+| *(no run row, in a campaign whose `completed_at` is NULL)* | *(none exists)* | `PENDING` |
+
+The asymmetry is the whole point. A **kill is a proof**: the mutant died, and a wider selection
+could only have killed it too, so no amount of shortfall in the selection weakens it. Only the
+negative claim — "no test caught this" — depends on having run every test that could have, which
+is exactly what `top_bounded` says you did not.
+
+`PENDING` has no column and must never get one. It is the **absence** of a `mutant_runs` row
+inside an open campaign, and storing it would widen a vocabulary closed to four values that this
+tool's own bucketing depends on. A mutant that was never attempted reported as `SURVIVED` would
+be a false accusation against a test that was never given the chance.
+
+Two consequences worth stating because they are easy to get backwards:
+
+- Every published verdict carries the provenance **of the run row that produced it**, joined by
+  identity. Where no run row exists — a `PENDING` finding — both the status and the provenance are
+  an explicit `null`, never the first value available elsewhere in the campaign.
+- An index no campaign has ever run against **refuses**, exit 3, rather than publishing an empty
+  verdict list. "Nothing ran" and "ran and found nothing" are different facts.
+
 ### An all-green mutation run proves nothing on its own (issue #77)
 
 **A mutation run containing at least one RED self-certifies its greens.** A stale or wrong

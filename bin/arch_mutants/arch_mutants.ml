@@ -25,6 +25,14 @@ Usage: arch-mutants plan   <db> [--tests <selector>] [--format text|json|lines] 
                                  [--catalogue <file>] [--report <file>]
                                  [--from generic|mutaml] [--seed S] [--engine-version V]
                                  [--repo DIR] [--format text|json] [--max-list N]
+       arch-mutants verdict <db> [--campaign N] [--format text|json] [--max-list N]
+
+`verdict` publishes what `run` persisted. The verdict is DERIVED, never stored:
+KILLED or TIMEOUT publish KILLED whatever the provenance (a kill is a proof);
+ERROR publishes ERROR; SURVIVED publishes SURVIVED only under `proved_superset`,
+UNKNOWN under `top_bounded` and UNKNOWN_NO_CONTRACT under `no_contract`; and a
+catalogued mutant with NO run row in a campaign whose completion is NULL is
+PENDING, by that absence.
 
 `run` invokes the ENGINE once. The engine loops over its own mutants and calls
 scripts/mutaml-wrapper.sh once per mutant; the wrapper reads MUTAML_MUTANT, resolves it
@@ -1244,6 +1252,285 @@ let run_campaign (t : Arch_db.t) (g : Arch_graph.t) test_keys ~db_path ~plan_pat
   finish (if refused then 3 else 0)
 
 (* ------------------------------------------------------------------ *)
+(* verdict — the PUBLISHED verdict over what `run` persisted           *)
+(*                                                                    *)
+(* Derived, never stored (FR-011). There is no `verdict` column and    *)
+(* there must never be one: PENDING in particular is the ABSENCE of a  *)
+(* `mutant_runs` row inside a campaign whose `completed_at` is NULL,   *)
+(* and a stored PENDING would widen a vocabulary closed to four values *)
+(* that this file's own bucketing depends on.                          *)
+(* ------------------------------------------------------------------ *)
+
+let cell_text = function Arch_db.Text s -> Some s | Arch_db.Nul | Arch_db.Int _ | Arch_db.Real _ -> None
+let cell_int = function Arch_db.Int i -> Some i | Arch_db.Nul | Arch_db.Text _ | Arch_db.Real _ -> None
+
+(** One reported mutant. [f_outcome] is [None] for a PENDING finding and for nothing else:
+    where the schema carries no run row, there is no status and no provenance, and the
+    honest answer is the absence of both — never the first pair that happens to be lying
+    around in the campaign (FR-033). *)
+type finding = {
+  f_file : string;
+  f_line : int;
+  f_fn : string option;
+  f_engine_id : string option;
+  f_outcome : MDb.outcome option;
+  f_verdict : MDb.verdict;
+}
+
+let all_verdicts =
+  [ MDb.V_killed; MDb.V_survived; MDb.V_unknown; MDb.V_unknown_no_contract; MDb.V_error;
+    MDb.V_pending ]
+
+(** The three shapes the campaign tables are read through. Declared, not inferred: the
+    pair (row type, projection) is what [Arch_db.rows] checks the SELECT against, so a
+    column that changes type stops the query rather than decoding into something plausible. *)
+module Shape = struct
+  open Arch_db
+
+  let s = Rows.s
+  let i = Rows.i
+
+  (* id, completed_at, engine, engine_path, granularity *)
+  let campaign = Ty.(t2 (t3 i s s) (t2 s s))
+
+  let campaign_cells ((id, completed, engine), (path, gran)) =
+    [ int_cell id; text_cell completed; text_cell engine; text_cell path; text_cell gran ]
+
+  (* engine_status, selection_provenance, file_path, line, function_name, engine_mutant_id *)
+  let run = Ty.(t2 (t3 s s s) (t3 i s s))
+
+  let run_cells ((status, prov, file), (line, fn, eid)) =
+    [ text_cell status; text_cell prov; text_cell file; int_cell line; text_cell fn;
+      text_cell eid ]
+
+  (* file_path, line, function_name *)
+  let site = Ty.(t3 s i s)
+  let site_cells (file, line, fn) = [ text_cell file; int_cell line; text_cell fn ]
+end
+
+(** Read one campaign's run rows into findings.
+
+    Every finding's [outcome] is built from the status and the provenance of {b the same
+    row}, in one place, so there is no list of provenances for a later loop to index into.
+    FR-033's failure mode needs such a list to exist; this shape does not create one. *)
+let findings_of_runs (t : Arch_db.t) campaign_id =
+  List.filter_map
+    (fun row ->
+      match row with
+      | [ st_cell; prov_cell; file_cell; line_cell; fn_cell; eid_cell ] ->
+          let raw_status = cell_text st_cell and raw_prov = cell_text prov_cell in
+          let status =
+            match Option.map MDb.status_of_string raw_status with
+            | Some (Some s) -> s
+            | Some None | None ->
+                die
+                  (Printf.sprintf
+                     "arch-mutants: campaign %d holds engine_status %S, which is not one of \
+                      KILLED|SURVIVED|TIMEOUT|ERROR. Refusing to guess: a status added to \
+                      the CHECK and dropped here would shrink the answer with no error at \
+                      all."
+                     campaign_id
+                     (Option.value ~default:"NULL" raw_status))
+          in
+          let provenance =
+            match Option.map MDb.provenance_of_string raw_prov with
+            | Some (Some p) -> p
+            | Some None | None ->
+                die
+                  (Printf.sprintf
+                     "arch-mutants: campaign %d holds selection_provenance %S, which is not \
+                      one of proved_superset|top_bounded|no_contract. Refusing to guess: \
+                      defaulting it to proved_superset would turn a survivor into an \
+                      accusation against a test that may never have run."
+                     campaign_id
+                     (Option.value ~default:"NULL" raw_prov))
+          in
+          let outcome = { MDb.o_status = status; o_provenance = provenance } in
+          Some
+            { f_file = Option.value ~default:"(unknown file)" (cell_text file_cell);
+              f_line = Option.value ~default:0 (cell_int line_cell);
+              f_fn = cell_text fn_cell;
+              f_engine_id = cell_text eid_cell;
+              f_outcome = Some outcome;
+              f_verdict = MDb.published_verdict outcome }
+      | _ -> None)
+    (Arch_db.rows t ~params_ty:Arch_db.Ty.int ~shape:Shape.run ~to_cells:Shape.run_cells
+       "SELECT r.engine_status, r.selection_provenance, m.file_path, m.line, \
+        m.function_name, r.engine_mutant_id FROM mutant_runs r JOIN mutants m ON m.id = \
+        r.mutant_id WHERE r.campaign_id = ? ORDER BY r.id"
+       campaign_id)
+
+(** The PENDING findings: mutant sites with no run row in this campaign.
+
+    Only ever consulted for a campaign whose [completed_at] is NULL. In a completed
+    campaign the same absence means something else entirely — a site catalogued by some
+    other campaign — and calling that PENDING would invent work that was never scheduled. *)
+let findings_of_pending (t : Arch_db.t) campaign_id =
+  List.filter_map
+    (fun row ->
+      match row with
+      | [ file_cell; line_cell; fn_cell ] ->
+          Some
+            { f_file = Option.value ~default:"(unknown file)" (cell_text file_cell);
+              f_line = Option.value ~default:0 (cell_int line_cell);
+              f_fn = cell_text fn_cell;
+              f_engine_id = None;
+              (* No run row, so no status and no provenance. FR-033: the honest answer
+                 where no link exists is the absence, never the first one available. *)
+              f_outcome = None;
+              f_verdict = MDb.V_pending }
+      | _ -> None)
+    (Arch_db.rows t ~params_ty:Arch_db.Ty.int ~shape:Shape.site ~to_cells:Shape.site_cells
+       "SELECT m.file_path, m.line, m.function_name FROM mutants m WHERE NOT EXISTS \
+        (SELECT 1 FROM mutant_runs r WHERE r.campaign_id = ? AND r.mutant_id = m.id) \
+        ORDER BY m.id"
+       campaign_id)
+
+let finding_json f =
+  `Assoc
+    [ ("file", `String f.f_file); ("line", `Int f.f_line);
+      ("function", match f.f_fn with Some x -> `String x | None -> `Null);
+      ("engine_mutant_id", match f.f_engine_id with Some x -> `String x | None -> `Null);
+      (* FR-013: engine_status NEVER travels without selection_provenance. Both are NULL
+         together for a PENDING finding, which is the one case where there is no run row
+         to take either from. *)
+      ("engine_status",
+       match f.f_outcome with
+       | Some o -> `String (MDb.status_to_string o.MDb.o_status)
+       | None -> `Null);
+      ("selection_provenance",
+       match f.f_outcome with
+       | Some o -> `String (MDb.provenance_to_string o.MDb.o_provenance)
+       | None -> `Null);
+      ("published_verdict", `String (MDb.verdict_to_string f.f_verdict));
+      ("verdict_basis",
+       match f.f_outcome with
+       | Some o -> `String (MDb.verdict_basis o)
+       | None ->
+           `String
+             "no run row in a campaign whose completion is NULL: this mutant was never \
+              attempted, which is not the same as having survived") ]
+
+let count_of v findings = List.length (List.filter (fun f -> f.f_verdict = v) findings)
+
+let verdict_cmd (t : Arch_db.t) ~only_campaign ~fmt ~maxlist =
+  if not (Arch_db.has_table t "mutant_runs") then (
+    Printf.eprintf
+      "arch-mutants: %s carries no `mutant_runs` table, so no campaign has ever been \
+       executed against it. REFUSED (exit 3) rather than reported as an empty verdict \
+       list: 'nothing ran' and 'ran and found nothing' are different facts. Run \
+       `arch-mutants run` first.\n"
+      t.path ;
+    exit 3) ;
+  let campaigns =
+    Arch_db.rows t ~params_ty:Arch_db.Ty.unit ~shape:Shape.campaign
+      ~to_cells:Shape.campaign_cells
+      (Printf.sprintf
+         "SELECT id, completed_at, engine, engine_path, granularity FROM mutant_campaigns \
+          %s ORDER BY id"
+         (match only_campaign with Some n -> Printf.sprintf "WHERE id = %d" n | None -> ""))
+      ()
+  in
+  let campaigns =
+    List.filter_map
+      (fun row ->
+        match row with
+        | [ id_cell; completed_cell; engine_cell; path_cell; gran_cell ] ->
+            Option.map
+              (fun id ->
+                ( id,
+                  cell_text completed_cell,
+                  Option.value ~default:"(unnamed)" (cell_text engine_cell),
+                  Option.value ~default:"(unresolved)" (cell_text path_cell),
+                  Option.value ~default:"(unrecorded)" (cell_text gran_cell) ))
+              (cell_int id_cell)
+        | _ -> None)
+      campaigns
+  in
+  if campaigns = [] then (
+    Printf.eprintf
+      "arch-mutants: no campaign %sto report on. What would have made this non-zero: one \
+       `arch-mutants run` that got as far as resolving its engine.\n"
+      (match only_campaign with Some n -> Printf.sprintf "with id %d " n | None -> "") ;
+    exit 3) ;
+  let per_campaign =
+    List.map
+      (fun (id, completed, engine, engine_path, granularity) ->
+        let runs = findings_of_runs t id in
+        (* PENDING is the absence of a run row, and ONLY inside an open campaign. *)
+        let pending = if completed = None then findings_of_pending t id else [] in
+        (id, completed, engine, engine_path, granularity, runs @ pending))
+      campaigns
+  in
+  if fmt = "json" then
+    print_endline
+      (Yojson.Safe.pretty_to_string
+         (`Assoc
+           [ ("db", `String t.path);
+             ("campaigns",
+              `List
+                (List.map
+                   (fun (id, completed, engine, engine_path, granularity, findings) ->
+                     `Assoc
+                       [ ("campaign_id", `Int id); ("engine", `String engine);
+                         ("engine_path", `String engine_path);
+                         ("granularity", `String granularity);
+                         ("completed_at", match completed with Some c -> `String c | None -> `Null);
+                         ("partial", `Bool (completed = None));
+                         ("verdict_counts",
+                          `Assoc
+                            (List.map
+                               (fun v -> (MDb.verdict_to_string v, `Int (count_of v findings)))
+                               all_verdicts));
+                         ("findings", `List (List.map finding_json (take maxlist findings)));
+                         ("findings_total", `Int (List.length findings)) ])
+                   per_campaign)) ]))
+  else
+    List.iter
+      (fun (id, completed, engine, engine_path, granularity, findings) ->
+        Printf.printf "== Published verdicts for campaign %d\n" id ;
+        Printf.printf "  • engine %s → %s, granularity %s\n" engine engine_path granularity ;
+        (match completed with
+        | Some c -> Printf.printf "  • completed at %s\n" c
+        | None ->
+            print_endline
+              "  • PARTIAL: completion is NULL, so every catalogued mutant with no run row \
+               is PENDING — never SURVIVED") ;
+        List.iter
+          (fun v ->
+            Printf.printf "  • %-19s %d\n" (MDb.verdict_to_string v) (count_of v findings))
+          all_verdicts ;
+        if count_of MDb.V_survived findings = 0 then
+          print_endline
+            "  • 0 published SURVIVED. What would have made it non-zero: a mutant the \
+             engine reported SURVIVED whose selection provenance is proved_superset — a \
+             bounded selection publishes UNKNOWN instead, on purpose" ;
+        print_endline "" ;
+        print_endline "-- findings (verdict, then the status and provenance it was derived from)" ;
+        List.iter
+          (fun f ->
+            Printf.printf "  • %-19s [%s / %s]  %s:%d  in %s\n"
+              (MDb.verdict_to_string f.f_verdict)
+              (match f.f_outcome with
+              | Some o -> MDb.status_to_string o.MDb.o_status
+              | None -> "no run row")
+              (match f.f_outcome with
+              | Some o -> MDb.provenance_to_string o.MDb.o_provenance
+              | None -> "no provenance — none exists")
+              f.f_file f.f_line
+              (match f.f_fn with Some x -> x | None -> "(unmapped — persisted, not dropped)") ;
+            Printf.printf "      %s\n"
+              (match f.f_outcome with
+              | Some o -> MDb.verdict_basis o
+              | None ->
+                  "never attempted: no run row inside a campaign whose completion is NULL"))
+          (take maxlist findings) ;
+        if maxlist > 0 && List.length findings > maxlist then
+          Printf.printf "  … and %d more (--max-list 0 for all)\n" (List.length findings - maxlist) ;
+        print_endline "")
+      per_campaign
+
+(* ------------------------------------------------------------------ *)
 
 let main () =
   let args = List.tl (Array.to_list Sys.argv) in
@@ -1257,7 +1544,9 @@ let main () =
          through into [positional] and the subcommand's database argument becomes whichever
          one came first. *)
       "--plan"; "--engine"; "--engine-version"; "--seed"; "--profile"; "--catalogue";
-      "--report"; "--test-cmd" ]
+      "--report"; "--test-cmd";
+      (* `verdict`'s own value-taking flag, same reason. *)
+      "--campaign" ]
   in
   let positional =
     let rec go acc = function
@@ -1362,6 +1651,17 @@ let main () =
         ~seed:(match opt "--seed" "" with "" -> None | s -> Some s)
         ~profile_name ~granularity ~from ~catalogue_path ~report_path ~test_cmd
         ~repo:(opt "--repo" ".") ~fmt ~maxlist
+  | "verdict" ->
+      if fmt = "lines" then die "arch-mutants: --format lines is only meaningful for `plan`" ;
+      let only_campaign =
+        match opt "--campaign" "" with
+        | "" -> None
+        | v -> (
+            match int_of_string_opt v with
+            | Some n -> Some n
+            | None -> die (Printf.sprintf "arch-mutants: --campaign %S is not a campaign id" v))
+      in
+      verdict_cmd t ~only_campaign ~fmt ~maxlist
   | "report" ->
       let mfile = match extra with m :: _ -> m | [] -> die "arch-mutants: report needs a mutant report path" in
       let mutants = if opt "--from" "generic" = "mutaml" then load_mutaml mfile else load_generic mfile in

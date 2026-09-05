@@ -35,8 +35,20 @@ let provenance_to_string = function
   | Top_bounded -> "top_bounded"
   | No_contract -> "no_contract"
 
+(** [None] rather than a default, for exactly the reason [status_of_string] returns one: a
+    fourth member added to the CHECK without updating this function must ABORT at the call
+    site rather than be silently relabelled. The value it would most plausibly be
+    defaulted to, [Proved_superset], is the one that turns a survivor into an accusation
+    against a test that may never have run. *)
+let provenance_of_string s =
+  match String.trim s with
+  | "proved_superset" -> Some Proved_superset
+  | "top_bounded" -> Some Top_bounded
+  | "no_contract" -> Some No_contract
+  | _ -> None
+
 (** How a survivor found under [p] must be described in words. The published VERDICT is
-    slice 2's business; this is only the shortfall, named. *)
+    below; this is only the shortfall, named. *)
 let provenance_caveat = function
   | Proved_superset ->
       "the executed set is provably a superset of every test that reaches the mutant"
@@ -69,6 +81,84 @@ type attribution = Singleton_executed_set | Engine_named
 let attribution_to_string = function
   | Singleton_executed_set -> "singleton_executed_set"
   | Engine_named -> "engine_named"
+
+(* -------------------------------------------------------------------------- *)
+(* The PUBLISHED VERDICT — derived, never stored (FR-011).                     *)
+(*                                                                            *)
+(* There is no column for this and there must never be one. The engine-status  *)
+(* vocabulary is closed to four values and the bucketing in arch_mutants.ml's  *)
+(* `report` reads any fifth value as an error, so storing a verdict would      *)
+(* widen a vocabulary the rest of the codebase depends on being closed. It is  *)
+(* computed from the run row's OWN status and the run row's OWN provenance,    *)
+(* both read from the same row — see [published_verdict]'s single argument.    *)
+(* -------------------------------------------------------------------------- *)
+
+type verdict =
+  | V_killed  (** a kill is a PROOF: the selection cannot weaken it *)
+  | V_survived  (** SURVIVED under a provably-superset selection: a real test gap *)
+  | V_unknown  (** SURVIVED under a ⊤-bounded selection: the tests may never have run *)
+  | V_unknown_no_contract  (** SURVIVED on an index carrying no soundness contract (EC-5) *)
+  | V_error  (** the engine could not build or run this mutant: inconclusive *)
+  | V_pending
+      (** no run row at all, inside a campaign whose completed_at is NULL. Derived from
+          the ABSENCE of the row, which is why it has no (status, provenance) pair and
+          cannot be produced by [published_verdict]. *)
+
+let verdict_to_string = function
+  | V_killed -> "KILLED"
+  | V_survived -> "SURVIVED"
+  | V_unknown -> "UNKNOWN"
+  | V_unknown_no_contract -> "UNKNOWN_NO_CONTRACT"
+  | V_error -> "ERROR"
+  | V_pending -> "PENDING"
+
+(** One run row's outcome, carried as ONE value so a verdict cannot be computed from a
+    status belonging to one row and a provenance belonging to another.
+
+    That pairing is the whole point of the type. FR-033 exists because a peer's reviewer
+    found [match producers with p :: _] labelling every finding with the FIRST run's
+    class; a heuristic finding then carried the sound class merely because the sound run
+    sorted first, and no single-element fixture could tell the two apart. Making the pair
+    the unit of computation removes the shape that bug needs. *)
+type outcome = { o_status : status; o_provenance : provenance }
+
+(** FR-011, and every arm is spelled out because the compiler is the enforcement.
+
+    A kill published as KILLED {i regardless of provenance} is not an oversight: the mutant
+    died, and a wider selection could only have killed it too, so nothing about how the
+    selection was obtained weakens the proof (EC-6). The asymmetry is the point — only the
+    NEGATIVE claim, "no test caught this", depends on having run every test that could
+    have. *)
+let published_verdict o =
+  match o.o_status with
+  | Killed | Timeout -> V_killed
+  | Errored -> V_error
+  | Survived -> (
+      match o.o_provenance with
+      | Proved_superset -> V_survived
+      | Top_bounded -> V_unknown
+      | No_contract -> V_unknown_no_contract)
+
+(** Why the verdict is what it is, in words, so a reader never has to reconstruct the
+    rule. Split from [published_verdict] so a test can assert the VERDICT — a computed
+    value — rather than search prose for a word that may be present for other reasons. *)
+let verdict_basis o =
+  match o.o_status with
+  | Killed | Timeout ->
+      "the mutant died; a wider selection could only have killed it too, so the \
+       selection provenance does not weaken this"
+  | Errored -> "the engine could not build or run this mutant, so nothing was tested"
+  | Survived -> (
+      match o.o_provenance with
+      | Proved_superset ->
+          "every test that reaches this mutant was executed and none killed it — a real \
+           test gap"
+      | Top_bounded ->
+          "a ⊤ edge inside the test cone: a test that would have killed this mutant may \
+           never have been run, so this is NOT a test gap"
+      | No_contract ->
+          "this index carries no soundness contract, so no claim can be made about which \
+           tests reach the mutant")
 
 (* -------------------------------------------------------------------------- *)
 (* Connection                                                                  *)

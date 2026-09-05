@@ -177,7 +177,7 @@ node; a language with no profile yields `not_analysed` rather than an empty camp
 - **FR-010** [US-3]: Each `mutant_runs` row MUST carry `selection_provenance ∈ {proved_superset, top_bounded, no_contract}`, constrained by a CHECK.
 - **FR-011** [US-3]: The published verdict MUST be computed, never stored, as: KILLED or TIMEOUT → `KILLED`; ERROR → `ERROR`; SURVIVED with `proved_superset` → `SURVIVED`; SURVIVED with `top_bounded` → `UNKNOWN`; SURVIVED with `no_contract` → `UNKNOWN_NO_CONTRACT`.
 - **FR-012** [US-3]: `selection_provenance` MUST be `proved_superset` only when the test cone holds no ⊤ edge **and** the index carries a soundness contract, reusing the `proof` binding — `let proof = escapes = [] && sound` — rather than recomputing it. On this branch's base that binding is at `bin/arch_mutants/arch_mutants.ml:122`, one line below the `sound` half; cite the **binding**, because a line number moves under a rebase and this branch's base has moved three times in one day.
-- **FR-013** [US-3]: No report, view, or JSON output MUST expose `engine_status` without the accompanying `selection_provenance` in the same record.
+- **FR-013** [US-3]: No report, view, or JSON output MUST expose the **stored** `engine_status` without the accompanying `selection_provenance` in the same record. **Carve-out, added after implementation found the requirement unsatisfiable as first written:** `arch-mutants report`'s `unmapped` records carry a status read straight out of the engine's own file. There is no campaign behind them, no `mutant_runs` row, and therefore no provenance in existence to accompany them. That path is excluded, and the exclusion is written into `scripts/check-status-provenance.sh`'s header rather than left for a reader to infer from the absence of a warning.
 - **FR-014** [US-3]: A mutant with no `mutant_runs` row in a campaign whose `completed_at` is NULL MUST be reported PENDING, and MUST NOT be reported SURVIVED.
 - **FR-015** [US-3]: The system MUST NOT emit any mutation score, ratio, percentage, or threshold.
 
@@ -207,6 +207,15 @@ node; a language with no profile yields `not_analysed` rather than an empty camp
   **self-uncertified**, and the report MUST state that such a campaign cannot distinguish a weak
   test suite from a stale or wrong binary. A campaign containing at least one kill is
   self-certifying, because a stale binary is unmutated and therefore cannot produce a kill.
+- **FR-034** [US-3]: `PENDING` is derived from the absence of a `mutant_runs` row, but **no table
+  records which mutants a given campaign catalogued**, so the only derivable universe is the global
+  `mutants` site table. On a database holding one campaign that is exactly right; on a database
+  holding two campaigns over different mutant sets, an open campaign would report the **other**
+  campaign's sites as `PENDING`. Until a catalogue link exists, the verdict surface MUST **refuse**
+  — exit 3, refused, naming the ambiguity — when it is asked for an open campaign in a database
+  that holds more than one campaign. It MUST NOT answer a question it cannot answer correctly.
+  Closing this properly needs a `campaign_id` on a catalogue table or a `mutant_campaign_sites`
+  join, which is a schema change and therefore a version bump.
 - **FR-033** [US-3]: A published verdict MUST carry the `selection_provenance` **of the run row that
   produced it**, joined by identity, never the first provenance available in any collection. Where
   the schema carries no link between a reported finding and the run that produced it, the honest
@@ -266,6 +275,7 @@ node; a language with no profile yields `not_analysed` rather than an empty camp
 - AC-20 [C-22]: the mutaml integration is exercised against a real mutaml, or the report states it is unverified — never silently assumed.
 - AC-21 [FR-027]: an all-survivor campaign prints "self-uncertified" and names the reason → an entirely green campaign never reads as evidence.
 - AC-22 [FR-028]: the campaign record names the resolved engine and runner paths → a reader can tell which binary ran.
+- AC-28 [FR-034]: asked for an open campaign in a two-campaign database, the verdict surface exits 3 naming the ambiguity → it never reports another campaign's sites as pending.
 - AC-27 [FR-033]: a report over two runs of differing provenance labels each finding with its own run's provenance → swapping the collection order changes no label.
 - AC-25 [FR-031]: adding a member to a CHECK-declared vocabulary without updating its consumer fails the build → the next addition cannot be dropped silently.
 - AC-26 [FR-032]: a subprocess exiting 3 is reported as refused, distinctly from a failure and from an empty result → "did not really run" survives the process boundary.
@@ -302,6 +312,7 @@ and the shared `Fixture.flat` / `Fixture.malformed_contract` helpers.
 - CHECK-7 [AC-10]: `scripts/check-status-provenance.sh` — greps every emitter in `bin/arch_mutants/` for a status field written without a provenance field in the same record; exit 1 on any hit. Self-contained, no test runner.
 - CHECK-8 [AC-20]: `scripts/check-mutaml-integration.sh` — runs a real `mutaml-runner` over a two-function fixture and asserts the wrapper resolved `MUTAML_MUTANT` to the right test set. Exit 3 (not 1) when mutaml is absent, so an unverified integration stays distinguishable from a failed one. **The mechanism itself is no longer in doubt** — it was established by reading `src/runner/runner.ml:123-130` and `src/ppx/mutaml_ppx.ml:40`; this check confirms the runtime behaviour, not the premise.
 - CHECK-9 [AC-19]: `scripts/check-mutant-key.sh <db>` — inserts the campaign's mutants and reports the count of rows **rejected** by the UNIQUE constraint, not a `GROUP BY` count, because under a constraint a duplicate never becomes a group. Run against the largest population available and print the population size and the working tree with the count.
+- CHECK-19 [AC-28]: `dune test --force` — `mutants: the verdict refuses an open campaign it cannot scope`. The fixture MUST hold two campaigns over different mutant sets; a single-campaign fixture cannot distinguish the refusal from the correct answer.
 - CHECK-18 [AC-27]: `dune test --force` — `mutants: provenance follows the run, not the collection order`. The fixture MUST contain **at least two** runs of differing provenance, and the test MUST assert that reversing their order changes no published label. A single-run fixture cannot distinguish positional attribution from correct attribution.
 - CHECK-17 [AC-25]: `scripts/check-total-matches.sh` — greps the campaign's consumers for a `| _ ->` arm on any vocabulary a schema `CHECK` declares, and fails naming the site. Self-contained. This is a lint, not a proof: the real defence is the total match itself, which the compiler enforces.
 - CHECK-16 [AC-12, AC-13]: `dune test --force` — `mutants: a diff touching only a test helper selects mutants in the code that helper's tests reach`. Added because the runnable-check table had no entry for US-4 at all: the story had acceptance criteria and no automated check, which the architect voice caught. A story whose only verification is an AC read by a human is a story that ships unverified.

@@ -168,3 +168,20 @@ state, applied one level further in.
 one quantity in a single day gave 78.5 %, 6.7 % and 3.1 % — a factor of 25, all three correct,
 because the rate measured which units had been compiled. A number that names only its tree can be
 neither reproduced nor contradicted.
+
+## Known residual after slice 2 — the surviving `if`-chain in `report`
+
+`bin/arch_mutants/arch_mutants.ml`'s `report` buckets the engine's file-based statuses with
+`if st = "KILLED" || st = "TIMEOUT" then killed else if st <> "SURVIVED" then errored else survivor`.
+That is exactly the silent-fifth-value hazard FR-031 describes, and the spec cites this very line as
+the *reason* PENDING must not be stored — while leaving it in place.
+
+It was deliberately not changed in slice 2, and the reason is worth recording rather than
+rediscovering. It is an `if`-chain over the **engine's report file**, not a match over a schema
+`CHECK`, so `scripts/check-total-matches.sh` correctly does not flag it. Rewriting it would change
+`report`'s behaviour for an unknown status from "counted as errored" to "abort" — a behavioural
+change to a shipped command, outside slice 2's scope and outside this item's brief.
+
+The residual is therefore: **the campaign consumers are total, the file-based `report` path is not.**
+Whoever changes it owns the behavioural change, and should note that "counted as errored" is not
+obviously worse than "abort" for a path whose input is a third-party file.

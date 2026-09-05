@@ -39,6 +39,10 @@ let () =
   Mutants.register_run_missing_engine () ;
   Mutants.register_run_interrupted () ;
   Mutants.register_run_self_uncertified () ;
+  Mutants.register_verdict_three_indexes () ;
+  Mutants.register_verdict_killed_under_top () ;
+  Mutants.register_verdict_pending () ;
+  Mutants.register_verdict_provenance_follows_run () ;
   Decision_lint.register_aliases () ;
   Decision_lint.register_smt_noise () ;
   Decision_lint.register_smt_mute () ;

@@ -18,3 +18,6 @@ skills-meta/friction.jsonl
 bin/arch_mutants/arch_mutant_db.ml
 bin/arch_mutants/dune
 tezt/tests/main.ml
+scripts/check-status-provenance.sh
+scripts/check-total-matches.sh
+scripts/check-no-score.sh

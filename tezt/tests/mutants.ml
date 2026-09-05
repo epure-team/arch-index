@@ -420,11 +420,15 @@ let wrapper_path () = Filename.concat (repo_root ()) "scripts/mutaml-wrapper.sh"
 (* One campaign harness: build the index, derive the plan through the real CLI,
    write the catalogue/report/engine, and hand back a runner plus the work
    directory the wrapper writes its trace into. *)
-let campaign_setup ~name ~engine_body ~report =
-  let db = load_fixture name campaign_stream in
+(* [db] and [tests] are parameters rather than constants because slice 2 replays ONE
+   engine report over three DIFFERENT indexes — closed cone, ⊤ inside the cone, and no
+   soundness contract at all — and the whole claim is that the same report publishes three
+   different verdicts. A harness that could only build one index would make two of those
+   three arms unreachable while the assertions still read as if they covered them. *)
+let campaign_setup_on ~db ~tests ~name ~engine_body ~report =
   let dir = Temp.dir (name ^ "_campaign") in
   let plan_file = Filename.concat dir "plan.json" in
-  let _, plan_out = mutants ["plan"; db; "--tests"; "file:test/**"; "--format"; "json"] in
+  let _, plan_out = mutants ["plan"; db; "--tests"; tests; "--format"; "json"] in
   write_file plan_file plan_out ;
   let catalogue = Filename.concat dir "catalogue.ndjson" in
   write_file catalogue campaign_catalogue ;
@@ -438,7 +442,7 @@ let campaign_setup ~name ~engine_body ~report =
   in
   let argv extra =
     ["run"; db; "--plan"; plan_file; "--engine"; engine; "--test-cmd"; "true";
-     "--catalogue"; catalogue; "--report"; report_file; "--tests"; "file:test/**"]
+     "--catalogue"; catalogue; "--report"; report_file; "--tests"; tests]
     @ extra
   in
   let run extra = run_command ~env (arch_mutants ()) (argv extra) in
@@ -448,6 +452,10 @@ let campaign_setup ~name ~engine_body ~report =
      assertion fail for a reason that has nothing to do with the code. *)
   let run_json extra = run_command_split ~env (arch_mutants ()) (argv extra) in
   (db, work, run, run_json)
+
+let campaign_setup ~name ~engine_body ~report =
+  campaign_setup_on ~db:(load_fixture name campaign_stream) ~tests:"file:test/**" ~name
+    ~engine_body ~report
 
 (* The wrapper's trace: one line per invocation, "<id>\t<n>\t<executed,…>\t<rc>". *)
 let trace_rows work =
@@ -734,4 +742,324 @@ let register_run_self_uncertified () =
       (* One kill is enough: a stale, unmutated binary cannot produce one. *)
       check ~what:"one kill" killed_case ~tag:"self_certifying" ~killed:1 ~survived:2
         ~errored:0) ;
+  Lwt.return_unit
+
+(* ------------------------------------------------------------------------ *)
+(* SLICE 2 — `arch-mutants verdict`: the PUBLISHED verdict.                  *)
+(*                                                                          *)
+(* The stored fact is the engine's status. The published verdict is DERIVED  *)
+(* from that status together with the selection provenance OF THE SAME RUN   *)
+(* ROW, and never stored — PENDING least of all, which is the ABSENCE of a   *)
+(* run row inside a campaign whose completion is NULL.                       *)
+(*                                                                          *)
+(* Everything below asserts on the computed verdict string and on            *)
+(* hand-counted numbers rather than on words in prose. A word survives a     *)
+(* great many wrong implementations because it can be present for a reason   *)
+(* unrelated to the branch that should have produced it; "UNKNOWN" in        *)
+(* particular appears in this tool's own legends. A count cannot.            *)
+(* ------------------------------------------------------------------------ *)
+
+(* The same index as [campaign_stream], plus ONE ⊤ edge held by `covered`,
+   which t_alpha reaches — so the escape is INSIDE the test cone and every
+   selection over this index is a lower bound. Without this fixture the
+   `top_bounded` arm is unreachable, and an assertion about a branch no fixture
+   can reach passes while checking nothing. *)
+let campaign_stream_top =
+  campaign_stream
+  ^ {|{"type":"call","caller_name":"covered","caller_file":"lib/x.ml","callee_name":"*TOP*","callee_file":null,"call_site":"lib/x.ml:12","kind":"MAY_TOP"}
+|}
+
+let verdict_of b ~what ?(args = []) db =
+  match mutants_json b ~what (["verdict"; db; "--format"; "json"] @ args) with
+  | None -> None
+  | Some j -> (
+      match expect b (Json.list ~what "campaigns" j) with
+      | Some (c :: _) -> (
+          match expect b (Json.list ~what:"campaign" "findings" c) with
+          | Some fs -> Some (c, fs)
+          | None -> None)
+      | _ ->
+          Batch.note b "%s: the verdict output carries no campaign" what ;
+          None)
+
+(* One field of the finding for [file]. "<absent>" and "null" are kept apart on
+   purpose: FR-033 requires an unlinked finding to carry an explicit null rather
+   than a borrowed value, and a MISSING key would satisfy a laxer assertion
+   while telling a reader nothing. *)
+let finding_field fs ~file key =
+  List.find_map
+    (function
+      | `Assoc f when List.assoc_opt "file" f = Some (`String file) ->
+          Some
+            (match List.assoc_opt key f with
+            | Some (`String s) -> s
+            | Some `Null -> "null"
+            | Some other -> Yojson.Safe.to_string other
+            | None -> "<absent>")
+      | _ -> None)
+    fs
+
+let verdict_count b ~what c verdict expected =
+  match Json.member "verdict_counts" c with
+  | Some counts ->
+      Option.iter
+        (fun n -> Batch.eq_int b ~msg:(what ^ ": " ^ verdict ^ " count") n expected)
+        (expect b (Json.int ~what verdict counts))
+  | None -> Batch.note b "%s: no verdict_counts in the campaign record" what
+
+(* CHECK-4 / AC-7, AC-8, AC-9. ONE engine report — every mutant SURVIVED —
+   replayed over THREE indexes, publishing three different verdicts while the
+   STORED status stays SURVIVED in all three.
+
+   Each arm has its own fixture, because a three-arm assertion over a fixture
+   that can only produce one arm passes while checking a third of what it
+   claims. The three fixtures differ in exactly the two facts the rule reads:
+   whether the test cone escapes, and whether the index carries a soundness
+   contract at all. *)
+let register_verdict_three_indexes () =
+  Test.register ~__FILE__
+    ~title:"mutants: one engine report, three indexes, three published verdicts"
+    ~tags:["mutants"; "verdict"]
+  @@ fun () ->
+  let closed =
+    campaign_setup_on
+      ~db:(load_fixture "mutants_verdict_closed" campaign_stream)
+      ~tests:"file:test/**" ~name:"mutants_verdict_closed"
+      ~engine_body:(stub_engine ["m1"; "m2"; "m3"]) ~report:all_survived
+  in
+  let bounded =
+    campaign_setup_on
+      ~db:(load_fixture "mutants_verdict_top" campaign_stream_top)
+      ~tests:"file:test/**" ~name:"mutants_verdict_top"
+      ~engine_body:(stub_engine ["m1"; "m2"; "m3"]) ~report:all_survived
+  in
+  (* The shared malformed-contract fixture, not a copy: arch-mutants must reach
+     the same "no contract" verdict the other four tools reach on the same
+     bytes, because they all read it through Arch_db.contract_ok. *)
+  let no_contract =
+    campaign_setup_on
+      ~db:(Fixture.malformed_contract ~name:"mutants_verdict_nocontract")
+      ~tests:"fn:A" ~name:"mutants_verdict_nocontract"
+      ~engine_body:(stub_engine ["m1"; "m2"; "m3"]) ~report:all_survived
+  in
+  Batch.run (fun b ->
+      let arm ~what (db, _, run, _) ~provenance ~verdict =
+        Batch.exit_code b ~msg:(what ^ ": the campaign must run") ~expected:0 (run []) ;
+        (* The STORED fact is SURVIVED in all three arms. Asserted as a count of
+           rows, which no rendering can imitate. *)
+        Db.with_db db (fun conn ->
+            Batch.eq_int b ~msg:(what ^ ": all three mutants are stored SURVIVED")
+              (Db.int conn "SELECT count(*) FROM mutant_runs WHERE engine_status = 'SURVIVED'")
+              3 ;
+            Batch.eq_int b
+              ~msg:(what ^ ": the published verdict must not be stored in any column")
+              (Db.int conn
+                 "SELECT count(*) FROM pragma_table_info('mutant_runs') WHERE name LIKE \
+                  '%verdict%'")
+              0) ;
+        match verdict_of b ~what db with
+        | None -> ()
+        | Some (c, fs) ->
+            Batch.eq_string_opt b ~msg:(what ^ ": the run's own selection provenance")
+              (finding_field fs ~file:"lib/x.ml" "selection_provenance")
+              (Some provenance) ;
+            Batch.eq_string_opt b ~msg:(what ^ ": the engine status stays SURVIVED")
+              (finding_field fs ~file:"lib/x.ml" "engine_status")
+              (Some "SURVIVED") ;
+            Batch.eq_string_opt b ~msg:(what ^ ": the PUBLISHED verdict")
+              (finding_field fs ~file:"lib/x.ml" "published_verdict")
+              (Some verdict) ;
+            (* Three mutants, all with the same provenance in this campaign, so
+               the count is 3 — worked out from the fixture, not read back. *)
+            verdict_count b ~what c verdict 3
+      in
+      arm ~what:"closed cone + contract" closed ~provenance:"proved_superset"
+        ~verdict:"SURVIVED" ;
+      arm ~what:"⊤ inside the test cone" bounded ~provenance:"top_bounded" ~verdict:"UNKNOWN" ;
+      arm ~what:"no soundness contract" no_contract ~provenance:"no_contract"
+        ~verdict:"UNKNOWN_NO_CONTRACT") ;
+  Lwt.return_unit
+
+(* AC-9 / EC-6. A kill is a PROOF: a wider selection could only have killed the
+   mutant too, so a bounded selection cannot weaken it. The provenance is
+   asserted in the SAME record, which is what stops this passing vacuously on a
+   closed-cone fixture where every kill is trivially unbounded. *)
+let register_verdict_killed_under_top () =
+  Test.register ~__FILE__ ~title:"mutants: a KILLED under a bounded selection still publishes KILLED"
+    ~tags:["mutants"; "verdict"]
+  @@ fun () ->
+  let db, _, run, _ =
+    campaign_setup_on
+      ~db:(load_fixture "mutants_verdict_kill_top" campaign_stream_top)
+      ~tests:"file:test/**" ~name:"mutants_verdict_kill_top"
+      ~engine_body:(stub_engine ["m1"; "m2"; "m3"])
+      ~report:
+        {|{"file":"lib/x.ml","line":15,"status":"KILLED","id":"m1"}
+{"file":"lib/y.ml","line":35,"status":"TIMEOUT","id":"m2"}
+{"file":"lib/z.ml","line":55,"status":"SURVIVED","id":"m3"}
+|}
+  in
+  Batch.run (fun b ->
+      Batch.exit_code b ~msg:"the campaign must run" ~expected:0 (run []) ;
+      match verdict_of b ~what:"killed under top" db with
+      | None -> ()
+      | Some (c, fs) ->
+          Batch.eq_string_opt b ~msg:"the fixture must really be the bounded one"
+            (finding_field fs ~file:"lib/x.ml" "selection_provenance")
+            (Some "top_bounded") ;
+          Batch.eq_string_opt b ~msg:"KILLED under top_bounded still publishes KILLED"
+            (finding_field fs ~file:"lib/x.ml" "published_verdict")
+            (Some "KILLED") ;
+          Batch.eq_string_opt b ~msg:"TIMEOUT under top_bounded also publishes KILLED"
+            (finding_field fs ~file:"lib/y.ml" "published_verdict")
+            (Some "KILLED") ;
+          (* And the survivor beside them does NOT: the same provenance weakens
+             the negative claim and leaves the positive one alone. Two kills and
+             one UNKNOWN — hand-counted from the report above. *)
+          Batch.eq_string_opt b ~msg:"a SURVIVED under the same provenance publishes UNKNOWN"
+            (finding_field fs ~file:"lib/z.ml" "published_verdict")
+            (Some "UNKNOWN") ;
+          verdict_count b ~what:"killed under top" c "KILLED" 2 ;
+          verdict_count b ~what:"killed under top" c "UNKNOWN" 1 ;
+          verdict_count b ~what:"killed under top" c "SURVIVED" 0) ;
+  Lwt.return_unit
+
+(* CHECK-5 / AC-11, FR-014. The engine dies after one of three mutants. The two
+   it never reached have no run row, and that ABSENCE publishes PENDING. Calling
+   them SURVIVED would accuse two tests that were never given the chance. *)
+let register_verdict_pending () =
+  Test.register ~__FILE__
+    ~title:"mutants: an unattempted mutant publishes PENDING, never SURVIVED"
+    ~tags:["mutants"; "verdict"]
+  @@ fun () ->
+  let db, _, run, _ =
+    campaign_setup ~name:"mutants_verdict_pending"
+      ~engine_body:"#!/bin/sh\nMUTAML_MUTANT=m1 \"$1\" || true\nexit 1\n"
+      ~report:{|{"file":"lib/x.ml","line":15,"status":"SURVIVED","id":"m1"}
+|}
+  in
+  Batch.run (fun b ->
+      (* An index no campaign has ever touched REFUSES (exit 3) rather than publishing an
+         empty verdict list. FR-032's distinction, at the surface a caller reads: "nothing
+         ran" and "ran and found nothing" are different facts, and 3 is the code that
+         carries the first across a process boundary. *)
+      let virgin = load_fixture "mutants_verdict_virgin" campaign_stream in
+      Batch.exit_code b
+        ~msg:"an index with no campaign tables must REFUSE, not publish an empty verdict"
+        ~expected:3
+        (mutants ["verdict"; virgin; "--format"; "json"]) ;
+      ignore (run [] : int * string) ;
+      match verdict_of b ~what:"interrupted" db with
+      | None -> ()
+      | Some (c, fs) ->
+          Option.iter
+            (fun partial ->
+              Batch.check b ~msg:"an interrupted campaign must report itself partial" partial)
+            (expect b (Json.bool ~what:"campaign" "partial" c)) ;
+          (* One attempted, two never reached. Hand-counted from the engine body
+             above, which stops after m1. *)
+          verdict_count b ~what:"interrupted" c "PENDING" 2 ;
+          verdict_count b ~what:"interrupted" c "SURVIVED" 1 ;
+          List.iter
+            (fun file ->
+              Batch.eq_string_opt b
+                ~msg:("an unattempted mutant in " ^ file ^ " publishes PENDING")
+                (finding_field fs ~file "published_verdict")
+                (Some "PENDING") ;
+              (* FR-033: no run row means no provenance to carry, and the honest
+                 answer is an explicit null — never the provenance of the one run
+                 that did happen. *)
+              Batch.eq_string_opt b
+                ~msg:("a PENDING finding in " ^ file ^ " borrows no provenance")
+                (finding_field fs ~file "selection_provenance")
+                (Some "null") ;
+              Batch.eq_string_opt b
+                ~msg:("a PENDING finding in " ^ file ^ " borrows no engine status")
+                (finding_field fs ~file "engine_status")
+                (Some "null"))
+            ["lib/y.ml"; "lib/z.ml"]) ;
+  Lwt.return_unit
+
+(* CHECK-18 / AC-27, FR-033. Two runs, DIFFERING provenance, in one campaign —
+   and the same two runs written in the opposite order in a second database.
+
+   A single-run fixture cannot tell positional attribution from correct
+   attribution, which is exactly how a peer's `match producers with p :: _`
+   survived review: it labelled every finding with the FIRST run's class. So the
+   fixture holds two, the two disagree, and the test asserts BOTH that the
+   collection order really did reverse and that no label moved with it. *)
+let seed_two_provenances ~name ~x_first =
+  let db = load_fixture name campaign_stream in
+  let migration = read_file (Filename.concat (repo_root ()) "mutants-schema-migration.sql") in
+  Db.with_db_rw db (fun conn ->
+      (* The migration text itself, not a hand-copied CREATE TABLE: a copy keeps
+         working while the real schema moves under it. *)
+      Db.exec conn migration ;
+      Db.exec conn
+        {|INSERT INTO mutants(file_path,line,col_start,col_end,replacement,source_hash,function_name)
+            VALUES ('lib/x.ml',15,3,9,'true','hash-x','covered'),
+                   ('lib/y.ml',35,1,4,'false','hash-y','other');
+          INSERT INTO mutant_campaigns(engine,engine_path,test_runner_path,granularity,completed_at)
+            VALUES ('stub','/bin/true','/bin/true','case','2026-09-05T00:00:00Z');|} ;
+      let insert file provenance =
+        Db.exec conn
+          (Printf.sprintf
+             "INSERT INTO mutant_runs(campaign_id,mutant_id,engine_mutant_id,engine_status,\
+              selection_provenance,intended_tests,executed_tests) SELECT 1, id, 'e-'||id, \
+              'SURVIVED', '%s', 1, 1 FROM mutants WHERE file_path = '%s'"
+             provenance file)
+      in
+      (* Insertion order IS the order the reporter walks, because it reads
+         ORDER BY r.id. That is what makes the swap observable. *)
+      if x_first then (
+        insert "lib/x.ml" "top_bounded" ;
+        insert "lib/y.ml" "proved_superset")
+      else (
+        insert "lib/y.ml" "proved_superset" ;
+        insert "lib/x.ml" "top_bounded")) ;
+  db
+
+let register_verdict_provenance_follows_run () =
+  Test.register ~__FILE__
+    ~title:"mutants: provenance follows the run, not the collection order"
+    ~tags:["mutants"; "verdict"]
+  @@ fun () ->
+  let x_first = seed_two_provenances ~name:"mutants_fr033_x" ~x_first:true in
+  let y_first = seed_two_provenances ~name:"mutants_fr033_y" ~x_first:false in
+  Batch.run (fun b ->
+      let labels ~what db =
+        match verdict_of b ~what db with
+        | None -> None
+        | Some (_, fs) ->
+            (* The order actually reversed — asserted, not assumed. Without this
+               the "reversing changes no label" claim could hold because nothing
+               reversed. *)
+            Some
+              ( List.hd (Json.field_of_objects ~field:"file" fs),
+                finding_field fs ~file:"lib/x.ml" "published_verdict",
+                finding_field fs ~file:"lib/y.ml" "published_verdict",
+                finding_field fs ~file:"lib/x.ml" "selection_provenance",
+                finding_field fs ~file:"lib/y.ml" "selection_provenance" )
+      in
+      match (labels ~what:"x first" x_first, labels ~what:"y first" y_first) with
+      | Some (head_x, vx1, vy1, px1, py1), Some (head_y, vx2, vy2, px2, py2) ->
+          Batch.eq_string b ~msg:"the first database must list the ⊤-bounded run first" head_x
+            "lib/x.ml" ;
+          Batch.eq_string b
+            ~msg:"the second database must list the proved run first — otherwise nothing swapped"
+            head_y "lib/y.ml" ;
+          (* The bounded run is UNKNOWN and the proved run is SURVIVED, in BOTH
+             orders. A first-element attribution would label both runs alike and
+             so would disagree with itself between the two databases. *)
+          List.iter
+            (fun (msg, got, expected) -> Batch.eq_string_opt b ~msg got (Some expected))
+            [ ("x-first: the ⊤-bounded run publishes UNKNOWN", vx1, "UNKNOWN");
+              ("x-first: the proved run publishes SURVIVED", vy1, "SURVIVED");
+              ("y-first: the ⊤-bounded run still publishes UNKNOWN", vx2, "UNKNOWN");
+              ("y-first: the proved run still publishes SURVIVED", vy2, "SURVIVED");
+              ("x-first: lib/x.ml carries its OWN provenance", px1, "top_bounded");
+              ("x-first: lib/y.ml carries its OWN provenance", py1, "proved_superset");
+              ("y-first: lib/x.ml still carries its own provenance", px2, "top_bounded");
+              ("y-first: lib/y.ml still carries its own provenance", py2, "proved_superset") ]
+      | _ -> Batch.note b "one of the two orderings produced no verdict output") ;
   Lwt.return_unit
