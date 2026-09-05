@@ -1,0 +1,37 @@
+{
+ "task": "escaping-origins",
+ "mode": "fast",
+ "current_phase": "closed",
+ "note": "PR #71, `arch-query escaping-origins`. Authored by the peer session arch-index-0e; reviewed and coordinated here. Ledger written retroactively at ship. SIX review rounds. The accepted follow-ups live in briefs/escaping-origins-followups.md (18 items, transcribed verbatim rather than paraphrased).",
+ "events": [
+  {"phase": "review", "outcome": "NO-GO", "at": "2026-09-05T00:10:00+02:00", "by": "roster-review", "round": 1,
+   "blocking": ["HIGH-1: the root pattern was an unanchored suffix LIKE with `%`/`_` live and no `/` boundary. When the over-broad pattern hit exactly ONE function, the ambiguity refusal never fired and the command answered for a module the caller never named. `--roots '%level_repr.ml:add'` returned a confident MUST about raw_level_repr.ml. Not the union we were watching for -- a failure to recognise the key was ambiguous at all.",
+    "HIGH-2: `0 edges unresolved · 0 ⊤ — LOWER BOUND` over an empty table for a closure never entered.",
+    "HIGH-3: scope/coverage header printed, THEN a raw sqlite error with the full query, exit 2.",
+    "HIGH-4: the scope line did not identify the index -- two runs, byte-identical scope lines, 21 vs 37 origins."]},
+  {"phase": "review", "outcome": "NO-GO", "at": "2026-09-05T00:40:00+02:00", "by": "roster-review", "round": 2,
+   "note": "TWO of four fixes were PARTIAL. NOTHING TRAVERSED fixed for a single-function root but not `<path>:*`, the granularity the tool's own docs recommend -- and the same commit shipped a usage line ASSERTING the fixed behaviour, on the line documenting the shape where it was false. The flat-schema symptom (an unused `flat` variable) was DELETED rather than handled, so the raw-SQL crash survived."},
+  {"phase": "review", "outcome": "NO-GO", "at": "2026-09-05T01:10:00+02:00", "by": "roster-review", "round": 3,
+   "note": "The replacement guard was a SECOND proxy: `resolved_out_edges > 0` is not `reach ⊋ root` -- a resolved edge whose callee is already in the root set (intra-module under `:*`, or self-recursion) fires it while nothing beyond the root was entered.",
+   "sharpest_finding": "The author had written a test, it failed, and they concluded the FIXTURE was wrong -- recording in the commit message 'the premise was wrong, not the code'. It was the reverse. The discarded fixture was the discriminating one. See [[a-red-you-explain-away-is-a-hypothesis]]."},
+  {"phase": "review", "outcome": "NO-GO", "at": "2026-09-05T01:35:00+02:00", "by": "roster-review", "round": 4,
+   "note": "Regression streak BROKEN -- `count(reach) - count(root)` is the claim itself, sound in both directions across a full A-G granularity matrix, and the restored fixture is what kills the round-3 proxy.",
+   "blocking": ["HIGH-1 (new): `channel='exception'` hard-coded and stated NOWHERE. On proto_alpha 1219 of 30526 origins are on the reported channel (4%), and `--forms raise` answered on 20 of 29218 rows (0.07%) while printing an empty table for the rest. Round 1's defect through a door nobody was watching."]},
+  {"phase": "review", "outcome": "NO-GO", "at": "2026-09-05T02:00:00+02:00", "by": "roster-review", "round": 5,
+   "blocking": ["HIGH-A: the channel filter was DISCLOSED but not VERIFIED. Mutating `AND o.channel=%s` to `AND (o.channel=%s OR 1)` left all six tests green -- they pinned that the channel is NAMED and that an ABSENT channel is refused, never that the named channel is the one queried. Round 3's mistake one level up: asserting the banner instead of the claim.",
+    "HIGH-B: the MEDIUM-2 reword was reported shipped and was not in the code. Root cause named by the author: in their patch script, THAT substitution was the only one without an assertion on the match count -- it matched nothing, changed nothing, and the script printed success."]},
+  {"phase": "review", "outcome": "GO", "at": "2026-09-05T02:20:00+02:00", "by": "roster-review", "round": 6,
+   "verified": {
+     "matrix": "ALL 91 `:*` roots of the self-index against SQL ground truth: 28 NOTHING TRAVERSED / 63 LOWER BOUND / 0 mismatches, independently reproducing round 5's 88/27/61/0.",
+     "fixture_validated_empirically": "The two-channel fixture was checked by dumping its rows, not by reading: both origins are form `raise`, differing ONLY in channel, so `--forms` cannot separate them and the channel predicate is the only thing that can.",
+     "head_change_adjudicated": "The author's ledger-only commit during an in-flight review was verified by BLOB HASH, not diff -- `bin/` byte-identical, so everything already measured still stood.",
+     "ledger_faithfulness": "The reviewer re-derived the ledger's load-bearing numbers rather than trusting them (1132/0/8329 vs the recorded 1130/0/8313); deltas are build variance in the conservative direction. Their verdict: 'the 153 mechanism is not present here.'"},
+   "coordinator_override": "The reviewer rated the untested `:*` ambiguity refusal MEDIUM and recommended ledgering it. I asked for the fixture instead: it is structurally identical to round 5's HIGH-A (a refusal that works, is disclosed, and has no discriminating test), and a regression there does not produce an empty table -- it UNIONS several protocol versions' modules into one root set where every member becomes MUST. One fixture, zero changes to bin/."},
+  {"phase": "ship", "outcome": "MERGED", "at": "2026-09-05T00:05:38Z", "by": "roster-ship", "pr": 71,
+   "merged_into": "ed0b946",
+   "ci_finding": "#71 had NO CI RUN AT ALL for its entire six-round life. The workflow triggers on `pull_request: branches: [main]` and its base was `spec/point-free-aliases` throughout. Every reviewer correctly flagged 'no CI checks -- a missing signal is not evidence' rather than reading absence as approval. Retargeting the base does NOT retroactively trigger a run; closing and reopening the PR fires `reopened`, which does. It passed first try. The stacked-PR trade in one line: stacking let #71 develop against #69's schema bump without waiting, and cost it every CI signal until #69 landed -- and #69 had exactly the defect class only CI catches."},
+  {"phase": "note", "outcome": "FOLLOW-UP", "at": "2026-09-05",
+   "ledger": "briefs/escaping-origins-followups.md — 18 items, transcribed VERBATIM including measurements. The author refused to paraphrase from memory when they lacked the source text, and marked the list incomplete rather than filling it in; the missing text was then supplied and transcribed. An invented-but-plausible entry reads as a record while being a reconstruction — the same mechanism as the `153` figure this project was bitten by.",
+   "highest_value": "LOW-4 is the only one touching output correctness: ⊤ is a STRICT subset of unresolved (1132, of which 0 have a resolved callee, against 8329 null callees) but is rendered as if disjoint, inviting addition. Summing OVERSTATES what the tool could not see -- the safe direction, which is why it is LOW."}
+ ]
+}
