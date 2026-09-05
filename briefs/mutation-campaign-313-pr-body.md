@@ -47,6 +47,17 @@ house rule applied to the one tool that had skipped it, not a new principle.
 - **Five guard scripts**, each red-verified on its own injection: the Quint red harness, binary
   provenance, status-without-provenance, catch-all match arms, and no-score.
 
+**The gate that carries the weight is `scripts/check-quint-red.sh`, and it is worth saying why.**
+A typecheck, a 20 000-sample invariant run and an Apalache temporal check all prove that the
+checker executed. **None of them proves the invariants can fail** — a model asserting `true` would
+produce the same three greens. Only the red harness does, by injecting one defect at a time and
+requiring a *named* invariant to go red for each. On its first execution it found one invariant
+**tautological**: it related the published verdict to a derived value the publication function ties
+together by construction, so it could not fail whatever the code did. It was rewritten over the
+primitive state before it could ship green and empty. Every check in this PR that reports zero has
+been shown capable of reporting non-zero, and a `sed` matching nothing is reported as a failure
+rather than a pass, so a stale mutation cannot masquerade as a caught one.
+
 ## What this does NOT establish
 
 **The campaign mechanism has never been observed running.** It is established by reading the
