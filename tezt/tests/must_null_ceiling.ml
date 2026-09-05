@@ -192,7 +192,24 @@ let must_null_query =
    from a new file and 5 Arch_tezt.Temp.* rows that DO carry signal — that
    separation belongs in that branch's ledger and must not be hidden behind
    this recalibration. *)
-let clean_measured = 382
+
+(* 382 -> 383, and the +1 is ONE NAMED ROW, not a delta:
+
+     tezt/tests/flat_exported_selector.ml:rule_file -> Arch_tezt.Temp.file
+
+   That file is new in this branch; its [rule_file] helper calls [Temp.file], which lives in a
+   different library and so resolves to no [callee_id] — a MUST edge with a NULL callee, which
+   is exactly what this metric counts. Inert: it is a test helper writing a temp file, carrying
+   no signal about the indexed code.
+
+   Attributed by DIFFING THE ROW SETS between main and this branch, not by subtracting counts.
+   The first attempt used a baseline tree one commit behind main and showed TWO differences —
+   this row, plus [must_null_ceiling.ml:register.<fun:224:6>] appearing as [<fun:257:6>]. The
+   second is not a row at all: it is the same edge renamed, because a lambda's identity encodes
+   its LINE, and the recalibration above moved every line in this file. Counting would have
+   netted the two to +1 and looked right for the wrong reason; re-measured against the tree that
+   exists, there is one difference and it is the new one. *)
+let clean_measured = 383
 
 let headroom = 25
 
