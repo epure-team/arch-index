@@ -95,6 +95,47 @@ read as an error, it reads as a new site, i.e. as a regression.** That is the
 three-cause confusion coming back through the back door after being chased out
 the front. The translation cost is the price of decoupling, and it is explicit.
 
+## CORRECTION — the four-field identity is NOT a key, measured
+
+I specified `function | file:line | form | exn` as a site identity and then
+tested it instead of assuming it. **It collides.** On the full Octez exception
+population, 25 479 origins:
+
+| identity | distinct | collisions |
+|---|---|---|
+| the four fields as specified | 24 329 | **1 150** (4.5 %) |
+| + column | 25 340 | **139** |
+
+`Make_Module.mul` at `poseidon_utils.ml:114`, form `index`, `Invalid_argument`,
+appears **×8** — eight array accesses on one line. And adding the column does not
+close it: `dal_common.ml:189:30` carries **two** `index` origins at the exact
+same position, which is what a nested `a.(i).(j)` produces.
+
+**So no positional identity is unique**, and any design that assumed one was
+going to exempt more than the author intended.
+
+### Decision: four fields PLUS a count
+
+    fn | file:line | form | exn | ×N
+
+The count is what makes a ninth access on an already-exempted line **fail loud**
+instead of being silently covered by the exemption for the first eight. Without
+it an allow-list entry is a *set* exemption whose membership can grow after
+review — a new risk admitted by a decision nobody took.
+
+Its brittleness is real and is worth stating: reformatting a line changes the
+count. But it changes the **line number** too, so a count is no more brittle than
+the positional identity it accompanies. Line-based identity is brittle to
+reformatting; that is a known and accepted property of this class of gate, and
+the failure is loud in both cases.
+
+### Why this was worth finding before implementation
+
+Had it shipped, the gate would have had a silent widening path — the one thing
+this design was written to eliminate — and it would have looked correct on
+proto_alpha, where the 37 sites collide **zero** times. A format that is a key on
+the demo corpus and not on the real one is exactly the shape that survives review.
+
 ## Two parser properties that bite a FILE PATH specifically
 
 Both verified in `bin/arch_rules/arch_rules.ml`, both undocumented.
