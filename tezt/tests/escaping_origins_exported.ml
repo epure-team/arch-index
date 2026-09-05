@@ -148,87 +148,152 @@ let register_refuses_an_unmarked_index () =
         (not (contains ~needle:"coverage:" out))) ;
   Lwt.return_unit
 
-(* A FLAT-schema index spells the API-surface flag [functions.exported]; MAIN spells it
-   [functions.exposed], and this subcommand reads MAIN throughout — its root CTE joins
-   [functions.module_id], which FLAT has no column for. So [--roots exported] against FLAT
-   has three possible outcomes and only one of them is acceptable:
+(* What a FLAT-schema index actually does here, and the story of getting it wrong.
 
-     crash            loud, recoverable
-     EMPTY RESULT     silent, confident, about the wrong population — and for THIS question
-                      an empty list reads as "nothing escapes", the reassuring answer
-     refusal          what this test pins
+   [--roots exported] against FLAT has three possible outcomes, and only one is acceptable:
+   a crash (loud), an EMPTY RESULT (silent, confident, about the wrong population — and for
+   THIS question an empty list reads as "nothing escapes", the reassuring answer), or a
+   refusal. This test pins the refusal.
 
-   The middle one is the same shape #87's [COALESCE(exported,0) -> 1] mutant was built to
-   catch: no crash and no empty set is precisely what makes it invisible. This test exists
-   because the convention "escaping-origins is MAIN-only" was in our heads and in no
-   executable form — the defect #87 itself was written to close, one file over. *)
+   It pins it AT THE LINE THAT ACTUALLY RUNS. A FLAT index stops at the missing-[modules]
+   guard, ~180 lines before the [functions.exposed] check that [--roots exported] adds: no
+   FLAT producer creates a [modules] table — [bin/arch_load/arch_load.ml],
+   [lib/arch_db/arch_load.ml] and [lib/arch_index/runner.ml] each create only
+   comment_db_meta/functions/calls (plus decisions/dead_code_sites in the first).
+
+   The first version of this test asserted the [exposed] check's message instead, and passed.
+   It passed because its fixture created a [modules] table, which no producer emits — the
+   fixture had manufactured the reachability its assertion depended on. A test can be green,
+   kill a mutant, and still describe a state the system cannot enter. The fixture below is
+   deliberately restricted to the three tables a FLAT producer really writes. *)
 let register_refuses_a_flat_index () =
   Test.register ~__FILE__
-    ~title:"escaping-origins --roots exported: a FLAT index is told WHY (the refusal itself is Arch_db.ok's)"
+    ~title:"escaping-origins --roots exported: a producer-shaped FLAT index is REFUSED, not answered empty"
     ~tags:["query"; "origins"; "exported"; "crash"; "flat"; "schema"]
   @@ fun () ->
   let db = Arch_tezt.temp_db "eoe_flat" in
-  (* The fixture must clear every EARLIER guard, or the refusal below is credited to the
-     wrong one: escaping-origins refuses in turn on a missing contract flag, a missing
-     exn_origins table, and an empty exn_origins, all before it looks at any column. A
-     fixture that tripped one of those would make this test pass without the schema guard
-     existing at all. *)
   Db.with_db_rw db (fun c ->
       Db.exec c
         {|
 CREATE TABLE comment_db_meta(key TEXT, value TEXT);
 INSERT INTO comment_db_meta VALUES('callgraph_contract','v1');
-CREATE TABLE modules(path TEXT);
-INSERT INTO modules VALUES ('api.ml'),('vuln.ml');
 CREATE TABLE functions(name TEXT, file_path TEXT, exported INT, line_start INT, line_end INT);
 INSERT INTO functions VALUES ('flat_entry','api.ml',1,1,2),('flat_danger','vuln.ml',0,1,2);
 CREATE TABLE calls(caller_name TEXT, caller_file TEXT, callee_name TEXT, callee_file TEXT, call_site TEXT, kind TEXT);
 INSERT INTO calls VALUES ('flat_entry','api.ml','flat_danger','vuln.ml','api.ml:1','MUST');
-CREATE TABLE exn_origins(id INTEGER PRIMARY KEY AUTOINCREMENT, function_id INTEGER, scope_id INTEGER,
-  form TEXT NOT NULL, exn_path TEXT, escapes BOOLEAN NOT NULL DEFAULT 1,
-  line INTEGER NOT NULL, col INTEGER NOT NULL, channel TEXT NOT NULL DEFAULT 'exception');
-INSERT INTO exn_origins(function_id,form,escapes,line,col,channel) VALUES (2,'division',1,1,0,'exception');
 |}) ;
   let code, out = query [ db; "escaping-origins"; "--roots"; "exported" ] in
   Batch.run (fun b ->
-      (* PREMISE — the discriminator, asserted on the columns the guard actually branches on
-         rather than on the fixture text meant to produce them. *)
+      (* PREMISE — FIDELITY OF THE FIXTURE, which is the assertion the first version of this
+         test lacked and the reason it measured an unreachable state. Asserted on the absence
+         a producer actually produces, not on the fixture text meant to produce it. *)
+      Batch.eq_int b
+        ~msg:"premise: no modules table — the shape every FLAT producer emits, and what stops \
+              this command above the exposed check"
+        (Db.with_db db (fun c ->
+             Db.int c "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='modules'"))
+        0 ;
       Batch.eq_int b ~msg:"premise: functions.exported exists (this really is FLAT's spelling)"
         (Db.with_db db (fun c ->
              Db.int c "SELECT count(*) FROM pragma_table_info('functions') WHERE name='exported'"))
         1 ;
-      Batch.eq_int b ~msg:"premise: and functions.exposed does NOT, so the MAIN path is unreachable"
+      Batch.eq_int b ~msg:(Printf.sprintf "refuses with exit 3:\n%s" out) code 3 ;
+      Batch.check b
+        ~msg:(Printf.sprintf "…and names the flat schema as the cause:\n%s" out)
+        (contains ~needle:"flat schema" out) ;
+      (* The outcome this whole test exists to exclude: no header, so nothing reads as empty. *)
+      Batch.check b
+        ~msg:(Printf.sprintf "…and prints no coverage header:\n%s" out)
+        (not (contains ~needle:"coverage:" out))) ;
+  Lwt.return_unit
+
+(* The [functions.exposed] guard that [--roots exported] adds had NO test and never ran under
+   the suite — review finding 5. Its reachable population is narrow and worth stating: not a
+   FLAT index (which stops ~180 lines earlier on the missing [modules] table — see above), but
+   a MAIN index that PREDATES the column. Constructed here by dropping the column from a real
+   index rather than by hand-building a plausible one, so the fixture cannot drift away from
+   what the producer emits in every respect except the one under test. *)
+let register_refuses_an_index_predating_exposed () =
+  Test.register ~__FILE__
+    ~title:"escaping-origins --roots exported: an index predating functions.exposed is REFUSED"
+    ~tags:["query"; "origins"; "exported"; "crash"; "schema"]
+  @@ fun () ->
+  with_indexed "eoe_preexposed" @@ fun db ->
+  (* An index and two views reference the column, and sqlite refuses the DROP while they do.
+     Removing them is faithful rather than convenient: an index that genuinely predates
+     [functions.exposed] predates everything defined in terms of it. *)
+  Db.with_db_rw db (fun c ->
+      Db.exec c "DROP INDEX IF EXISTS idx_functions_exposed" ;
+      Db.exec c "DROP VIEW IF EXISTS v_large_functions" ;
+      Db.exec c "DROP VIEW IF EXISTS v_undocumented" ;
+      Db.exec c "ALTER TABLE functions DROP COLUMN exposed") ;
+  let code, out = query [ db; "escaping-origins"; "--roots"; "exported" ] in
+  Batch.run (fun b ->
+      Batch.eq_int b ~msg:"premise: functions.exposed is really gone"
         (Db.with_db db (fun c ->
              Db.int c "SELECT count(*) FROM pragma_table_info('functions') WHERE name='exposed'"))
         0 ;
-      (* PREMISE — a fatal origin IS recorded, so a later empty list could not be blamed on
-         an index with nothing in it. This is what makes the refusal load-bearing. *)
-      Batch.check b ~msg:"premise: a fatal origin is recorded, so an empty report would be a LIE"
-        (Db.with_db db (fun c -> Db.int c "SELECT count(*) FROM exn_origins") >= 1) ;
-      (* CONTROL, NOT THIS TEST'S SUBJECT — and the distinction is load-bearing enough to
-         be in the title. Exit 3 here is guaranteed by [Arch_db.ok], which converts a raw
-         "no such column: exposed" into a Refused at any site with no guard of its own;
-         measured by deleting the guard below and re-running, where this line still passes
-         and only the two message assertions fail. So a reader who breaks [Arch_db.ok] and
-         finds this test green has NOT been told they are safe: nothing here pins the
-         refusal. What this test owns is the DIAGNOSIS. *)
-      Batch.eq_int b ~msg:(Printf.sprintf "control (owned by Arch_db.ok, not by this test): exit 3:\n%s" out) code 3 ;
-      (* THE TWO ASSERTIONS THIS TEST ACTUALLY OWNS. The remedy is the point, not the refusal. Telling a FLAT user to "re-index
-         with a producer that records exports" names a defect they do not have: their
-         producer recorded exports, in FLAT's own column. *)
+      (* PREMISE — and [modules] is still THERE, which is what makes this index reach the
+         guard at all. Without it this test would be pinning the earlier refusal again. *)
+      Batch.eq_int b ~msg:"premise: modules survives, so the earlier flat-schema guard passes"
+        (Db.with_db db (fun c ->
+             Db.int c "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='modules'"))
+        1 ;
+      Batch.eq_int b ~msg:(Printf.sprintf "refuses with exit 3:\n%s" out) code 3 ;
       Batch.check b
-        ~msg:(Printf.sprintf "…names FLAT as the cause, not an out-of-date index:\n%s" out)
-        (contains ~needle:"FLAT-schema index" out) ;
+        ~msg:(Printf.sprintf "…and the remedy it names is the one that works here:\n%s" out)
+        (contains ~needle:"Re-index with a producer that records exports" out) ;
+      (* No literal run of spaces: the string is assembled by concatenation and an earlier
+         version rendered "this index                  predates it". *)
+      Batch.check b ~msg:(Printf.sprintf "…and renders without space runs:\n%s" out)
+        (not (contains ~needle:"   " out)) ;
       Batch.check b
-        ~msg:(Printf.sprintf "…and says re-indexing will not help:\n%s" out)
-        (contains ~needle:"re-indexing will not help" out) ;
-      (* The outcome this whole test exists to exclude. *)
-      Batch.check b
-        ~msg:(Printf.sprintf "…and prints no coverage header, so nothing reads as empty:\n%s" out)
+        ~msg:(Printf.sprintf "…and prints no coverage header:\n%s" out)
         (not (contains ~needle:"coverage:" out))) ;
+  Lwt.return_unit
+
+(* The keyword SHADOWS a real function name, and nothing in the exit code says so: both
+   spellings exit 0 and answer about different populations. Review finding 1 — in this
+   repository's own index [tezt/tests/multilang.ml:exported] exists, so the change silently
+   redirected an invocation that already worked. The escape hatch is qualification, and this
+   test is what keeps it working. *)
+let register_keyword_shadows_a_function_of_that_name () =
+  Test.register ~__FILE__
+    ~title:"escaping-origins --roots exported: the keyword shadows a function named exported, and qualifying escapes it"
+    ~tags:["query"; "origins"; "exported"; "crash"; "shadow"]
+  @@ fun () ->
+  with_indexed "eoe_shadow" @@ fun db ->
+  (* Rename an UNEXPORTED function to [exported] — unexported so the two spellings cannot
+     agree by accident: the keyword's set provably excludes it. *)
+  Db.with_db_rw db (fun c ->
+      Db.exec c "UPDATE functions SET name='exported' WHERE name='orphan_risky'") ;
+  let kw_code, kw_out = query [ db; "escaping-origins"; "--roots"; "exported" ] in
+  let q_code, q_out = query [ db; "escaping-origins"; "--roots"; "eoe_a.ml:exported" ] in
+  Batch.run (fun b ->
+      Batch.eq_int b ~msg:"premise: a function named 'exported' now exists"
+        (Db.with_db db (fun c -> Db.int c "SELECT count(*) FROM functions WHERE name='exported'"))
+        1 ;
+      Batch.eq_int b ~msg:"premise: and it is NOT exported, so the two spellings cannot coincide"
+        (Db.with_db db (fun c ->
+             Db.int c "SELECT COALESCE(exposed,0) FROM functions WHERE name='exported'"))
+        0 ;
+      Batch.eq_int b ~msg:(Printf.sprintf "the keyword answers:\n%s" kw_out) kw_code 0 ;
+      Batch.eq_int b ~msg:(Printf.sprintf "the qualified name answers too:\n%s" q_out) q_code 0 ;
+      Batch.check b
+        ~msg:(Printf.sprintf "the keyword roots at the API surface, not at the function:\n%s" kw_out)
+        (contains ~needle:"root: exported (2 entry point" kw_out) ;
+      Batch.check b
+        ~msg:(Printf.sprintf "qualifying roots at the FUNCTION — the escape hatch:\n%s" q_out)
+        (contains ~needle:"root: eoe_a.ml:exported" q_out) ;
+      (* THE POINT. Both exit 0; only the root line distinguishes them. A user who typed
+         [--roots exported] before this feature existed gets a different answer and no signal. *)
+      Batch.check b ~msg:"the two spellings really do answer about different roots"
+        (kw_out <> q_out)) ;
   Lwt.return_unit
 
 let register () =
   register_roots_the_api_surface () ;
   register_refuses_an_unmarked_index () ;
-  register_refuses_a_flat_index ()
+  register_refuses_a_flat_index () ;
+  register_refuses_an_index_predating_exposed () ;
+  register_keyword_shadows_a_function_of_that_name ()

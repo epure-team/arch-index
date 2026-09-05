@@ -43,9 +43,26 @@
   13 519 unresolved edges and 2 369 ⊤ on the same run, so that list is a **lower bound** and
   says so.
 
-  **Spelled as the bare keyword `exported`, not as a selector.** `arch-coverage --roots exported`
-  already means this set, computed from the same `functions.exposed` column; a second spelling
-  for one set is how two names for one thing come to disagree in the place it matters.
+  **Spelled as the bare keyword `exported`, not as a selector**, matching the spelling
+  `arch-coverage --roots exported` already uses for this set. The two commands compute it by
+  DIFFERENT routes and agree on a MAIN index by virtue of a reconciliation, not by sharing a
+  column: `arch-coverage` folds over `Arch_graph.node.exported`, the field
+  `Arch_graph.load_nodes` fills from `functions.exposed` (MAIN) or `functions.exported`
+  (FLAT); this command reads `functions.exposed` directly in SQL. An earlier draft of this
+  entry claimed they were "computed from the same `functions.exposed` column" — that was
+  false, and false in the direction that matters, since it would let a reader conclude the
+  agreement is structural when it is contingent on FLAT reconciliation this command does not
+  perform.
+
+  **The keyword shadows a function actually named `exported`**, and one exists in this
+  repository's own index (`tezt/tests/multilang.ml:exported`). Before this change
+  `--roots exported` rooted at that function; it now roots at the API surface — exit 0 both
+  times, different answers, so nothing surfaces the change. Qualify it to get the old
+  behaviour back: `--roots multilang.ml:exported`. The unqualified name is the keyword.
+
+  `--roots exported:**` is NOT a second spelling of the keyword here: this command's `--roots`
+  is `<module-path>:<fn>`, not the `Arch_sel` selector grammar `arch-coverage` accepts, so
+  `exported:**` is read as a module path and refused like any root that matches nothing.
 
   **An index with no exports is REFUSED (exit 3), never reported empty.** That is the
   load-bearing half: an unmarked index gives an empty cone, and every list is then empty for

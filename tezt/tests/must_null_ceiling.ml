@@ -233,9 +233,13 @@ let must_null_query =
 
    The PRESENCE PREMISE, because a metric that never saw the new code reports zero
    exactly like a metric that saw it and found nothing: [escaping_origins_exported.ml]
-   IS in the index (18 functions, 73 calls). It contributes 13 MUST-with-NULL rows
-   and every one is excluded by name — [Stdlib.Printf.sprintf] x7, [Stdlib.>=] x3,
-   [Stdlib.not] x2, [Stdlib.<>] x1.
+   IS in the index (38 functions, 172 calls). It contributes 28 MUST-with-NULL rows
+   and every one is excluded by name — [Stdlib.Printf.sprintf] x18, [Stdlib.not] x5,
+   [Stdlib.>=] x3, [Stdlib.<>] x2.
+
+   RE-DERIVED, not carried: review round 1 added two tests to that file and these
+   figures read 18/73/13 before them. A presence premise whose numbers describe an
+   earlier version of the file it vouches for has stopped vouching for anything.
 
    The CONTROL that proves a new test file's row would have been counted: the row
    this metric gained from #87's new file — [flat_exported_selector.ml:rule_file ->

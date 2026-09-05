@@ -50,6 +50,9 @@ Subcommands:
   exn-stats    [--assume-externals-pure]
                                bounded/unbounded share of every node, ⊤ reasons, origin counts
   escaping-origins --roots exported|<module-path>:<fn>|<module-path>:* [--forms <f1,f2,...>]
+                               bare `exported` is the API-surface KEYWORD and SHADOWS any
+                               function of that name; qualify it (multilang.ml:exported) to
+                               root at the function instead
                    [--channel <name>]   (default: exception — see NOTE below)
                                fatal origins (assert/division/index/partial_match by default)
                                in the forward closure of the root. Prints root/scope/coverage
@@ -649,30 +652,26 @@ let () =
                point rather than for want of crash sites. That reads as "nothing can crash
                here", which is the worst available answer to this question. *)
             let exported_roots = root_spec = "exported" in
-            (* Two different absences of [functions.exposed], and they need two different
-               remedies. A MAIN index that predates the column is fixed by re-indexing. A
-               FLAT index is NOT out of date — it spells the same flag [functions.exported]
-               (see the schema reconciliation in [Arch_graph.load_nodes], and this file's
-               own line ~237, which adapts) — and telling its owner to "re-index with a
-               producer that records exports" names a remedy for a defect they do not have.
+            (* Reachable ONLY by a MAIN index that predates [functions.exposed], and the
+               message is written for exactly that population. A FLAT index never arrives
+               here: no FLAT producer creates a [modules] table ([bin/arch_load/arch_load.ml],
+               [lib/arch_db/arch_load.ml], [lib/arch_index/runner.ml] each create only
+               comment_db_meta/functions/calls, plus decisions/dead_code_sites in the first),
+               and the guard ~180 lines above refuses on a missing [modules] with a message
+               that already names the flat schema.
 
-               Both are refused, and refused loudly: exit 3 before any header. The outcome
-               this guard exists to prevent is the third one — an EMPTY result, which for
-               this question reads as "nothing escapes", the reassuring answer. Verified by
-               execution against a FLAT fixture, not by reading: [Flat_escaping_origins]. *)
+               This comment exists because I got it wrong the other way first. I built a FLAT
+               fixture that DID create [modules], reached this line with it, concluded the
+               message misdiagnosed FLAT users, and wrote a second branch for them. The
+               fixture had manufactured its own reachability. Review caught it; verified by
+               executing against a producer-shaped FLAT index, which stops above. So
+               "re-index with a producer that records exports" is the RIGHT remedy here —
+               the only readers who can see this string are the ones it describes. *)
             if exported_roots && not (Arch_db.has_col t "functions" "exposed") then
-              if Arch_db.has_col t "functions" "exported" then
-                die 3
-                  "arch-query: REFUSED — this is a FLAT-schema index (functions.exported), and \
-                   escaping-origins reads the MAIN schema throughout: its root CTE joins \
-                   functions.module_id, which FLAT does not have. This is not an out-of-date \
-                   index and re-indexing will not help. Use a MAIN-schema index."
-              else
-                die 3
-                  "arch-query: REFUSED — --roots exported needs functions.exposed and this index \
-                   has neither that column nor the FLAT spelling functions.exported, so no \
-                   export was ever recorded. Re-index with a producer that records exports, or \
-                   name a module root explicitly." ;
+              die 3
+                "arch-query: REFUSED — --roots exported needs functions.exposed and this index \
+                 predates it. Re-index with a producer that records exports, or name a module \
+                 root explicitly." ;
             let path_frag, root_name =
               if exported_roots then ("", "*")
               else
