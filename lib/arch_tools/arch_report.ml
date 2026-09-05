@@ -71,6 +71,15 @@ type finding = {
   f_message : string;
   f_location : string option;  (** ["file:line"], the repo's existing call-site spelling *)
   f_subject : string option;  (** the function or callee the finding is about *)
+  f_level : string option;
+      (** The producer's OWN severity, verbatim. [None] for a finding from an analysis that has no
+          severity vocabulary of its own.
+
+          Not folded into a default: the ingest slice stores a foreign [level] under a closed
+          CHECK precisely so it is not flattened, and rewriting every finding to [warning] here
+          undid that one layer up — the same flattening this repository's 2.1 review found in the
+          SARIF writer, which collapsed five verdicts into one [note]. A severity we did not
+          choose is a fact about the producer. *)
   f_producer : string option;
   f_soundness_class : string option;
       (** [None] when the table this finding came from records no [producer_run_id].
@@ -130,7 +139,17 @@ let opt = function "" -> None | s -> Some s
 (* Every analysis this tool knows how to look for. An analysis absent from the index still gets a
    section, because FR-024's whole point is that a reader must be able to tell "we looked and found
    none" from "we never looked" — and an absent section says neither. *)
-let known_analyses = [ ("dead_code", "dead_code_sites"); ("imported", "imported_findings") ]
+(* The analysis name here MUST be the one the producer writes into [analysis_coverage]. The
+   ingest adapter writes ['sarif_import']; this list said ['imported'], so [status_of] filtered
+   by name, found nothing, and fell through to "the table has rows, therefore covered" — while
+   the matrix beside it displayed `sarif_import / failed`. An import that had partially and then
+   entirely failed rendered as a clean analysis in all three channels, with the reader seeing one
+   analysis under two names carrying contradictory statuses.
+
+   Neither slice was wrong alone. The name is the join between them, and a join nothing checks is
+   a join that drifts — which is why [unmatched_coverage] below turns a future divergence into a
+   visible finding rather than a silent `covered`. *)
+let known_analyses = [ ("dead_code", "dead_code_sites"); ("sarif_import", "imported_findings") ]
 
 let collect ~db_path (t : Arch_db.t) : t =
   let schema_version =
@@ -191,6 +210,7 @@ let collect ~db_path (t : Arch_db.t) : t =
                      Printf.sprintf "call to %s in %s sits in a CFG-unreachable block" callee fn;
                    f_location = opt site;
                    f_subject = opt callee;
+                   f_level = None;
                    (* dead_code_sites carries no producer_run_id, so this finding's run is not
                       recorded and is therefore not known. *)
                    f_producer = None;
@@ -257,12 +277,19 @@ let collect ~db_path (t : Arch_db.t) : t =
     if not (Arch_db.has_table t "imported_findings") then []
     else
       q t ~shape:Arch_db.Rows.t6' ~to_cells:Arch_db.Rows.c6
-        "SELECT f.rule_id, COALESCE(f.uri,''), COALESCE(CAST(f.start_line AS TEXT),''), \
-         f.message, COALESCE(r.producer,'?'), COALESCE(r.soundness_class,'heuristic') \
+        "SELECT f.rule_id, COALESCE(f.uri,'') || '\n' || COALESCE(CAST(f.start_line AS TEXT),''), \
+         f.message, COALESCE(r.producer,'?'), COALESCE(r.soundness_class,'heuristic'), f.level \
          FROM imported_findings f LEFT JOIN producer_runs r ON f.producer_run_id = r.id \
          ORDER BY f.id"
       |> List.filter_map (function
-           | [ rid; uri; line; msg; producer; sc ] ->
+           | [ rid; uriline; msg; producer; sc; level ] ->
+               let uri, line =
+                 match String.index_opt uriline '\n' with
+                 | Some i ->
+                     ( String.sub uriline 0 i,
+                       String.sub uriline (i + 1) (String.length uriline - i - 1) )
+                 | None -> (uriline, "")
+               in
                let loc =
                  match (opt uri, opt line) with
                  | Some u, Some l -> Some (u ^ ":" ^ l)
@@ -273,15 +300,42 @@ let collect ~db_path (t : Arch_db.t) : t =
                  { f_id =
                      Printf.sprintf "imported|%s|%s|%s" producer rid
                        (Option.value ~default:"-" loc);
-                   f_kind = "imported";
+                   f_kind = "sarif_import";
                    f_message = msg;
                    f_location = loc;
                    f_subject = Some rid;
+                   f_level = Some level;
                    (* Imported findings DO record their run, so these are facts. *)
                    f_producer = Some producer;
                    f_soundness_class = Some sc;
                    f_verdict = None }
            | _ -> None)
+  in
+  (* A coverage row naming an analysis this report has no section for. Rendered as its OWN
+     section rather than dropped, because that is exactly the shape the name disagreement took:
+     the producer wrote `sarif_import`, the report looked for `imported`, and the mismatch was
+     invisible — it degraded into a `covered` instead of announcing itself.
+
+     A join between two slices that nothing checks is a join that drifts. This makes the next
+     drift a visible finding on the first run rather than a false clean nobody questions. *)
+  let known_names = List.map fst known_analyses in
+  let unmatched_coverage =
+    List.filter (fun c -> not (List.mem c.c_analysis known_names)) coverage
+    |> List.map (fun c ->
+           { f_id = Printf.sprintf "unknown_analysis|%s|%s" c.c_analysis c.c_status;
+             f_kind = "unknown_analysis";
+             f_message =
+               Printf.sprintf
+                 "analysis_coverage records '%s' with status '%s', and this report has no section \
+                  for it — the producer and the report disagree about the name, so its status is \
+                  not reaching any section"
+                 c.c_analysis c.c_status;
+             f_location = None;
+             f_subject = Some c.c_analysis;
+             f_level = None;
+             f_producer = None;
+             f_soundness_class = None;
+             f_verdict = None })
   in
   let sections =
     List.map
@@ -291,9 +345,16 @@ let collect ~db_path (t : Arch_db.t) : t =
           s_findings =
             (match analysis with
             | "dead_code" -> dead_code
-            | "imported" -> imported
+            | "sarif_import" -> imported
             | _ -> []) })
       known_analyses
+    @
+    (* Only when there is something to say: an empty section here would be noise on every
+       well-behaved index, and FR-024's "labelled, never absent" is about analyses this tool
+       KNOWS, not about ones it has just discovered it does not. *)
+    if unmatched_coverage = [] then []
+    else
+      [ { s_analysis = "unknown_analysis"; s_status = "failed"; s_findings = unmatched_coverage } ]
   in
   { db_path; schema_version; producers; coverage; top_frontier; verdicts; sections }
 
@@ -355,8 +416,19 @@ let to_json (r : t) : Yojson.Safe.t =
 
 let to_sarif (r : t) : Yojson.Safe.t =
   let sarif_finding (f : finding) : Arch_sarif.finding =
-    { rule_id = f.f_kind; level = Arch_sarif.Warning; message = f.f_message;
-      verdict = f.f_verdict; soundness_class = f.f_soundness_class; soundness = None;
+    { rule_id = f.f_kind;
+      (* The producer's own severity, mapped rather than replaced. An unknown string maps to
+         [Note] and the verbatim value still travels in [properties.verdict] below, so nothing is
+         lost even when SARIF's own vocabulary cannot express it. *)
+      level =
+        (match f.f_level with
+        | Some "error" -> Arch_sarif.Error
+        | Some "warning" -> Arch_sarif.Warning
+        | Some _ -> Arch_sarif.Note
+        | None -> Arch_sarif.Warning);
+      message = f.f_message;
+      verdict = (match f.f_verdict with Some v -> Some v | None -> f.f_level);
+      soundness_class = f.f_soundness_class; soundness = None;
       top_reasons = [];
       (* [Arch_sarif] parses a label as ["name  (file)"] — the shape [Arch_graph.label] produces.
          An earlier version passed a bare ["file:line"], which has no such separator, so every
@@ -372,17 +444,39 @@ let to_sarif (r : t) : Yojson.Safe.t =
         | None, None -> []);
       detail_total = 1; code_flow = [] }
   in
-  (* One run per SECTION, so each carries its own category. GitHub OVERWRITES a run sharing
-     tool+category with a later one rather than merging them (behaviour change, July 2025), so a
-     single category across analyses would silently keep only the last. [Arch_sarif.log] refuses
-     duplicates outright, which is why this is safe to state rather than hope. *)
+  (* One run per (PRODUCER, ANALYSIS), which is what [Arch_sarif]'s own header prescribes —
+     "never one per producer alone" — and what carries the producer at all: a SARIF finding has no
+     producer field, the RUN does. Grouping by section only meant every finding was attributed to
+     "arch-report", so the JSON and the HTML named semgrep and the SARIF did not. CHECK-5 failed
+     for precisely the one class of findings that carries a provenance, and the round-trip could
+     not see it because its fixture had no imported findings at all.
+
+     It is also the correct category key. GitHub OVERWRITES a run sharing tool+category rather
+     than merging (behaviour change, July 2025), so two importers under one category would keep
+     only the last. [Arch_sarif.log] refuses duplicate categories outright. *)
+  let groups =
+    List.concat_map
+      (fun s ->
+        let producers =
+          List.sort_uniq compare (List.map (fun f -> f.f_producer) s.s_findings)
+        in
+        let producers = if producers = [] then [ None ] else producers in
+        List.map
+          (fun prod ->
+            (s, prod, List.filter (fun f -> f.f_producer = prod) s.s_findings))
+          producers)
+      r.sections
+  in
   Arch_sarif.log
     (List.map
-       (fun s ->
-         { Arch_sarif.producer = "arch-report";
+       (fun (s, prod, fs) ->
+         { Arch_sarif.producer = Option.value ~default:"arch-report" prod;
            producer_version = None;
-           category = "arch-report/" ^ s.s_analysis;
-           findings = List.map sarif_finding s.s_findings;
+           category =
+             (match prod with
+             | Some p -> Printf.sprintf "arch-report/%s/%s" s.s_analysis p
+             | None -> "arch-report/" ^ s.s_analysis);
+           findings = List.map sarif_finding fs;
            coverage =
              List.map
                (fun c ->
@@ -402,7 +496,7 @@ let to_sarif (r : t) : Yojson.Safe.t =
                         s.s_status } ]);
            contract_ok = None; computed = Some (s.s_status = "covered");
            proved = None })
-       r.sections)
+       groups)
 
 let esc s =
   String.to_seq s
