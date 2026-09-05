@@ -52,6 +52,7 @@
   %{exe:../../bin/arch_serve/arch_serve.exe}
   %{exe:../../bin/arch_rules/arch_rules.exe}
   %{exe:../../bin/arch_report/arch_report.exe}
+  %{exe:../../bin/arch_sarif_load/arch_sarif_load.exe}
   %{exe:../../bin/arch_impact/arch_impact.exe}
   %{exe:../../bin/arch_effects_ocaml/arch_effects_ocaml.exe}
   %{exe:../../bin/arch_effects_load/main.exe}

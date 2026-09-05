@@ -39,6 +39,47 @@
   roadmap 3.2 rather than deleted, so the discharge ledger cannot reinvent it without the
   constraint that makes it safe. CHECK-1 and CHECK-3 are marked as the ingest slice's (2.3): they
   require adapters the same document declares unwritten.
+- **`arch-sarif-load <db> <file.sarif>` — import a foreign analyser's findings as heuristic facts**
+  (roadmap 2.3, `specs/reporting-and-integration.md` FR-010/FR-012). Opens Semgrep OSS, clippy,
+  staticcheck, gosec and anything else that emits SARIF 2.1.0. New table `imported_findings`
+  (schema **1.12**).
+
+  **ADR 002's guarantee is structural, not remembered.** A `heuristic` fact may raise a finding and
+  may never discharge a ⊤ anchor or license a `PASS`. That is enforced by where the rows go:
+  imported findings land in a table no reachability or effect query reads, and create no `calls`
+  row, no `callee_id` and no edge kind. A Semgrep finding cannot discharge anything because there
+  is nothing for it to discharge *through* — measured, the call graph is byte-identical across an
+  import. `soundness_class` is carried by the `producer_runs` row, so the class lives in one place
+  rather than one copy per finding.
+
+  **A `uri` that matches no indexed module — or matches several — is recorded as `unresolved` with
+  a NULL `module_id`, never attached to the nearest candidate.** The path is written by a tool that
+  knows nothing of this tree: absolute, relative to a `uriBaseId` we do not have, or
+  percent-encoded. A finding on the wrong function is worse than a finding on none, and a suffix
+  match produces one cheerfully. Ambiguity is absence of proof here for the same reason it is in
+  the qualified-name resolver.
+
+  **A `level` outside SARIF's closed vocabulary is refused and counted, never folded into a
+  default.** The input is foreign and the standard evolves, so a value we do not know is a fact
+  about the producer rather than noise to swallow.
+
+  **The two failure states are kept apart.** An input that cannot be parsed exits non-zero and
+  writes **no facts** — the whole document is parsed before any write is opened, so a malformed
+  file never reaches the writer (`Arch_db` has no transactions, and a loop that stops at the bad
+  record leaves everything before it written). An input that parses while records are refused
+  exits 0, writes the survivors, and records `partial` with the rejected count. The coverage row is
+  a write about the *failure*, not about the program.
+
+### Changed
+- **`specs/reporting-and-integration.md` amended again, in the same slice as the code.** FR-012's
+  "writes nothing" and CHECK-3's "no rows written **and** a coverage row" could not both hold
+  literally — a coverage row is a row. Scoped to *writes no **facts***, with the transactional
+  reading and its mechanism stated, and the residual named: a *write* that fails part-way is not
+  covered and would need a transaction. CHECK-3 split in two, because "a `partial` or `failed`
+  coverage row" for a malformed input conflates the two states FR-012 keeps apart — CHECK-3-bis
+  now covers `partial`, which otherwise no test ever produced. CHECK-1's second clause needed
+  `PASS_UNDER_HYP` (roadmap 3.2, unreachable today) and is replaced by the stronger property the
+  design actually gives: the import changes no verdict and no edge.
 
 ### Added
 - **`arch-rules --format sarif` — SARIF 2.1.0 output (roadmap 2.1).** `arch-rules` can now emit

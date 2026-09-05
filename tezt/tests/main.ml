@@ -102,6 +102,8 @@ let () =
   Point_free_aliases.register () ;
   Module_alias_heads.register () ;
   Report.register () ;
+
+  Sarif_in.register () ;
   Insert_rowid_attribution.register () ;
   Dropped_node_dependents.register_dropped_function () ;
   Dropped_node_dependents.register_dropped_module () ;

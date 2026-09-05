@@ -153,6 +153,41 @@ CREATE INDEX IF NOT EXISTS idx_functions_mutation ON functions(mutation_sites DE
   WHERE mutation_sites IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_functions_producer_run ON functions(producer_run_id);
 
+-- Findings imported from a FOREIGN analyser (roadmap 2.3,
+-- specs/reporting-and-integration.md FR-010). Schema 1.12.
+--
+-- There is no `soundness_class` column here on purpose: it lives on
+-- `producer_runs`, and a finding inherits it from the run that imported it.
+-- An adapter therefore creates a RUN, not a column — which is what keeps the
+-- ADR-002 guarantee in one place instead of one copy per finding that could
+-- drift from its run.
+--
+-- `resolution` is the load-bearing one. `uri` is written by a tool we do not
+-- control: absolute, relative to a `uriBaseId` we do not have, or
+-- percent-encoded. A uri matching no indexed file is recorded as
+-- 'unresolved' with `module_id` NULL — NEVER attached to the nearest match.
+-- A finding on the wrong function is worse than a finding on none, and a
+-- `LIKE '%…'` will happily produce one.
+CREATE TABLE IF NOT EXISTS imported_findings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    producer_run_id INTEGER NOT NULL REFERENCES producer_runs(id) ON DELETE CASCADE,
+    rule_id TEXT NOT NULL,
+    -- SARIF 2.1.0's own closed vocabulary. A member outside it is REFUSED by
+    -- the adapter and counted, never mapped to a default: the input is
+    -- foreign, so a value we do not know is a fact about the producer and not
+    -- noise to swallow.
+    level TEXT NOT NULL CHECK(level IN ('none', 'note', 'warning', 'error')),
+    message TEXT NOT NULL,
+    uri TEXT,                               -- verbatim, as the foreign tool wrote it
+    start_line INTEGER,
+    module_id INTEGER REFERENCES modules(id) ON DELETE SET NULL,
+    resolution TEXT NOT NULL CHECK(resolution IN ('resolved', 'unresolved')),
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_imported_findings_run ON imported_findings(producer_run_id);
+CREATE INDEX IF NOT EXISTS idx_imported_findings_module ON imported_findings(module_id);
+
 -- Mutability density (R8). Advisory only: a threshold on this is gameable by
 -- hiding writes behind a helper, so surface it for sorting and review, never as
 -- a CI gate.
