@@ -494,10 +494,25 @@ type result = {
    from the errors profile the index was BUILT with, so the database is the only
    thing that can answer, and it is also the only answer that matters to a rule
    evaluated against it. *)
+(* [exn_origins.channel] arrived in schema 1.8. An index written by an earlier
+   producer has the table and NOT the column, and reading it there is a SQL error
+   rather than an empty result -- the rule would die instead of reporting what it
+   could not compute. Gated on the COLUMN, not on the schema version, exactly as
+   arch-query gates [edge_form]: a version is what a database CLAIMS, a column is
+   what it has.
+
+   On such an index every origin is an exception origin by construction: the
+   column was introduced by a re-tag slice whose producer emitted only
+   [channel = 'exception']. So the honest answer for [exception] is "all rows",
+   and for any other channel it is a refusal -- that channel cannot exist here. *)
+let has_channel_column t = Arch_db.has_col t "exn_origins" "channel"
+
 let channels_in_index t =
-  Arch_db.rows t ~params_ty:Arch_db.Ty.unit ~shape:Arch_db.Rows.t1 ~to_cells:Arch_db.Rows.c1
-    "SELECT DISTINCT channel FROM exn_origins ORDER BY 1" ()
-  |> List.filter_map (function [ c ] -> Some (Arch_db.string_of_cell c) | _ -> None)
+  if not (has_channel_column t) then [ "exception" ]
+  else
+    Arch_db.rows t ~params_ty:Arch_db.Ty.unit ~shape:Arch_db.Rows.t1 ~to_cells:Arch_db.Rows.c1
+      "SELECT DISTINCT channel FROM exn_origins ORDER BY 1" ()
+    |> List.filter_map (function [ c ] -> Some (Arch_db.string_of_cell c) | _ -> None)
 
 let reach_verdict (g : Arch_graph.t) ~sound src dst =
   if SS.is_empty src then ("NO_SOURCE", [])
@@ -856,17 +871,32 @@ let eval (t : Arch_db.t) (g : Arch_graph.t) ~sound r =
         let ids_json = Yojson.Safe.to_string (`List ids) in
         let forms_json = Yojson.Safe.to_string (`List (List.map (fun f -> `String f) forms)) in
         let hits =
-          Arch_db.rows t
-            ~params_ty:Arch_db.Ty.(t2 string (t2 string string))
-            ~shape:Arch_db.Rows.t5' ~to_cells:Arch_db.Rows.c5
-            "SELECT f.name, COALESCE(m.path,'?'), o.form, COALESCE(o.exn_path,''), \
-             CAST(o.line AS TEXT) \
-             FROM exn_origins o JOIN functions f ON o.function_id = f.id \
-             LEFT JOIN modules m ON f.module_id = m.id \
-             WHERE o.escapes = 1 AND o.channel = ? \
-             AND o.form IN (SELECT value FROM json_each(?)) \
-             AND o.function_id IN (SELECT value FROM json_each(?))"
-            (channel, (forms_json, ids_json))
+          (* The channel predicate is omitted entirely on a pre-1.8 index rather
+             than being written against a column that is not there. The
+             refusal above has already established that only `exception` is
+             askable on such an index, and on it every row IS an exception row,
+             so dropping the predicate is not a widening. *)
+          let chan_and = if has_channel_column t then "AND o.channel = ? " else "" in
+          let sql =
+            Printf.sprintf
+              "SELECT f.name, COALESCE(m.path,'?'), o.form, COALESCE(o.exn_path,''), \
+               CAST(o.line AS TEXT) \
+               FROM exn_origins o JOIN functions f ON o.function_id = f.id \
+               LEFT JOIN modules m ON f.module_id = m.id \
+               WHERE o.escapes = 1 %s\
+               AND o.form IN (SELECT value FROM json_each(?)) \
+               AND o.function_id IN (SELECT value FROM json_each(?))"
+              chan_and
+          in
+          if has_channel_column t then
+            Arch_db.rows t
+              ~params_ty:Arch_db.Ty.(t2 string (t2 string string))
+              ~shape:Arch_db.Rows.t5' ~to_cells:Arch_db.Rows.c5 sql
+              (channel, (forms_json, ids_json))
+          else
+            Arch_db.rows t
+              ~params_ty:Arch_db.Ty.(t2 string string)
+              ~shape:Arch_db.Rows.t5' ~to_cells:Arch_db.Rows.c5 sql (forms_json, ids_json)
         in
         (* Group into site identities and COUNT. The count is the whole reason this is not a
            plain set difference — see [origin_allow]: a ninth array access on an

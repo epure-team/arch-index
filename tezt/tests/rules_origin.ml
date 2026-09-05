@@ -638,9 +638,71 @@ let register_coverage_and_scope () =
         (not (Arch_tezt.contains ~needle:"caught_div" out))) ;
   Lwt.return_unit
 
+(* A PRE-1.8 INDEX. exn_origins.channel arrived in schema 1.8; an index written by
+   an earlier producer has the table and NOT the column. Reading it there is a SQL
+   ERROR, not an empty result, so the rule DIES instead of reporting what it
+   cannot compute — and it dies on the default text output, not in some exotic
+   mode.
+
+   Found by looking for the same shape a peer had just hit on their own branch,
+   rather than by a reviewer finding it here. The repo already has the idiom for
+   this: arch-query gates edge_form on Arch_db.has_col. A version is what a
+   database CLAIMS; a column is what it HAS. *)
+let register_pre_channel_schema () =
+  Test.register ~__FILE__
+    ~title:"rules origin: an index older than the channel column is handled, not crashed into"
+    ~tags:["rules"; "origin"; "channel"; "schema"]
+  @@ fun () ->
+  with_indexed "ro_old" @@ fun db ->
+  (* Rebuild exn_origins without the channel column — exactly the shape a 1.7
+     producer left behind. *)
+  Db.with_db_rw db (fun c ->
+      List.iter
+        (fun sql -> ignore (Db.exec_result c sql))
+        [
+          "CREATE TABLE eo_old AS SELECT id, function_id, scope_id, form, exn_path, escapes,            line, col FROM exn_origins";
+          "DROP TABLE exn_origins";
+          "ALTER TABLE eo_old RENAME TO exn_origins";
+        ]) ;
+  Batch.run (fun b ->
+      (* PREMISE: the column really is gone, or everything below passes by
+         testing the ordinary path a second time. *)
+      Batch.eq_int b ~msg:"premise: this index has no exn_origins.channel column"
+        (Db.with_db db (fun c ->
+             Db.int c "SELECT count(*) FROM pragma_table_info('exn_origins') WHERE name='channel'"))
+        0 ;
+      let allow = allow_file "ro_old" "" in
+      let code, out = rules [db; rule_file "ro_old" (origin_rule ~forms:"division" ~allow)] in
+      (* It must EVALUATE. Exit 2 would be an abort and a crash is worse still —
+         the unguarded version dies with "Sqlite3.prepare: no such column:
+         channel" before printing a verdict at all. *)
+      Batch.check b
+        ~msg:("the rule evaluates on a pre-channel index instead of dying (exit " ^ string_of_int code
+            ^ ", output:\n" ^ out ^ ")")
+        (code <> 2 && not (Arch_tezt.contains ~needle:"no such column" out)) ;
+      Batch.check b
+        ~msg:"and it still finds the sites, so the channel predicate was dropped and not the query"
+        (Arch_tezt.contains ~needle:"[new]" out) ;
+      (* And a channel that cannot exist on such an index is refused rather than
+         silently answered: before 1.8 the producer emitted only exception rows,
+         so `option` is not merely empty here, it is unaskable. *)
+      let code_o, _ =
+        rules
+          [ db;
+            rule_file "ro_old_opt"
+              (Printf.sprintf
+                 "rule \"o\"\n  forbid origin from file:**/ro_main.ml form:division \
+                  channel:option allow-file:%s\n"
+                 allow) ]
+      in
+      Batch.eq_int b
+        ~msg:"a non-exception channel is refused on an index that predates channels" code_o 2) ;
+  Lwt.return_unit
+
 let register () =
   register_count () ;
   register_refusals () ;
   register_not_computed () ;
   register_flow () ;
-  register_coverage_and_scope ()
+  register_coverage_and_scope () ;
+  register_pre_channel_schema ()
