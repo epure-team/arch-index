@@ -545,7 +545,7 @@ false as a statement about the guard: it is a statement about *that corpus*.
 
 | corpus | rewrites, unguarded → guarded | resolved, unguarded → guarded |
 |---|---|---|
-| proto_alpha (468 modules) | 3 247 → 3 203 | 2 839 → **2 839** |
+| proto_alpha (468 modules, 500 `.cmt`, `0982a42`) | 3 247 → 3 203 | 2 839 → **2 839** |
 | whole `src` (8 615 modules) | 43 401 → 41 622 | 32 737 → **32 664** |
 
 On the whole tree the guard removes **73 resolved edges**, and they are precisely
