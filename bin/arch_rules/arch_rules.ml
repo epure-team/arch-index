@@ -254,6 +254,22 @@ let origin_forms =
   [ "raise"; "reraise"; "unknown"; "failwith"; "invalid_arg"; "assert"; "partial_match";
     "compare"; "division"; "index"; "inferred_bind" ]
 
+(* And [channel:] is closed for exactly the same reason, which had to be pointed
+   out to me: I refused an unknown [form:] on the ground that it "would select
+   nothing, and the rule would report a PASS while policing an empty population"
+   -- and then added [channel:] three lines away with no such check.
+
+   Measured before fixing: `channel:banana` and `channel:result` produced
+   BYTE-IDENTICAL verdicts, both `[UNKNOWN] 0 origin(s)`, both exit 0. A
+   misspelled channel was indistinguishable from a genuinely clean one, and on a
+   cone with no ⊤ escape it is an outright PASS.
+
+   Unlike [form:], the vocabulary is not a schema CHECK: `exn_origins.channel` is
+   free text whose members come from the errors profile the INDEX was built with.
+   So the check cannot be a hardcoded list -- it is the set of channels this
+   database actually contains, which is also the only set that can answer. A
+   channel absent from the index is refused with the ones that are present. *)
+
 
 let sel ~allow tok line =
   match Arch_sel.parse ~allow tok with
@@ -452,6 +468,16 @@ type result = {
    `kind` column is missing or partly NULL is worse than no flag, because SQL's 3-valued logic
    makes such an edge invisible to both the closure and the ⊤ check. The caller passes the result
    of the full check. *)
+(* The channels this index actually contains. Not a hardcoded list: unlike
+   [exn_origins.form], the channel column has no schema CHECK -- its members come
+   from the errors profile the index was BUILT with, so the database is the only
+   thing that can answer, and it is also the only answer that matters to a rule
+   evaluated against it. *)
+let channels_in_index t =
+  Arch_db.rows t ~params_ty:Arch_db.Ty.unit ~shape:Arch_db.Rows.t1 ~to_cells:Arch_db.Rows.c1
+    "SELECT DISTINCT channel FROM exn_origins ORDER BY 1" ()
+  |> List.filter_map (function [ c ] -> Some (Arch_db.string_of_cell c) | _ -> None)
+
 let reach_verdict (g : Arch_graph.t) ~sound src dst =
   if SS.is_empty src then ("NO_SOURCE", [])
   else if SS.is_empty dst then ("NO_TARGET", [])
@@ -768,6 +794,18 @@ let eval (t : Arch_db.t) (g : Arch_graph.t) ~sound r =
             Some
               "exn_origins exists but holds no rows — the exception pass produced nothing, so \
                this rule was never evaluated against anything." }
+      else if not (List.mem channel (channels_in_index t)) then
+        (* Refused, not reported as clean. An unknown channel selects nothing, so
+           every downstream verdict would be a PASS earned by policing an empty
+           population -- the vacuity this whole verb exists to refuse, and the
+           one its own [form:] check already refuses. *)
+        die
+          (Printf.sprintf
+             "arch-rules: rule %S names channel %S, which this index does not contain. \
+              Channels present: %s. A channel that selects nothing would make this rule \
+              report a PASS it never earned."
+             r.name channel
+             (String.concat ", " (channels_in_index t)))
       else if SS.is_empty (Lazy.force origin_src) then
         { rule = r.name; kind = kind_of r.body; exact = false; verdict = "NO_SOURCE"; detail = [];
           detail_total = 0; sizes = None; witness = []; top_reasons = [];

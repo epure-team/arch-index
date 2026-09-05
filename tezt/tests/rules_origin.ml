@@ -92,6 +92,40 @@ let piped_div a b = a |/| b
    that was deleted. *)
 let caught_div a b = try a / b with Division_by_zero -> 0
 
+(* TWENTY-FIVE distinct division sites, so the offender list crosses the 20 that
+   every other verdict caps at while staying under this verb's 200. Without them
+   the documented divergence is unpinnable: the reviewer measured that dropping
+   the cap from 200 to 20 SURVIVES, and it had to — a fixture yielding five
+   offenders cannot tell the two caps apart, so no assertion written against it
+   could ever have failed. The cap is not decoration: this list is the artefact a
+   reviewer transcribes into the allow-file, and there is deliberately no
+   --regenerate to produce it another way. *)
+let d01 a b = a / b
+let d02 a b = a / b
+let d03 a b = a / b
+let d04 a b = a / b
+let d05 a b = a / b
+let d06 a b = a / b
+let d07 a b = a / b
+let d08 a b = a / b
+let d09 a b = a / b
+let d10 a b = a / b
+let d11 a b = a / b
+let d12 a b = a / b
+let d13 a b = a / b
+let d14 a b = a / b
+let d15 a b = a / b
+let d16 a b = a / b
+let d17 a b = a / b
+let d18 a b = a / b
+let d19 a b = a / b
+let d20 a b = a / b
+let d21 a b = a / b
+let d22 a b = a / b
+let d23 a b = a / b
+let d24 a b = a / b
+let d25 a b = a / b
+
 (* An OPTION-channel origin: on that channel, "raising" means returning None.
    Present so that "the default channel is exception" is a claim that CAN FAIL.
    Without an origin on another channel, a default that silently widened to
@@ -105,6 +139,13 @@ let maybe_div a b = if b = 0 then None else Some (a / b)
   let y = Ro_leaf.piped_div x a in
   let z = Ro_leaf.caught_div y b in
   let _ = Ro_leaf.maybe_div x b in
+  let _ = Ro_leaf.d01 x b + Ro_leaf.d02 x b + Ro_leaf.d03 x b + Ro_leaf.d04 x b
+          + Ro_leaf.d05 x b + Ro_leaf.d06 x b + Ro_leaf.d07 x b + Ro_leaf.d08 x b
+          + Ro_leaf.d09 x b + Ro_leaf.d10 x b + Ro_leaf.d11 x b + Ro_leaf.d12 x b
+          + Ro_leaf.d13 x b + Ro_leaf.d14 x b + Ro_leaf.d15 x b + Ro_leaf.d16 x b
+          + Ro_leaf.d17 x b + Ro_leaf.d18 x b + Ro_leaf.d19 x b + Ro_leaf.d20 x b
+          + Ro_leaf.d21 x b + Ro_leaf.d22 x b + Ro_leaf.d23 x b + Ro_leaf.d24 x b
+          + Ro_leaf.d25 x b in
   Ro_leaf.one_assert (x + y + z)
 |} );
   ]
@@ -251,6 +292,39 @@ let register_refusals () =
       Batch.eq_int b ~msg:"an unknown origin form aborts instead of policing nothing" code_f 2 ;
       Batch.check b ~msg:"the refusal lists the known forms"
         (Arch_tezt.contains ~needle:"division" out_f) ;
+      (* AN UNKNOWN CHANNEL. Same argument as the unknown form three lines above,
+         and it took a reviewer to point out that I had made it for one token and
+         not the other. Measured before the fix: `channel:banana` and
+         `channel:result` produced BYTE-IDENTICAL `[UNKNOWN] 0 origin(s)`
+         verdicts at exit 0 — a misspelling indistinguishable from a genuinely
+         clean channel, and on a cone with no ⊤ escape an outright PASS.
+
+         The refusal has to name the channels PRESENT, because unlike `form:`
+         this vocabulary is not a schema CHECK: it comes from the errors profile
+         the index was built with, so only the database can answer. *)
+      let code_ch, out_ch =
+        run "ror_chan"
+          (Printf.sprintf
+             "forbid origin from file:**/ro_main.ml form:division channel:banana allow-file:%s"
+             ok_allow)
+      in
+      Batch.eq_int b ~msg:"an unknown channel aborts instead of policing an empty population"
+        code_ch 2 ;
+      Batch.check b
+        ~msg:("the refusal lists the channels this index DOES contain (output:\n" ^ out_ch ^ ")")
+        (Arch_tezt.contains ~needle:"exception" out_ch) ;
+      (* And the negation, which is what stops the check from being a blanket
+         refusal: a channel that IS present is accepted even when it yields no
+         origin in this cone. A typo and a genuinely clean channel must be
+         distinguishable in BOTH directions. *)
+      let code_ok_ch, _ =
+        run "ror_chan_ok"
+          (Printf.sprintf
+             "forbid origin from file:**/ro_main.ml form:division channel:option allow-file:%s"
+             ok_allow)
+      in
+      Batch.check b ~msg:"a channel present in the index is accepted, empty or not"
+        (code_ok_ch <> 2) ;
       (* A MISSING allow-file must abort at PARSE time. A gate that starts
          evaluating and then finds it cannot read its own exemptions has already
          printed half a verdict. *)
@@ -369,6 +443,22 @@ let register_coverage_and_scope () =
         (Arch_tezt.contains ~needle:"coverage:" out) ;
       Batch.check b ~msg:"it states the cone size, so a widened cone is visible as such"
         (Arch_tezt.contains ~needle:"node(s) in cone" out) ;
+      (* THE CAP, pinned. [detail] caps at 200 here and at 20 everywhere else,
+         and the divergence is deliberate: elsewhere the list is a SAMPLE a human
+         reads, here it IS the payload a human transcribes. Counting the listed
+         offenders is the only assertion that can tell the two caps apart, and it
+         needs a fixture with more than 20 — which is what the d01..d25 sites are
+         for. *)
+      let listed =
+        String.split_on_char '\n' out
+        |> List.filter (fun l -> Arch_tezt.contains ~needle:"[new]" l)
+        |> List.length
+      in
+      Batch.check b
+        ~msg:
+          (Printf.sprintf
+             "the offender list is not truncated at the sibling verbs' 20 (listed %d)" listed)
+        (listed > 20) ;
       Batch.check b ~msg:"and how many allow-entries matched nothing"
         (Arch_tezt.contains ~needle:"matching nothing" out) ;
       (* THE CHANNEL SCOPE. exn_origins holds every error channel, not just
