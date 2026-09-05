@@ -184,6 +184,14 @@ return zero:
 | octez-manager | 18 758 | 6 367 | **15 569 (83 %)** | 118 |
 | whole `src` | 265 217 | 116 684 | **169 525 (64 %)** | 139 |
 
+All three rows were measured from indexes built by `origin/main` `0982a42`:
+proto_alpha from `tezos/_build/default/src/proto_alpha/lib_protocol` and the whole
+tree from `tezos/_build/default/src`, both with `--errors-profile=tezos`;
+octez-manager from its own `_build/default`. **The build state belongs with the
+corpus name here for the same reason it does for resolution rates**: how many
+origins exist at all depends on which units were compiled, so a collision count
+is a joint property of the code and the build's coverage — not of the code alone.
+
 Two things are wrong, not one:
 
 1. **The rate.** 4.5 % published against 64–88 % measured — an order of magnitude,
