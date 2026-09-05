@@ -91,12 +91,20 @@ let piped_div a b = a |/| b
    fixture where everything escapes cannot tell a filter that works from one
    that was deleted. *)
 let caught_div a b = try a / b with Division_by_zero -> 0
+
+(* An OPTION-channel origin: on that channel, "raising" means returning None.
+   Present so that "the default channel is exception" is a claim that CAN FAIL.
+   Without an origin on another channel, a default that silently widened to
+   every channel would produce identical output and no assertion could see it —
+   which would be worse than the bug it replaced. *)
+let maybe_div a b = if b = 0 then None else Some (a / b)
 |} );
     ( "ro_main.ml",
       {|let entry a b c =
   let x = Ro_leaf.two_on_one_line a b c in
   let y = Ro_leaf.piped_div x a in
   let z = Ro_leaf.caught_div y b in
+  let _ = Ro_leaf.maybe_div x b in
   Ro_leaf.one_assert (x + y + z)
 |} );
   ]
@@ -381,6 +389,55 @@ let register_coverage_and_scope () =
       in
       Batch.check b ~msg:"an explicit channel is honoured"
         (Arch_tezt.contains ~needle:"on channel 'option'" out_o) ;
+      (* THE DEFAULT MUST RESTRICT, not merely be named. A default that silently
+         widened to every channel would print the same word and report MORE
+         sites — worse than the unscoped bug it replaces, because it would look
+         scoped. So the claim is made against a fixture that HAS an origin on
+         another channel, and it is a count. *)
+      let sites out =
+        String.split_on_char '\n' out
+        |> List.filter_map (fun l ->
+               match String.index_opt l ',' with
+               | _ when not (Arch_tezt.contains ~needle:"site(s)" l) -> None
+               | _ ->
+                   let rec scan i acc =
+                     if i >= String.length l then acc
+                     else if l.[i] >= '0' && l.[i] <= '9' then
+                       let j = ref i in
+                       while !j < String.length l && l.[!j] >= '0' && l.[!j] <= '9' do incr j done ;
+                       let n = int_of_string (String.sub l i (!j - i)) in
+                       if !j + 5 <= String.length l && String.sub l !j 5 = " site" then Some n
+                       else scan !j acc
+                     else scan (i + 1) acc
+                   in
+                   scan 0 None)
+        |> function [ n ] -> n | _ -> -1
+      in
+      Batch.eq_int b
+        ~msg:"premise: the fixture carries an option-channel origin, so the default CAN be wrong"
+        (Db.with_db db (fun c ->
+             Db.int c "SELECT count(*) FROM exn_origins WHERE channel='option'") > 0
+         |> fun x -> if x then 1 else 0)
+        1 ;
+      let _, out_raise =
+        rules [db; rule_file "roc_raise" (origin_rule ~forms:"raise" ~allow:empty)]
+      in
+      let _, out_raise_opt =
+        rules
+          [ db;
+            rule_file "roc_raise_opt"
+              (Printf.sprintf
+                 "rule \"ro\"\n  forbid origin from file:**/ro_main.ml form:raise \
+                  channel:option allow-file:%s\n"
+                 empty) ]
+      in
+      Batch.check b
+        ~msg:
+          (Printf.sprintf
+             "the DEFAULT channel restricts: form:raise sees %d site(s) by default and %d on \
+              channel:option — a default that widened would make these equal"
+             (sites out_raise) (sites out_raise_opt))
+        (sites out_raise <> sites out_raise_opt) ;
       (* THE escapes = 1 FILTER. [caught_div] divides inside a handler that
          catches Division_by_zero, so its origin does not escape and must not be
          policed. A fixture with no handler cannot tell a working filter from a
