@@ -216,17 +216,26 @@ let load ?(channel = "exception") ?(use_builtin_summaries = false) (t : Arch_db.
     if channel = "exception" then Arch_db.refuse "%s" not_analysed
     else Arch_db.refuse "%s" (not_analysed_channel channel (Arch_db.meta t "error_contract"))
   in
+  (* A version is what a database CLAIMS; a column is what it HAS. [exn_scopes.channel]
+     and [exn_origins.channel] are schema-1.3 columns (see architecture-schema.sql) — an
+     index built before them has [exn_origins] (so [has_table] passes) but querying
+     [channel] on either table raises a bare [Sqlite3.prepare: no such column]. Guard on
+     the column itself, not on [exn_contract] or a schema-version number, either of which
+     can be set (or absent) independently of whether the column was ever added. *)
+  let has_channel_col () =
+    Arch_db.has_col t "exn_scopes" "channel" && Arch_db.has_col t "exn_origins" "channel"
+  in
   if t.schema = Arch_db.Flat then refuse_not_analysed () ;
   if channel = "exception" then
     match Arch_db.meta t "exn_contract" with
-    | Some _ when Arch_db.has_table t "exn_origins" -> ()
+    | Some _ when Arch_db.has_table t "exn_origins" && has_channel_col () -> ()
     | _ -> Arch_db.refuse "%s" not_analysed
   else (
     (* A value channel's contract lives in [error_contract]
        ("v1:exception,result,option,…") — FR-032: a channel absent there
        MUST refuse NOT_ANALYSED, distinctly from the [exception] channel's
        own (unchanged) check above. *)
-    if not (Arch_db.has_table t "exn_origins") then refuse_not_analysed () ;
+    if not (Arch_db.has_table t "exn_origins" && has_channel_col ()) then refuse_not_analysed () ;
     let ec = Arch_db.meta t "error_contract" in
     let emitted =
       match ec with
