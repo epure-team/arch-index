@@ -112,3 +112,16 @@ no recalibration here.
   silent-fifth-value shape FR-031 describes, and the spec cites that very line as its reason. It
   reads a third-party file rather than a schema `CHECK`, and changing it would alter a shipped
   command's behaviour for an unknown status.
+
+## A consequence for `arch-report` that this PR creates
+
+`lib/arch_tools/arch_report.ml:196` builds its verdict row as `List.map (fun v -> (v, 0))` over a
+fixed eight-token vocabulary. Two of those tokens, `UNKNOWN` and `UNKNOWN_NO_CONTRACT`, are also
+`arch-mutants`' vocabulary. Today no table stores them, so the zeros are honest. **After this
+merges they stop being honest**: a `GROUP BY selection_provenance` over `mutant_runs` returns them,
+and the report will publish 0 against a database that holds them. Measured on a fixture carrying
+the migration plus three run rows — the query returns 1 and 1, the report publishes 0 and 0.
+
+This is not a regression this PR introduces. It is a hardcoded zero finally meeting data, and it
+belongs to issue #84 rather than here — recorded so the reviewer of #84 has the date it starts
+mattering. Findings handed to the roadmap session separately.
