@@ -14,8 +14,18 @@ arch-index tags every `calls` row with a `kind` value that encodes what is stati
 [`specs/point-free-aliases.md`](../specs/point-free-aliases.md). Effect and reachability
 consumers are right to traverse it (the alias genuinely forwards `M.g`'s body), but a consumer
 counting **call sites** or **callers** must exclude it, and the three that do are `fan-in`,
-`god-modules` and `callers-of`. `edge_form IS NULL` is the predicate; the column is nullable and
-absent on a pre-`1.10` database, so gate on `Arch_db.has_col` rather than assuming it.
+`god-modules` and `callers-of`.
+
+**The predicate is `COALESCE(edge_form,'') <> 'value_alias'`, NOT `edge_form IS NULL`.** That
+distinction did not exist while the vocabulary had one member, and this document asserted the
+wrong one until `1.11` added a second. `edge_form = 'module_alias'` marks a head that was
+*spelled* through a module alias (`S.f` where the file declares `module S = Saturation_repr`) —
+a real `Texp_apply` at a real call site, which a caller-count consumer **must** count. Excluding
+every non-NULL value would have silently dropped 3 247 genuine edges on proto_alpha. Exclude the
+member that means *no call happens here*, never the column's non-emptiness.
+
+The column is nullable and absent on a pre-`1.10` database, so gate on `Arch_db.has_col` rather
+than assuming it.
 
 When a backend produces a ⊤-marked index it sets `callgraph_contract = v1` in `comment_db_meta`. Backends that cannot tag edges must not produce a DB at all — the loader aborts on missing or invalid `kind` values (exit 2) to prevent a silent false-confidence index.
 

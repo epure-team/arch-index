@@ -72,8 +72,22 @@ let current_schema_version = "1.11"
    [collect_calls_from_expr] with the main indexer and so receives
    alias-marked edges whether or not the column exists. The number is
    independent of the main schema's: "1.2" here and "1.10" there describe
-   different schemas, not comparable versions. *)
-let current_flat_schema_version = "1.2"
+   different schemas, not comparable versions.
+
+   Bumped to "1.3" for the second [edge_form] member, 'module_alias'
+   (specs/reexport-resolution.md). An earlier revision of this branch left it at
+   "1.2" on the ground that "no structure changed" — no CHECK constraint exists
+   on this schema's column, so nothing in the DDL moves. That reasoning is wrong
+   by this table's own precedent: 1.1 -> 1.2 was taken because
+   fan-in/god-modules/callers-of "answer a DIFFERENT NUMBER on a database that
+   has the column than on one that does not", and a consumer comparing two runs
+   must have a version to refuse against rather than attribute the change to the
+   code. Exactly that holds here — the flat producer emits the new member
+   (call_graph_extractor.ml shares collect_calls_from_expr), and a consumer
+   excluding only 'value_alias' counts differently from one excluding every
+   non-NULL. A version records what a consumer can OBSERVE, not what the DDL
+   text says. *)
+let current_flat_schema_version = "1.3"
 
 (* FIX (review): [current_schema_version] is a raw string, so a naive consumer
    is tempted to write [Arch_index.schema_version = "1.2"] — brittle against
