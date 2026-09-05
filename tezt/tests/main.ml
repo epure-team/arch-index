@@ -99,6 +99,7 @@ let () =
   Completion_markers.register () ;
   Escaping_origins.register () ;
   Point_free_aliases.register () ;
+  Module_alias_heads.register () ;
   Insert_rowid_attribution.register () ;
   Dropped_node_dependents.register_dropped_function () ;
   Dropped_node_dependents.register_dropped_module () ;
