@@ -74,7 +74,22 @@ let current_schema_version = "1.11"
    history records why that is worse than a hole — a version LOWER than main's
    while carrying strictly more schema breaks every >= comparison. So this slice
    takes 1.12 and DEPENDS on 1.11 landing first; if that branch is dropped, this
-   one renumbers rather than silently filling the gap. *)
+   one renumbers rather than silently filling the gap.
+
+   AND 1.12 WAS CONTENDED TOO, BY A BRANCH NO GIT COMMAND CAN SEE. A third slice
+   had written 1.12 into its working tree an hour before this one, on a branch it
+   is not permitted to push. Sweeping the 24 remote branches — the check one
+   would naturally prescribe — finds 1.11 and 1.12 and misses it entirely,
+   because an unpushed branch is not an open branch. The reservation existed only
+   in a conversation.
+
+   The general defect, recorded here because this comment is where the next
+   author will reason about a number: THE PROTOCOL RESERVES A VERSION AT WRITE
+   TIME AND CONFIRMS IT AT MERGE TIME, and between the two the reservation is
+   invisible to tooling. Two sessions applying the protocol correctly collided
+   twice in two hours. The fix is to assign the version AT MERGE, not at write;
+   until then, a number taken from a grep is a guess, and the roadmap owner
+   assigns. *)
 let current_schema_version = "1.12"
 
 (* The flat schema (runner.ml's own inline 3-table [schema_sql]) — distinct
