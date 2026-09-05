@@ -149,11 +149,16 @@ the taxonomy this document defines is what shows it. On Octez:
   than one function answers. Not unknowable: under-determined, and roadmap 1.6 records it as ⊤
   precisely because picking one would forge a `MUST`.
 - `module_param` — **117 048 edges**, of which **42 987 (36.7 %)** are headed by a module alias
-  (`module S = Target`) declared in the calling module, and **39 524 (33.8 %)** have an alias
+  (`module S = Target`) declared in the calling module, and **≈39.5 k (≈33.8 %)** have an alias
   target naming a module that is **in the index**. Both halves are already in the database and
-  the resolver reads neither: a wiring gap, not an unknowable target. (The 39 524 was measured
-  by the roadmap owner's session on an independent Octez index; the three figures below were
-  cross-derived and reproduce exactly.)
+  the resolver reads neither: a wiring gap, not an unknowable target.
+
+  The second figure is given to two significant digits on purpose: two independent derivations
+  gave **39 524** and **39 731** — a 0.5 % spread, because each matches an alias target against
+  module names by a slightly different rule. That the spread is 0.5 % and not 5 % is itself the
+  useful part: the quantity is robust to the matching rule, and it is a **heuristic upper bound**
+  in both derivations rather than a resolved count. Quoting either figure to the unit would
+  assert a precision neither has.
 
   **The key is the PAIR, never the name.** 3 423 distinct `(source_module, alias_name)` keys, of
   which **0 are ambiguous** — and that zero is a measurement, not a schema tautology: there is no
