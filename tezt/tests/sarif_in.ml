@@ -224,12 +224,18 @@ let register_foreign_input_hazards () =
            "SELECT count(*) FROM modules WHERE 'si_zz.ml' = path OR 'si_zz.ml' LIKE '%/' || path \
             OR path LIKE '%/' || 'si_zz.ml'")
         0 ;
+      (* This premise USED to be spelled with LIKE, in the file whose subject is that LIKE's
+         wildcard — so it asserted through the very mechanism under test. It was not wrong today,
+         because the decoy lives in another database, but it was one fixture edit from measuring
+         itself. Written with substr, like the decoy-only premise below.
+
+         Two modules end in the segment, and that is what makes the uri ambiguous. *)
       Batch.eq_int b
-        ~msg:"premise (the real one): LIKE matches the decoy for the underscore uri"
+        ~msg:"premise: two modules end in the si_a.ml segment, so the uri really is ambiguous"
         (count
-           "SELECT count(*) FROM modules WHERE 'si_a.ml' = path OR 'si_a.ml' LIKE '%/' || path \
-            OR path LIKE '%/' || 'si_a.ml'")
-        2 ;
+           "SELECT count(*) FROM modules WHERE path='si_a.ml' \
+            OR substr(path, length(path) - 7) = '/si_a.ml'")
+        1 ;
       let f =
         write (Temp.file "underscore.sarif")
           {|{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"probe"}},"results":[
@@ -345,8 +351,53 @@ let register_pre_schema_index () =
         1) ;
   Lwt.return_unit
 
+(* A MERGED SARIF LOG is the ordinary shape: `semgrep --sarif` beside `gosec` is what a CI job
+   produces. The writer flattened every run into one producer_runs row, so both findings were
+   attributed to whichever tool was read LAST -- and `tool_version` was assigned unconditionally
+   while `tool` was not, so the two fields could come from DIFFERENT runs: semgrep's version
+   destroyed by a gosec run that carried none.
+
+   That is provenance decided by POSITION, the same defect the sibling report slice was corrected
+   for one round earlier. Found there, then written here. *)
+let register_multi_run_provenance () =
+  Test.register ~__FILE__
+    ~title:"sarif-in: a merged log attributes each finding to ITS own tool, not the last one"
+    ~tags:["sarif"; "ingest"; "provenance"; "multirun"]
+  @@ fun () ->
+  indexed "si_multi" @@ fun db ->
+  let f =
+    write (Temp.file "merged.sarif")
+      {|{"version":"2.1.0","runs":[
+        {"tool":{"driver":{"name":"semgrep","version":"1.0"}},
+         "results":[{"ruleId":"S1","level":"error","message":{"text":"from semgrep"}}]},
+        {"tool":{"driver":{"name":"gosec"}},
+         "results":[{"ruleId":"G1","level":"warning","message":{"text":"from gosec"}}]}]}|}
+  in
+  let code, out = load db f in
+  Batch.run (fun b ->
+      Batch.eq_int b ~msg:("the merged log imports (output:\n" ^ out ^ ")") code 0 ;
+      (* PREMISE: two runs with DIFFERENT tools, one carrying a version and one not. Without the
+         asymmetry, "took the last tool" and "took the right tool" can coincide. *)
+      Batch.eq_int b ~msg:"premise: two heuristic producer runs, one per tool"
+        (Db.with_db db (fun c ->
+             Db.int c
+               "SELECT count(*) FROM producer_runs WHERE soundness_class='heuristic'"))
+        2 ;
+      Batch.eq_string b
+        ~msg:"each finding names ITS own tool, and semgrep's version is not destroyed by gosec's absence"
+        (String.concat ", "
+           (Db.with_db db (fun c ->
+                Db.rows c
+                  "SELECT f.rule_id || '->' || r.producer || '/' || COALESCE(r.producer_version,'-') \
+                   FROM imported_findings f JOIN producer_runs r ON f.producer_run_id = r.id \
+                   ORDER BY f.rule_id")
+            |> List.map (function [ x ] -> Db.to_string ~sql:"prov" x | _ -> Test.fail "shape")))
+        "G1->gosec/-, S1->semgrep/1.0") ;
+  Lwt.return_unit
+
 let register () =
   register_heuristic_cannot_reach () ;
+  register_multi_run_provenance () ;
   register_foreign_input_hazards () ;
   register_pre_schema_index () ;
   register_failure_states ()
