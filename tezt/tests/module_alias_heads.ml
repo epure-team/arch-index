@@ -54,6 +54,10 @@ let fixture_files =
     ("ma_real.ml", {|exception Real_boom
 let f n = if n > 0 then raise Real_boom else n
 let g n = n + 1
+
+module Sub = struct
+  let g n = n + 1
+end
 |});
     ("ma_stub.ml", {|exception Stub_boom
 let f n = if n > 0 then raise Stub_boom else n
@@ -108,6 +112,12 @@ let via_alias n = S.f n
     ( "ma_param.ml",
       {|module type HAS_F = sig
   val f : int -> int
+end
+
+module type HAS_SUB = sig
+  module Sub : sig
+    val g : int -> int
+  end
 end
 
 module Make (S : HAS_F) = struct
@@ -174,6 +184,30 @@ end
 let r6 (x : (module HAS_F)) n =
   let module R6 = (val x : HAS_F) in
   R6.f n
+
+(* R8 — INCLUDE of a functor parameter, and R9 — a RECURSIVE binding to one.
+   Both were named in the review's list of other roads and both were missing
+   from the first battery, which is itself the layer-up version of the defect
+   the battery exists to close.
+
+   Measured: both are safe ONLY because [Tstr_include] and [Tstr_recmodule] are
+   not [Tstr_module], so neither reaches the table. And [Tstr_recmodule] is the
+   sharp one: the [unit_declared] pre-pass in this same file ALREADY handles it
+   beside [Tstr_module], so anyone extending this table to mirror that pre-pass
+   makes R9 live in one edit — at which point the persistent-root guard becomes
+   its only protection. The expiry is not hypothetical; the precedent to copy is
+   thirty lines away. *)
+module Inc (P : HAS_SUB) = struct
+  include P
+
+  let r8 n = Sub.g n
+end
+
+module RecM (P : HAS_F) = struct
+  module rec R9 : HAS_F = P
+
+  let r9 n = R9.f n
+end
 |} );
   ]
 
@@ -317,7 +351,7 @@ let register_rewrite () =
          guarantees, and the second kind stops holding the day the walker learns
          to visit expression-level module bindings. *)
       List.iter
-        (fun (caller, road) ->
+        (fun (caller, callee_pat, road) ->
           Batch.eq_string b
             ~msg:(Printf.sprintf "%s: %s keeps its ⊤" caller road)
             (String.concat ","
@@ -328,18 +362,25 @@ let register_rewrite () =
                           ||CASE WHEN c.edge_form IS NULL THEN 'unmarked' ELSE c.edge_form END \
                           ||'/'||CASE WHEN c.callee_id IS NULL THEN 'unresolved' ELSE 'RESOLVED' END \
                           FROM calls c JOIN functions cf ON c.caller_id=cf.id \
-                          WHERE cf.name='%s' AND c.callee_name LIKE '%%.f'"
-                         caller))
+                          WHERE cf.name='%s' AND c.callee_name LIKE '%s'"
+                         caller callee_pat))
                 |> List.map (function
                      | [x] -> Db.to_string ~sql:"route" x
                      | _ -> Test.fail "route: unexpected row shape")))
             "MAY_TOP/unmarked/unresolved")
         [
-          ("Routes.r2", "an alias to a parameter behind a signature constraint");
-          ("Routes.Inner.r3", "a nested alias to a parameter");
-          ("Routes.r5", "an alias to an alias to a parameter");
-          ("Routes.r4", "a let module binding (never reaches the table)");
-          ("r6", "a first-class module unpack (never reaches the table)");
+          ("Routes.r2", "%.f", "an alias to a parameter behind a signature constraint");
+          ("Routes.Inner.r3", "%.f", "a nested alias to a parameter");
+          ("Routes.r5", "%.f", "an alias to an alias to a parameter");
+          ("Routes.r4", "%.f", "a let module binding (never reaches the table)");
+          ("r6", "%.f", "a first-class module unpack (never reaches the table)");
+          (* The callee pattern is per-route rather than a hardcoded [%.f]: the
+             include route calls [Sub.g], and a battery whose selector matched
+             only [.f] reported an EMPTY result for it — the selector filtering
+             out exactly the row it was added to observe, in the battery written
+             to close that class. *)
+          ("Inc.r8", "%.g", "an include of a parameter (never reaches the table)");
+          ("RecM.r9", "%.f", "a recursive binding to a parameter (never reaches the table)");
         ]) ;
   Lwt.return_unit
 
