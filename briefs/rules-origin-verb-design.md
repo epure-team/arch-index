@@ -74,15 +74,47 @@ A verb that does not declare its kinds inherits that by omission.
 accepted kinds — an origin belongs to a function in a file; a module is not a
 root and an external has no body to hold one.
 
-## Open, for the parsing-area owner
+## Both open questions are now answered
 
-1. Does `allow-file:` fit the token conventions of the other bodies
-   (`kind:VALUE`), or is there a house form for file references?
-2. Should the entry format be the four-field identity above, or reuse
-   `escaping-origins`' list output verbatim so the two cannot drift?
-   Reusing it means one format and no translation; it also couples the rule file
-   to a query's rendering, which is the coupling that made `top_reason` diverge
-   between a string and a constructor.
+**`allow-file:` is the right form.** `kind:` is the only `token:value` outside
+selectors, matched by `String.sub k 0 5 = "kind:"` and then sliced — this is the
+same mould. Confirmed in the source.
+
+**And the entry format is the four declared fields, NOT the query's rendering.**
+My reason was the `top_reason` string/constructor divergence. The parsing-area
+owner supplied a better one, measured an hour before: **the rendering is pinned
+by no test.** `Arch_graph.label` strips the `ext:` prefix at
+`arch_graph.ml:206-207`; disabling that strip leaves the whole suite green at
+164/164, and the only occurrence of `ext:` anywhere in `tezt/tests/` is a
+*comment* in `must_null_ceiling.ml`. Verified here independently.
+
+So coupling a CI gate's allow-list to that rendering would build the gate on the
+one surface of the system nothing retains. Any display-format improvement would
+silently invalidate every exemption — and **an invalidated exemption does not
+read as an error, it reads as a new site, i.e. as a regression.** That is the
+three-cause confusion coming back through the back door after being chased out
+the front. The translation cost is the price of decoupling, and it is explicit.
+
+## Two parser properties that bite a FILE PATH specifically
+
+Both verified in `bin/arch_rules/arch_rules.ml`, both undocumented.
+
+**1. A `#` anywhere in the line truncates it, silently.** Comment stripping is
+`String.index_opt raw '#'` at line 102 — the FIRST `#`, wherever it sits. So
+`allow-file:sites#1.txt` becomes `allow-file:sites` and the rule loads a file
+that does not exist, or worse, one that does. **It fails by deletion**, the same
+family as backticks eaten by bash inside a double-quoted `-m`.
+
+**Decision: refuse a path containing `#`, with a message that names the
+character.** Not "document that it is impossible" — a documented impossibility is
+still a silent truncation for whoever did not read the doc.
+
+**2. `String.split_on_char ' '` (line 125) turns a path with a space into an
+extra token**, which falls into the catch-all `die "unrecognised rule body"`.
+Closed and loud, so not dangerous — but the message will not tell the author that
+the cause is a space in their path. **Decision: name that possibility in the
+refusal text.** One clause, and it converts a puzzling failure into an obvious
+one.
 
 ## Harness note, inherited from the #73 review
 
