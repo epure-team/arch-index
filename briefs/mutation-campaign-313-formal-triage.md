@@ -3,7 +3,7 @@ slug: mutation-campaign-313
 date: 2026-09-05
 component: bin/arch_mutants/arch_mutants.ml (+ new `run` driver, `mutants` / `mutant_kills` tables, architecture-schema.sql)
 backend_recommendation: quint
-human_decision: null
+human_decision: quint
 downgrade_reason: null
 ---
 
