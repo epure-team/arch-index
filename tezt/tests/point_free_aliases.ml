@@ -83,6 +83,16 @@ let caller n = raiser n
 let pi = 3
 let k = pi
 
+(* A MODULE alias and a call through it. Added for the FLAT schema's sake: its
+   producer emits edge_form='module_alias' (specs/reexport-resolution.md) because
+   call_graph_extractor.ml shares collect_calls_from_expr with the main indexer,
+   and nothing in this file contained a `module X = Y` at all — so the flat
+   assertion below had no row of that kind to observe and the flat schema's
+   1.2 -> 1.3 bump was unobservable. *)
+module Pfa_alias = Pfa_b
+
+let through_module_alias n = Pfa_alias.cross_helper n
+
 (* EXCLUDED (FR-003), and THE witnesses for it: qualified non-arrow values.
    [Path.Pdot] skips the [local_fn_stamps] exclusion entirely and lands on
    [add_path_call], so [is_arrow] is the ONLY thing standing between these
@@ -652,6 +662,42 @@ let register_flat_schema_marks_aliases () =
            "SELECT count(*) FROM calls WHERE caller_name='caller' AND callee_name='raiser' \
             AND edge_form IS NULL")
         1 ;
+      (* THE POSITIVE ASSERTION for the second member, and the reason this test
+         needed one. The CHECK-2 line below is NEGATIVE — "no row carries an
+         out-of-vocabulary value" — and a negative is satisfied identically by a
+         producer that emits correctly, one that emits the wrong thing, and one
+         that never emits at all. Proved: emptying the module-alias stamp table
+         on the flat path left the suite at 168/0.
+
+         This test's own docstring says a column added to a second schema with
+         nothing reading it "is a column that can be silently deleted... that is
+         the mutation this test exists to kill". It killed it for value_alias and
+         not for module_alias — the eleventh time in two days that a class
+         reappeared inside the fix for it, and this one had the sentence written
+         above it.
+
+         It also makes flat 1.2 -> 1.3 observable, which arch_index_db.ml
+         justifies on the ground that "a version records what a consumer can
+         OBSERVE". Nothing observed it. *)
+      let flat_module_alias_rows =
+        Db.with_db db (fun c ->
+            Db.rows c
+              "SELECT caller_name, callee_name FROM calls WHERE edge_form='module_alias' \
+               ORDER BY caller_name, callee_name")
+        |> List.map (function
+             | [caller; callee] ->
+                 Db.to_string ~sql:"flat_ma" caller ^ "->" ^ Db.to_string ~sql:"flat_ma" callee
+             | _ -> Test.fail "flat module_alias row: unexpected shape")
+      in
+      (* The callee is the BARE name here, where the main schema stores
+         `Pfa_b.cross_helper`. That is a pre-existing difference between the two
+         producers' callee_name conventions, not something this feature
+         introduces — recorded because an expectation that silently matched
+         either spelling would stop distinguishing them. *)
+      Batch.eq_string b
+        ~msg:"the flat producer emits the module-alias edge, and exactly that one"
+        (String.concat ", " flat_module_alias_rows)
+        "through_module_alias->cross_helper" ;
       (* CHECK-2 on this schema as well. The vocabulary is TWO members wide as of
          flat schema 1.3, and this assertion said "one" until then — the
          main-schema twin was widened for 'module_alias' and this one was

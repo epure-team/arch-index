@@ -21,7 +21,7 @@ distinction did not exist while the vocabulary had one member, and this document
 wrong one until `1.11` added a second. `edge_form = 'module_alias'` marks a head that was
 *spelled* through a module alias (`S.f` where the file declares `module S = Saturation_repr`) —
 a real `Texp_apply` at a real call site, which a caller-count consumer **must** count. Excluding
-every non-NULL value would have silently dropped 3 247 genuine edges on proto_alpha. Exclude the
+every non-NULL value would have silently dropped 3 247 genuine edges on proto_alpha (500 `.cmt`, `0982a42`, `--errors-profile=tezos`). Exclude the
 member that means *no call happens here*, never the column's non-emptiness.
 
 The column is nullable and absent on a pre-`1.10` database, so gate on `Arch_db.has_col` rather

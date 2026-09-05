@@ -256,7 +256,7 @@ disagreement — which is why a number here names its build state and not just i
   `edge_form IS NULL`, i.e. every non-NULL value rather than the one value that is not a call site.
   That was correct only while `'value_alias'` was the vocabulary's sole member. The predicate is now
   `COALESCE(edge_form,'') <> 'value_alias'`; without the fix these commands would have silently
-  dropped 3 247 genuine edges on proto_alpha. `docs/edge-kind-contract.md` stated the wrong
+  dropped 3 247 genuine edges on proto_alpha (500 `.cmt`, `0982a42`, `--errors-profile=tezos`). `docs/edge-kind-contract.md` stated the wrong
   predicate and is corrected with it.
 - **A completion marker can no longer outlive its evidence.** `comment_db_meta`'s
   `error_contract` / `exn_contract` / `callgraph_contract` keys claim that an analysis RAN; they

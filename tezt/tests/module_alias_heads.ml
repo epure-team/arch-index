@@ -36,7 +36,7 @@
       correct while [value_alias] was the only value: a point-free binding is
       not a call site. A [module_alias] edge {i is} a call site — a real
       [Texp_apply] whose head merely happened to be spelled through an alias —
-      and the same predicate would have silently dropped 3 247 genuine edges on
+      and the same predicate would have silently dropped 3 247 genuine edges on proto_alpha (500 .cmt, 0982a42, --errors-profile=tezos) on
       proto_alpha. No test could see it, because the only fixture with an
       [edge_form] had none of the second kind. Now one does. *)
 
