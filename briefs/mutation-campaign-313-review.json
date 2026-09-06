@@ -369,7 +369,8 @@
    "replay_verdict": "SUBJECT-ABSENT-AT-HEAD",
    "replay_note": "Replayed BY CONTENT at 4e4ca5b by the reviewer, not accepted from the implementing agent's report. the basename join survives ONLY as a history comment at :2443 ('The join was first [Filename.basename ...'). same_path is full-path equality; by_site discriminates on cols, replacement and the occurrence ordinal; refuse_ambiguous exists at two sites. Every named ratchet was itself re-proved by the reviewer: red against the pre-fix tree via git checkout <sha> -- <path> then rebuild, green after, no git stash.",
    "prior_last_replayed_at": "0851761b637c46e524cd354abca3fa04acde3681",
-   "closure_species": "subject-absent+ratcheted"
+   "closure_species": "subject-absent+ratcheted",
+   "closure_species_method": "computed by the same classifier on both sides (2026-09-06 correction)"
   },
   {
    "severity": "HIGH",
@@ -1390,7 +1391,8 @@
    "last_replayed_at": "d98277e9caf1d98530c0b8f4082b76b133b34194",
    "replay_verdict": "SUBJECT-ABSENT-CONFIRMED-BY-EXECUTION",
    "replay_note": "Replayed BY EXECUTION at d98277e by group R4-B, not by reading: checks/tree-boundary-non-git-checkout.js probe 1 -- inner checkout NOT git-initialised, nested inside an outer repo, outer wrapper reached by the ancestor walk -- exits 1 and names the outside path. The described failure mode (engine handed the outer wrapper, campaign written, exit 0) does not occur. Closed against CHECK-40, which was red-verified when it was written and is green here. What would have made this non-zero: probe 1 accepting the outer wrapper.",
-   "closure_species": "subject-absent+ratcheted"
+   "closure_species": "subject-absent+ratcheted",
+   "closure_species_method": "computed by the same classifier on both sides (2026-09-06 correction)"
   },
   {
    "severity": "MEDIUM",
@@ -1474,7 +1476,8 @@
    "replay_verdict": "SUBJECT-ABSENT-AT-HEAD",
    "replay_note": "Replayed BY CONTENT at 4e4ca5b by the reviewer, not accepted from the implementing agent's report. same subject as :1393 and the same evidence closes both. The label ROUND-1 FINDING NOT CLOSED was inherited across two rounds and never replayed; it was already false at 0851761. Every named ratchet was itself re-proved by the reviewer: red against the pre-fix tree via git checkout <sha> -- <path> then rebuild, green after, no git stash.",
    "prior_last_replayed_at": "0851761b637c46e524cd354abca3fa04acde3681",
-   "closure_species": "subject-absent+ratcheted"
+   "closure_species": "subject-absent+ratcheted",
+   "closure_species_method": "computed by the same classifier on both sides (2026-09-06 correction)"
   },
   {
    "severity": "HIGH",
@@ -1675,7 +1678,8 @@
    "last_replayed_at": "d98277e9caf1d98530c0b8f4082b76b133b34194",
    "replay_verdict": "SUBJECT-ABSENT-CONFIRMED-BY-EXECUTION",
    "replay_note": "Same executed replay as the :984 row -- these two are one boundary described twice, duplicated because the normaliser fingerprints on path:line:category. The boundary is no longer the git repository alone: it is the git toplevel, narrowed by an UNTRACKED nearer dune-project, falling back to the invocation directory. `git init` in the inner tree no longer decides whether the guard fires; CHECK-40 probes 1 and 2 assert exactly that, both green at d98277e.",
-   "closure_species": "subject-absent+ratcheted"
+   "closure_species": "subject-absent+ratcheted",
+   "closure_species_method": "computed by the same classifier on both sides (2026-09-06 correction)"
   },
   {
    "severity": "HIGH",
@@ -2000,7 +2004,8 @@
    "replay_verdict": "SUBJECT-ABSENT-AT-HEAD",
    "prior_last_replayed_at": "618acb9",
    "replay_note": "Replayed BY CONTENT at 4e4ca5b by the reviewer, not accepted from the implementing agent's report. the second route to :450, closed by the same structural change. Distinct route kept below rather than dropped. Every named ratchet was itself re-proved by the reviewer: red against the pre-fix tree via git checkout <sha> -- <path> then rebuild, green after, no git stash.",
-   "closure_species": "subject-absent+ratcheted"
+   "closure_species": "subject-absent+ratcheted",
+   "closure_species_method": "computed by the same classifier on both sides (2026-09-06 correction)"
   },
   {
    "severity": "HIGH",
@@ -2024,7 +2029,8 @@
    "replay_verdict": "SUBJECT-ABSENT-AT-HEAD",
    "prior_last_replayed_at": "618acb9",
    "replay_note": "Replayed BY CONTENT at 4e4ca5b by the reviewer, not accepted from the implementing agent's report. MDb.count_runs asks the database and completed_at is withheld unless rows equal mutants_attempted; attempts_reconciled_with_rows reaches the JSON. A collision now refuses BEFORE the campaign row exists. Every named ratchet was itself re-proved by the reviewer: red against the pre-fix tree via git checkout <sha> -- <path> then rebuild, green after, no git stash.",
-   "closure_species": "subject-absent+ratcheted"
+   "closure_species": "subject-absent+ratcheted",
+   "closure_species_method": "computed by the same classifier on both sides (2026-09-06 correction)"
   },
   {
    "severity": "HIGH",
@@ -2047,7 +2053,8 @@
    "last_replayed_at": "d98277e9caf1d98530c0b8f4082b76b133b34194",
    "replay_verdict": "CONFIRMED-AT-ROUND-4",
    "replay_note": "Re-executed at d98277e by group R4-B, ARCH_MUTANTS_WRAPPER unset, identical argv, only cwd varied: repo root exit 0, bin/ exit 0, poc/decision-lint exit 1 with 'belongs to a different tree'. Both halves confirmed -- the verdict and the diagnosis. Fixed by requiring the marker to be UNTRACKED by the enclosing repository before it may narrow the boundary (`let tracked_by`), and the Anchor_marker diagnosis reworded to state that condition. CHECK-51 red-verified at d98277e (exit 1, 4 of 10) with its two negative-control probes green in both runs.",
-   "closure_species": "fixed-with-ratchet"
+   "closure_species": "fixed-with-ratchet",
+   "closure_species_method": "computed by the same classifier on both sides (2026-09-06 correction)"
   },
   {
    "severity": "HIGH",
@@ -2071,7 +2078,8 @@
    "replay_verdict": "SUBJECT-ABSENT-AT-HEAD",
    "prior_last_replayed_at": "618acb9",
    "replay_note": "Replayed BY CONTENT at 4e4ca5b by the reviewer, not accepted from the implementing agent's report. the campaign tier now reads briefs/ACTIVE_TASK and passes each script the argument it documents needing. NOTE: this finding's THIRD clause -- a concealed red on ci.yml -- was RETRACTED; check-scope-diff exits 0, ci.yml having been added to the manifest by ac08d1a before the clause was written. Every named ratchet was itself re-proved by the reviewer: red against the pre-fix tree via git checkout <sha> -- <path> then rebuild, green after, no git stash.",
-   "closure_species": "subject-absent+ratcheted"
+   "closure_species": "subject-absent+ratcheted",
+   "closure_species_method": "computed by the same classifier on both sides (2026-09-06 correction)"
   },
   {
    "severity": "LOW",
@@ -2137,7 +2145,8 @@
    "replay_verdict": "SUBJECT-ABSENT-AT-HEAD",
    "prior_last_replayed_at": "618acb9",
    "replay_note": "Replayed BY CONTENT at 4e4ca5b by the reviewer, not accepted from the implementing agent's report. by_id is at ZERO occurrences -- the id join arm is deleted, not deprecated. string_of_int !n survives only in the comment at :532 documenting its own removal. engine_name splits Engine_declared of string from Report_ordinal of int, so the type-checker refuses the conflation. Every named ratchet was itself re-proved by the reviewer: red against the pre-fix tree via git checkout <sha> -- <path> then rebuild, green after, no git stash.",
-   "closure_species": "subject-absent+ratcheted"
+   "closure_species": "subject-absent+ratcheted",
+   "closure_species_method": "computed by the same classifier on both sides (2026-09-06 correction)"
   },
   {
    "severity": "HIGH",
@@ -2161,7 +2170,8 @@
    "replay_verdict": "SUBJECT-ABSENT-AT-HEAD",
    "prior_last_replayed_at": "618acb9",
    "replay_note": "Replayed BY CONTENT at 4e4ca5b by the reviewer, not accepted from the implementing agent's report. the resolution is written in all three files: arch_mutant_db.ml:315-318 states engine_mutant_id is RUN-SCOPED, is not an identity, nothing joins on it, and cross-references the doctrine in arch_mutants.ml AND in mutants-schema-migration.sql. The migration prevails, because a document asserting a checkable property outranks one describing a mechanism. Every named ratchet was itself re-proved by the reviewer: red against the pre-fix tree via git checkout <sha> -- <path> then rebuild, green after, no git stash.",
-   "closure_species": "subject-absent+ratcheted"
+   "closure_species": "subject-absent+ratcheted",
+   "closure_species_method": "computed by the same classifier on both sides (2026-09-06 correction)"
   },
   {
    "severity": "HIGH",
@@ -2185,7 +2195,8 @@
    "replay_verdict": "SUBJECT-ABSENT-AT-HEAD",
    "prior_last_replayed_at": "618acb9",
    "replay_note": "Replayed BY CONTENT at 4e4ca5b by the reviewer, not accepted from the implementing agent's report. source_hash at :1231-1279 stamps its derivation INTO the stored value as 'line:' or 'site:', and both arms hash in the occurrence ordinal -- without which the DB's UNIQUE key would re-merge the pair the site key had just separated. Every named ratchet was itself re-proved by the reviewer: red against the pre-fix tree via git checkout <sha> -- <path> then rebuild, green after, no git stash.",
-   "closure_species": "subject-absent+ratcheted"
+   "closure_species": "subject-absent+ratcheted",
+   "closure_species_method": "computed by the same classifier on both sides (2026-09-06 correction)"
   },
   {
    "severity": "HIGH",
@@ -2209,7 +2220,8 @@
    "replay_verdict": "SUBJECT-ABSENT-AT-HEAD",
    "prior_last_replayed_at": "618acb9",
    "replay_note": "Replayed BY CONTENT at 4e4ca5b by the reviewer, not accepted from the implementing agent's report. mutants_schema_version is written in the migration SQL itself, so the hand-applied path stamps it too, and separately from the index-wide value. Every named ratchet was itself re-proved by the reviewer: red against the pre-fix tree via git checkout <sha> -- <path> then rebuild, green after, no git stash.",
-   "closure_species": "subject-absent+ratcheted"
+   "closure_species": "subject-absent+ratcheted",
+   "closure_species_method": "computed by the same classifier on both sides (2026-09-06 correction)"
   },
   {
    "severity": "HIGH",
@@ -2233,7 +2245,8 @@
    "replay_verdict": "SUBJECT-ABSENT-AT-HEAD",
    "prior_last_replayed_at": "618acb9",
    "replay_note": "Replayed BY CONTENT at 4e4ca5b by the reviewer, not accepted from the implementing agent's report. the code===3 short-circuit is gone; only !fatalUnrun (the campaign tier) still treats 3 as non-fatal. The check fires on exit 3 AND on exit 5, the latter already fatal beforehand -- which is what makes it a rule. Every named ratchet was itself re-proved by the reviewer: red against the pre-fix tree via git checkout <sha> -- <path> then rebuild, green after, no git stash.",
-   "closure_species": "subject-absent+ratcheted"
+   "closure_species": "subject-absent+ratcheted",
+   "closure_species_method": "computed by the same classifier on both sides (2026-09-06 correction)"
   },
   {
    "severity": "MEDIUM",
@@ -2278,7 +2291,8 @@
    "replay_verdict": "SUBJECT-ABSENT-AT-HEAD",
    "prior_last_replayed_at": "618acb9",
    "replay_note": "Replayed BY CONTENT at 4e4ca5b by the reviewer, not accepted from the implementing agent's report. the contract is now stated BY KIND at :70-91, enumerating all four exit-1 refusals, and names the earlier narrowness as its own reason. Every named ratchet was itself re-proved by the reviewer: red against the pre-fix tree via git checkout <sha> -- <path> then rebuild, green after, no git stash.",
-   "closure_species": "subject-absent-only"
+   "closure_species": "subject-absent-only",
+   "closure_species_method": "computed by the same classifier on both sides (2026-09-06 correction)"
   },
   {
    "severity": "MEDIUM",
@@ -2683,8 +2697,9 @@
    "check": "checks/tree-boundary-non-git-checkout.js",
    "red_verified": true,
    "pre_fix_sha": "a1e60a9",
-   "closure_species": "fixed-with-ratchet",
-   "replay_note": "Replayed at f6f78c1 by the reviewer, not accepted from the agent that closed it, and every named ratchet re-proved red against the pre-fix tree by the reviewer with git checkout <sha> -- <path> plus a rebuild, never git stash. THE TYPOGRAPHIC FALSE-RED IS GONE and the reviewer re-proved it bilaterally: a purely typographic reformat leaves the new assertion green where the old one fired, and a real defect still turns it red. CLOSED ON THAT CLAIM ALONE -- the repair also opened a COVERAGE HOLE on the defect this finding names, which is filed SEPARATELY as a new HIGH rather than left to make this closure look larger than it is."
+   "closure_species": "subject-absent+ratcheted",
+   "replay_note": "Replayed at f6f78c1 by the reviewer, not accepted from the agent that closed it, and every named ratchet re-proved red against the pre-fix tree by the reviewer with git checkout <sha> -- <path> plus a rebuild, never git stash. THE TYPOGRAPHIC FALSE-RED IS GONE and the reviewer re-proved it bilaterally: a purely typographic reformat leaves the new assertion green where the old one fired, and a real defect still turns it red. CLOSED ON THAT CLAIM ALONE -- the repair also opened a COVERAGE HOLE on the defect this finding names, which is filed SEPARATELY as a new HIGH rather than left to make this closure look larger than it is.",
+   "closure_species_method": "computed by the same classifier on both sides (2026-09-06 correction)"
   },
   {
    "severity": "MEDIUM",
@@ -2708,8 +2723,9 @@
    "check": "checks/tree-boundary-non-git-checkout.js",
    "red_verified": true,
    "pre_fix_sha": "a1e60a9",
-   "closure_species": "fixed-with-ratchet",
-   "replay_note": "Replayed at f6f78c1 by the reviewer, not accepted from the agent that closed it, and every named ratchet re-proved red against the pre-fix tree by the reviewer with git checkout <sha> -- <path> plus a rebuild, never git stash. the cannot-be-red absence on an acceptance path is replaced by an assertion on what the engine is HANDED, which has no fallback vacuity: if the engine is never invoked the compared value becomes an explicit marker and the assertion fires. Falsifier: TENUE, with the old probe's vacuity re-measured by instrumentation (1524 chars of a SUCCEEDING campaign, the forbidden phrase living only inside refuse)."
+   "closure_species": "subject-absent+ratcheted",
+   "replay_note": "Replayed at f6f78c1 by the reviewer, not accepted from the agent that closed it, and every named ratchet re-proved red against the pre-fix tree by the reviewer with git checkout <sha> -- <path> plus a rebuild, never git stash. the cannot-be-red absence on an acceptance path is replaced by an assertion on what the engine is HANDED, which has no fallback vacuity: if the engine is never invoked the compared value becomes an explicit marker and the assertion fires. Falsifier: TENUE, with the old probe's vacuity re-measured by instrumentation (1524 chars of a SUCCEEDING campaign, the forbidden phrase living only inside refuse).",
+   "closure_species_method": "computed by the same classifier on both sides (2026-09-06 correction)"
   },
   {
    "severity": "MEDIUM",
@@ -2823,8 +2839,9 @@
    "check": "checks/tree-boundary-git-cannot-answer.js",
    "red_verified": true,
    "pre_fix_sha": "a1e60a9",
-   "closure_species": "fixed-with-ratchet",
-   "replay_note": "Replayed at f6f78c1 by the reviewer, not accepted from the agent that closed it, and every named ratchet re-proved red against the pre-fix tree by the reviewer with git checkout <sha> -- <path> plus a rebuild, never git stash. tracked_by now returns Tracked | Untracked | Undetermined of int, three call-site arms, three outcomes, and Undetermined narrows under its OWN anchor whose refusal names the indeterminacy and quotes git's exit code. VERIFIED BY THE REVIEWER, and by the test that separates a value that EXISTS from one that ACTS: collapsing the third arm's ACTION onto the second's -- same diagnosis text, build exit 0, binary mtime CONFIRMED moved -- turns the check red with 6 assertions, one of them 'it does NOT assert the marker belongs to a different tree'. The check pins the effect, not the constructor."
+   "closure_species": "subject-absent+ratcheted",
+   "replay_note": "Replayed at f6f78c1 by the reviewer, not accepted from the agent that closed it, and every named ratchet re-proved red against the pre-fix tree by the reviewer with git checkout <sha> -- <path> plus a rebuild, never git stash. tracked_by now returns Tracked | Untracked | Undetermined of int, three call-site arms, three outcomes, and Undetermined narrows under its OWN anchor whose refusal names the indeterminacy and quotes git's exit code. VERIFIED BY THE REVIEWER, and by the test that separates a value that EXISTS from one that ACTS: collapsing the third arm's ACTION onto the second's -- same diagnosis text, build exit 0, binary mtime CONFIRMED moved -- turns the check red with 6 assertions, one of them 'it does NOT assert the marker belongs to a different tree'. The check pins the effect, not the constructor.",
+   "closure_species_method": "computed by the same classifier on both sides (2026-09-06 correction)"
   },
   {
    "severity": "MEDIUM",
@@ -2866,8 +2883,9 @@
    "check": "checks/one-engine-id-two-sites-is-refused.js",
    "red_verified": true,
    "pre_fix_sha": "a1e60a9",
-   "closure_species": "fixed-with-ratchet",
-   "replay_note": "Replayed at f6f78c1 by the reviewer, not accepted from the agent that closed it, and every named ratchet re-proved red against the pre-fix tree by the reviewer with git checkout <sha> -- <path> plus a rebuild, never git stash. the shared-id assertion is anchored on step 5b's own sentence, PARSED into a handle-to-site-count map, instead of searched as a string anywhere in stderr. Falsifier: TENUE on both gestures, plus a third it imposed on itself."
+   "closure_species": "subject-absent+ratcheted",
+   "replay_note": "Replayed at f6f78c1 by the reviewer, not accepted from the agent that closed it, and every named ratchet re-proved red against the pre-fix tree by the reviewer with git checkout <sha> -- <path> plus a rebuild, never git stash. the shared-id assertion is anchored on step 5b's own sentence, PARSED into a handle-to-site-count map, instead of searched as a string anywhere in stderr. Falsifier: TENUE on both gestures, plus a third it imposed on itself.",
+   "closure_species_method": "computed by the same classifier on both sides (2026-09-06 correction)"
   },
   {
    "severity": "MEDIUM",
@@ -2891,8 +2909,9 @@
    "check": "checks/mutant-tables-declare-their-version.js",
    "red_verified": true,
    "pre_fix_sha": "a1e60a9",
-   "closure_species": "fixed-with-ratchet",
-   "replay_note": "Replayed at f6f78c1 by the reviewer, not accepted from the agent that closed it, and every named ratchet re-proved red against the pre-fix tree by the reviewer with git checkout <sha> -- <path> plus a rebuild, never git stash. the assertion was INVERTED -- red where the property held, green where it was violated -- and was DELETED rather than strengthened, with both measurements written in place. Seven assertions instead of eight: one green fewer, deliberately. Falsifier reproduced BOTH measurements."
+   "closure_species": "subject-absent+ratcheted",
+   "replay_note": "Replayed at f6f78c1 by the reviewer, not accepted from the agent that closed it, and every named ratchet re-proved red against the pre-fix tree by the reviewer with git checkout <sha> -- <path> plus a rebuild, never git stash. the assertion was INVERTED -- red where the property held, green where it was violated -- and was DELETED rather than strengthened, with both measurements written in place. Seven assertions instead of eight: one green fewer, deliberately. Falsifier reproduced BOTH measurements.",
+   "closure_species_method": "computed by the same classifier on both sides (2026-09-06 correction)"
   },
   {
    "severity": "MEDIUM",
@@ -2916,8 +2935,9 @@
    "check": "checks/source-hash-declares-its-derivation.js",
    "red_verified": true,
    "pre_fix_sha": "a1e60a9",
-   "closure_species": "fixed-with-ratchet",
-   "replay_note": "Replayed at f6f78c1 by the reviewer, not accepted from the agent that closed it, and every named ratchet re-proved red against the pre-fix tree by the reviewer with git checkout <sha> -- <path> plus a rebuild, never git stash. the equality that passed by String(null)===String(null) now carries its own non-nullness. Falsifier: TENUE."
+   "closure_species": "subject-absent+ratcheted",
+   "replay_note": "Replayed at f6f78c1 by the reviewer, not accepted from the agent that closed it, and every named ratchet re-proved red against the pre-fix tree by the reviewer with git checkout <sha> -- <path> plus a rebuild, never git stash. the equality that passed by String(null)===String(null) now carries its own non-nullness. Falsifier: TENUE.",
+   "closure_species_method": "computed by the same classifier on both sides (2026-09-06 correction)"
   },
   {
    "severity": "LOW",
@@ -2974,10 +2994,11 @@
    "check": "checks/ownership-is-a-record-not-a-mention.js",
    "red_verified": true,
    "pre_fix_sha": "a1e60a9",
-   "closure_species": "fixed-with-ratchet",
+   "closure_species": "subject-absent+ratcheted",
    "replay_note": "Replayed at f6f78c1 by the reviewer, not accepted from the agent that closed it, and every named ratchet re-proved red against the pre-fix tree by the reviewer with git checkout <sha> -- <path> plus a rebuild, never git stash. ownership is now a RECORD with external references: fingerprint by EXACT equality, plus a commit= that must be a real object, an ancestor of HEAD, touching the finding's path or the named check, plus a check= that exists and is tracked. Both conventions printed every run. Verified by the reviewer: red against the old gate, green restored.",
    "surface": "pre-existing",
-   "surface_reason": "the ownership gate was written in rounds 2-3 by the orchestrator"
+   "surface_reason": "the ownership gate was written in rounds 2-3 by the orchestrator",
+   "closure_species_method": "computed by the same classifier on both sides (2026-09-06 correction)"
   },
   {
    "severity": "HIGH",
@@ -3187,7 +3208,7 @@
    "trace_schema_version": "1.0"
   }
  ],
- "summary": "ROUND 5 NO-GO, AND THE NO-GO IS NARROW: one HIGH remains open, and it was produced BY this round. Everything the round set out to do, it did, and the reviewer verified each closure by content and re-proved every ratchet red rather than accepting the agent that wrote it.\n\nWHAT CLOSED. The five assertions that did not weigh what their labels announced. One of them was not weak but INVERTED -- red where the property held, green where it was violated -- and was DELETED rather than strengthened, seven assertions instead of eight, one green fewer deliberately; an inverted probe is green on the old code, so no red-on-old-tree check would ever have caught it, which is the probe-liveness sweep earning its place. The ownership gate, which answered 'is this finding MENTIONED anywhere' while claiming to answer 'does it have an owner'. And the HIGH from round 4: tracked_by conflating 'no' with 'I could not tell'.\n\nTHE TEST THAT SEPARATES A VALUE THAT EXISTS FROM ONE THAT ACTS. A third answer helps only if a caller does something different with it. Collapsing Undetermined's ACTION onto Untracked's -- same diagnosis, build exit 0, binary mtime CONFIRMED moved -- turns the check red with six assertions. The reviewer's first two attempts at this were INVALID and are recorded: one did not compile and the binary never moved, so the check measured the previous build and returned green; and the reviewer's own `dune build | tail; echo $?` read TAIL's exit code, printing build=0 over a failed build. A control that does not rebuild is not a control, and a pipeline's status is its LAST element's.\n\nWHAT THE FALSIFICATION READ FOUND, and it is why this is NO-GO. R5-A's repair removed a typographic false-red and OPENED A COVERAGE HOLE on the defect its own finding names: the replacement vocabulary knows two phrasings and not the original one, so a fallback path asserting the nesting passes green. Reproduced by the reviewer with ONE thing changed -- the first attempt changed two and would have 'refuted' a correct report.\n\nAND THE GATE'S REPAIR EXPOSED THAT OWNERSHIP HAD BEEN FICTIONAL. Fifteen of twenty-one ownerships rested on a path substring and a bare line number found SEPARATELY anywhere in a section; one finding was claimed by nine sections; a paragraph using three line numbers as OUTPUT SIZES claimed three findings; and a section stating that a finding was never looked at, followed by its fingerprint, CLOSED it. Documenting a finding closed it, and the more thorough the document the more it closed. The published figures are marked UNRECOVERABLE -- not wrong, since it was never shown the nineteen were unowned, and not left standing either.\n\nWHAT IS NOT CLOSED AND IS NAMED RATHER THAN LEFT: ownership now proves a commit touching the path plus a tracked check, and does NOT prove the commit's work is RELATED to the finding. Three discriminators were built and correctly killed. The remedy is SAMPLING -- revert-and-re-run over a random sample with N and the selection stated -- which is unaffordable per finding and affordable per round, and it enters the next round's plan ranked with everything else rather than promoted for being the freshest known gap.\n\nTHE STREAK PERSISTS AND ITS COMPOSITION CHANGED, which is the reading the split makes possible and the round-4 verdict could not. novel-finding-streak fires again -- two consecutive strike rounds ending at round 5 -- and it is recorded, not silenced. But round 4's streak was 7 of 13 findings about its own output, and round 5's is 1 of 4. The review is still finding new defects; it is far less often finding defects IT JUST CREATED. A streak counts findings; the split says where they come from, and only the second answers whether the fix rate was the problem.\n\nTHE DENOMINATOR: recomputed per CLOSURE rather than per finding produced -- because the first conflates how much was fixed with how much was broken -- round 4 is 0.50 self-produced defects per closure and round 5 is 0.14. And round 5's seven closures are ALL fixed-with-ratchet, where round 4's fourteen were mostly closures by the subject having gone away. Also corrected here: round 4 produced FOURTEEN findings, not the thirteen this verdict first published.",
+ "summary": "ROUND 5 NO-GO, AND THE NO-GO IS NARROW: one HIGH remains open, and it was produced BY this round. Everything the round set out to do, it did, and the reviewer verified each closure by content and re-proved every ratchet red rather than accepting the agent that wrote it.\n\nWHAT CLOSED. The five assertions that did not weigh what their labels announced. One of them was not weak but INVERTED -- red where the property held, green where it was violated -- and was DELETED rather than strengthened, seven assertions instead of eight, one green fewer deliberately; an inverted probe is green on the old code, so no red-on-old-tree check would ever have caught it, which is the probe-liveness sweep earning its place. The ownership gate, which answered 'is this finding MENTIONED anywhere' while claiming to answer 'does it have an owner'. And the HIGH from round 4: tracked_by conflating 'no' with 'I could not tell'.\n\nTHE TEST THAT SEPARATES A VALUE THAT EXISTS FROM ONE THAT ACTS. A third answer helps only if a caller does something different with it. Collapsing Undetermined's ACTION onto Untracked's -- same diagnosis, build exit 0, binary mtime CONFIRMED moved -- turns the check red with six assertions. The reviewer's first two attempts at this were INVALID and are recorded: one did not compile and the binary never moved, so the check measured the previous build and returned green; and the reviewer's own `dune build | tail; echo $?` read TAIL's exit code, printing build=0 over a failed build. A control that does not rebuild is not a control, and a pipeline's status is its LAST element's.\n\nWHAT THE FALSIFICATION READ FOUND, and it is why this is NO-GO. R5-A's repair removed a typographic false-red and OPENED A COVERAGE HOLE on the defect its own finding names: the replacement vocabulary knows two phrasings and not the original one, so a fallback path asserting the nesting passes green. Reproduced by the reviewer with ONE thing changed -- the first attempt changed two and would have 'refuted' a correct report.\n\nAND THE GATE'S REPAIR EXPOSED THAT OWNERSHIP HAD BEEN FICTIONAL. Fifteen of twenty-one ownerships rested on a path substring and a bare line number found SEPARATELY anywhere in a section; one finding was claimed by nine sections; a paragraph using three line numbers as OUTPUT SIZES claimed three findings; and a section stating that a finding was never looked at, followed by its fingerprint, CLOSED it. Documenting a finding closed it, and the more thorough the document the more it closed. The published figures are marked UNRECOVERABLE -- not wrong, since it was never shown the nineteen were unowned, and not left standing either.\n\nWHAT IS NOT CLOSED AND IS NAMED RATHER THAN LEFT: ownership now proves a commit touching the path plus a tracked check, and does NOT prove the commit's work is RELATED to the finding. Three discriminators were built and correctly killed. The remedy is SAMPLING -- revert-and-re-run over a random sample with N and the selection stated -- which is unaffordable per finding and affordable per round, and it enters the next round's plan ranked with everything else rather than promoted for being the freshest known gap.\n\nTHE STREAK PERSISTS AND ITS COMPOSITION CHANGED, which is the reading the split makes possible and the round-4 verdict could not. novel-finding-streak fires again -- two consecutive strike rounds ending at round 5 -- and it is recorded, not silenced. But round 4's streak was 7 of 13 findings about its own output, and round 5's is 1 of 4. The review is still finding new defects; it is far less often finding defects IT JUST CREATED. A streak counts findings; the split says where they come from, and only the second answers whether the fix rate was the problem.\n\nTHE DENOMINATOR: recomputed per CLOSURE rather than per finding produced -- because the first conflates how much was fixed with how much was broken -- round 4 is 0.50 self-produced defects per closure and round 5 is 0.14. A SPECIES CLAIM MADE HERE WAS RETRACTED: 'round 5's closures are all fixed-with-ratchet where round 4's were mostly subject-absent' was an artefact of the field being COMPUTED on one side and HAND-WRITTEN on the other. Recomputed identically, both rounds are subject-absent+ratcheted -- 7 of 7 and 12 of 14. Comparing two fields produced by different methods is not a comparison. Also corrected here: round 4 produced FOURTEEN findings, not the thirteen this verdict first published.",
  "gate_exit_status": 2,
  "gate_inconclusive_checks": 51,
  "gate_checks_total": 51,
@@ -3209,5 +3230,6 @@
  "ownership_fix_ceiling": "THE FIX'S CEILING, NAMED BEFORE IT IS BUILT, the same way R4-D's was. An explicit owner field is the right structure and it does NOT close the class -- it closes the ACCIDENTAL half. It removes ownership claimed by a paragraph that happened to contain a path and a digit. It CANNOT remove an agent that writes `owner: R5-B` for work it did not do: a field written deliberately can be written falsely, by an agent under pressure to show coverage.\nSo the scope is MAKE OWNERSHIP DELIBERATE, NOT TRUTHFUL. A group told to make ownership trustworthy will report success when it has made it explicit. What makes a deliberate claim checkable is the same thing that makes an assertion checkable -- something OUTSIDE the claim that can contradict it: a finding marked owned must name the commit and the check that closed it, and a claim with neither is a claim, not a closure.",
  "superseded_ownership_figures": "THE PUBLISHED OWNERSHIP FIGURES ARE UNRECOVERABLE. Not wrong, and not left standing -- both of those readings are available and both are false. The annotation that matches what was measured: PRODUCED UNDER record-v0, WHICH CANNOT BE EVALUATED; NO OWNERSHIP CLAIM FROM THESE ROUNDS IS VERIFIABLE IN EITHER DIRECTION.\n'Wrong' over-claims -- it was never shown that the nineteen were unowned. Leaving them lets a reader take them at face value. Unrecoverable is a THIRD STATUS and it is the accurate one, the same distinction as 'could not make it red' versus 'does not depend on formatting': an absence of evidence stated as an absence of evidence.\nAffected, re-derived under record-v1 at their own commits: 899138c published '25 open, 19 dispatched, 6 deferred, 0 unowned' and re-derives to 25 unowned / 0 owned; 4e4ca5b re-derives to 22 / 0. Not a single ownership survives -- because record-v1 demands records that did not exist then, the convention having been invented after. The re-derivation therefore DISCOVERED NO WORK: it established that the record can no longer say anything about those rounds. A weaker result than hoped for, and the honest one.",
  "ownership_relatedness_gap": "THE GAP R5-B COULD NOT CLOSE IS SAMPLABLE, and sampling is the standard answer to a check that is correct and too expensive -- which neither the reviewer nor the roadmap session reached for once tonight. The gap: nothing distinguishes 'the commit contains work RELATED to the finding' from 'the commit touches the same file'. R5-B killed three discriminators correctly -- line proximity dies on findings at line 0 or 1, of which this verdict has several; a fingerprint in the commit message is self-corroborating, the same agent writing both in one breath; revert-plus-re-run is the right question and too expensive PER FINDING.\nBut it is unaffordable only EXHAUSTIVELY. Revert-and-re-run over a RANDOM SAMPLE OF N ownership records, with N and the selection method stated, converts an impossible check into an estimate -- and an estimate with a declared sample is enormously better than the current position, which is that nothing distinguishes the two at all. Five of five surviving is real evidence; one of five failing is a live defect no exhaustive check would ever have been run to find. THE RATCHET CANNOT AFFORD IT, BUT A ROUND CAN.",
- "round5_split": "THE NUMBER THE ROUND EXISTS TO PRODUCE: 1 of 4 findings this round produced concern code ROUND 5 ITSELF WROTE; 3 concern pre-existing surface. Round 4 was SEVEN of THIRTEEN. The acceptance criterion -- every fix carries a probe on its own error path, answered by execution -- was round 5's whole intervention, and this is the ratio it was meant to move. IT MOVED, from 54% to 25%. READ IT WITH ITS CAVEATS, both of which cut against the flattering reading: the denominators differ (13 against 4), so this is a direction and not a rate; and the one round-5-output finding is a HIGH -- a repair that opened a coverage hole on the very defect its own finding named -- so the class did not disappear, it got rarer and stayed severe.\n\nTHE DENOMINATOR WAS WRONG ON BOTH SIDES, AND CORRECTING IT STRENGTHENS THE RESULT. 'Findings produced this round' conflates HOW MUCH WAS FIXED with HOW MUCH WAS BROKEN: a round that ships fewer or smaller fixes produces fewer self-inflicted defects with no improvement in method at all, and the ratio falls because the denominator falls with it. The criterion was introduced to answer DOES A FIX NOW BREAK LESS OFTEN, so the denominator must name the WORK.\nRecomputed per CLOSURE: round 4 is 7 self-produced findings against 14 closures = 0.50; round 5 is 1 against 7 = 0.14. That is a stronger statement than 1-of-4 AND it measures the thing that was intervened on. With n this small it is a direction, not a rate, on either denominator.\n\nAND A CORRECTION TO A FIGURE THIS VERDICT ALREADY PUBLISHED: round 4 produced FOURTEEN findings, not thirteen. '7 of 13' was taken before the set was complete -- a count true at the moment it was read and stale by the time it was quoted, which is the defect this task has spent two rounds naming. The split is 7 of 14, and the direction is unchanged.\n\nA QUALITATIVE DIFFERENCE THE RATIO HIDES, and it is the strongest evidence here. Round 4's closures were 12 subject-absent-plus-ratcheted, 1 ratcheted only, 1 subject-absent only: mostly findings whose SUBJECT HAD GONE AWAY. Round 5's seven are ALL fixed-with-ratchet -- every one closed by a fix carrying a proven-red guard, none by the subject having vanished. So round 5 did more actual FIXING per closure and produced fewer defects doing it. Two independent movements in the same direction, which a single ratio would have reported as one."
+ "round5_split": "THE NUMBER THE ROUND EXISTS TO PRODUCE: 1 of 4 findings this round produced concern code ROUND 5 ITSELF WROTE; 3 concern pre-existing surface. Round 4 was SEVEN of THIRTEEN. The acceptance criterion -- every fix carries a probe on its own error path, answered by execution -- was round 5's whole intervention, and this is the ratio it was meant to move. IT MOVED, from 54% to 25%. READ IT WITH ITS CAVEATS, both of which cut against the flattering reading: the denominators differ (13 against 4), so this is a direction and not a rate; and the one round-5-output finding is a HIGH -- a repair that opened a coverage hole on the very defect its own finding named -- so the class did not disappear, it got rarer and stayed severe.\n\nTHE DENOMINATOR WAS WRONG ON BOTH SIDES, AND CORRECTING IT STRENGTHENS THE RESULT. 'Findings produced this round' conflates HOW MUCH WAS FIXED with HOW MUCH WAS BROKEN: a round that ships fewer or smaller fixes produces fewer self-inflicted defects with no improvement in method at all, and the ratio falls because the denominator falls with it. The criterion was introduced to answer DOES A FIX NOW BREAK LESS OFTEN, so the denominator must name the WORK.\nRecomputed per CLOSURE: round 4 is 7 self-produced findings against 14 closures = 0.50; round 5 is 1 against 7 = 0.14. That is a stronger statement than 1-of-4 AND it measures the thing that was intervened on. With n this small it is a direction, not a rate, on either denominator.\n\nAND A CORRECTION TO A FIGURE THIS VERDICT ALREADY PUBLISHED: round 4 produced FOURTEEN findings, not thirteen. '7 of 13' was taken before the set was complete -- a count true at the moment it was read and stale by the time it was quoted, which is the defect this task has spent two rounds naming. The split is 7 of 14, and the direction is unchanged.\n\nA QUALITATIVE DIFFERENCE THE RATIO HIDES, and it is the strongest evidence here. Round 4's closures were 12 subject-absent-plus-ratcheted, 1 ratcheted only, 1 subject-absent only: mostly findings whose SUBJECT HAD GONE AWAY. Round 5's seven are ALL fixed-with-ratchet -- every one closed by a fix carrying a proven-red guard, none by the subject having vanished. So round 5 did more actual FIXING per closure and produced fewer defects doing it. Two independent movements in the same direction, which a single ratio would have reported as one.",
+ "species_claim_retracted": "RETRACTED IN FULL: 'round 5's closures are ALL fixed-with-ratchet where round 4's were mostly subject-absent' was called the strongest evidence in this verdict, and it was an ARTEFACT OF HOW THE FIELD WAS PRODUCED. Round 4's species were COMPUTED by a classifier; round 5's were HAND-WRITTEN by the reviewer during the closure pass, hardcoded to fixed-with-ratchet. Recomputed with the SAME classifier on both sides: round 4 is 12 subject-absent+ratcheted, 1 ratcheted only, 1 subject-absent only; ROUND 5 IS 7 SUBJECT-ABSENT+RATCHETED OUT OF 7. Both rounds closed findings in the same way. There is no qualitative difference, and the 'two independent movements in the same direction' claim had ONE movement in it.\n\nTHE GENERAL FORM, and it is worse than the compositional confound that prompted the check: COMPARING TWO FIELDS PRODUCED BY DIFFERENT METHODS IS NOT A COMPARISON. One side computed, one side written by hand, same name, same file, same schema -- and nothing in the record said so. The field carried no statement of its own provenance, which is the identical defect this verdict documents elsewhere as a reading that does not say which convention produced it. Every closure record now carries closure_species_method.\n\nWHAT SURVIVES: the per-closure ratio, 0.50 against 0.14, which is computed the same way on both sides from data neither round hand-wrote. It is a direction and not a rate at this n, and it is now the ONLY evidence that the criterion moved anything. The compositional confound raised against the species claim never had to be answered -- the claim did not survive its own audit."
 }
