@@ -1,0 +1,31 @@
+{
+  "task": "vuln-reachability-triage",
+  "mode": "full",
+  "current_phase": "spec",
+  "events": [
+    {
+      "phase": "question",
+      "outcome": "COMPLETED",
+      "at": "2026-09-06",
+      "by": "roster-question"
+    },
+    {
+      "phase": "research",
+      "outcome": "COMPLETED",
+      "at": "2026-09-06",
+      "by": "roster-research"
+    },
+    {
+      "phase": "intake",
+      "outcome": "VALIDATED",
+      "at": "2026-09-06",
+      "by": "roster-intake"
+    },
+    {
+      "phase": "spec",
+      "outcome": "VALIDATED",
+      "at": "2026-09-06",
+      "by": "roster-spec"
+    }
+  ]
+}
