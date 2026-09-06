@@ -401,7 +401,8 @@ const bySeverity = (arr) => {
 
 console.log(
   `dispatch-covers-open-findings [convention ${CONVENTION}]: ${open.length} OPEN finding(s) of every ` +
-  `severity — ${closed.length} closed, ${deferred.length} deferred, ${accepted.length} accepted, ` +
+  `severity — ${closed.length} OWNED-dispatched, ${deferred.length} owned-deferred, ` +
+  `${accepted.length} owned-accepted, ` +
   `${unowned.length} unowned.`
 );
 console.log(`  verdict: ${verdictPath}`);
@@ -428,6 +429,11 @@ console.log(`    ${LEGACY_CONVENTION}: a section containing the path and the lin
 console.log(`                or the fingerprint as a substring    -> ${legacyOwnedCount} owned, ${open.length - legacyOwnedCount} unowned`);
 console.log(`    ${CONVENTION}:  an OWNER line whose commit and check resolve against git`);
 console.log(`                                                    -> ${closed.length + deferred.length + accepted.length} owned, ${unowned.length} unowned`);
+console.log("  THIS GATE MEASURES OWNERSHIP, NOT RESOLUTION. 'OWNED-dispatched' means a record\n" +
+  "  names a commit and a check; it does NOT mean the finding is fixed. Resolution is the\n" +
+  "  status field in review.json, set by a reviewer who verified it. The two diverge, and\n" +
+  "  reading one for the other is an error this gate's own author made, in the favourable\n" +
+  "  direction, an hour before renaming this line.");
 const delta = legacyOwnedCount - (closed.length + deferred.length + accepted.length);
 if (delta !== 0) {
   console.log(
