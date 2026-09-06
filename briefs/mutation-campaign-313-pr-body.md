@@ -179,3 +179,82 @@ it moved the premise from argued to measured and nothing else.
 Until a pilot runs on a real corpus — the miaou measurement, deliberately sequenced after this
 merges — the honest summary is: **the selection rule is sound, the persistence is sound, the
 verdict derivation is sound, the refusals are sound, and nothing has been mutated.**
+
+---
+
+## What went wrong in producing this branch, and one of it changed the work
+
+Six review rounds hardened this machinery. The defects that mattered most were not
+found by any of it.
+
+### The scoping number was wrong by a factor of fifty, and it decided the work
+
+The campaign's target corpus was published as **21 550 `.ml` files and 3.9 M lines**,
+and the first campaign was scoped down to a single library on that basis. The real
+figures, by `git ls-files`: **392 files, 64 661 lines**. The count came from a `find`
+that excluded `_build` and nothing else, so **17 951 files came from `_opam`** — the
+local opam switch — and **3 207 from `.claude`**, agent worktrees.
+
+It was used three times: published twice, used to decide the campaign's scope, and
+repeated in the execution brief. Nobody checked it, because it was plausible. It
+surfaced only because a human asked.
+
+**This is the one defect here that changed what work was done.** Every other changed
+what was believed. A scoping decision taken on an unverified number is precisely the
+failure this branch's machinery exists to prevent, committed by its author against
+himself, in the campaign that machinery was built for.
+
+### Self-inflicted findings per closure: 0.79, then 0.29, then 1.50
+
+Computed identically across three review rounds — findings about code the round
+itself wrote, divided by that round's closures. **Round 6 is worse than round 4**, and
+it crossed one: it produced more defects than it closed, two closures against three
+self-inflicted findings.
+
+Read it with what it is and is not. Rounds 5 and 6 changed object — round 4 worked on
+the product, mutant identity and tree boundaries, while 5 and 6 worked on **probes,
+gates, runners and labels**, the apparatus that checks the product. Each round's output
+is then new surface, that surface is itself checking apparatus, and its defects are
+found by the same apparatus, which generates more. 1.50 is what that recursion looks
+like when measured. It is also why this branch stops at a pull request rather than a
+seventh round.
+
+### A rule reminder is not a withdrawal of permission
+
+A standing authorization to push existed. A context block restating the rule was
+repeated on every scheduled tick, and each repetition was read as re-imposing the
+constraint — so **117 commits sat on one disk for hours** while every status report
+dutifully noted "zero remote refs" as a blocker rather than asking to lift it.
+
+That is the same class as every instrument defect in this campaign — a reading that
+answers a nearby question — applied to a person's words instead of a query. It is the
+one lesson here that generalises past software.
+
+### The harness was hardened six times before its purpose was exercised once
+
+"No mutation campaign has ever run" was reported as a **finding** for hours, in verdict
+after verdict, rather than as a thing to fix. Each round supplied a reason to keep
+hardening. Nothing was blocking it: the engine was installed, the per-mutant mechanism
+had been observed against a real mutaml 0.3, the binary was built. The first campaign
+began when someone asked why it had not.
+
+### What the campaign's numbers are, and are not
+
+One run. On a corpus scoped after correcting a fifty-fold error. Driven by an agent
+instructed to reduce scope only on its own measurement and to report the candidates it
+discarded. They are evidence that the machinery executes on real code — not that the
+capability is validated.
+
+### Every ratchet figure in this record is unevaluable as gate output
+
+`checks/run-ratchet.js` never builds. So any check grading a compiled artefact can
+grade a **stale** one and return green having measured a previous compilation, and 25
+of the 46 checks reference `_build`. CI is not exposed — it builds and runs the ratchet
+in the same job, verified by parsing the workflow's job boundaries — but every ratchet
+number quoted in this branch's own review record (37/1, 38/1, 39/1, 40/1) came from a
+local invocation with no such guarantee.
+
+Not wrong; **unevaluable**. Their credibility rests on `dune build` having been run by
+hand before nearly every one, which is a habit, not a guarantee, and is not in the
+record. A number whose credibility rests on the discipline of whoever produced it is
+not evidence produced by the gate.
