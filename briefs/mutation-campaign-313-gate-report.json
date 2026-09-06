@@ -1,9 +1,9 @@
 {
  "mode": "full",
- "no_go_round": 2,
+ "no_go_round": 3,
  "max_rounds": 5,
  "legacy_no_go_round": false,
- "round": 2,
+ "round": 3,
  "legacy_round": false,
  "current_round_strike": true,
  "config": {
@@ -49,6 +49,20 @@
    "fid": "bin/arch_mutants/arch_mutants.ml:1263:correctness#db12bd63",
    "inconclusive": true,
    "reason": "check file not found in current tree: CHECK-27"
+  },
+  {
+   "check": "CHECK-35 (checks/empty-scope-and-unmatched-block-completion.js)",
+   "fingerprint": "bin/arch_mutants/arch_mutants.ml:1456:architecture",
+   "fid": "bin/arch_mutants/arch_mutants.ml:1456:architecture#9f415bae",
+   "inconclusive": true,
+   "reason": "check file not found in current tree: CHECK-35 (checks/empty-scope-and-unmatched-block-completion.js)"
+  },
+  {
+   "check": "CHECK-36 (checks/arch-impact-boundary-refuses-empty.js)",
+   "fingerprint": "bin/arch_mutants/arch_mutants.ml:938:architecture",
+   "fid": "bin/arch_mutants/arch_mutants.ml:938:architecture#d7617f14",
+   "inconclusive": true,
+   "reason": "check file not found in current tree: CHECK-36 (checks/arch-impact-boundary-refuses-empty.js)"
   },
   {
    "check": "CHECK-26",
@@ -238,16 +252,135 @@
    "fid": null,
    "inconclusive": true,
    "reason": "check file not found in current tree: CHECK-SCOPE-GATE (scripts/check-scope-diff.sh)"
+  },
+  {
+   "check": "CHECK-30 (checks/status-scan-eof-is-not-a-pass.js)",
+   "fingerprint": "scripts/check-status-provenance.sh:161:correctness",
+   "fid": "scripts/check-status-provenance.sh:161:correctness#2c2f1ed7",
+   "inconclusive": true,
+   "reason": "check file not found in current tree: CHECK-30 (checks/status-scan-eof-is-not-a-pass.js)"
+  },
+  {
+   "check": "CHECK-38 (checks/unmapped-survivor-carries-its-verdict.js)",
+   "fingerprint": "bin/arch_mutants/arch_mutants.ml:588:correctness",
+   "fid": "bin/arch_mutants/arch_mutants.ml:588:correctness#f9486530",
+   "inconclusive": true,
+   "reason": "check file not found in current tree: CHECK-38 (checks/unmapped-survivor-carries-its-verdict.js)"
+  },
+  {
+   "check": "CHECK-36 (checks/arch-impact-boundary-refuses-empty.js)",
+   "fingerprint": "bin/arch_mutants/arch_mutants.ml:1168:architecture",
+   "fid": "bin/arch_mutants/arch_mutants.ml:1168:architecture#98224aac",
+   "inconclusive": true,
+   "reason": "check file not found in current tree: CHECK-36 (checks/arch-impact-boundary-refuses-empty.js)"
+  },
+  {
+   "check": "CHECK-35 (checks/empty-scope-and-unmatched-block-completion.js)",
+   "fingerprint": "bin/arch_mutants/arch_mutants.ml:1836:architecture",
+   "fid": "bin/arch_mutants/arch_mutants.ml:1836:architecture#e23a5b74",
+   "inconclusive": true,
+   "reason": "check file not found in current tree: CHECK-35 (checks/empty-scope-and-unmatched-block-completion.js)"
+  },
+  {
+   "check": "CHECK-32 (checks/ratchet-is-wired-into-ci.js)",
+   "fingerprint": ".github/workflows/ci.yml:105:architecture",
+   "fid": ".github/workflows/ci.yml:105:architecture#0c82d731",
+   "inconclusive": true,
+   "reason": "check file not found in current tree: CHECK-32 (checks/ratchet-is-wired-into-ci.js)"
+  },
+  {
+   "check": "CHECK-39 (checks/genuine-99-is-not-a-refusal.js)",
+   "fingerprint": "scripts/mutaml-wrapper.sh:120:architecture",
+   "fid": "scripts/mutaml-wrapper.sh:120:architecture#2cc3b846",
+   "inconclusive": true,
+   "reason": "check file not found in current tree: CHECK-39 (checks/genuine-99-is-not-a-refusal.js)"
+  },
+  {
+   "check": "CHECK-31 (checks/mutant-key-parse-error-is-not-a-rejection.js)",
+   "fingerprint": "scripts/check-mutant-key.sh:84:spec",
+   "fid": "scripts/check-mutant-key.sh:84:spec#42fec8e4",
+   "inconclusive": true,
+   "reason": "check file not found in current tree: CHECK-31 (checks/mutant-key-parse-error-is-not-a-rejection.js)"
+  },
+  {
+   "check": "CHECK-33 (checks/ratchet-is-node-executable.js)",
+   "fingerprint": "checks/no-score-scans-sql-strings.sh:1:correctness",
+   "fid": null,
+   "inconclusive": true,
+   "reason": "check file not found in current tree: CHECK-33 (checks/ratchet-is-node-executable.js)"
+  },
+  {
+   "check": "closed by group C, verified by the round-3 review",
+   "fingerprint": "specs/mutation-campaign-313.md:369:spec",
+   "fid": "specs/mutation-campaign-313.md:369:spec#d8fcca12",
+   "inconclusive": true,
+   "reason": "check file not found in current tree: closed by group C, verified by the round-3 review"
+  },
+  {
+   "check": "closed by group C, verified by the round-3 review",
+   "fingerprint": "specs/mutation-campaign-313.md:354:spec",
+   "fid": "specs/mutation-campaign-313.md:354:spec#e28685ad",
+   "inconclusive": true,
+   "reason": "check file not found in current tree: closed by group C, verified by the round-3 review"
+  },
+  {
+   "check": "closed by group C, verified by the round-3 review",
+   "fingerprint": "specs/mutation-campaign-313.md:184:spec",
+   "fid": "specs/mutation-campaign-313.md:184:spec#1418c929",
+   "inconclusive": true,
+   "reason": "check file not found in current tree: closed by group C, verified by the round-3 review"
+  },
+  {
+   "check": "closed by group C, verified by the round-3 review",
+   "fingerprint": "specs/mutation-campaign-313.md:22:spec",
+   "fid": "specs/mutation-campaign-313.md:22:spec#1ecad476",
+   "inconclusive": true,
+   "reason": "check file not found in current tree: closed by group C, verified by the round-3 review"
+  },
+  {
+   "check": "closed by group C, verified by the round-3 review",
+   "fingerprint": "specs/mutation-campaign-313.md:335:spec",
+   "fid": "specs/mutation-campaign-313.md:335:spec#be89e69a",
+   "inconclusive": true,
+   "reason": "check file not found in current tree: closed by group C, verified by the round-3 review"
+  },
+  {
+   "check": "closed by group C, verified by the round-3 review",
+   "fingerprint": "specs/mutation-campaign-313.md:168:spec",
+   "fid": "specs/mutation-campaign-313.md:168:spec#6cbb90fd",
+   "inconclusive": true,
+   "reason": "check file not found in current tree: closed by group C, verified by the round-3 review"
+  },
+  {
+   "check": "closed by group C, verified by the round-3 review",
+   "fingerprint": "specs/mutation-campaign-313.md:322:spec",
+   "fid": "specs/mutation-campaign-313.md:322:spec#a6663eb4",
+   "inconclusive": true,
+   "reason": "check file not found in current tree: closed by group C, verified by the round-3 review"
+  },
+  {
+   "check": "closed by group C, verified by the round-3 review",
+   "fingerprint": "specs/mutation-campaign-313.md:4:spec",
+   "fid": "specs/mutation-campaign-313.md:4:spec#839e8e38",
+   "inconclusive": true,
+   "reason": "check file not found in current tree: closed by group C, verified by the round-3 review"
+  },
+  {
+   "check": "closed by group C, verified by the round-3 review",
+   "fingerprint": "specs/mutation-campaign-313.md:183:spec",
+   "fid": "specs/mutation-campaign-313.md:183:spec#8a73f7b2",
+   "inconclusive": true,
+   "reason": "check file not found in current tree: closed by group C, verified by the round-3 review"
   }
  ],
  "trace": {
   "obligated": true,
-  "lines_seen": 16,
+  "lines_seen": 24,
   "schema_version": "1.0",
   "skipped": false
  },
- "inconclusive_checks": 32,
- "checks_total": 32,
+ "inconclusive_checks": 51,
+ "checks_total": 51,
  "gate_exit_status": 2,
- "degradation_note": "READ THIS BESIDE `violations`. This run exited 2 \u2014 DEGRADED INPUT \u2014 with violations: 0. Those two facts are not independent: 32 of 32 linked checks came back inconclusive ('check file not found in current tree'), so the zero is a true statement about a population that was never examined. The gate resolves a check as a node-runnable PATH; this task's nine ratchet checks are bash scripts and the demoted links are spec-level CHECK ids, and neither is one. A reader who takes `violations: 0` at face value without the exit status is reading a tier that reported zero because it never ran. These four fields are added by roster-review for this task so the count carries its own degradation rather than requiring a reader to iterate checks[] and know to look."
+ "degradation_note": "READ BESIDE `violations`. Exit 2, DEGRADED INPUT, violations 0. Not independent: 51 of 51 linked checks are inconclusive, because the gate resolves a check as a node-runnable PATH and a spec-level CHECK-N id is not one. The zero is a true statement about a population never examined."
 }

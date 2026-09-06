@@ -14,3 +14,11 @@
 {"schema_version":"1.0","ts":"2026-09-05T22:56:15.336Z","task":"mutation-campaign-313","round":2,"cycle":1,"event":"specialist","actor":"codex-xruntime","outcome":"skipped","detail":"breaker: degraded at round 1 with non-conforming-output; precedence forbids re-probe absent a digest change or --human-retry"}
 {"schema_version":"1.0","ts":"2026-09-05T22:56:15.356Z","task":"mutation-campaign-313","round":2,"cycle":1,"event":"specialist","actor":"opencode-xruntime","outcome":"skipped","detail":"breaker: degraded at round 1 with non-conforming-output; same precedence"}
 {"schema_version":"1.0","ts":"2026-09-05T22:56:15.387Z","task":"mutation-campaign-313","round":2,"cycle":1,"event":"normalizer","actor":"review-normalize.js","outcome":"ran"}
+{"schema_version":"1.0","ts":"2026-09-06T01:19:13.141Z","task":"mutation-campaign-313","round":3,"cycle":1,"event":"scope-gate","actor":"check-scope-diff.sh","outcome":"ran"}
+{"schema_version":"1.0","ts":"2026-09-06T01:19:13.163Z","task":"mutation-campaign-313","round":3,"cycle":1,"event":"specialist","actor":"reviewer","outcome":"ran"}
+{"schema_version":"1.0","ts":"2026-09-06T01:19:13.183Z","task":"mutation-campaign-313","round":3,"cycle":1,"event":"specialist","actor":"spec-compliance","outcome":"ran"}
+{"schema_version":"1.0","ts":"2026-09-06T01:19:13.204Z","task":"mutation-campaign-313","round":3,"cycle":1,"event":"specialist","actor":"architect","outcome":"ran"}
+{"schema_version":"1.0","ts":"2026-09-06T01:19:13.225Z","task":"mutation-campaign-313","round":3,"cycle":1,"event":"specialist","actor":"code-quality-auditor","outcome":"skipped","detail":"no kb/ in this repository"}
+{"schema_version":"1.0","ts":"2026-09-06T01:19:13.246Z","task":"mutation-campaign-313","round":3,"cycle":1,"event":"specialist","actor":"codex-xruntime","outcome":"skipped","detail":"breaker: degraded at round 1, non-conforming-output; no digest change"}
+{"schema_version":"1.0","ts":"2026-09-06T01:19:13.266Z","task":"mutation-campaign-313","round":3,"cycle":1,"event":"specialist","actor":"opencode-xruntime","outcome":"skipped","detail":"breaker: degraded at round 1, same precedence"}
+{"schema_version":"1.0","ts":"2026-09-06T01:19:13.296Z","task":"mutation-campaign-313","round":3,"cycle":1,"event":"normalizer","actor":"review-normalize.js","outcome":"ran"}
