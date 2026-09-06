@@ -568,9 +568,23 @@ Three consequences worth stating, because "blocked" has been used loosely about 
   than a thing nobody realised was possible — merging red would mean accepting 24 findings
   that no record claims, which is exactly what the gate is refusing to let happen silently.
 
-Which makes the merge path precise: rebase (`strict: true` requires it) plus either OWNER
-records for the 24 findings, or a deliberate administrative override with that acceptance
-stated.
+Which makes the merge path precise — and it is **four distinct gestures, not three
+decisions**, because two of them were conflated all day and only one of the pair answers
+each problem:
+
+1. **Resolve the conflict** (`git merge origin/main` or a rebase, three files). This is
+   what makes the branch testable again; nothing else does, and no number of pushes
+   substitutes for it.
+2. **Bump `base=` in the manifest** to the new base. This — *not* the rebase — is what
+   clears the scope finding, because the gate diffs `${BASE}...HEAD` with three dots and
+   `090f832` stays the merge-base through any rebase or merge.
+3. **Own the 24 findings**, or accept them: `OWNER` records with `dispatched`, `deferred`
+   or `accepted` and a reason each. This is the branch's one real red.
+4. **Or an administrative override** (`enforce_admins` is false), which merges without
+   green and means accepting 24 findings no record claims — a decision, stated as one.
+
+Gestures 1 and 2 look like one action and are not. Gesture 3 is the only one that
+addresses a defect in this branch's own work.
 
 ### A rebase is owed, and its conflict has a known shape
 
