@@ -29,6 +29,20 @@
 // Probes 1, 2/4 and 1/3 are the three, in that order. Probes 1 and 2 are also each other's
 // NEGATIVE CONTROL: without probe 1, "accept everything" passes; without probe 2, "refuse
 // everything" passes; a guard that hard-codes a diagnosis passes both and fails 1 or 3.
+//
+// WHAT IS A PROPERTY HERE AND WHAT IS ONLY AN ENUMERATION. Reporting the two as one strength
+// is how the sibling check acquired a coverage hole on the defect it was written to catch.
+//
+//   PROPERTY — WHICH ARM DECIDED THE BOUNDARY. The driver prints `boundary-anchor=<tag>`,
+//   chosen by an exhaustive match on `type tree_anchor` with no wildcard. Every refusing
+//   probe asserts the exact tag. No vocabulary is involved, so no rewording defeats it, and
+//   a fifth anchor cannot ship without the compiler demanding a tag for it.
+//
+//   ENUMERATION — WHETHER THE PROSE IS TRUE OF THAT ARM. Nothing decides whether a sentence
+//   is true. The three matchers below are an ENUMERATED SET of three phrasings and A FOURTH
+//   DEFEATS THEM; this file carried two of the three until round 6. Kept because the
+//   alternative is no coverage of a false diagnosis at all — not because it is a property.
+//   The success line repeats this, so it is not buried here.
 
 const fs = require('fs');
 const os = require('os');
@@ -108,6 +122,22 @@ function runFrom(cwd) {
 // adjacency-based regex over the raw output silently stops matching the moment the wording is
 // re-wrapped — which is a matcher that reads green while checking nothing.
 const flat = (s) => String(s).replace(/\s+/g, ' ');
+
+// STRUCTURAL, and the only assertion here that is a property. Read off the RAW output: the
+// driver emits this token, it is not prose and it is not reflowed. `null` where no refusal
+// was emitted, which separates "the guard did not fire" from "it fired naming no arm".
+const ANCHOR = (s) => {
+  const m = /boundary-anchor=([a-z][a-z-]*)/.exec(String(s));
+  return m ? m[1] : null;
+};
+
+// THE NESTING PHRASING, WHICH THIS FILE DID NOT KNOW. An Anchor_cwd diagnosis that keeps its
+// fall-back wording and ADDS "this checkout is nested inside another one" satisfied both
+// matchers below and passed probe 3. The denial clause is subtracted first because the
+// honest fallback message contains that phrase inside the sentence written to DENY it, so a
+// bare match fires on the message telling the truth.
+const DENIAL_OF_NESTING = /NOT a claim that[^.]*?nested inside another one/gi;
+const SAYS_NESTED = (s) => /nested inside another one/i.test(flat(s).replace(DENIAL_OF_NESTING, ''));
 //
 // Keyed on wording that appears ONLY in the two AFFIRMATIVE diagnoses. The honest fallback
 // diagnosis contains the sentence "This is NOT a claim that this checkout is nested inside
@@ -145,8 +175,16 @@ console.log('probe 1 — an UNTRACKED nested checkout must still have the outer 
   assertEq('the outer wrapper is REFUSED (exit 1)', 1, r.code);
   assertEq('the refusal names the outside path',
     'true', String(r.out.includes(path.join(outer, 'scripts', 'mutaml-wrapper.sh'))));
+  // STRUCTURAL: the marker arm, not git's. The prose matcher below cannot tell these two
+  // apart — SAYS_FOREIGN_TREE is true under both — so before the tag a guard that had
+  // collapsed them passed this probe.
+  assertEq('the arm that decided the boundary, named by the driver', 'marker', String(ANCHOR(r.out)));
   assertEq('and the diagnosis is the foreign-tree one, which is TRUE here',
     'true', String(SAYS_FOREIGN_TREE(r.out)));
+  // The marker arm reports walking PAST this checkout's own root, not a nesting. Probe 5
+  // carries the affirmative half, so this absence is not a green that weighs nothing.
+  assertEq('and it does NOT claim a nesting, which the marker arm never establishes',
+    'false', String(SAYS_NESTED(r.out)));
 }
 
 // ---- PROBE 2 — the accept polarity ---------------------------------------------------------
@@ -183,8 +221,15 @@ console.log('probe 3 — with no git and no marker the refusal must name the fal
   fs.mkdirSync(path.join(tree, 'sub'), { recursive: true });
   const r = runFrom(path.join(tree, 'sub'));
   assertEq('it refuses (exit 1), the narrower answer', 1, r.code);
-  assertEq('it does NOT assert a nesting or a foreign tree',
+  // STRUCTURAL. What the fallback probe actually rests on: the arm is named by the driver and
+  // settled without reading the diagnosis.
+  assertEq('the arm that decided the boundary, named by the driver', 'cwd', String(ANCHOR(r.out)));
+  // ENUMERATED — the three phrasings known today, asking whether the prose beside that tag is
+  // true of it. A fourth phrasing passes; that is stated in the header and the success line.
+  assertEq('it does NOT assert a foreign tree',
     'false', String(SAYS_FOREIGN_TREE(r.out)));
+  assertEq('it does NOT assert a nesting either',
+    'false', String(SAYS_NESTED(r.out)));
   assertEq('it says the boundary fell back to the invocation directory',
     'true', String(SAYS_FELL_BACK(r.out)));
 }
@@ -207,6 +252,34 @@ console.log('probe 4 — this repository, invoked from its own tracked nested ch
   }
 }
 
+// ---- PROBE 5 — the git arm, which is what makes probes 1 and 3's absences weigh -----------
+// An absence assertion over a phrasing NO probe can emit is a green that measures nothing;
+// that exact defect was removed from a sibling check and this file must not reintroduce it by
+// forbidding a nesting claim nowhere. Here the inner checkout IS its own repository, so it is
+// its own toplevel, the boundary is git's, and the walk that reached the outer wrapper really
+// did leave a nested tree — the one layout where claiming a nesting is TRUE.
+console.log('probe 5 — a nested checkout that is its own repository: the git arm, where a nesting is real');
+{
+  const outer = path.join(W, 'p5', 'outer');
+  sh(path.join(outer, 'scripts', 'mutaml-wrapper.sh'), '#!/bin/sh\nexit 0\n');
+  fs.writeFileSync(path.join(outer, 'dune-project'), '(lang dune 3.0)\n');
+  git(outer, ['init', '-q', '.']);
+  git(outer, ['config', 'user.email', 'c@t.b']);
+  git(outer, ['config', 'user.name', 'tb']);
+  git(outer, ['add', '-A']);
+  git(outer, ['commit', '-qm', 'outer']);
+  const inner = path.join(outer, 'inner');
+  fs.mkdirSync(path.join(inner, 'sub'), { recursive: true });
+  fs.writeFileSync(path.join(inner, 'dune-project'), '(lang dune 3.0)\n');
+  git(inner, ['init', '-q', '.']);
+  if (fs.existsSync(path.join(inner, 'scripts'))) fatal('probe 5: the inner tree must NOT hold a wrapper');
+  const r = runFrom(path.join(inner, 'sub'));
+  assertEq('the outer wrapper is REFUSED (exit 1)', 1, r.code);
+  assertEq('the arm that decided the boundary, named by the driver', 'git', String(ANCHOR(r.out)));
+  assertEq('and it DOES claim a nesting, which is true on this arm alone',
+    'true', String(SAYS_NESTED(r.out)));
+}
+
 console.log('');
 if (fails > 0) {
   console.error(`tree-boundary-tracked-marker: FAIL — ${fails} assertion(s) fired.`);
@@ -215,9 +288,14 @@ if (fails > 0) {
   console.error('  repository\'s own wrapper there is a false refusal carrying a false reason.');
   process.exit(1);
 }
-console.log('tree-boundary-tracked-marker: PASS — 4 of 4 probes over 10 assertions.');
+console.log('tree-boundary-tracked-marker: PASS — 5 of 5 probes over 17 assertions.');
 console.log('  What would have made this non-zero: letting any nested marker narrow the boundary');
 console.log('  (probes 2 and 4), dropping the marker branch so the outer wrapper is accepted');
-console.log('  (probe 1), or printing a foreign-tree diagnosis where the boundary merely fell');
-console.log('  back to the invocation directory (probe 3).');
+console.log('  (probe 1), printing a foreign-tree or a nesting diagnosis where the boundary');
+console.log('  merely fell back to the invocation directory (probe 3), or collapsing the marker');
+console.log('  and git arms into one — which no prose matcher here can see and the tag does.');
+console.log('  SCOPE, so it is not read wider than it is: the ARM is enforced as a property, by a');
+console.log('  tag the driver picks from an exhaustive match. Whether the PROSE beside it is true');
+console.log('  is only ENUMERATED — three phrasings, fell-back, foreign-tree, nesting. A FOURTH');
+console.log('  PHRASING PASSES THIS CHECK. This file knew two of the three until round 6.');
 process.exit(0);
