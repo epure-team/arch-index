@@ -401,10 +401,18 @@ belong to nobody.** CI logs expire; this paragraph does not.
 
 ### A rebase is owed, and its conflict has a known shape
 
-Base at the time of writing: this branch sits on `090f832`; `origin/main` has since moved
-to `1adc3c7` (#91). One commit, one file, and it is the one file this branch also
-touches: `tezt/tests/must_null_ceiling.ml`, +65/−7 upstream, 66/66 lines apart from this
-side.
+This branch is based on `090f832` and main has moved repeatedly since — it was one commit
+ahead when this paragraph was first written and three by the time it was corrected, which
+is why the number is not the thing to record. **The durable statement is which file
+overlaps, and it has not changed: `tezt/tests/must_null_ceiling.ml` is the only file
+touched by both this branch and main since the base.** Everything else landing upstream
+(`bin/arch_rules/arch_rules.ml`, `lib/arch_tools/arch_report.ml`) is outside this diff.
+Re-derive the overlap before rebasing rather than trusting this sentence's count:
+
+```
+comm -12 <(git diff --name-only $(git merge-base HEAD origin/main)..origin/main | sort) \
+         <(git diff --name-only $(git merge-base HEAD origin/main)..HEAD | sort)
+```
 
 **The constant regions do not overlap** — this side carries `clean_measured = 407` with
 its two-class attribution comment, main's side carries 383 unchanged plus a new
