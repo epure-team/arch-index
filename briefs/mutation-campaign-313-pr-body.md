@@ -413,6 +413,18 @@ lines, written by the same person who built the gate, on the evening he opened h
 PR — which is not a gate any more. The red states something true: **these 24 findings
 belong to nobody.** CI logs expire; this paragraph does not.
 
+**Two things this body has repeatedly said imprecisely, corrected here.** First, the
+denominator: `review.json` holds **148 findings — 124 RESOLVED and 24 OPEN**. Quoting the
+24 alone, as this body has done throughout, reads as though the branch ignored its review;
+it closed five sixths of it across six rounds. Second, ownership work was not absent.
+**Three `OWNER` records exist in the brief, well-formed — the gate parses 3 and reports 0
+malformed** — and they name three HIGH findings closed in rounds 5 and 6
+(`arch_mutants.ml:1378`, `dispatch-covers-open-findings.js:80`,
+`tree-boundary-non-git-checkout.js:1`). The gate lists them under *"name a fingerprint that
+is not an OPEN non-scope finding"* precisely because those findings are now RESOLVED. That
+is the gate being correct, not an anomaly, and "nobody ever claimed anything" was the wrong
+summary: the convention was used, three times, and then the findings it tracked were fixed.
+
 ### The red acquired a second assertion, and that one is a false positive in the scope gate
 
 Between `7f5fa6a` and `1442c7f` the ratchet went from **39 passed / 1 asserted** to **38
@@ -646,8 +658,13 @@ it is real data rather than a constructed case, and it *quantifies* what the old
 convention was doing rather than merely showing that it could. Twenty of twenty-four owned
 by accident is the answer to whether the rewrite was worth doing.
 
-It also explains the failed reconstruction described below: an attempt here to
-reimplement `mention-v0` returned 0 where the real path yields 20.
+**And the failed reconstruction described below now has its cause.** The reimplementation of
+`mention-v0` attempted here read each finding's `file` field. `review.json` has no such
+field — it is `path` — so every comparison was against `None` and the result was
+structurally 0, not a measurement. Re-run against `path`, the old matcher claims **4** of
+the 24 open findings on this PR body. It was never 0, and the correct figure was one field
+name away. The gate's own 20 is a different question again: it measures `impl.md`, which is
+the file the gate actually reads.
 
 Two CI runs here (`fc0b496`, `7f5fa6a`) report byte-identical gate output — `24 OPEN, 0
 OWNED-dispatched, 0 owned-deferred, 0 owned-accepted, 24 unowned`, with an identical
