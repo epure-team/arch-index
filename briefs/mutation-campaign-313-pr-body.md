@@ -509,8 +509,31 @@ queries that produced them are one `group by` each over `mutant_runs`; the colum
 precisely so that **prose about a finding stops counting as ownership of it** — the
 predecessor matched `body.includes(path) && body.includes(String(line))` as two
 independent substring searches, so a paragraph saying nobody had looked at a finding could
-close it. **That rewrite has not been tested on live data, and it will not be on this
-branch.**
+close it.
+
+**This section previously said that rewrite had not been tested on live data and would not
+be on this branch. That was wrong, and the evidence was in the gate's own output the whole
+time.** It runs both matchers over the same live brief on every CI run and prints their
+disagreement (as of `103d005`):
+
+```
+THE MEASURE OF OWNERSHIP CHANGED — both numbers, so a reader can tell an instrument
+change from a work change:
+  mention-v0: a section containing the path and the line as separate substrings,
+              or the fingerprint as a substring    -> 20 owned, 4 unowned
+  record-v1:  an OWNER line whose commit and check resolve against git
+                                                  -> 0 owned, 24 unowned
+```
+
+**On this branch's real brief, the old convention claims 20 of 24 findings by accidental
+substring collision and the new one claims none.** That is not the controlled before/after
+specified below — it is weaker as a demonstration and stronger as a measurement, because
+it is real data rather than a constructed case, and it *quantifies* what the old
+convention was doing rather than merely showing that it could. Twenty of twenty-four owned
+by accident is the answer to whether the rewrite was worth doing.
+
+It also explains the failed reconstruction described below: an attempt here to
+reimplement `mention-v0` returned 0 where the real path yields 20.
 
 Two CI runs here (`fc0b496`, `7f5fa6a`) report byte-identical gate output — `24 OPEN, 0
 OWNED-dispatched, 0 owned-deferred, 0 owned-accepted, 24 unowned`, with an identical
@@ -520,7 +543,8 @@ and both commits touched only `briefs/<task>-pr-body.md`. The gate's input did n
 so the identical output demonstrates determinism and nothing more. It was nearly published
 here as a confirmation.
 
-**The experiment that would test it**, for whoever wants the answer: commit a change to
+**The controlled experiment still worth running**, since the figure above is observational
+rather than a before/after: commit a change to
 `briefs/<task>-impl.md` that discusses one or more OPEN findings by path and line — the
 shape the old matcher accepted — and writes **no** `OWNER` line for any of them. Then read
 the gate's four numbers.
