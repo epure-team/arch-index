@@ -374,7 +374,21 @@ This branch was stopped deliberately with the PR open and red. Everything below 
 recorded because it is **not** recoverable from the repository alone, and whoever picks
 this up should not have to reconstruct it.
 
-### The PR is red, and the red is not a code failure
+### The PR is not red on its current head — no check has run on it
+
+**This section described a red, and by the time the campaign finished that was the wrong
+state.** On head `18b46e4` GitHub reports **0 check-runs**: the PR is `CONFLICTING` /
+`DIRTY` against main, so no merge ref can be built and nothing was scheduled. The last run
+on this branch was on `2e17483`.
+
+That is the third state, and this branch has spent the day insisting on it: a green, a red,
+and *a check that did not run* are three different things, and the last one is the one a
+status table renders as if it were an answer. **Do not read "no green tick" here as a
+failure.** What follows describes the red that CI did report, on the commits where it
+actually ran, and it remains the expected result once the conflict is resolved — but it is
+an expectation, not the current state.
+
+### The red CI did report, and why it is not a code failure
 
 Run `34023261190` on head `fc0b496`. Job `build`, step by step: `Build` **success**,
 `Unit and integration tests` **success**, `Ratchet checks` **failure**, everything after
@@ -480,13 +494,26 @@ stated.
 
 ### A rebase is owed, and its conflict has a known shape
 
-This branch is based on `090f832` and main has moved repeatedly since — it was one commit
-ahead when this paragraph was first written and three by the time it was corrected, which
-is why the number is not the thing to record. **The durable statement is which file
-overlaps, and it has not changed: `tezt/tests/must_null_ceiling.ml` is the only file
-touched by both this branch and main since the base.** Everything else landing upstream
-(`bin/arch_rules/arch_rules.ml`, `lib/arch_tools/arch_report.ml`) is outside this diff.
-Re-derive the overlap before rebasing rather than trusting this sentence's count:
+This branch is based on `090f832` and main has moved repeatedly since — one commit ahead
+when this paragraph was written, three when it was corrected, seven now — which is why the
+number is not the thing to record.
+
+**The overlapping SET has also grown, and that is worth more than the count.** It was
+`tezt/tests/must_null_ceiling.ml` alone; it is now three files, and the additions change the
+character of the rebase:
+
+- `tezt/tests/must_null_ceiling.ml` — disjoint constant regions, union of two comment
+  blocks, and **re-derive 407 rather than carrying it** (main's lines shift every
+  position-encoded lambda in that file).
+- `skills-meta/friction.jsonl` — **append-only and contended.** A sibling branch hit a real
+  incident resolving this same file: removing `<<<<<<<`, `=======` and `>>>>>>>` but **not
+  `|||||||`**, which kept the diff3 *base* section and silently duplicated records. Validate
+  each line as JSON afterwards; do not resolve it by reading.
+- `.gitignore`.
+
+The PR is `CONFLICTING` / `DIRTY`, so this is a real conflict, not a projected one.
+**Re-derive the set before rebasing rather than trusting this list** — it has changed twice
+already, which is exactly why the command is here and the count is not:
 
 ```
 comm -12 <(git diff --name-only $(git merge-base HEAD origin/main)..origin/main | sort) \
