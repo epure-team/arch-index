@@ -115,11 +115,11 @@ real run.
    by a different route ("sites mapping to no indexed function"). **The actionable
    population is 1659, not 4159**, and this record previously said 4159.
 
-3. **The A/B compared nothing.** `ab-naive.db` and `ab-selected.db` have an identical md5
-   over every run row, and both carry profile `group` in `mutant_campaigns`, 48 seconds
-   apart. The same configuration ran twice. The naive arm of the full campaign has 0 runs.
-   **There is no wall-clock naive-vs-selected measurement in this branch** — the 60/15 pair
-   quoted above is one configuration, not a comparison.
+3. **The first A/B compared nothing, and was replaced by one that does.** `ab-naive.db` and
+   `ab-selected.db` have an identical md5 over every run row and both carry profile `group`
+   48 seconds apart — the same configuration run twice. That pair is not a comparison and
+   nothing here rests on it. **The full naive arm has since completed**, and it is reported
+   below; it is the measurement this blocker was about.
 
 ## What this does NOT establish
 
@@ -511,8 +511,8 @@ project. They are at `/mnt/ssd-external-2to/miaou-campaign/`:
 | file | what it holds |
 |---|---|
 | `full-selected.db` | the 4931-run campaign: 772 KILLED, 4159 SURVIVED, `top_bounded` on every row |
-| `ab-selected.db` / `ab-naive.db` | the 76-mutant pair — md5-identical over every run row, both profile `group` |
-| `full-naive.db` | catalogued only, **0 runs**: the missing naive arm |
+| `ab-selected.db` / `ab-naive.db` | the void 76-mutant pair — md5-identical over every run row, both profile `group`; superseded, nothing rests on it |
+| `full-naive.db` | the naive arm, completed after the stop: 4929 runs, 774 KILLED, 4155 SURVIVED |
 | `plan.json` | `test_cone_escapes` (358), `indexed_functions` (6169), `test_roots` (1124), `unreached` (3668) |
 
 The corpus is `miaou`, `src/` entire, at `/mnt/ssd-external-2to/miaou-campaign` (detached
@@ -579,35 +579,77 @@ path-and-line-substrings"* for a single finding. The reconstruction was wrong, a
 comparing a tool against a belief about the tool is the failure this whole branch exists to
 make harder. **Read what the gate prints.**
 
-### What was still running when this stopped
+### The naive arm completed after the stop, and it vindicates the design
 
-A background agent was executing the naive arm of the full campaign. As of this writing it
-had not: `full-naive.db` holds **4976 mutants catalogued and 0 runs, and no `.timing` file
-exists at all.**
+The background agent finished. `full-naive.db` is no longer empty, and the two arms are
+now comparable on the same 4976-mutant catalogue:
 
-That shape matters more than the zero. The catalogue was built, so the setup succeeded;
-**execution never began.** This is not a partial run, not a slow one, and there is no
-fragment to salvage or to wait a little longer for. **Step 3 of the next steps has no
-input**, and the wall-clock naive-vs-selected comparison does not exist in this branch in
-any form.
+| | selected | naive |
+|---|---|---|
+| runs attempted | 4931 | 4929 |
+| KILLED | 772 | 774 |
+| SURVIVED (engine) | 4159 | 4155 |
+| wall clock | **1279.9 s** | **7514.8 s** |
 
-The agent's own state was equally unknown at the stop: last output ten minutes prior,
-neither finished nor exited, and **no way from here to distinguish progressing from
-stuck.** Saying "in progress" would imply knowledge nobody had. Re-check the row count and
-the process before assuming either — the same distinction this branch draws between a
-green, a red, and a run that never happened, applied to a process rather than to CI.
+**Selection is 5.87× cheaper.** A controlled A/B on `canvas.muts` alone (76 mutants) gives
+7.82× with identical verdicts. Caveat on both figures: the machine was not dedicated and
+the arms ran sequentially. And roughly half the saving is not selection working — 2500 of
+4931 mutants execute zero tests because they sit outside the plan's targets, which is
+blocker 2 above, not a speed-up to be proud of.
 
-## What went wrong in producing this branch, and one of it changed the work
+**The result that matters is not the ratio.** Joining the two arms mutant by mutant:
 
-**This section exists because the alternative is a reviewer finding these later and
-trusting nothing else in the body.** It is evidence of what was checked, not an
-argument against merging — the defects below were found, measured and recorded, and
-three of them are retractions of this branch's own published claims.
+```
+selected SURVIVED & naive KILLED : 4
+selected KILLED  & naive SURVIVED: 0
+```
 
+**Four mutants that the graph-based selection reported as survivors were genuinely killed
+when every test ran** — `helpers.ml:171` twice in `pad_to_width`, `capability.ml:55` in
+`clear`, `pane.ml:121` in `split_vertical_with_left_width`. The selection missed a killing
+test, 4 times in 4931 (0.08%). **And zero in the other direction.**
 
+That asymmetry is the whole argument. Had this tool published its 4159 engine-survivors as
+`SURVIVED`, four of them would have been false test gaps — someone would have been sent to
+write a test that already exists. It published none of them, because `top_bounded` says the
+selection could not be proven sound, and **on this corpus it demonstrably was not.** The
+refusal that produced an empty principal output was not excess caution; it was correct, and
+this is the measurement that shows it.
 
-Six review rounds hardened this machinery. The defects that mattered most were not
-found by any of it.
+So the honest summary changes shape: the tool's principal output is empty **and the empty
+output was the right answer**. Fixing blocker 1 must therefore not be read as "make it
+publish survivors" — it is "compute per mutant whether soundness holds, so the ones where
+it does can publish while these four still cannot."
+
+### What the campaign cost to start, which the harness does not record
+
+Eight obstacles were worked around in the campaign worktree, none of them in this
+repository, and they are the difference between "the tool runs" and "the tool ran". The
+load-bearing ones:
+
+- **`run` refuses any OCaml index arch-index itself produces.** 52 of 581 test names are
+  anonymous functions the indexer names `<fun:L:C>`; `<` and `>` fail `name_is_safe`, so it
+  exits 2 before writing anything. The error advises excluding the test with `--tests`, but
+  the selector's globs have neither negation nor character classes — **the advice names an
+  impossible action.** Worked around by rewriting the names in a copy of the database. The
+  campaign does not start otherwise.
+- **mutaml 0.3 writes no `.muts` files under `dune lang ≥ 3.3`** — build exits 0, prints
+  "Writing mutation info to …", and no file exists. Bisected: 3.0/3.1/3.2 fine, 3.3 onward
+  broken. Required downgrading `dune-project` to `(lang dune 3.2)`.
+- **Dune's shared cache replays the ppx output without re-running it**, so after `rm -rf
+  _build` the log shows 168 "Writing mutation info" lines with zero files on disk. **Any
+  check that verifies instrumentation by grepping that log reads green on a cache hit.**
+- **`--seed` is recorded in the database and never passed to the engine.** mutaml's default
+  is a random seed *per file*, so a campaign can stamp `seed 42` over a catalogue built from
+  random seeds. It was only true here because `MUTAML_SEED=42` was set by hand.
+- **`completed_at` is NULL and will normally be**: 45 mutants exceeded mutaml's 20 s
+  timeout, which kills the wrapper before its trace line, so they are executed-but-unobserved
+  → PENDING → the campaign is never stamped complete. On a real repository that is the
+  nominal case, not the edge case.
+- **`scripts/check-mutaml-integration.sh` returns 3 only because of PATH.** With
+  `MUTAML_RUNNER` pointed at the engine it **passes, exit 0**, two invocations, every mutant
+  resolved to its declared set. The "unverified" status recorded elsewhere in this body is a
+  PATH artefact, not an unexercised mechanism.
 
 ### The scoping number was wrong by a factor of fifty, and it decided the work
 
