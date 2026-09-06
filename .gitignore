@@ -14,3 +14,6 @@ _opam/
 
 # Apalache model-checker scratch output
 _apalache-out/
+# Roster pipeline control files — session state, never committed
+briefs/ACTIVE_TASK
+briefs/*-manifest.txt

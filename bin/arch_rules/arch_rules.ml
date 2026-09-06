@@ -1321,12 +1321,32 @@ let main () =
   let results = List.map (eval t g ~sound:contract_ok) rules in
   (* UNKNOWN is fail-OPEN by default: a rule that blocks every PR whose cone happens to touch a
      callback teaches people to delete the rule, which leaves them worse off than a warning. *)
+  (* EXHAUSTIVE over [Arch_report.verdict], not a disjunction of string equalities.
+     Until 2026-09-06 this was a chain of [v = "..."] tests, so a verdict absent
+     from the chain evaluated to [false] and passed the gate in silence, and the
+     census assertion below that dies on an uncounted verdict covers only the
+     DISPLAY path. Coverage happened to be complete -- measured before the change,
+     seven named of an eight-member vocabulary, the omitted one being [PASS] --
+     but nothing kept it so. A ninth constructor is now a compile error here.
+
+     An unparseable verdict string dies loudly rather than defaulting to "does
+     not fail": ambiguity is absence of proof, and the safe default for a GATE is
+     to refuse, not to pass. *)
   let failing v =
-    v = "VIOLATION"
-    || (on_possible = "fail" && v = "POSSIBLE")
-    || (on_unknown = "fail" && (v = "UNKNOWN" || v = "UNKNOWN_NO_CONTRACT"))
-    || (on_vacuous = "fail" && (v = "NO_SOURCE" || v = "NO_TARGET"))
-    || (on_not_computed = "fail" && v = "NOT_COMPUTED")
+    match Arch_report.verdict_of_string v with
+    | None ->
+        die
+          (Printf.sprintf
+             "verdict %S is outside the published vocabulary [%s]. Refusing rather than treating \
+              it as passing: an unrecognised verdict must not silently satisfy the gate."
+             v
+             (String.concat "; " Arch_report.verdict_vocabulary))
+    | Some Arch_report.Pass -> false
+    | Some Arch_report.Violation -> true
+    | Some Arch_report.Possible -> on_possible = "fail"
+    | Some (Arch_report.Unknown | Arch_report.Unknown_no_contract) -> on_unknown = "fail"
+    | Some (Arch_report.No_source | Arch_report.No_target) -> on_vacuous = "fail"
+    | Some Arch_report.Not_computed -> on_not_computed = "fail"
   in
   let failed_names = List.filter_map (fun r -> if failing r.verdict then Some r.rule else None) results in
   let count_verdicts vs = List.length (List.filter (fun r -> List.mem r.verdict vs) results) in
