@@ -1357,6 +1357,27 @@ type tree_anchor =
           reason is different and saying [Anchor_marker]'s reason here is FALSE: it asserts
           the repository does not track the marker, which is precisely what nobody knows. *)
 
+(** The MACHINE-READABLE name of the arm that decided the boundary, printed alongside the
+    refusal so that a reader — human or check — can tell which of the four branches ran
+    WITHOUT parsing the English diagnosis.
+
+    THIS EXISTS BECAUSE MATCHING PROSE IS A GATE THAT ROTS. Every check that wanted to know
+    which arm fired had to key on phrases lifted out of the diagnoses, and an enumerated set
+    of phrases is defeated by the next phrase: a repair that knew two of them shipped a check
+    blind to the third, and the coverage hole it opened was on the very defect it was
+    repairing. A tag the CODE emits removes the question instead of moving it — reword every
+    diagnosis and the tag is unchanged.
+
+    THE MATCH IS EXHAUSTIVE AND CARRIES NO WILDCARD ON PURPOSE. A fifth anchor cannot be
+    added without the compiler demanding a tag for it, so the set of arms and the set of tags
+    cannot drift apart in silence. checks/tree-boundary-anchor-is-structural.js pins that
+    same correspondence from the outside, against this source and against the binary. *)
+let anchor_tag = function
+  | Anchor_git -> "git"
+  | Anchor_marker -> "marker"
+  | Anchor_cwd -> "cwd"
+  | Anchor_undetermined _ -> "marker-undetermined"
+
 (** The nearest ancestor of [d] holding a tree-local marker of a checkout root.
 
     `dune-project` is the marker. It is what says "this directory is the root of the
@@ -1503,13 +1524,14 @@ let guard_inside_tree ~what path =
     refuse
       (Printf.sprintf
          "arch-mutants: %s resolved to %s, which is OUTSIDE the boundary %s.\n\
+          arch-mutants: boundary-anchor=%s\n\
           %s That is issue #77's mechanism: the outer tree's binary is unmutated, every \
           mutant survives, and the report becomes a page of false test gaps that reads \
           exactly like a real finding. Refusing rather than producing it.\n\
           What would make this work: build the artefact inside %s, or name the one you mean \
           explicitly with ARCH_MUTANTS_WRAPPER / ARCH_IMPACT — an override that names an \
           existing path is honoured, because there you chose it."
-         what path root diagnosis root)
+         what path root (anchor_tag (tree_anchor ())) diagnosis root)
 
 (** The wrapper the engine will call once per mutant. [ARCH_MUTANTS_WRAPPER] overrides;
     otherwise it is found by walking up from the working directory, the same resolution
