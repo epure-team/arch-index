@@ -602,6 +602,10 @@ Twenty-two of the thirty are one PR's worth of harness refresh
 `bin/arch_rules/arch_rules.ml`, `lib/arch_tools/arch_report.ml`, a `docs/` note, and the
 five `roster/vuln-reachability-triage/` + `specs/` files.
 
+**None of the thirty is touched by this branch.** Measured, not asserted: intersecting the
+predicted violation set with `git diff --name-only 090f832..HEAD` yields **0**. Every one of
+them arrived through other work merged to main while this branch was untestable.
+
 **Read that number correctly when it appears.** It is **not** a regression caused by
 resolving the conflict. The run at 10:21 reported two because at that moment main differed
 from this branch's base by one PR. Three more have merged since, during a window in which
