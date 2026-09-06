@@ -452,9 +452,11 @@ for every file main touches outside the manifest.
 **That prediction has since been confirmed by the runs themselves.** The scope finding was
 absent at `7f5fa6a` (39 passed, 1 asserted), and from `1442c7f` onward — the first run after
 main moved — it names both files and the ratchet reads 38 passed, 2 asserted, unchanged
-across every run since. **Eight runs on this branch have now failed**, not one; the count
-is stable because the cause is stable. The gate is not intermittent and it is not
-responding to anything in this diff.
+across every run since. The durable statement is not a count of failed runs — that number grows by one with every
+push and measures nothing but how often this body was edited; it was written as "eight"
+here and was nine within the hour. **The property is that every run started after main
+moved fails, on the same two files, with the same 38/2 ratchet reading.** The gate is not
+intermittent, and it is not responding to anything in this diff.
 
 **And this reframes the rebase from housekeeping into a correction.** Rebasing does not
 merely unblock CI: it closes the `base...HEAD` range over main's commits, so these two
