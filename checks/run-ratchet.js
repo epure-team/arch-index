@@ -127,7 +127,7 @@ for (const t of tiers) {
     } else if (code === 1) {
       verdict = 'ASSERTED';
       asserted.push({ rel, code, out });
-    } else if (code === 3 || !t.fatalUnrun) {
+    } else if (!t.fatalUnrun) {
       verdict = code === 3 ? 'REFUSED (3)' : `UNRUN (${code})`;
       unrun.push({ rel, code, out });
     } else {
