@@ -399,6 +399,31 @@ lines, written by the same person who built the gate, on the evening he opened h
 PR — which is not a gate any more. The red states something true: **these 24 findings
 belong to nobody.** CI logs expire; this paragraph does not.
 
+### Exactly what gates this merge, measured rather than assumed
+
+`repos/epure-team/arch-index/branches/main/protection` returns:
+
+```
+strict: true          required contexts: ["build"]
+reviews: null         enforce_admins: false
+```
+
+Three consequences worth stating, because "blocked" has been used loosely about this PR:
+
+- **No approving review is required by the repository.** Nothing here waits on a
+  judgement in the review sense. The two open decisions below are real, but they are not
+  imposed by branch protection.
+- **The only required check is `build`** — the same job whose `Ratchet checks` step fails.
+  So the red is not one signal among several: it is precisely the gate.
+- **`enforce_admins` is false.** An administrator can merge this without the check going
+  green. That is a genuine option and it is recorded here so it is a *decision* rather
+  than a thing nobody realised was possible — merging red would mean accepting 24 findings
+  that no record claims, which is exactly what the gate is refusing to let happen silently.
+
+Which makes the merge path precise: rebase (`strict: true` requires it) plus either OWNER
+records for the 24 findings, or a deliberate administrative override with that acceptance
+stated.
+
 ### A rebase is owed, and its conflict has a known shape
 
 This branch is based on `090f832` and main has moved repeatedly since — it was one commit
