@@ -586,6 +586,39 @@ each problem:
 Gestures 1 and 2 look like one action and are not. Gesture 3 is the only one that
 addresses a defect in this branch's own work.
 
+### What the first run after resolution will report, predicted before it happens
+
+**Not two out-of-manifest findings. Thirty.** Computed here against this task's manifest
+rather than estimated:
+
+```
+files in 090f832...origin/main : 36
+manifest entries               : 28   (dirty: 0)
+predicted violations           : 30
+```
+
+Twenty-two of the thirty are one PR's worth of harness refresh
+(`.claude/commands/roster-*.md` and `.claude/.roster-channel`); the rest are
+`bin/arch_rules/arch_rules.ml`, `lib/arch_tools/arch_report.ml`, a `docs/` note, and the
+five `roster/vuln-reachability-triage/` + `specs/` files.
+
+**Read that number correctly when it appears.** It is **not** a regression caused by
+resolving the conflict. The run at 10:21 reported two because at that moment main differed
+from this branch's base by one PR. Three more have merged since, during a window in which
+this branch was untestable — five pushes, no runs — so **the state accumulated silently and
+the gate simply had no opportunity to report it.** Resolving the conflict does not create
+those thirty; it reveals them.
+
+**This is what makes the manifest `base=` urgent rather than tidy.** Without it, resolution
+turns two false accusations into thirty. With it, the range closes and they go away — which
+is the whole point of gesture 2 above being separate from gesture 1.
+
+**And it retires this body's own positive control.** The green at 09:20 proves the scope
+gate *can* pass on this branch, so its red is not vacuous — that claim stands. It does
+**not** predict the next verdict, because it was measured against a main five hours and
+three merges old. A control establishes that an instrument works; it expires as a forecast
+the moment its inputs move.
+
 ### A rebase is owed, and its conflict has a known shape
 
 This branch is based on `090f832` and main has moved repeatedly since — one commit ahead
