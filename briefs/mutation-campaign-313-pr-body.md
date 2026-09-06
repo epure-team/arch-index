@@ -446,7 +446,24 @@ Main changed it (#92, `062f2dd` and `b120765`). CI runs on `event=pull_request`,
 checks out the **merge ref**, so the diff the gate takes against this task's manifest base
 contains main's work as well as the branch's — and the gate attributes it to the task.
 
-**Three independent confirmations, because a single one would not settle it:**
+**The strongest evidence is a before/after with one intervening event, not an argument
+about `checkout@v4`.** The scope gate **passed** on this branch, and then stopped:
+
+```
+09:20:37Z   run on 7f5fa6a   PASS      scripts/check-scope-diff.sh   39 passed, 1 asserted
+09:38:09Z   #92 merged to main (b120765)
+09:42:07Z   run on 1442c7f   ASSERTED  scripts/check-scope-diff.sh   38 passed, 2 asserted
+```
+
+This branch's only change between those two runs was to `briefs/<task>-pr-body.md`. **The
+branch did not change in any way the gate reads; main did.** One event sits between a pass
+and a failure.
+
+**That also hands this branch a positive control it did not have.** The scope gate *can*
+pass here — it did at 09:20 — so its assertion is not the vacuous kind this body spends its
+length hunting. The gate works; it is being fed a diff that is not this task's.
+
+**Three further confirmations, because a single one would not settle it:**
 
 - **Positive control.** `bash scripts/check-scope-diff.sh briefs/<task>-manifest.txt` run
   against the branch alone exits **0**. Same gate, same manifest, no finding.
