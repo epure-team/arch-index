@@ -529,13 +529,30 @@ stale. A `.gitignore` rule does not untrack an already-tracked path, so after th
 both remain committed and main's new rule is silently ineffective against exactly the two
 files it names.
 
-**And they cannot simply be removed, which is the part worth knowing before someone tries.**
-`checks/run-ratchet.js:115` resolves the scope gate's input as
-`briefs/<activeTask>-manifest.txt`, with the active task read from the committed
-`ACTIVE_TASK`. CI has no session state, so the gate can only run at all *because* these
-files are in the tree. Untracking them the way main intends moves `check-scope-diff.sh`
-from **asserting** to **not running** — the third state again, and this time it would be
-introduced deliberately while looking like cleanup.
+**And they cannot simply be removed, which is the part worth knowing before someone tries —
+but the coupling is this branch's own, not the repository's.** Measured on `e868bcd`:
+`checks/run-ratchet.js` **does not exist on main**; main's `scripts/check-scope-diff.sh`
+takes the manifest **as an argument** (`Usage: check-scope-diff.sh <manifest-path>`) and
+never reads `ACTIVE_TASK`; and main tracks **zero** control-file paths. Main's `.gitignore`
+rule is correct as written and nothing upstream is degraded.
+
+The coupling was introduced here, by this branch, in both halves: `checks/run-ratchet.js`
+arrived in `7ca7b43` and resolves the gate's input as `briefs/<activeTask>-manifest.txt`
+with the active task read from the committed `ACTIVE_TASK`; and the two control files are
+committed on this branch alone. CI has no session state, so **this branch's** wrapper can
+only run the gate because the files are in its tree. Untracking them the way main intends
+moves `check-scope-diff.sh` from **asserting** to **not running** — the third state, this
+time introduced deliberately while looking like cleanup.
+
+**The failure is asymmetric, which is why it is worth writing down rather than just
+fixing.** A `.gitignore` rule does not untrack an already-tracked path, so the breakage
+never appears in the tree where it is introduced. It appears at a fresh clone, or after a
+deliberate `git rm --cached` — far from whoever caused it, and looking like someone else's
+problem. A gate that stops running is indistinguishable from a gate that passes.
+
+The general form is recorded upstream as roadmap 4.15, with the rule that any later wrapper
+takes its manifest as an argument or **fails loudly (exit 2, never 0)** when the control
+file is absent — never a silent resolution to nothing.
 
 So the rebase forces a decision that is not textual: either the scope gate keeps a
 committed input and main's rule stays ineffective for this branch, or the input becomes
