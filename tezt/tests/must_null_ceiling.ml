@@ -288,7 +288,23 @@ let must_null_query =
    the test itself uses: [calls] moved 18743 -> 18915 with #88's code present, and the
    MUST-with-NULL-callee figure held at 403. An expected number is the one nobody
    re-derives, which is the reason to re-derive it. *)
-let clean_measured = 403
+(* Round 3: 403 -> 407, and the whole movement is this branch's again. Measured on the
+   round-3 tree with the same arch_callgraph_ocaml the test uses, main still reading
+   383 at its own tip:
+
+     +12  bin/arch_mutants/arch_mutant_db.ml, unchanged since the last entry, every
+          row a Sqlite3.* call. The inert class: Sqlite3 is never in this index.
+     +12  tezt/tests/mutants.ml, every row an Arch_tezt.Temp.file or .dir. NOT inert
+          -- Arch_tezt is in this repository, so these are the signal-carrying
+          residue. They were 8; round 3's seven new tezt cases added four.
+
+   407 - 383 = 24 = 12 + 12, closing to the unit. The signal-carrying half now equals
+   the inert half, which is worth noticing rather than smoothing: every round that
+   adds tezt coverage grows the class this ratchet exists to see, and a branch can
+   improve its own testing while making this metric worse. That is not a reason to
+   stop adding cases; it is a reason to keep the two halves named separately, because
+   a single 24 would hide which one moved. *)
+let clean_measured = 407
 
 let headroom = 25
 
