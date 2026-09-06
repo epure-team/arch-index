@@ -107,6 +107,27 @@ const git = (cwd, args) => {
 // read `fichier d'index plus petit qu'attendu` — so a matcher on English index-error text would
 // be a matcher that reads green under LANG=fr.
 const flat = (s) => String(s).replace(/\s+/g, ' ');
+
+// STRUCTURAL, and the only assertions in this file that are a property rather than an
+// enumeration of phrasings. The driver names the arm that decided the boundary in a token IT
+// chooses, by an exhaustive match on `type tree_anchor` with no wildcard, so no rewording of
+// any diagnosis moves it and a fifth anchor cannot ship without a tag. Read off the RAW
+// output: it is not prose and it is not reflowed.
+const ANCHOR = (s) => {
+  const m = /boundary-anchor=([a-z][a-z-]*)/.exec(String(s));
+  return m ? m[1] : null;
+};
+
+// WHAT IS DELIBERATELY NOT ASSERTED HERE, so the next reader does not mistake its absence for
+// coverage. The sibling checks also forbid the phrasing "nested inside another one" on the
+// arms where no nesting was established, and the undetermined diagnosis below could acquire
+// that false claim without any assertion in this file firing. That absence is NOT added here
+// because every probe in this file takes the marker or the undetermined arm, and neither can
+// ever emit a nesting claim truthfully: the assertion would be one no probe here could turn
+// red, which is a green that weighs nothing — the exact defect this round removed from a
+// sibling. The affirmative anchor for that phrasing lives in
+// checks/tree-boundary-tracked-marker.js, which has a git-arm probe; this file relies on the
+// tag instead, which distinguishes the arms without naming a single phrase.
 const SAYS_FOREIGN_TREE = (s) =>
   /the campaign was about to run the OUTER tree's artefact|belongs to a different tree/i.test(flat(s));
 const SAYS_FELL_BACK = (s) => /No boundary could be established|FELL BACK/i.test(flat(s));
@@ -208,6 +229,11 @@ for (const [n, how, label] of [[2, 'corrupt', 'CORRUPT'], [3, 'unreadable', 'UNR
   const r = runFrom(nested);
   assertEq(`git declined with a code that is neither 0 nor 1`, 'true', String(lsCode >= 2));
   assertEq('the artefact is REFUSED (exit 1), the narrower answer', 1, r.code);
+  // STRUCTURAL: the undetermined arm, told apart from the plain marker arm of probe 4 by a
+  // token the code picks. The two share the same boundary and differ only in their reason, so
+  // before the tag the only thing separating them was the wording matched below.
+  assertEq('the arm that decided the boundary, named by the driver',
+    'marker-undetermined', String(ANCHOR(r.out)));
   assertEq('the refusal says git could not determine the marker\'s tracking', 'true', String(SAYS_UNDETERMINED(r.out)));
   assertEq('and it carries git\'s actual exit code', 'true', String(flat(r.out).includes(`exited ${lsCode}`)));
   assertEq('and it does NOT assert the marker belongs to a different tree', 'false', String(SAYS_FOREIGN_TREE(r.out)));
@@ -225,6 +251,9 @@ console.log('probe 4 — healthy index, UNTRACKED nested marker: the boundary st
   assertEq('the outer wrapper is REFUSED (exit 1)', 1, r.code);
   assertEq('the refusal names the outside path', 'true',
     String(r.out.includes(path.join(dir, 'scripts', 'mutaml-wrapper.sh'))));
+  // STRUCTURAL, and the negative control for the tag itself: probes 2 and 3 must NOT reach
+  // this arm and this probe must NOT reach theirs.
+  assertEq('the arm that decided the boundary, named by the driver', 'marker', String(ANCHOR(r.out)));
   assertEq('the diagnosis is the foreign-tree one, which is TRUE here', 'true', String(SAYS_FOREIGN_TREE(r.out)));
   assertEq('and NOT the could-not-determine one', 'false', String(SAYS_UNDETERMINED(r.out)));
 }
@@ -244,5 +273,9 @@ console.log('  What would have made this non-zero: testing the ls-files exit as 
 console.log('  reads as "untracked" (probes 2 and 3); printing the foreign-tree or the fell-back');
 console.log('  diagnosis on the undetermined path (probes 2 and 3); dropping git\'s exit code from the');
 console.log('  message (probes 2 and 3); or answering "could not tell" to a git that answered plainly');
-console.log('  (probes 1 and 4).');
+console.log('  (probes 1 and 4); or collapsing the undetermined arm into the plain marker arm, which');
+console.log('  no wording matched here could see and the anchor tag does (probes 2, 3 and 4).');
+console.log('  SCOPE: the ARM is enforced as a property, by that tag. Whether the PROSE beside it is');
+console.log('  true is only ENUMERATED, over the phrasings named above, and a further phrasing would');
+console.log('  pass. See the note beside the matchers for the one absence deliberately NOT asserted.');
 process.exit(0);
