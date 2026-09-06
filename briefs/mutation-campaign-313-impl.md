@@ -1453,3 +1453,206 @@ Findings this section claims, by fingerprint, so the gate can see them:
   section's numbers are the source and the table is stale by them.
 * **PC-A1 measures the fallback literal only.** Whether the `Anchor_git` and `Anchor_marker`
   literals carry the same latent typographic dependence in OTHER checks was not swept.
+
+## Group R5-B — outcome
+
+One file was in scope: `checks/dispatch-covers-open-findings.js`, the gate that decides which
+review finding has an owner. Finding `checks/dispatch-covers-open-findings.js:80:gate-vacuous`
+(HIGH, falsifier) said ownership there was verbal and mostly fictional. It is.
+
+### The defect, re-measured at 10f51bf rather than quoted
+
+The matcher ran two INDEPENDENT substring searches over a brief section —
+`body.includes(finding.path)` and `body.includes(String(finding.line))` — with nothing binding
+the two to each other and nothing binding either to a claim of having done work. Measured on
+this task's own corpus, 29 OPEN non-scope findings, `node checks/dispatch-covers-open-findings.js`
+at 10f51bf printing `17 dispatched, 6 deferred, 6 unowned`:
+
+| what established ownership under the old rule | findings |
+|---|---|
+| the path and the line found as separate substrings, nothing else | 17 |
+| the fingerprint found as a substring | 4 |
+| both grounds, in different sections | 2 |
+| nothing — genuinely unowned | 6 |
+
+So of 23 owned, SEVENTEEN rested on nothing but a path and a digit occurring somewhere in the
+same section. Four further facts, each measured, not reasoned:
+
+- `checks/run-ratchet.js:1` was claimed by NINE sections at once. An owner that is nine
+  sections is not an owner.
+- Several findings sit at line 1, and for those the "line" half was satisfied unconditionally:
+  the digit `1` occurs in every section that names the file at all.
+- A paragraph reporting three OUTPUT SIZES over a file — 1152 characters, then 2425, then 1378 —
+  owns three unrelated findings at those lines of that file.
+- A section whose prose says a finding was looked at by nobody, was not fixed and remains
+  entirely unowned, quoting its fingerprint in order to say so, CLOSED it. Complaining about a
+  finding was a way of owning it.
+
+The gate did not answer "does this finding have an owner". It answered "is this finding
+mentioned somewhere", and the two diverge exactly in the case it exists to catch: a group
+writing about work it did not do.
+
+### The ceiling, stated before the work and not walked back
+
+An explicit owner field closes ONLY THE ACCIDENTAL HALF. It removes ownership claimed by a
+paragraph that happened to contain a path and a number. It does not stop an agent writing an
+owner for work it did not do: a field written deliberately can be written falsely, by an agent
+under pressure to show coverage. **The scope of this change is to make ownership DELIBERATE,
+NOT VERIDICAL.** Nothing below should be read as making it trustworthy, and probe C would pass
+just as well for a group that named a real commit and did no work inside it.
+
+What narrows the remaining hole is the same thing that makes any assertion checkable: something
+OUTSIDE the claim that can contradict it. A closure therefore names the commit that closed it
+and the check that holds it closed, and both are resolved against git rather than believed.
+
+### The grammar
+
+```
+OWNER <fingerprint> | status=dispatched | commit=<sha> | check=<path under checks|scripts|tezt>
+OWNER <fingerprint> | status=deferred   | reason=<why not now, at least 24 characters>
+OWNER <fingerprint> | status=accepted   | reason=<why this is the end state, at least 24 chars>
+```
+
+The fingerprint is matched by EXACT EQUALITY, never as a substring. A `dispatched` record is
+corroborated or it does not own: `commit=` must name a real commit object that is an ancestor of
+HEAD and that touches either the finding's path or the named check; `check=` must name a file
+that exists, is tracked, and lives where a runner can reach it. A record failing either is
+reported as uncorroborated — a louder state than silence — and still fires the gate. `deferred`
+and `accepted` name no commit and no check because nothing was done, so they are corroborated by
+nothing but their reason, and they are counted and listed separately for exactly that reason.
+Lines inside fenced code blocks are ignored, which is why the block above owns nothing.
+
+### The check, and the red/green proof
+
+`checks/ownership-is-a-record-not-a-mention.js`, six probes, each building its own fixture
+repository so the ratchet can run it with no arguments:
+
+| probe | fixture | required |
+|---|---|---|
+| A | a paragraph reporting output sizes 1152, 2425, 1378 over a file with findings at those lines | RED |
+| B | a section saying the finding is unowned, quoting its fingerprint | RED |
+| C | a record naming a real commit that touches the finding, and a tracked check | GREEN — anti-vacuity |
+| D | a well-formed record naming a sha of forty zeroes | RED |
+| E | a well-formed record naming a real commit that touched only `docs/unrelated.md` | RED |
+| F | the grammar quoted inside a fenced code block as documentation | RED |
+
+C is not decoration. Without it, a gate answering UNOWNED to everything satisfies A, B, D, E and
+F, and the green would be earned by refusing to answer.
+
+Proven RED at 10f51bf by `git checkout 10f51bfb9bbd53f9725288e452d68bfe7f2de7f5 -- checks/dispatch-covers-open-findings.js`,
+never `git stash`: 13 assertions failed. Proven GREEN after restoring the fix: exit 0, 6 probes.
+Under the old matcher A, B, D, E and F each exited 0. C exited 0 too — it is the control, not a
+discriminator, and this is said rather than counted as a fifth win.
+
+### The falsifiable claims
+
+Each is a sentence that can be false, with a concrete reproducible X, not a category.
+
+1. **The gate becomes RED when a brief section contains the sentence "I instrumented
+   `bin/arch_mutants/arch_mutants.ml` and printed the buffer at three points: 1152 characters,
+   then 2425, then 1378" while the verdict carries OPEN findings at lines 1152, 2425 and 1378 of
+   that file.** The old matcher PASSED this: measured exit 0, `3 dispatched, 0 unowned`. Probe A.
+2. **The gate becomes RED when a section says "Nobody looked at this one … it remains entirely
+   unowned", followed by the finding's fingerprint.** The old matcher PASSED this: measured exit
+   0, `1 dispatched, 0 unowned`. Probe B.
+3. **The gate becomes RED on `OWNER <fingerprint> | status=dispatched | commit=<forty zeroes> |
+   check=checks/fixture-check.js`.** The old matcher PASSED this — the line contains the
+   fingerprint, one of its two grounds: measured exit 0. Probe D.
+4. **The gate becomes RED on the same record naming a commit that exists and is an ancestor of
+   HEAD but touched only `docs/unrelated.md`.** The old matcher PASSED this: measured exit 0.
+   Probe E.
+5. **The gate becomes RED when the only OWNER line in the brief sits inside a fenced code
+   block.** The old matcher PASSED this: measured exit 0. Probe F.
+
+Claim 3 and claim 4 are the two that say anything about DELIBERATE ownership rather than
+accidental ownership. Neither makes a record true.
+
+**No X was found for one thing I wanted to claim, and the search is stated rather than the
+absence.** I wanted a check that a record's `commit=` actually contains work RELATED to the
+finding, not merely work touching the same file. I built three candidate discriminators against
+fixtures and none survived: (a) requiring the commit's diff to touch the finding's LINE RANGE —
+defeated by any finding whose fix is elsewhere in the file, and by every finding at line 0 or 1,
+of which this verdict has several; (b) requiring the commit message to name the fingerprint —
+this is text the same agent writes in the same breath as the record, so it is the claim
+corroborating itself, and a fixture with a copy-pasted fingerprint in the message passes it
+trivially; (c) requiring the named check to FAIL when the commit is reverted — the honest
+version of the question, and out of scope for a gate that must run in seconds inside a ratchet,
+since it means a checkout and a re-run per finding. So the gap between "named a real commit that
+touched the file" and "did the work" is NOT covered, by anything here.
+
+### Three affordances for re-deriving past rounds, which this branch needs
+
+The readings this gate has already produced sit in three verdicts and do not mean what they say —
+a round-4 line of `25 open, 19 dispatched, 6 deferred, 0 unowned` proves that everything was
+MENTIONED somewhere, not that everything had an owner. A corrected census is review work and is
+not done here; what is done is making it possible:
+
+1. **Inputs are parameters.** `--brief=<path> --verdict=<path> --repo=<path>`: a past state
+   extracted with `git show <sha>:briefs/…` into a scratch directory still resolves its shas
+   against the real repository.
+2. **A machine-readable result.** `--json=<path>` emits one row per OPEN finding carrying its
+   state, `established_by`, and the same two fields under the old rule (`mention_v0_state`,
+   `mention_v0_established_by`), so a corrected census lines up against the old one row by row
+   and the findings that MOVED are readable as a set rather than as prose.
+3. **Every reading is stamped with its convention.** `record-v1` here, `mention-v0` for
+   everything printed before. The human output prints BOTH numbers on every run, so a reader who
+   sees unowned move from 6 to 28 can tell an instrument change from a work change.
+
+A re-derivation can move findings from treated to UNTREATED. That is discovery of work, not a
+correction of bookkeeping, and it is the reason this had to land before anything is planned on
+top of the census.
+
+### This section is the first test of its own fix — the two measurements
+
+The previous group was caught here: its outcome section quoted other groups' fingerprints in
+order to explain why the gate would stay red, and the gate went green. This section quotes far
+more than that one did — three line numbers used as sizes, a fingerprint quoted inside a
+complaint, six file paths, a fenced record — so it is a stronger instance of the same shape.
+
+Measured with the gate at `f4e2c90`, the only variable being whether this section is in the file:
+
+| | `mention-v0` owned / unowned | `record-v1` owned / unowned |
+|---|---|---|
+| brief WITHOUT this section | 23 / 6 | 0 / 29 |
+| brief WITH this section | 27 / 2 | 1 / 28 |
+
+Writing this section would have closed FOUR findings under the old rule, taking its unowned
+count from 6 to 2. Three of the four are findings this group did nothing whatever about:
+
+| finding | what the old rule would have accepted as its owner |
+|---|---|
+| `bin/arch_mutants/arch_mutants.ml:1152:architecture` | the digits `1152` in a sentence about output sizes |
+| `bin/arch_mutants/arch_mutants.ml:2425:architecture` | the digits `2425` in the same sentence |
+| `bin/arch_mutants/arch_mutants.ml:1378:correctness` | the digits `1378` in the same sentence |
+| `checks/dispatch-covers-open-findings.js:80:gate-vacuous` | its fingerprint, quoted inside a description of a defect |
+
+Under `record-v1` this section closes exactly ONE: the finding actually fixed, and only because
+its record resolves to a commit and a check. The three findings about `arch_mutants.ml` stay
+unowned, which is true. That difference IS the fix, measured on the very text that would
+previously have exploited it — and it is why this section, not the check, is the first test.
+
+### What is claimed, and what is not
+
+One finding is claimed. It is the one this group was given and the one it fixed.
+
+OWNER checks/dispatch-covers-open-findings.js:80:gate-vacuous | status=dispatched | commit=f4e2c90fd28b22b9a481859e43e55b0d10fa922c | check=checks/ownership-is-a-record-not-a-mention.js | by=R5-B
+
+Every other OPEN finding in the verdict is left UNOWNED, deliberately and visibly. Twenty-three
+of them were counted as owned an hour ago. Nothing about them changed; the instrument did. Both
+numbers are printed on every run so that this is legible rather than alarming, and the gate is
+RED on that count — which is the correct state for a branch whose census has just been shown to
+have been measuring the wrong thing.
+
+### Steps skipped, and one mistake worth recording
+
+Nothing imposed was skipped. Two things a falsification read should know:
+
+- `git checkout <sha> -- <path>` writes the INDEX as well as the working tree. Restoring the fix
+  with `cp` afterwards left the OLD gate staged, and `git commit --amend` then produced a commit
+  whose message described a rewrite it did not contain. Caught only by running `git show --stat`
+  on the result rather than trusting the amend. The commit was re-amended; `f4e2c90` is the one
+  that carries both files, verified by comparing `git show HEAD:<path> | md5sum` against the
+  working tree.
+- The old matcher is retained verbatim inside the new file, running on every invocation. It
+  decides nothing. It exists so the two numbers are produced by one process over one corpus, and
+  so nobody has to re-run an old revision to compare.
