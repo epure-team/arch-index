@@ -465,9 +465,12 @@ type engine_name =
       (** NOT a name. The position of the record in the report file, kept only so a
           diagnostic can point at the offending line. Never joined on, never stored. *)
 
-(** For messages only. It says WHAT IT IS, because a bare "3" in a diagnostic reads as an
-    engine id and sends the reader looking for one in the engine's output. *)
-let engine_name_to_string = function
+(** For a diagnostic an operator reads, and for nothing else — the name says which, because
+    a renderer called [to_string] is one a later author reaches for when comparing two of
+    these, and that comparison is the join arm this round deleted. It says WHAT IT IS, too:
+    a bare "3" in a diagnostic reads as an engine id and sends the reader looking for one in
+    the engine's output. *)
+let engine_name_for_display = function
   | Engine_declared s -> s
   | Report_ordinal n -> Printf.sprintf "<report record %d: the engine declared no id>" n
 
@@ -692,7 +695,7 @@ let report (t : Arch_db.t) (g : Arch_graph.t) mutants test_keys repo fmt maxlist
                "arch-mutants: mutant %s (%s:%d) carries status %S, which is neither one of \
                 KILLED | SURVIVED | TIMEOUT | ERROR nor %s. Refusing to guess: counting it \
                 as anything at all deletes a defect from the list."
-               (engine_name_to_string m.m_name) m.file m.line bad refused_status)
+               (engine_name_for_display m.m_name) m.file m.line bad refused_status)
       | Wrapper_refused -> incr refused
       | Engine_status (MDb.Killed | MDb.Timeout) -> incr killed
       | Engine_status MDb.Errored -> incr errored
@@ -734,7 +737,7 @@ let report (t : Arch_db.t) (g : Arch_graph.t) mutants test_keys repo fmt maxlist
                    (fun (m, fn, reaching) ->
                      `Assoc
                        [ ("file", `String m.file); ("line", `Int m.line);
-                         ("id", `String (engine_name_to_string m.m_name));
+                         ("id", `String (engine_name_for_display m.m_name));
                          (* RUN-scope, stated in the payload rather than left for the reader
                             to assume: this names the mutant in ONE engine invocation's
                             output. It is not a key and nothing may join on it. *)
@@ -768,7 +771,7 @@ let report (t : Arch_db.t) (g : Arch_graph.t) mutants test_keys repo fmt maxlist
                      `Assoc
                        [ ("file", `String m.file); ("line", `Int m.line);
                          ("status", `String m.status);
-                         ("id", `String (engine_name_to_string m.m_name));
+                         ("id", `String (engine_name_for_display m.m_name));
                          ("id_scope", `String "engine_run");
                          ("mutation", match m.mutation with Some x -> `String x | None -> `Null);
                          (* FR-013 here TOO. This record is the one a reader copies out for a
@@ -910,14 +913,68 @@ let known_profiles =
   [ ("case", Case); ("group", Group); ("suite", Suite); ("alcotest", Group);
     ("cargo-mutants", Suite) ]
 
+(** THE ENGINE'S HANDLE ON A MUTANT — a run-scoped coordinate, and NOT an identity.
+
+    R4-A closed the original conflation in the type: [site_key] is a distinct record with no
+    identifier field, so an identity cannot carry an engine id by construction, and
+    [engine_name] splits [Engine_declared] from [Report_ordinal]. Those are compiler
+    guarantees. What was left open is smaller: this handle was a bare [string], so a future
+    author could compare two of them and rebuild the deleted join arm under a name no grep
+    anticipates.
+
+    THIS MODULE DOES NOT CLOSE THAT HOLE, AND IT IS NOT MEANT TO READ AS IF IT DOES. Both
+    legitimate uses of the handle — telling the wrapper which mutant to activate, and naming
+    an entry in a diagnostic — require a string. So the type has renderers, and the moment it
+    has one, [to_display_string a = to_display_string b] reconstitutes exactly the comparison
+    an unexposed equality was supposed to forbid. Abstraction MOVES the escape hatch; it does
+    not remove it.
+
+    What it does buy is that the wrong thing has to be WRITTEN OUT. There is no [to_string]:
+    each renderer is named for the CHANNEL it feeds, so a comparison of two handles cannot be
+    spelled without naming a channel in it, and [to_display_string a = to_display_string b]
+    reads as wrong at the call site rather than as ordinary. That is legibility, not
+    prevention. The enforcement lives elsewhere and is named where it lives:
+    checks/join-independent-of-id-shape.js diverges on any residual id-sensitivity whatever
+    it is called, and checks/one-engine-id-two-sites-is-refused.js refuses a catalogue in
+    which one handle addresses two sites. *)
+module Engine_run_id : sig
+  type t
+
+  val of_catalogue : string -> t
+  (** the id the ENGINE'S CATALOGUE gave this mutant. The only origin there is: a generic
+      catalogue record without an [id] is refused at load, and mutaml's is derived exactly
+      as mutaml derives it. *)
+
+  val of_wrapper_trace : string -> t
+  (** the handle a trace line reports back, which is the same string the driver put in the
+      selection file. Separate from [of_catalogue] so the round trip is visible: these two
+      constructors are the ONLY two ends of the wrapper protocol. *)
+
+  val for_wrapper_argv : t -> string
+  (** the selection file's first field, and hence [MUTAML_MUTANT]. This is a protocol
+      channel: the bytes matter and no other use may borrow it. *)
+
+  val to_display_string : t -> string
+  (** for a diagnostic an operator reads, and for the [engine_mutant_id] column that records
+      what the engine called this thing. Never for a decision. *)
+end = struct
+  type t = string
+
+  let of_catalogue s = s
+  let of_wrapper_trace s = s
+  let for_wrapper_argv s = s
+  let to_display_string s = s
+end
+
 (** One mutant as the ENGINE's own catalogue describes it: a SITE, plus the id the engine
     will export in [MUTAML_MUTANT].
 
-    [s_id] is RUN-SCOPED and is used for exactly two things: telling the wrapper which mutant
-    to activate, and reading the wrapper's trace line back. It is never an identity and no
-    join consults it — see the IDENTITY DOCTRINE above. *)
+    [s_engine_id] is RUN-SCOPED and is used for exactly two things: telling the wrapper which
+    mutant to activate, and reading the wrapper's trace line back. It is never an identity and
+    no join consults it — see the IDENTITY DOCTRINE above. Its type says so and its renderers
+    are named for their channel; neither makes a comparison impossible, only conspicuous. *)
 type site = {
-  s_id : string;
+  s_engine_id : Engine_run_id.t;
   s_file : string;
   s_line : int;
   s_col_start : int;
@@ -972,7 +1029,9 @@ let site_key s =
   { k_file = strip_dot s.s_file; k_line = s.s_line; k_col_start = s.s_col_start;
     k_col_end = s.s_col_end; k_repl = s.s_repl; k_occurrence = s.s_occurrence }
 
-let site_key_to_string k =
+(** For a diagnostic. Named for that, not for its type: an identity comparison belongs on
+    the [site_key] record itself, where the fields are, and never on two rendered strings. *)
+let site_key_for_display k =
   Printf.sprintf "%s:%d cols %d-%d replacement %S%s" k.k_file k.k_line k.k_col_start k.k_col_end
     k.k_repl
     (match k.k_occurrence with
@@ -1061,7 +1120,9 @@ let load_mutaml_catalogue path =
               else
                 Option.map
                   (fun n ->
-                    { s_id = Filename.remove_extension fname ^ ":" ^ string_of_int n;
+                    { s_engine_id =
+                        Engine_run_id.of_catalogue
+                          (Filename.remove_extension fname ^ ":" ^ string_of_int n);
                       s_file = fname;
                       s_line = ints start "pos_lnum";
                       s_col_start = ints start "pos_cnum" - ints start "pos_bol";
@@ -1145,7 +1206,7 @@ let load_catalogue ~from path =
                (match (str "id", str "file", List.assoc_opt "line" a) with
                | Some id, Some f, Some (`Int l) ->
                    acc :=
-                     { s_id = id; s_file = f; s_line = l;
+                     { s_engine_id = Engine_run_id.of_catalogue id; s_file = f; s_line = l;
                        s_col_start = num "col_start" 0; s_col_end = num "col_end" 0;
                        s_repl = Option.value ~default:"" (str "replacement");
                        (* From the mutation SPECIFICATION — this record — and never from a
@@ -2120,7 +2181,8 @@ let run_campaign (t : Arch_db.t) (g : Arch_graph.t) test_keys ~db_path ~plan_pat
                 Where this comes from: the plan's reaching set and the profile's addressable \
                 set were computed from different test selections. Run `plan` and `run` with \
                 the same --tests."
-               sel.sel_site.s_id sel.sel_site.s_file sel.sel_site.s_line
+               (Engine_run_id.to_display_string sel.sel_site.s_engine_id) sel.sel_site.s_file
+               sel.sel_site.s_line
                (List.length missing) (List.length sel.sel_intended)
                (String.concat ", " (take 5 missing))))
     selections ;
@@ -2139,14 +2201,19 @@ let run_campaign (t : Arch_db.t) (g : Arch_graph.t) test_keys ~db_path ~plan_pat
                   the analysed repository's own source, and a comma or tab in it would \
                   silently split one test into two. No campaign row was written. Fix the \
                   name in the index, or exclude the test with --tests."
-                 n sel.sel_site.s_id sel.sel_site.s_file sel.sel_site.s_line))
+                 n
+                 (Engine_run_id.to_display_string sel.sel_site.s_engine_id)
+                 sel.sel_site.s_file sel.sel_site.s_line))
         (sel.sel_intended @ sel.sel_executed))
     selections ;
   write_file selection_file
     (String.concat ""
        (List.map
           (fun sel ->
-            Printf.sprintf "%s\t%d\t%s\t%s\n" sel.sel_site.s_id
+            (* The PROTOCOL channel, and the only place the handle is written as itself:
+               the engine exports this field as MUTAML_MUTANT to activate one mutant. *)
+            Printf.sprintf "%s\t%d\t%s\t%s\n"
+              (Engine_run_id.for_wrapper_argv sel.sel_site.s_engine_id)
               (if sel.sel_superset then 1 else 0)
               (String.concat "," sel.sel_intended)
               (String.concat "," sel.sel_executed))
@@ -2218,10 +2285,11 @@ let run_campaign (t : Arch_db.t) (g : Arch_graph.t) test_keys ~db_path ~plan_pat
         (List.length collisions) ;
       List.iter
         (fun (k, group) ->
-          Printf.eprintf "    %s\n" (site_key_to_string k) ;
+          Printf.eprintf "    %s\n" (site_key_for_display k) ;
           List.iter
             (fun sel ->
-              Printf.eprintf "      claimed by engine id %S (RUN-scoped)\n" sel.sel_site.s_id)
+              Printf.eprintf "      claimed by engine id %S (RUN-scoped)\n"
+                (Engine_run_id.to_display_string sel.sel_site.s_engine_id))
             group)
         collisions ;
       Printf.eprintf
@@ -2235,6 +2303,76 @@ let run_campaign (t : Arch_db.t) (g : Arch_graph.t) test_keys ~db_path ~plan_pat
          already counts) — never a position in a report file, which is a coordinate of one \
          run and not a property of the mutant.\n" ;
       ignore (finish 1 : 'a)) ;
+  (* 5b. AND THE OTHER DIRECTION, which 5a's own comment claims and 5a's code does not check:
+     no engine id may address more than one SELECTED site. Checked here, before the campaign
+     row exists, for the same reason as 5a — a refusal must leave the database as it was
+     found.
+
+     WHY THIS IS A REFUSAL AND NOT A REPAIR. The engine id is the wrapper's ONLY handle on a
+     mutant: `run` writes one selection line per site whose first field is that id, and the
+     engine activates a mutant by exporting exactly that string as MUTAML_MUTANT. Two selected
+     sites under one id are therefore unaddressable in the literal sense — nothing the driver
+     can send activates one and not the other — and the trace line that comes back names the
+     id, so even the observed test set cannot be attributed to one of them. There is no
+     correct choice to make, which is 5a's doctrine reached along the other axis.
+
+     WHAT WAS MEASURED BEFORE THIS EXISTED, on a two-entry catalogue whose sites differ in
+     their column span and whose ids are both "1": two `mutants` rows were written, the map
+     from a selection to its row was keyed on the id so the second entry OVERWROTE the first,
+     the SURVIVED verdict of the col-3 site was stored against the col-11 mutant — a false
+     attribution, the exact failure this round removes — and the KILLED verdict was rejected
+     by UNIQUE(campaign_id, mutant_id) and lost. The campaign did NOT read as complete: the
+     reconciliation guard saw 1 row against 2 attempts and withheld completed_at, which is a
+     real mitigation and is why this was a wrong row rather than a silent success. But a
+     false row plus a raw SQLite constraint message is not a diagnosis an operator can act
+     on, and the wrong row was still written.
+
+     checks/one-engine-id-two-sites-is-refused.js holds this, with a control arm in which the
+     identical catalogue carries distinct ids and must still run. *)
+  let id_collisions =
+    let tbl = Hashtbl.create 64 in
+    List.iter
+      (fun sel -> Hashtbl.add tbl (Engine_run_id.for_wrapper_argv sel.sel_site.s_engine_id) sel)
+      selections ;
+    Hashtbl.fold
+      (fun handle _ acc ->
+        if List.mem_assoc handle acc then acc
+        else
+          match Hashtbl.find_all tbl handle with
+          | (_ :: _ :: _) as group
+            when List.length
+                   (List.sort_uniq compare (List.map (fun sel -> site_key sel.sel_site) group))
+                 > 1 ->
+              (handle, group) :: acc
+          | _ -> acc)
+      tbl []
+  in
+  (match id_collisions with
+  | [] -> ()
+  | _ ->
+      Printf.eprintf
+        "arch-mutants: %d engine id(s) in this catalogue address more than one SELECTED site. \
+         The engine id is the wrapper's only handle on a mutant — it is the selection file's \
+         first field and the value the engine exports as MUTAML_MUTANT — so these sites cannot \
+         be activated, traced or attributed separately:\n"
+        (List.length id_collisions) ;
+      List.iter
+        (fun (handle, group) ->
+          Printf.eprintf "    engine id %S (RUN-scoped) is claimed by %d sites:\n" handle
+            (List.length group) ;
+          List.iter
+            (fun sel -> Printf.eprintf "      %s\n" (site_key_for_display (site_key sel.sel_site)))
+            group)
+        id_collisions ;
+      Printf.eprintf
+        "  Refusing, rather than choosing one. Measured on the previous behaviour: the map \
+         from a selection to its database row was keyed on this id, so one entry overwrote \
+         the other, ONE verdict was stored against the WRONG mutant and the other was \
+         rejected by UNIQUE(campaign_id, mutant_id) and lost. No campaign row was written.\n\
+         What would make this catalogue acceptable: a distinct id per entry. An id is a \
+         RUN-scoped coordinate and not an identity, so the driver will not invent one — a \
+         synthesised handle is a handle the engine does not answer to.\n" ;
+      ignore (finish 1 : 'a)) ;
   let campaign_id =
     try
       MDb.insert_campaign db ~engine ~engine_version ~seed ~engine_path
@@ -2244,6 +2382,12 @@ let run_campaign (t : Arch_db.t) (g : Arch_graph.t) test_keys ~db_path ~plan_pat
       prerr_endline ("arch-mutants: " ^ m) ;
       finish 2
   in
+  (* Keyed on the SITE KEY, never on the engine id. This map stands between a mutant and the
+     row its verdict is written to, which makes it an identity-bearing operation, and an
+     identity-bearing operation keyed on a run-scoped coordinate is the deleted join arm
+     wearing a hashtable. 5b now refuses the catalogue that made the difference observable;
+     the key is on the identity anyway, so weakening 5b later cannot quietly reintroduce a
+     verdict stored against the wrong row. *)
   let mutant_ids = Hashtbl.create 32 in
   List.iter
     (fun sel ->
@@ -2253,7 +2397,7 @@ let run_campaign (t : Arch_db.t) (g : Arch_graph.t) test_keys ~db_path ~plan_pat
           ~col_end:s.s_col_end ~replacement:s.s_repl ~source_hash:sel.sel_hash
           ~function_name:sel.sel_fn
       with
-      | id -> Hashtbl.replace mutant_ids s.s_id id
+      | id -> Hashtbl.replace mutant_ids (site_key s) id
       | exception MDb.Write_failed m -> prerr_endline ("arch-mutants: " ^ m))
     selections ;
   (* 6. ONE engine invocation. The engine loops; the wrapper is what runs per mutant. *)
@@ -2284,7 +2428,7 @@ let run_campaign (t : Arch_db.t) (g : Arch_graph.t) test_keys ~db_path ~plan_pat
       match split_on line '\t' with
       | id :: _ :: executed :: _ ->
           let tests = List.filter (fun s -> s <> "") (split_on executed ',') in
-          Hashtbl.replace executed_by_id id tests
+          Hashtbl.replace executed_by_id (Engine_run_id.of_wrapper_trace id) tests
       | _ -> ())
     (read_lines trace_file) ;
   (* 8. The engine's own report file is where each mutant's OUTCOME comes from — not
@@ -2332,13 +2476,13 @@ let run_campaign (t : Arch_db.t) (g : Arch_graph.t) test_keys ~db_path ~plan_pat
     Printf.eprintf
       "arch-mutants: the report entry for %s:%d (engine id %s, status %s) matches %d \
        catalogued mutant sites that are INDISTINGUISHABLE from what the report carries:\n"
-      m.file m.line (engine_name_to_string m.m_name) (String.uppercase_ascii m.status)
+      m.file m.line (engine_name_for_display m.m_name) (String.uppercase_ascii m.status)
       (List.length candidates) ;
     List.iter
       (fun sel ->
         Printf.eprintf "      %s (engine id %S, RUN-scoped)\n"
-          (site_key_to_string (site_key sel.sel_site))
-          sel.sel_site.s_id)
+          (site_key_for_display (site_key sel.sel_site))
+          (Engine_run_id.to_display_string sel.sel_site.s_engine_id))
       candidates ;
     Printf.eprintf
       "  The report carries no column span, replacement or anchor occurrence that tells these \
@@ -2400,7 +2544,7 @@ let run_campaign (t : Arch_db.t) (g : Arch_graph.t) test_keys ~db_path ~plan_pat
     List.partition
       (fun (sel, (m : mutant)) ->
         is_wrapper_refusal m.status
-        && not (from = "mutaml" && Hashtbl.mem executed_by_id sel.sel_site.s_id))
+        && not (from = "mutaml" && Hashtbl.mem executed_by_id sel.sel_site.s_engine_id))
       matched
   in
   let reclassified_99 = ref 0 in
@@ -2415,7 +2559,8 @@ let run_campaign (t : Arch_db.t) (g : Arch_graph.t) test_keys ~db_path ~plan_pat
              command's own exit status, not a refusal. Recording it as KILLED, which is what \
              a non-zero test run under a mutation means. Only a refusal leaves no trace \
              line.\n"
-            sel.sel_site.s_file sel.sel_site.s_line sel.sel_site.s_id ;
+            sel.sel_site.s_file sel.sel_site.s_line
+            (Engine_run_id.to_display_string sel.sel_site.s_engine_id) ;
           (sel, { m with status = MDb.status_to_string MDb.Killed }))
         else (sel, m))
       engine_reported
@@ -2423,7 +2568,7 @@ let run_campaign (t : Arch_db.t) (g : Arch_graph.t) test_keys ~db_path ~plan_pat
   let unobserved_runs, attempted =
     List.partition_map
       (fun (sel, m) ->
-        match Hashtbl.find_opt executed_by_id sel.sel_site.s_id with
+        match Hashtbl.find_opt executed_by_id sel.sel_site.s_engine_id with
         | None -> Either.Left (sel, m)
         | Some executed -> Either.Right (sel, m, executed))
       engine_reported
@@ -2479,7 +2624,10 @@ let run_campaign (t : Arch_db.t) (g : Arch_graph.t) test_keys ~db_path ~plan_pat
                       name and the type says so, so it falls back rather than being stored.
                       Nothing joins on this — see the IDENTITY DOCTRINE at the top. *)
                    ~engine_mutant_id:
-                     (Some (Option.value ~default:sel.sel_site.s_id (declared_name m.m_name)))
+                     (Some
+                        (Option.value
+                           ~default:(Engine_run_id.to_display_string sel.sel_site.s_engine_id)
+                           (declared_name m.m_name)))
                    ~status ~provenance
                    ~intended:(List.length sel.sel_intended)
                    ~executed:(List.length executed)
@@ -2498,7 +2646,7 @@ let run_campaign (t : Arch_db.t) (g : Arch_graph.t) test_keys ~db_path ~plan_pat
                   with MDb.Write_failed msg -> prerr_endline ("arch-mutants: " ^ msg))
               | (MDb.Killed | MDb.Timeout), ([] | _ :: _ :: _) -> ()
               | (MDb.Survived | MDb.Errored), _ -> ())
-            (Hashtbl.find_opt mutant_ids sel.sel_site.s_id))
+            (Hashtbl.find_opt mutant_ids (site_key sel.sel_site)))
     attempted ;
   let catalogued = List.length selections in
   let n_attempted = List.length attempted in
@@ -2669,7 +2817,8 @@ let run_campaign (t : Arch_db.t) (g : Arch_graph.t) test_keys ~db_path ~plan_pat
                  (List.map
                     (fun (sel, _) ->
                       `Assoc
-                        [ ("engine_mutant_id", `String sel.sel_site.s_id);
+                        [ ( "engine_mutant_id",
+                            `String (Engine_run_id.to_display_string sel.sel_site.s_engine_id) );
                           ("file", `String sel.sel_site.s_file);
                           ("line", `Int sel.sel_site.s_line) ])
                     refused_runs) );
@@ -2678,7 +2827,8 @@ let run_campaign (t : Arch_db.t) (g : Arch_graph.t) test_keys ~db_path ~plan_pat
                  (List.map
                     (fun (sel, (m : mutant)) ->
                       `Assoc
-                        [ ("engine_mutant_id", `String sel.sel_site.s_id);
+                        [ ( "engine_mutant_id",
+                            `String (Engine_run_id.to_display_string sel.sel_site.s_engine_id) );
                           ("file", `String sel.sel_site.s_file);
                           ("line", `Int sel.sel_site.s_line);
                           ("engine_status", `String (String.uppercase_ascii m.status));
@@ -2717,7 +2867,8 @@ let run_campaign (t : Arch_db.t) (g : Arch_graph.t) test_keys ~db_path ~plan_pat
                  (List.map
                     (fun (sel, (m : mutant), executed) ->
                       `Assoc
-                        [ ("engine_mutant_id", `String sel.sel_site.s_id);
+                        [ ( "engine_mutant_id",
+                            `String (Engine_run_id.to_display_string sel.sel_site.s_engine_id) );
                           ("file", `String sel.sel_site.s_file); ("line", `Int sel.sel_site.s_line);
                           ("function", match sel.sel_fn with Some f -> `String f | None -> `Null);
                           ("engine_status", `String (String.uppercase_ascii m.status));
