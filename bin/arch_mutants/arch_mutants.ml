@@ -1262,12 +1262,16 @@ let resolve_binary cmd =
 (* mutant survives and the report becomes a page of false test gaps    *)
 (* that reads exactly like a real finding.                             *)
 (*                                                                    *)
-(* The boundary is the WORKING TREE the command was invoked from —     *)
-(* `git rev-parse --show-toplevel`, falling back to the working        *)
-(* directory itself where there is no repository, which is the         *)
-(* narrower and therefore safer answer. An artefact resolved outside   *)
-(* it is REFUSED and the outside path is NAMED, because an exit code   *)
-(* on its own cannot tell a fired guard from an unrelated failure.     *)
+(* The boundary is the checkout the command was invoked from. It is    *)
+(* `git rev-parse --show-toplevel`, NARROWED to a nearer               *)
+(* `dune-project` only when that repository does not TRACK it — a      *)
+(* tracked one is the same checkout, and narrowing there refuses the   *)
+(* repository's own artefact — and falling back to the working         *)
+(* directory itself where neither answers, which is the narrower and   *)
+(* therefore safer answer. An artefact resolved outside the boundary   *)
+(* is REFUSED and the outside path is NAMED, because an exit code on   *)
+(* its own cannot tell a fired guard from an unrelated failure. The    *)
+(* DIAGNOSIS is chosen by which of the three answered, never asserted. *)
 (*                                                                    *)
 (* An environment override naming a path that EXISTS is exempt, and    *)
 (* deliberately so: there the operator named the path, and refusing it *)
@@ -1301,6 +1305,21 @@ let marker_root d =
   in
   up d
 
+(** Does the git repository rooted at [repo] TRACK [path]? This is the whole question a
+    nested marker turns on. A `dune-project` the repository has in its index is part of THIS
+    checkout — a sub-project, a proof-of-concept, a vendored-and-committed subtree — and the
+    campaign belongs to the repository, not to the subdirectory. One the repository does not
+    know about is the case FR-030 exists for: an unpacked tarball, an out-of-tree copy, a
+    build artefact dropped inside a checkout.
+
+    An untracked answer is the CONSERVATIVE one: it narrows the boundary, so a git that
+    cannot be run at all can only make the guard refuse more, never less. *)
+let tracked_by ~repo path =
+  Sys.command
+    (Printf.sprintf "git -C %s ls-files --error-unmatch -- %s >/dev/null 2>&1"
+       (Filename.quote repo) (Filename.quote path))
+  = 0
+
 (** The boundary, resolved ONCE. Computed lazily so a campaign that never walks an ancestor
     never pays for a subprocess, and so the value cannot drift between the two call sites
     that consult it.
@@ -1331,10 +1350,16 @@ let working_tree_root =
      let git = if code = 0 && value <> "" then Some (real_path value) else None in
      let marker = Option.map real_path (marker_root cwd) in
      (* Both, when present, are ancestors of the working directory, so "nearer" is simply
-        the longer path. The DEEPER boundary is the safer one: it can only narrow what the
-        campaign is allowed to reach. *)
+        the longer path. The DEEPER boundary is the safer one ONLY where the two describe
+        DIFFERENT checkouts. Where a git repository TRACKS the marker, they describe the
+        same one, and narrowing there refuses the repository's own artefact while asserting
+        it "belongs to a different tree" — a false verdict carrying a false reason. This
+        repository carries a tracked poc/decision-lint/dune-project, so it refused itself. *)
      match (git, marker) with
-     | Some g, Some m -> if String.length m > String.length g then (m, Anchor_marker) else (g, Anchor_git)
+     | Some g, Some m ->
+         if String.length m > String.length g && not (tracked_by ~repo:g (Filename.concat m "dune-project"))
+         then (m, Anchor_marker)
+         else (g, Anchor_git)
      | Some g, None -> (g, Anchor_git)
      | None, Some m -> (m, Anchor_marker)
      | None, None -> (cwd, Anchor_cwd))
@@ -1365,7 +1390,7 @@ let guard_inside_tree ~what path =
       | Anchor_git ->
           "The boundary is the enclosing git repository (`git rev-parse --show-toplevel`).            The artefact was reached by walking ancestor directories, so this checkout is            nested inside another one and the campaign was about to run the OUTER tree's            artefact."
       | Anchor_marker ->
-          "The boundary is this checkout's own root, found as the nearest `dune-project`            above the working directory — nearer than any git repository, or with no git            repository at all. The artefact was reached by walking PAST that root, so it            belongs to a different tree."
+          "The boundary is this checkout's own root, found as the nearest `dune-project`            above the working directory — with no git repository at all, or nearer than one            that does NOT track it, which is what makes it a checkout of its own. The            artefact was reached by walking PAST that root, so it belongs to a different            tree."
       | Anchor_cwd ->
           "No boundary could be established: `git rev-parse --show-toplevel` did not            answer and there is no `dune-project` above the working directory. The boundary            therefore FELL BACK to the invocation directory itself, which is the narrower            and safer answer. This is NOT a claim that this checkout is nested inside            another one — nothing here can tell whether it is."
     in

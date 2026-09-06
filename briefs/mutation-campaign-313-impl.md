@@ -908,6 +908,119 @@ repository, with a FALSE diagnosis). Serialised behind R4-A: both write
 `arch_mutants.ml`, and two writers in one file is how a clean resolution deletes
 something.
 
+## Group R4-B — outcome
+
+Executed in `/mnt/ssd-external-2to/arch-index-mutation-313` on
+`feat/mutation-campaign-313`, from `d98277e9caf1d98530c0b8f4082b76b133b34194` — the tip
+group R4-A left, which is therefore this group's pre-fix sha. Sole writer: R4-A had
+already handed the tree back, which is why this group started when it did and not
+earlier; both write `bin/arch_mutants/arch_mutants.ml`.
+
+**Measured, not cited.** `dune build` at `d98277e` before any edit: exit 0. The tezt suite
+after the fix, `./_build/default/tezt/tests/main.exe --keep-going`: exit 0, **255 SUCCESS
+and 0 FAILURE**, counted from that run's own log — `dune test --force` was not used
+anywhere, it stops at the first failure and under-reports. The brief's reference figure of
+255 was re-measured rather than quoted; it agrees.
+
+### The three rows are one boundary, and only one of them still described the code
+
+Replayed BY EXECUTION at `d98277e`, not by reading and not by coordinate.
+
+- `arch_mutants.ml:984` and `arch_mutants.ml:967` — **SUBJECT-ABSENT, confirmed by
+  execution.** Both describe the single-anchor version: an inner checkout that is not
+  itself a repository resolves its toplevel to the OUTER repo and the outer wrapper is
+  handed to the engine at exit 0. Run at `d98277e`,
+  `checks/tree-boundary-non-git-checkout.js` probe 1 builds exactly that layout — inner
+  tree NOT `git init`-ed, nested inside an outer repo whose `scripts/mutaml-wrapper.sh`
+  the ancestor walk reaches — and the driver exits 1 naming the outside path. Probe 2
+  shows the guard is not merely the old one inverted. Closed against CHECK-40, which was
+  red-verified when written. What would have made this non-zero: probe 1 accepting the
+  outer wrapper. These two rows are one defect fingerprinted twice, on
+  `path:line:category`, at two lines of the same function.
+- `arch_mutants.ml:1133` — **CONFIRMED, and it is the live one.** `ARCH_MUTANTS_WRAPPER`
+  unset, identical argv, only the working directory varied: repo root exit 0, `bin/` exit
+  0, `poc/decision-lint/` **exit 1**, refusing this repository's own
+  `scripts/mutaml-wrapper.sh` and stating that it *"belongs to a different tree"*.
+  `git ls-files --error-unmatch poc/decision-lint/dune-project` exits 0 — git tracks both
+  paths and says so, so the diagnosis is false as well as the verdict.
+
+### The fix: a marker narrows only where git does not own it
+
+`working_tree_root` chose the nearer of the git toplevel and the nearest `dune-project` by
+path length, with no test of whether the marker identified a DIFFERENT checkout. It now
+requires the marker to be UNTRACKED by the enclosing repository before it may narrow —
+`let tracked_by ~repo path`, a `git -C <repo> ls-files --error-unmatch` probe. A tracked
+`dune-project` is a sub-project of THIS checkout (this repository's `poc/decision-lint`,
+a committed vendored subtree); an untracked one is the unpacked tarball or out-of-tree
+copy FR-030 exists for. The untracked answer is the CONSERVATIVE one, so a `git` that
+cannot be run at all can only make the guard refuse more, never less.
+
+Two pieces of prose were corrected alongside it, because a refusal with the right verdict
+and the wrong reason is its own defect and the same is true of a comment: the
+`Anchor_marker` diagnosis now states the untracked condition rather than asserting a
+foreign tree unconditionally, and the FR-030 header block no longer says the boundary is
+`git rev-parse --show-toplevel` with a working-directory fallback, which had been false
+since round 3 added the third anchor.
+
+### CHECK-51 — a RULE, and what it does not cover
+
+`checks/tree-boundary-tracked-marker.js`, a NEW file, exit convention 0 / 1 / >=2.
+Auto-discovered by `checks/run-ratchet.js`'s `checks/*.js` glob, so it needs no registry
+edit and CHECK-32 already covers its reachability. Spec row CHECK-51 added under AC-24.
+
+**It is a RULE, not a regression test.** It does not pin the one working directory that
+motivated it. It pins the property that decides the boundary — a `dune-project` narrows
+only where the enclosing repository does not track it — in **both polarities** and on the
+**diagnosis**, which are three distinct failures and not two:
+
+| probe | polarity | asserts |
+|---|---|---|
+| 1 | must REFUSE | an UNTRACKED nested checkout inside an outer repo: outer wrapper refused, outside path named, foreign-tree diagnosis (true there) |
+| 2 | must ACCEPT | the same layout with the nested `dune-project` committed: the repository's own wrapper accepted, no foreign-tree claim |
+| 3 | diagnosis | no git and no marker: refuses, names the FALLBACK, does not assert a nesting |
+| 4 | motivating input | this repository from `poc/decision-lint`: accepted; SKIPPED with a printed line where the tree lacks that shape, never passing vacuously |
+
+**Negative control.** Probes 1 and 2 are the same layout with one variable turned, so
+"refuse always" fails 2 and 4 while "accept always" fails 1; neither can buy half the
+probes. Probe 3 catches the third failure, a right verdict reached for a false reason.
+
+**Red-verified twice**, both times by
+`git checkout d98277e9caf1d98530c0b8f4082b76b133b34194 -- bin/arch_mutants/arch_mutants.ml`
+and rebuilding — never `git stash`, whose foreign entries are live in this working tree.
+Twice because the check changed after the first red and a red proven against an earlier
+draft proves nothing about the shipped one. Final: **exit 1, 4 of 10 assertions**, with
+probes 1 and 3 GREEN in the red run as well as the green one — which is what makes the
+failure attributable to the property rather than to the check merely telling two trees
+apart. After the fix: exit 0, 4 of 4 probes over 10 assertions.
+`checks/tree-boundary-non-git-checkout.js` (9 assertions) and
+`checks/tree-boundary-refusal.sh` (3 probes) were re-run after the fix and both stay green.
+
+**Two matcher defects were found by the check firing on my own edits, and both are
+recorded in the file.** The diagnosis matchers run against whitespace-COLLAPSED output,
+because the diagnoses are multi-line OCaml literals whose continuation padding lands runs
+of spaces inside the sentence — rewording the literal silently stopped an
+adjacency-based regex from matching. And they key on the AFFIRMATIVE wording only,
+because the honest fallback message contains the sentence *"This is NOT a claim that this
+checkout is nested inside another one"*: a matcher for that phrase fires on the message
+written to deny it.
+
+**Adjacent finding, not fixed here, no row filed.** `checks/tree-boundary-non-git-checkout.js`
+probe 4 asserts `!/nested inside another one/i` against the RAW output and passes only
+because that literal's padding breaks the adjacency. It is green for the wrong reason:
+re-wrapping the `Anchor_cwd` literal onto one line would make the assertion match the
+denial and turn the probe red for no defect, while re-wrapping the `Anchor_git` literal
+would leave it vacuous with no signal. Left alone deliberately — it is CHECK-40's file,
+not this group's row, and CHECK-51 probe 3 covers the same property correctly.
+
+**What CHECK-51 does not cover.** A nested `dune-project` that is TRACKED by the outer
+repository but genuinely belongs to a different checkout — a vendored subtree committed
+whole, with its own build outputs. There the boundary now widens to the outer repository
+and the outer wrapper would be accepted. That is the deliberate reading of "the campaign
+belongs to the repository that owns the files", and it is the polarity a future defect
+would come from; nothing here asserts it either way. It also does not cover `git`
+being absent or failing: `tracked_by` then answers untracked, the boundary narrows, and
+the guard refuses more — safe, and unprobed.
+
 ## Group R4-C — the ratchet that cannot fail
 
 **Rows closed by this group:** `checks/run-ratchet.js:130`, `checks/run-ratchet.js:81`,
