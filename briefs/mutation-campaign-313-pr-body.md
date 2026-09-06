@@ -487,12 +487,20 @@ here and was nine within the hour. **The property is that every run started afte
 moved fails, on the same two files, with the same 38/2 ratchet reading.** The gate is not
 intermittent, and it is not responding to anything in this diff.
 
-**And this reframes the rebase from housekeeping into a correction.** Rebasing does not
-merely unblock CI: it closes the `base...HEAD` range over main's commits, so these two
-accusations disappear because the work stops being attributed here. Left un-rebased, the
-gate will keep charging this branch with every file main touches, indefinitely. The five
-re-commits of this task's manifest "as its base went stale", recorded elsewhere in this
-body, are the same phenomenon seen from the other end.
+**This body previously said a rebase would remove these two accusations. That is wrong, and
+the correction matters because it is an instruction someone would have followed.**
+`scripts/check-scope-diff.sh` computes `git diff --name-status "${BASE}...HEAD"` — **three
+dots**, i.e. `merge-base(BASE, HEAD)..HEAD` — with `BASE` read from the manifest. `090f832`
+is an **ancestor of main** (`git merge-base --is-ancestor 090f832 origin/main` succeeds), so
+`merge-base(090f832, anything descended from it)` is still `090f832`. **Rebasing does not
+move it. Merging does not move it.** `git diff --name-only 090f832...origin/main` still
+lists both files.
+
+**What removes the finding is bumping `base=` in the manifest to the new base — not moving
+the branch.** Which is exactly what the five re-commits of this task's manifest "as its base
+went stale" were doing: the right remedy applied five times at the right place, while nobody
+— this author first — named the cause. The rebase and the manifest bump are two separate
+actions, and only the second one answers this gate.
 
 **It is deliberately not filed as a finding in this task's `review.json`.** The gate is
 shared infrastructure, not this branch's code — filing it here would attribute to this task
@@ -514,6 +522,30 @@ what HEAD means under `pull_request`, not in how the base was obtained.
 (One thing stated here at second hand and not verified from this branch: that
 `scripts/check-scope-diff.sh` is vendored byte-identically from `agent-roster`. No roster
 checkout was reachable to confirm it. The mechanism above does not depend on that claim.)
+
+### This branch cannot be tested again until the conflict is resolved, in any form
+
+Not "not yet run" and not "waiting". **Both trigger paths are closed.** `.github/workflows/`
+holds one workflow, and its `on:` covers `push` to `main` and tags, plus `pull_request`
+against `main`. A push to `feat/mutation-campaign-313` matches neither: the push filter
+names only `main`, and `pull_request` needs a merge ref GitHub cannot build while the PR is
+`CONFLICTING`. There is **no `workflow_dispatch`**, so `gh workflow run` is not available,
+and re-running an existing run replays an old sha rather than current content.
+
+**No quantity of pushes will change this**, which is why the zero check-runs on the head is
+not a wait. The observable consistent with it: no run has been created on this branch since
+`10:21:02Z`, while main and other branches have had runs since.
+
+What does resolve it is a conflict resolution — `git merge origin/main` and an ordinary
+push would do it without any history rewrite, as would a rebase. But **resolving those three
+files is itself the human decision**, so this is not a way around the decision; it is only a
+way around the *force-push*. The two are separate, and only the second is a mechanical
+concern.
+
+(Noted for the roadmap, not done here: adding `workflow_dispatch` to `ci.yml` would make any
+branch testable on demand, and as a side effect a dispatched run checks out the **branch
+ref** rather than the merge ref — which would sidestep the misattribution above. That is a
+change to main, so a PR of its own.)
 
 ### Exactly what gates this merge, measured rather than assumed
 
