@@ -1350,6 +1350,12 @@ type tree_anchor =
   | Anchor_git  (** `git rev-parse --show-toplevel` answered *)
   | Anchor_marker  (** a `dune-project` above the working directory: the checkout's own root *)
   | Anchor_cwd  (** neither: the boundary is the invocation directory, and nothing is claimed *)
+  | Anchor_undetermined of int
+      (** git answered the toplevel but could NOT answer whether the nested marker is
+          tracked — it exited with the carried code, which is neither 0 (tracked) nor 1 (not
+          tracked). The boundary is the narrower one, as under [Anchor_marker], but the
+          reason is different and saying [Anchor_marker]'s reason here is FALSE: it asserts
+          the repository does not track the marker, which is precisely what nobody knows. *)
 
 (** The nearest ancestor of [d] holding a tree-local marker of a checkout root.
 
@@ -1366,20 +1372,45 @@ let marker_root d =
   in
   up d
 
-(** Does the git repository rooted at [repo] TRACK [path]? This is the whole question a
-    nested marker turns on. A `dune-project` the repository has in its index is part of THIS
-    checkout — a sub-project, a proof-of-concept, a vendored-and-committed subtree — and the
-    campaign belongs to the repository, not to the subdirectory. One the repository does not
-    know about is the case FR-030 exists for: an unpacked tarball, an out-of-tree copy, a
-    build artefact dropped inside a checkout.
+(** What git said when asked whether the repository rooted at [repo] tracks [path].
 
-    An untracked answer is the CONSERVATIVE one: it narrows the boundary, so a git that
-    cannot be run at all can only make the guard refuse more, never less. *)
+    THREE ANSWERS, NOT TWO, and the third is the whole point of this type existing. The
+    previous shape of this code was [Sys.command ... = 0], a boolean, and every non-zero exit
+    collapsed into "not tracked" — conflating a NEGATIVE ANSWER with A FAILURE TO ANSWER.
+
+    That is not hypothetical and it is not rare. `git ls-files --error-unmatch` reads the
+    INDEX; `git rev-parse --show-toplevel` does not. So an index that cannot be read —
+    permissions, truncation, a half-written file, a corrupted checkout — leaves the toplevel
+    answering 0 while ls-files exits 128. MEASURED (git 2.55.0): with the index chmod 000, and
+    again with fourteen bytes of garbage written over it, ls-files exits 128 and
+    `rev-parse --show-toplevel` exits 0 in both. The branch below IS therefore reached, a
+    TRACKED marker was declared untracked, the boundary shrank, and the repository refused its
+    own artefact while asserting it belonged to a different tree — a wrong verdict carrying a
+    wrong reason. That was finding :1133 returning through the error path of its own fix.
+
+    The exit vocabulary is git's own and is narrow on purpose: 0 means every named path is in
+    the index, 1 means one is not, and `--error-unmatch` is what makes that 1 an ANSWER rather
+    than an empty listing. Everything else — 128 for a fatal error, 127 for no git on PATH —
+    is git declining to answer, and is carried out of here as such.
+
+    The message text is deliberately NOT consulted. git localises its diagnostics (the same
+    fatal read `fichier d'index plus petit qu'attendu` on the machine this was measured on),
+    so anything keyed on English wording is a matcher that stops matching under LANG. The exit
+    code is the part of the interface that does not move. *)
+type tracked_answer =
+  | Tracked
+  | Untracked
+  | Undetermined of int  (** git's exit code, which is neither 0 nor 1 *)
+
 let tracked_by ~repo path =
-  Sys.command
-    (Printf.sprintf "git -C %s ls-files --error-unmatch -- %s >/dev/null 2>&1"
-       (Filename.quote repo) (Filename.quote path))
-  = 0
+  match
+    Sys.command
+      (Printf.sprintf "git -C %s ls-files --error-unmatch -- %s >/dev/null 2>&1"
+         (Filename.quote repo) (Filename.quote path))
+  with
+  | 0 -> Tracked
+  | 1 -> Untracked
+  | code -> Undetermined code
 
 (** The boundary, resolved ONCE. Computed lazily so a campaign that never walks an ancestor
     never pays for a subprocess, and so the value cannot drift between the two call sites
@@ -1418,9 +1449,19 @@ let working_tree_root =
         repository carries a tracked poc/decision-lint/dune-project, so it refused itself. *)
      match (git, marker) with
      | Some g, Some m ->
-         if String.length m > String.length g && not (tracked_by ~repo:g (Filename.concat m "dune-project"))
-         then (m, Anchor_marker)
-         else (g, Anchor_git)
+         if String.length m <= String.length g then (g, Anchor_git)
+         else (
+           (* Three answers, three boundaries, and the third one is NOT a rounding of either
+              neighbour. Tracked: same checkout, keep the repository. Untracked: a different
+              checkout, narrow — that is issue #77 and nothing here trades it away. Could not
+              tell: narrow, because widening on an answer nobody has would hand the OUTER
+              tree's artefact to the engine on a broken index, but carry the REASON so the
+              refusal says the index could not be read instead of asserting a nesting that
+              nobody established. *)
+           match tracked_by ~repo:g (Filename.concat m "dune-project") with
+           | Tracked -> (g, Anchor_git)
+           | Untracked -> (m, Anchor_marker)
+           | Undetermined code -> (m, Anchor_undetermined code))
      | Some g, None -> (g, Anchor_git)
      | None, Some m -> (m, Anchor_marker)
      | None, None -> (cwd, Anchor_cwd))
@@ -1454,6 +1495,10 @@ let guard_inside_tree ~what path =
           "The boundary is this checkout's own root, found as the nearest `dune-project`            above the working directory — with no git repository at all, or nearer than one            that does NOT track it, which is what makes it a checkout of its own. The            artefact was reached by walking PAST that root, so it belongs to a different            tree."
       | Anchor_cwd ->
           "No boundary could be established: `git rev-parse --show-toplevel` did not            answer and there is no `dune-project` above the working directory. The boundary            therefore FELL BACK to the invocation directory itself, which is the narrower            and safer answer. This is NOT a claim that this checkout is nested inside            another one — nothing here can tell whether it is."
+      | Anchor_undetermined code ->
+          Printf.sprintf
+            "The boundary is this checkout's own `dune-project` root, and it was narrowed to            it because git COULD NOT SAY whether the enclosing repository tracks that            marker: `git ls-files --error-unmatch` exited %d, which is neither 0 (tracked)            nor 1 (not tracked). The usual cause is an index that cannot be read — check            `.git/index` for permissions and for truncation. This is NOT a claim that the            marker is untracked and NOT a claim that this artefact was reached by walking out of the            checkout it belongs to; either might be true and nothing here established which. The narrower            boundary was taken because the wider one cannot be justified on an answer that            was never given."
+            code
     in
     refuse
       (Printf.sprintf
