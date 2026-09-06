@@ -368,7 +368,8 @@
    "last_replayed_at": "4e4ca5b",
    "replay_verdict": "SUBJECT-ABSENT-AT-HEAD",
    "replay_note": "Replayed BY CONTENT at 4e4ca5b by the reviewer, not accepted from the implementing agent's report. the basename join survives ONLY as a history comment at :2443 ('The join was first [Filename.basename ...'). same_path is full-path equality; by_site discriminates on cols, replacement and the occurrence ordinal; refuse_ambiguous exists at two sites. Every named ratchet was itself re-proved by the reviewer: red against the pre-fix tree via git checkout <sha> -- <path> then rebuild, green after, no git stash.",
-   "prior_last_replayed_at": "0851761b637c46e524cd354abca3fa04acde3681"
+   "prior_last_replayed_at": "0851761b637c46e524cd354abca3fa04acde3681",
+   "closure_species": "subject-absent+ratcheted"
   },
   {
    "severity": "HIGH",
@@ -1388,7 +1389,8 @@
    "reopen_note": "Re-found by the round-3 review on this HEAD, by two specialists independently.",
    "last_replayed_at": "d98277e9caf1d98530c0b8f4082b76b133b34194",
    "replay_verdict": "SUBJECT-ABSENT-CONFIRMED-BY-EXECUTION",
-   "replay_note": "Replayed BY EXECUTION at d98277e by group R4-B, not by reading: checks/tree-boundary-non-git-checkout.js probe 1 -- inner checkout NOT git-initialised, nested inside an outer repo, outer wrapper reached by the ancestor walk -- exits 1 and names the outside path. The described failure mode (engine handed the outer wrapper, campaign written, exit 0) does not occur. Closed against CHECK-40, which was red-verified when it was written and is green here. What would have made this non-zero: probe 1 accepting the outer wrapper."
+   "replay_note": "Replayed BY EXECUTION at d98277e by group R4-B, not by reading: checks/tree-boundary-non-git-checkout.js probe 1 -- inner checkout NOT git-initialised, nested inside an outer repo, outer wrapper reached by the ancestor walk -- exits 1 and names the outside path. The described failure mode (engine handed the outer wrapper, campaign written, exit 0) does not occur. Closed against CHECK-40, which was red-verified when it was written and is green here. What would have made this non-zero: probe 1 accepting the outer wrapper.",
+   "closure_species": "subject-absent+ratcheted"
   },
   {
    "severity": "MEDIUM",
@@ -1471,7 +1473,8 @@
    "last_replayed_at": "4e4ca5b",
    "replay_verdict": "SUBJECT-ABSENT-AT-HEAD",
    "replay_note": "Replayed BY CONTENT at 4e4ca5b by the reviewer, not accepted from the implementing agent's report. same subject as :1393 and the same evidence closes both. The label ROUND-1 FINDING NOT CLOSED was inherited across two rounds and never replayed; it was already false at 0851761. Every named ratchet was itself re-proved by the reviewer: red against the pre-fix tree via git checkout <sha> -- <path> then rebuild, green after, no git stash.",
-   "prior_last_replayed_at": "0851761b637c46e524cd354abca3fa04acde3681"
+   "prior_last_replayed_at": "0851761b637c46e524cd354abca3fa04acde3681",
+   "closure_species": "subject-absent+ratcheted"
   },
   {
    "severity": "HIGH",
@@ -1671,7 +1674,8 @@
    "reopen_note": "Re-found by the round-3 review on this HEAD, by two specialists independently.",
    "last_replayed_at": "d98277e9caf1d98530c0b8f4082b76b133b34194",
    "replay_verdict": "SUBJECT-ABSENT-CONFIRMED-BY-EXECUTION",
-   "replay_note": "Same executed replay as the :984 row -- these two are one boundary described twice, duplicated because the normaliser fingerprints on path:line:category. The boundary is no longer the git repository alone: it is the git toplevel, narrowed by an UNTRACKED nearer dune-project, falling back to the invocation directory. `git init` in the inner tree no longer decides whether the guard fires; CHECK-40 probes 1 and 2 assert exactly that, both green at d98277e."
+   "replay_note": "Same executed replay as the :984 row -- these two are one boundary described twice, duplicated because the normaliser fingerprints on path:line:category. The boundary is no longer the git repository alone: it is the git toplevel, narrowed by an UNTRACKED nearer dune-project, falling back to the invocation directory. `git init` in the inner tree no longer decides whether the guard fires; CHECK-40 probes 1 and 2 assert exactly that, both green at d98277e.",
+   "closure_species": "subject-absent+ratcheted"
   },
   {
    "severity": "HIGH",
@@ -1995,7 +1999,8 @@
    "last_replayed_at": "4e4ca5b",
    "replay_verdict": "SUBJECT-ABSENT-AT-HEAD",
    "prior_last_replayed_at": "618acb9",
-   "replay_note": "Replayed BY CONTENT at 4e4ca5b by the reviewer, not accepted from the implementing agent's report. the second route to :450, closed by the same structural change. Distinct route kept below rather than dropped. Every named ratchet was itself re-proved by the reviewer: red against the pre-fix tree via git checkout <sha> -- <path> then rebuild, green after, no git stash."
+   "replay_note": "Replayed BY CONTENT at 4e4ca5b by the reviewer, not accepted from the implementing agent's report. the second route to :450, closed by the same structural change. Distinct route kept below rather than dropped. Every named ratchet was itself re-proved by the reviewer: red against the pre-fix tree via git checkout <sha> -- <path> then rebuild, green after, no git stash.",
+   "closure_species": "subject-absent+ratcheted"
   },
   {
    "severity": "HIGH",
@@ -2018,7 +2023,8 @@
    "last_replayed_at": "4e4ca5b",
    "replay_verdict": "SUBJECT-ABSENT-AT-HEAD",
    "prior_last_replayed_at": "618acb9",
-   "replay_note": "Replayed BY CONTENT at 4e4ca5b by the reviewer, not accepted from the implementing agent's report. MDb.count_runs asks the database and completed_at is withheld unless rows equal mutants_attempted; attempts_reconciled_with_rows reaches the JSON. A collision now refuses BEFORE the campaign row exists. Every named ratchet was itself re-proved by the reviewer: red against the pre-fix tree via git checkout <sha> -- <path> then rebuild, green after, no git stash."
+   "replay_note": "Replayed BY CONTENT at 4e4ca5b by the reviewer, not accepted from the implementing agent's report. MDb.count_runs asks the database and completed_at is withheld unless rows equal mutants_attempted; attempts_reconciled_with_rows reaches the JSON. A collision now refuses BEFORE the campaign row exists. Every named ratchet was itself re-proved by the reviewer: red against the pre-fix tree via git checkout <sha> -- <path> then rebuild, green after, no git stash.",
+   "closure_species": "subject-absent+ratcheted"
   },
   {
    "severity": "HIGH",
@@ -2040,7 +2046,8 @@
    "red_verified": true,
    "last_replayed_at": "d98277e9caf1d98530c0b8f4082b76b133b34194",
    "replay_verdict": "CONFIRMED-AT-ROUND-4",
-   "replay_note": "Re-executed at d98277e by group R4-B, ARCH_MUTANTS_WRAPPER unset, identical argv, only cwd varied: repo root exit 0, bin/ exit 0, poc/decision-lint exit 1 with 'belongs to a different tree'. Both halves confirmed -- the verdict and the diagnosis. Fixed by requiring the marker to be UNTRACKED by the enclosing repository before it may narrow the boundary (`let tracked_by`), and the Anchor_marker diagnosis reworded to state that condition. CHECK-51 red-verified at d98277e (exit 1, 4 of 10) with its two negative-control probes green in both runs."
+   "replay_note": "Re-executed at d98277e by group R4-B, ARCH_MUTANTS_WRAPPER unset, identical argv, only cwd varied: repo root exit 0, bin/ exit 0, poc/decision-lint exit 1 with 'belongs to a different tree'. Both halves confirmed -- the verdict and the diagnosis. Fixed by requiring the marker to be UNTRACKED by the enclosing repository before it may narrow the boundary (`let tracked_by`), and the Anchor_marker diagnosis reworded to state that condition. CHECK-51 red-verified at d98277e (exit 1, 4 of 10) with its two negative-control probes green in both runs.",
+   "closure_species": "fixed-with-ratchet"
   },
   {
    "severity": "HIGH",
@@ -2063,7 +2070,8 @@
    "last_replayed_at": "4e4ca5b",
    "replay_verdict": "SUBJECT-ABSENT-AT-HEAD",
    "prior_last_replayed_at": "618acb9",
-   "replay_note": "Replayed BY CONTENT at 4e4ca5b by the reviewer, not accepted from the implementing agent's report. the campaign tier now reads briefs/ACTIVE_TASK and passes each script the argument it documents needing. NOTE: this finding's THIRD clause -- a concealed red on ci.yml -- was RETRACTED; check-scope-diff exits 0, ci.yml having been added to the manifest by ac08d1a before the clause was written. Every named ratchet was itself re-proved by the reviewer: red against the pre-fix tree via git checkout <sha> -- <path> then rebuild, green after, no git stash."
+   "replay_note": "Replayed BY CONTENT at 4e4ca5b by the reviewer, not accepted from the implementing agent's report. the campaign tier now reads briefs/ACTIVE_TASK and passes each script the argument it documents needing. NOTE: this finding's THIRD clause -- a concealed red on ci.yml -- was RETRACTED; check-scope-diff exits 0, ci.yml having been added to the manifest by ac08d1a before the clause was written. Every named ratchet was itself re-proved by the reviewer: red against the pre-fix tree via git checkout <sha> -- <path> then rebuild, green after, no git stash.",
+   "closure_species": "subject-absent+ratcheted"
   },
   {
    "severity": "LOW",
@@ -2128,7 +2136,8 @@
    "last_replayed_at": "4e4ca5b",
    "replay_verdict": "SUBJECT-ABSENT-AT-HEAD",
    "prior_last_replayed_at": "618acb9",
-   "replay_note": "Replayed BY CONTENT at 4e4ca5b by the reviewer, not accepted from the implementing agent's report. by_id is at ZERO occurrences -- the id join arm is deleted, not deprecated. string_of_int !n survives only in the comment at :532 documenting its own removal. engine_name splits Engine_declared of string from Report_ordinal of int, so the type-checker refuses the conflation. Every named ratchet was itself re-proved by the reviewer: red against the pre-fix tree via git checkout <sha> -- <path> then rebuild, green after, no git stash."
+   "replay_note": "Replayed BY CONTENT at 4e4ca5b by the reviewer, not accepted from the implementing agent's report. by_id is at ZERO occurrences -- the id join arm is deleted, not deprecated. string_of_int !n survives only in the comment at :532 documenting its own removal. engine_name splits Engine_declared of string from Report_ordinal of int, so the type-checker refuses the conflation. Every named ratchet was itself re-proved by the reviewer: red against the pre-fix tree via git checkout <sha> -- <path> then rebuild, green after, no git stash.",
+   "closure_species": "subject-absent+ratcheted"
   },
   {
    "severity": "HIGH",
@@ -2151,7 +2160,8 @@
    "last_replayed_at": "4e4ca5b",
    "replay_verdict": "SUBJECT-ABSENT-AT-HEAD",
    "prior_last_replayed_at": "618acb9",
-   "replay_note": "Replayed BY CONTENT at 4e4ca5b by the reviewer, not accepted from the implementing agent's report. the resolution is written in all three files: arch_mutant_db.ml:315-318 states engine_mutant_id is RUN-SCOPED, is not an identity, nothing joins on it, and cross-references the doctrine in arch_mutants.ml AND in mutants-schema-migration.sql. The migration prevails, because a document asserting a checkable property outranks one describing a mechanism. Every named ratchet was itself re-proved by the reviewer: red against the pre-fix tree via git checkout <sha> -- <path> then rebuild, green after, no git stash."
+   "replay_note": "Replayed BY CONTENT at 4e4ca5b by the reviewer, not accepted from the implementing agent's report. the resolution is written in all three files: arch_mutant_db.ml:315-318 states engine_mutant_id is RUN-SCOPED, is not an identity, nothing joins on it, and cross-references the doctrine in arch_mutants.ml AND in mutants-schema-migration.sql. The migration prevails, because a document asserting a checkable property outranks one describing a mechanism. Every named ratchet was itself re-proved by the reviewer: red against the pre-fix tree via git checkout <sha> -- <path> then rebuild, green after, no git stash.",
+   "closure_species": "subject-absent+ratcheted"
   },
   {
    "severity": "HIGH",
@@ -2174,7 +2184,8 @@
    "last_replayed_at": "4e4ca5b",
    "replay_verdict": "SUBJECT-ABSENT-AT-HEAD",
    "prior_last_replayed_at": "618acb9",
-   "replay_note": "Replayed BY CONTENT at 4e4ca5b by the reviewer, not accepted from the implementing agent's report. source_hash at :1231-1279 stamps its derivation INTO the stored value as 'line:' or 'site:', and both arms hash in the occurrence ordinal -- without which the DB's UNIQUE key would re-merge the pair the site key had just separated. Every named ratchet was itself re-proved by the reviewer: red against the pre-fix tree via git checkout <sha> -- <path> then rebuild, green after, no git stash."
+   "replay_note": "Replayed BY CONTENT at 4e4ca5b by the reviewer, not accepted from the implementing agent's report. source_hash at :1231-1279 stamps its derivation INTO the stored value as 'line:' or 'site:', and both arms hash in the occurrence ordinal -- without which the DB's UNIQUE key would re-merge the pair the site key had just separated. Every named ratchet was itself re-proved by the reviewer: red against the pre-fix tree via git checkout <sha> -- <path> then rebuild, green after, no git stash.",
+   "closure_species": "subject-absent+ratcheted"
   },
   {
    "severity": "HIGH",
@@ -2197,7 +2208,8 @@
    "last_replayed_at": "4e4ca5b",
    "replay_verdict": "SUBJECT-ABSENT-AT-HEAD",
    "prior_last_replayed_at": "618acb9",
-   "replay_note": "Replayed BY CONTENT at 4e4ca5b by the reviewer, not accepted from the implementing agent's report. mutants_schema_version is written in the migration SQL itself, so the hand-applied path stamps it too, and separately from the index-wide value. Every named ratchet was itself re-proved by the reviewer: red against the pre-fix tree via git checkout <sha> -- <path> then rebuild, green after, no git stash."
+   "replay_note": "Replayed BY CONTENT at 4e4ca5b by the reviewer, not accepted from the implementing agent's report. mutants_schema_version is written in the migration SQL itself, so the hand-applied path stamps it too, and separately from the index-wide value. Every named ratchet was itself re-proved by the reviewer: red against the pre-fix tree via git checkout <sha> -- <path> then rebuild, green after, no git stash.",
+   "closure_species": "subject-absent+ratcheted"
   },
   {
    "severity": "HIGH",
@@ -2220,7 +2232,8 @@
    "last_replayed_at": "4e4ca5b",
    "replay_verdict": "SUBJECT-ABSENT-AT-HEAD",
    "prior_last_replayed_at": "618acb9",
-   "replay_note": "Replayed BY CONTENT at 4e4ca5b by the reviewer, not accepted from the implementing agent's report. the code===3 short-circuit is gone; only !fatalUnrun (the campaign tier) still treats 3 as non-fatal. The check fires on exit 3 AND on exit 5, the latter already fatal beforehand -- which is what makes it a rule. Every named ratchet was itself re-proved by the reviewer: red against the pre-fix tree via git checkout <sha> -- <path> then rebuild, green after, no git stash."
+   "replay_note": "Replayed BY CONTENT at 4e4ca5b by the reviewer, not accepted from the implementing agent's report. the code===3 short-circuit is gone; only !fatalUnrun (the campaign tier) still treats 3 as non-fatal. The check fires on exit 3 AND on exit 5, the latter already fatal beforehand -- which is what makes it a rule. Every named ratchet was itself re-proved by the reviewer: red against the pre-fix tree via git checkout <sha> -- <path> then rebuild, green after, no git stash.",
+   "closure_species": "subject-absent+ratcheted"
   },
   {
    "severity": "MEDIUM",
@@ -2264,7 +2277,8 @@
    "last_replayed_at": "4e4ca5b",
    "replay_verdict": "SUBJECT-ABSENT-AT-HEAD",
    "prior_last_replayed_at": "618acb9",
-   "replay_note": "Replayed BY CONTENT at 4e4ca5b by the reviewer, not accepted from the implementing agent's report. the contract is now stated BY KIND at :70-91, enumerating all four exit-1 refusals, and names the earlier narrowness as its own reason. Every named ratchet was itself re-proved by the reviewer: red against the pre-fix tree via git checkout <sha> -- <path> then rebuild, green after, no git stash."
+   "replay_note": "Replayed BY CONTENT at 4e4ca5b by the reviewer, not accepted from the implementing agent's report. the contract is now stated BY KIND at :70-91, enumerating all four exit-1 refusals, and names the earlier narrowness as its own reason. Every named ratchet was itself re-proved by the reviewer: red against the pre-fix tree via git checkout <sha> -- <path> then rebuild, green after, no git stash.",
+   "closure_species": "subject-absent-only"
   },
   {
    "severity": "MEDIUM",
@@ -2661,7 +2675,9 @@
    "summary": "A NEGATIVE ASSERTION IS GREEN FOR A TYPOGRAPHIC REASON. It forbids a phrase the honest message contains IN ORDER TO DENY IT, and passes only because the OCaml literal's continuation fill lands between `inside` and `another`, breaking adjacency.",
    "evidence": "VALIDATED BY EXECUTION, not carried forward as a sentence, and run on an IDLE WORKTREE (r4-ratchet at bcd835e) so no writer was disturbed. Baseline exit 0. Collapsing runs of spaces to one space in that single literal -- 4 fills, message semantically identical, it still denies the nesting -- gives exit 1, the failing assertion being 'it does NOT claim the checkout is nested inside another one -- expected false, got true'. Restored: exit 0, tree clean. NO DEFECT WAS INTRODUCED. The gate measures the source formatting of the thing it tests. Remedy: assert on PARSED STRUCTURE, never on raw text -- an absence over raw output is satisfied by any reflow, wrap or colour code, and no pattern-widening changes that.",
    "confidence": 5,
-   "fix": "Assert on PARSED STRUCTURE, not raw text: match on an affirmative-wording vocabulary over whitespace-collapsed output, the way CHECK-51's probe 3 already does. Widening the pattern does not help -- any reflow satisfies an absence."
+   "fix": "Assert on PARSED STRUCTURE, not raw text: match on an affirmative-wording vocabulary over whitespace-collapsed output, the way CHECK-51's probe 3 already does. Widening the pattern does not help -- any reflow satisfies an absence.",
+   "surface": "pre-existing",
+   "surface_reason": "a round-3 check"
   },
   {
    "severity": "MEDIUM",
@@ -2677,7 +2693,9 @@
    "summary": "THE SAME REGEX AT A SECOND SITE CANNOT BE RED AT ALL -- a third category, not a weaker version of the first. It forbids a refusal-only phrase on an ACCEPTANCE path.",
    "evidence": "MEASURED, not inferred from a failure to make it red: the check was instrumented to print what probe 3 actually examines, then restored. r.out is 1524 chars, exit 0, and it is the output of a SUCCEEDING campaign ('== Mutation campaign 1 ...'). The phrase appears only inside `refuse`. So the probe forbids something its path cannot emit; its green never weighed anything. 'I could not make it red' would have been weaker -- this is the CAUSE. THE ENUMERATION IS THREE, NOT TWO: green because the property holds; green for a reason unrelated to the property; CANNOT BE RED AT ALL. Collapsing the third into the first is the easy error because both look sound. Remedy differs from :153's: give it an assertion that bears, or remove it with the reason written. Keeping it is worse than one fewer green, because it counts.",
    "confidence": 5,
-   "fix": "Give it an assertion that bears -- that a SUCCESS path emits no boundary diagnosis at all, over a structured vocabulary -- or delete it with the reason written. Do not keep it: a green that never weighed anything is worse than one fewer green, because it counts."
+   "fix": "Give it an assertion that bears -- that a SUCCESS path emits no boundary diagnosis at all, over a structured vocabulary -- or delete it with the reason written. Do not keep it: a green that never weighed anything is worse than one fewer green, because it counts.",
+   "surface": "pre-existing",
+   "surface_reason": "a round-3 check"
   },
   {
    "severity": "MEDIUM",
@@ -2693,7 +2711,9 @@
    "summary": "THE RATCHET'S STEADY STATE DURING WORK IS ONE EXPECTED RED, and a second red differs from it only arithmetically. dispatched-groups-were-executed asserts whenever a group is in flight -- that is, throughout every campaign.",
    "evidence": "Measured across this round: 25 PASS / 1 ASSERTED at 664e0d8 with R4-D in flight, then 38 passed / 0 asserted at 4e4ca5b once its outcome section existed. A gate with a permanently expected failure trains the reader to see '1 asserted' and move on. Two options, neither taken here: separate the PROCESS gate from the CODE ratchet into its own sweep, or have the runner state the expectation -- '1 asserted, expected: R4-D in flight' -- so that 2 asserted is VISIBLY and not arithmetically different. Same shape as the objection already open at dispatched-groups-were-executed.js:30, one layer in.",
    "confidence": 5,
-   "fix": "Either split the PROCESS gate out of the CODE ratchet into its own sweep, or have the runner print the expectation ('1 asserted, expected: <group> in flight') so a second red is perceptually and not merely arithmetically different."
+   "fix": "Either split the PROCESS gate out of the CODE ratchet into its own sweep, or have the runner print the expectation ('1 asserted, expected: <group> in flight') so a second red is perceptually and not merely arithmetically different.",
+   "surface": "pre-existing",
+   "surface_reason": "the runner and the process gate both predate round 4"
   },
   {
    "severity": "MEDIUM",
@@ -2709,7 +2729,9 @@
    "summary": "THE CONVERGENCE GATE'S INCONCLUSIVE COUNT IS ANTI-CORRELATED WITH THE WORK: every ratchet added makes the unexamined population larger while the published zero looks unchanged.",
    "evidence": "Measured: 41 inconclusive at round 3, 54 at 4e4ca5b. The gate resolves a check as a node-runnable PATH, and a spec-level CHECK-N id is not one, so each CHECK-N this branch adds is one more entry it cannot run. '0 violations, 54 inconclusive' and '0 violations, 41 inconclusive' read identically at a glance and are different states. A metric that DEGRADES AS THE WORK IMPROVES. The figure must never appear again without its degradation beside it -- which is why this verdict carries inconclusive_checks, checks_total, gate_exit_status and degradation_note as siblings of the count.",
    "confidence": 5,
-   "fix": "Never publish the violation count without inconclusive_checks, checks_total, gate_exit_status and degradation_note beside it -- as this verdict does. The structural fix is for the gate to accept an arbitrary executable, or for spec-level CHECK-N ids to become node-runnable paths."
+   "fix": "Never publish the violation count without inconclusive_checks, checks_total, gate_exit_status and degradation_note beside it -- as this verdict does. The structural fix is for the gate to accept an arbitrary executable, or for spec-level CHECK-N ids to become node-runnable paths.",
+   "surface": "pre-existing",
+   "surface_reason": "the convergence gate's behaviour predates round 4"
   },
   {
    "severity": "INFO",
@@ -2725,7 +2747,9 @@
    "summary": "PROBE-LEVEL LIVENESS IS NOT ESTABLISHED BY CHECK-LEVEL RED-VERIFICATION, and this verdict states the two as separate sentences rather than adjacent ones.",
    "evidence": "A RETRACTION OF THE REVIEWER'S OWN CLAIM. CHECK-51's red run left six assertions green, and that was reported as proof it tests a property rather than a permutation. That reading remains available -- but so does 'some of those greens cannot fail', and NOTHING IN THE RUN SEPARATES THEM. What IS established: CHECK-51 discriminates two trees and its failures concentrate on one polarity. What is NOT established: that each of its green assertions bears something. '18 checks made red on demand' is true and does not mean 'no vacuous probe remains'; a reader who was not present reads them as one sentence. Proof that the concern is real rather than theoretical: this file's :138, found vacuous inside a check that DOES discriminate. Discriminator for a later sweep, cheap per probe: instrument the check to print what the probe examines, then ask whether that output can ever contain what it forbids.",
    "confidence": 5,
-   "fix": "State the two claims as separate sentences in every verdict, and run the probe-level sweep before any future round asserts probe liveness. The sweep is mandated to this round's falsification read precisely because its author cannot self-administer it."
+   "fix": "State the two claims as separate sentences in every verdict, and run the probe-level sweep before any future round asserts probe liveness. The sweep is mandated to this round's falsification read precisely because its author cannot self-administer it.",
+   "surface": "pre-existing",
+   "surface_reason": "a standing property of check-level red-verification"
   },
   {
    "severity": "LOW",
@@ -2741,7 +2765,9 @@
    "summary": "A JUDGEMENT, NOT A DEFECT, AND DELIBERATELY NOT TESTED: a nested dune-project that IS tracked by git but genuinely belongs to another checkout -- a committed vendored subtree -- now widens FR-030's boundary to the enclosing repository.",
    "evidence": "The reviewer CONFIRMS the polarity R4-B chose. The rule 'the campaign belongs to the repository that owns the files' is the right one, because the failure it prevents is issue #77 -- an outer tree's unmutated binary making every mutant survive, which reads exactly like a real finding -- and the failure it admits is a vendored subtree mutated as part of its host, which is wrong but LOUD. Simulating this judgement with a green check would have been inventing a gate to satisfy a process rule, which is the defect this round spent itself removing. STATED PLAINLY: this is where a future defect will come from. It is a watch item, not a fix item, and it must not inherit the urgency of the two probe defects filed above it.",
    "confidence": 4,
-   "fix": "None. This is a watch item, not a fix item: the polarity is confirmed as correct. Revisit if a vendored subtree is ever mutated as part of its host."
+   "fix": "None. This is a watch item, not a fix item: the polarity is confirmed as correct. Revisit if a vendored subtree is ever mutated as part of its host.",
+   "surface": "round-4-output",
+   "surface_reason": "R4-B chose this polarity (a judgement, confirmed, not a defect)"
   },
   {
    "severity": "MEDIUM",
@@ -2757,7 +2783,9 @@
    "fingerprint": "scripts/lib/review/finding-schema.js:1:schema-drift",
    "summary": "THE REPLAY-PROVENANCE FIELDS ARE NOT IN THE FINDING SCHEMA, so the whole staleness apparatus built this round survives only because the verdict is hand-edited. Passed through the normalizer, last_replayed_at and replay_verdict are rejected as unexpected additional properties.",
    "evidence": "FOUND BY RUNNING THE NORMALIZER, not by reading it -- and it was run only because the convergence gate refused an unattested normalized_by claim. Measured at 4e4ca5b: feeding this round's six findings to scripts/review-normalize.js rejects all six with '$: unexpected additional property \"last_replayed_at\"; $: unexpected additional property \"replay_verdict\"'. So a finding cannot carry the commit it was last replayed at THROUGH the pipeline's own tool. The fields exist in this verdict because it is written by hand; the first round to normalize properly would silently drop them, and the census would go back to being a count of claims about past trees. Two lesser drifts found in the same run: `confidence` is a REQUIRED INTEGER (1-5) and `fix` is REQUIRED, neither documented where a reviewer authoring a finding would look.",
-   "fix": "Add last_replayed_at (string, a commit sha) and replay_verdict (enum: CONFIRMED-AT-HEAD | SUBJECT-ABSENT-AT-HEAD | STILL-OPEN-AT-HEAD | FOUND-AT-HEAD) to the finding schema, so a status can carry the commit it was measured at rather than being a value someone set in the past. This is the schema half of the roadmap item that tracks finding identity and status re-validation."
+   "fix": "Add last_replayed_at (string, a commit sha) and replay_verdict (enum: CONFIRMED-AT-HEAD | SUBJECT-ABSENT-AT-HEAD | STILL-OPEN-AT-HEAD | FOUND-AT-HEAD) to the finding schema, so a status can carry the commit it was measured at rather than being a value someone set in the past. This is the schema half of the roadmap item that tracks finding identity and status re-validation.",
+   "surface": "pre-existing",
+   "surface_reason": "the schema predates round 4"
   },
   {
    "severity": "HIGH",
@@ -2773,7 +2801,9 @@
    "fingerprint": "bin/arch_mutants/arch_mutants.ml:1378:correctness",
    "summary": "THE ROUND'S OWN FIX REOPENED THE DEFECT IT CLOSED, THROUGH ITS ERROR PATH. tracked_by tests `Sys.command ... = 0`, so EVERY non-zero exit reads as 'not tracked' -- conflating 'no' with 'I could not tell'. The repository then refuses its own artefact claiming it belongs to another tree: finding :1133 verbatim, by a new route.",
    "evidence": "FOUND BY THE FALSIFICATION READ AND REPRODUCED INDEPENDENTLY BY THE REVIEWER. Measured in a scratch repo: with a readable index `git ls-files --error-unmatch -- f.txt` exits 0; after `chmod 000 .git/index` it exits 128 while `git rev-parse --show-toplevel` still exits 0 -- rev-parse does not read the index. So the Some g/Some m branch IS reached, tracked_by answers false for a TRACKED file, the marker shrinks the boundary, and the diagnosis asserts either that there is no git repository or that the repository does not track the marker. Both false. The falsifier's own run, on the same fixture as probe 2 with the marker committed, printed exit 1 and foreign-tree claim=true, the ONLY difference from its passing control being chmod 000 on the index. Neither tree-boundary check has a probe where git fails other than by 'untracked'.",
-   "fix": "Distinguish the three answers git can give: tracked (0), untracked (1), and COULD NOT DETERMINE (anything else, 128 among them). The third must not silently become 'untracked' -- the conservative direction here is to keep the enclosing repository's boundary, or to refuse with a diagnosis that says the index could not be read. Add a probe where ls-files fails for a reason other than untracked; its absence is why the fix shipped."
+   "fix": "Distinguish the three answers git can give: tracked (0), untracked (1), and COULD NOT DETERMINE (anything else, 128 among them). The third must not silently become 'untracked' -- the conservative direction here is to keep the enclosing repository's boundary, or to refuse with a diagnosis that says the index could not be read. Add a probe where ls-files fails for a reason other than untracked; its absence is why the fix shipped.",
+   "surface": "round-4-output",
+   "surface_reason": "R4-B wrote tracked_by; the defect IS the fix"
   },
   {
    "severity": "MEDIUM",
@@ -2789,7 +2819,9 @@
    "fingerprint": "bin/arch_mutants/arch_mutants.ml:1:correctness",
    "summary": "A REFUSAL WRITES TO THE DATABASE BEFORE REFUSING. Step 5a creates all four mutant tables and stamps mutants_schema_version=1.0 before rejecting a colliding catalogue, so the source comment claiming 'a refusal here leaves the database exactly as it was found' is false as written.",
    "evidence": "Measured by the falsifier on a fresh arch_load database: before, 0 mutant_* tables and no version; the run exits 1 naming the collision; after, 4 tables and mutants_schema_version=1.0 exist, with 0/0/0 rows. The substance holds -- zero rows -- but the absolute does not. Consequence on a green: mutant-tables-declare-their-version probe 1 only observes the state BEFORE any invocation, so it cannot see that the declaration is written unconditionally by any run reaching the database, refusals included. Its own success banner names 'writing the declaration unconditionally so its absence means nothing' as what would have made it non-zero -- which is the measured case, and the check does not see it.",
-   "fix": "Either create the tables only after every pre-flight refusal has passed, or correct the comment and the check together: probe the state after a REFUSED run, not only before an invocation."
+   "fix": "Either create the tables only after every pre-flight refusal has passed, or correct the comment and the check together: probe the state after a REFUSED run, not only before an invocation.",
+   "surface": "round-4-output",
+   "surface_reason": "R4-A wrote step 5a's refusal, which writes before refusing"
   },
   {
    "severity": "MEDIUM",
@@ -2805,7 +2837,9 @@
    "fingerprint": "checks/one-engine-id-two-sites-is-refused.js:1:gate-vacuous",
    "summary": "AN ASSERTION IS SATISFIED BY A DIFFERENT MECHANISM THAN THE ONE IT NAMES. 'the diagnostic names the shared id' searches the WHOLE stderr, unanchored to step 5b's sentence, so the pre-existing 8a ambiguity refusal -- which also prints an engine id -- satisfies it.",
    "evidence": "Instrumented and run against 0851761 by the falsifier: the assertion is GREEN there although 5b does not exist, satisfied by 8a's 'the report entry for lib/x.ml:15 (engine id \"1\", ...) matches 2 catalogued mutant sites'. Three of five assertions in that arm are already green before the fix; only 'no campaign row' and 'no mutant row' carry the load. NOT dead, however -- positive control at 4e4ca5b: dropping %S from 5b's message turns it red on all three arms.",
-   "fix": "Anchor the needle on the sentence 5b itself emits, not on any occurrence of the id in stderr."
+   "fix": "Anchor the needle on the sentence 5b itself emits, not on any occurrence of the id in stderr.",
+   "surface": "round-4-output",
+   "surface_reason": "R4-D's own ratchet"
   },
   {
    "severity": "MEDIUM",
@@ -2821,7 +2855,9 @@
    "fingerprint": "checks/mutant-tables-declare-their-version.js:1:gate-vacuous",
    "summary": "A KEY PROPERTY IS TESTED BY AN INEQUALITY OF VALUES: the stated property is that a consumer reading the GLOBAL version cannot learn the tables exist, but the assertion compares the two version STRINGS. It is green only because two independent numbers do not coincide today.",
    "evidence": "Instrumented by the falsifier at 4e4ca5b: global schema_version = 1.2, mutants_schema_version = 1.0, and the assertion is exactly 'these two strings differ'. A legitimate bump of mutants_schema_version to 1.2 turns it red with no property violated -- a false-red trap. Its sibling assertion (global unchanged before/after) is the one that carries the property.",
-   "fix": "Delete this assertion or restate it over the KEY: that the global version's value is independent of whether the mutant tables exist. The sibling already covers it."
+   "fix": "Delete this assertion or restate it over the KEY: that the global version's value is independent of whether the mutant tables exist. The sibling already covers it.",
+   "surface": "round-4-output",
+   "surface_reason": "R4-A's own ratchet"
   },
   {
    "severity": "MEDIUM",
@@ -2837,7 +2873,9 @@
    "fingerprint": "checks/source-hash-declares-its-derivation.js:1:gate-vacuous",
    "summary": "AN ASSERTION IS GREEN BY COMPARING TWO ABSENCES. 'the same declaration as probe 1' passes because both sides are null and String(null)===String(null).",
    "evidence": "Read directly out of the falsifier's red run, no instrumentation needed: the sibling 'a declaration is present at all' fires with expected true / got false, and immediately below, 'the same declaration as probe 1 -- null' passes. The file's own comment claims a neighbouring assertion neutralises this class; the neutralisation is that the NEIGHBOUR goes red, while the assertion itself stays green in exactly the state it was written against. It is live in the fixed tree, so this is not a cannot-be-red.",
-   "fix": "Require both sides non-null before comparing them, and fail when either is null."
+   "fix": "Require both sides non-null before comparing them, and fail when either is null.",
+   "surface": "round-4-output",
+   "surface_reason": "R4-A's own ratchet"
   },
   {
    "severity": "LOW",
@@ -2853,7 +2891,9 @@
    "fingerprint": "briefs/mutation-campaign-313-review.json:2:evidence",
    "summary": "THE REVIEWER'S OWN CLAIM A7 WAS WIDER THAN THE CLOSURES IT DESCRIBED: 'each closed because its SUBJECT is absent' is false for at least one closure, which was closed by a FIX after being re-confirmed present.",
    "evidence": "The falsifier examined the three closures existing in its tree and found :1133 recorded as CONFIRMED-AT-ROUND-4 then repaired -- a closure by correction, not by absence. Two kinds of closure were stated as one. SEPARATELY, AND THIS IS THE REVIEWER'S PROCESS ERROR: the falsifier was pointed at 4e4ca5b while the claims described the post-replay state committed at 1a4f6d2. Measured: 3 findings carry resolved_round 4 at 4e4ca5b, 14 at HEAD. Its 'A7 broken on the count' is therefore a faithful report about the tree it was given -- a checker cut before the fix reporting the pre-fix answer -- and the count part is withdrawn while the MOTIF part stands.",
-   "fix": "State closures by KIND -- closed-by-absence versus closed-by-fix -- since only the first needs no ratchet. And pin a falsification read to the exact commit whose claims it is given."
+   "fix": "State closures by KIND -- closed-by-absence versus closed-by-fix -- since only the first needs no ratchet. And pin a falsification read to the exact commit whose claims it is given.",
+   "surface": "round-4-output",
+   "surface_reason": "the round-4 review's own overstated claim"
   },
   {
    "severity": "LOW",
@@ -2869,7 +2909,8 @@
    "fingerprint": "bin/arch_mutants/arch_mutants.ml:2425:architecture",
    "summary": "AN IDENTITY-BEARING HASHTABLE IS STILL KEYED ON A RUN-SCOPED COORDINATE. executed_by_id is keyed on the engine id and sits in an attribution path: it decides whether a 99 is a refusal and which executed test set attaches to the run, hence what mutant_kills.test_name names.",
    "evidence": "Named by the falsifier, not executed: no experiment was run on a duplicated trace line, where Hashtbl.replace resolves silently by read order. It is the wrapper's protocol channel and no site_key exists on that side, and 5b forbids one id addressing two SELECTED sites -- so the protection is a control elsewhere, not the structure. Recorded because the round's claim is that identity is keyed on the site key STRUCTURALLY.",
-   "fix": "Either carry the site key through the wrapper protocol, or state in the code that this table's safety rests on 5b and add a probe for a duplicated trace line."
+   "fix": "Either carry the site key through the wrapper protocol, or state in the code that this table's safety rests on 5b and add a probe for a duplicated trace line.",
+   "surface": "UNCLASSIFIED"
   }
  ],
  "cross_runtime_findings": [],
@@ -3006,5 +3047,7 @@
  "dedupe_note": "REPLAY RAN FIRST, THEN THIS. The order is not a preference: merging first would have made one record inherit ONE status for differently-aged claims, and 'ROUND-1 FINDING NOT CLOSED' -- the more alarming label -- is the one that survives a merge. :1726 was marked closed on ITS OWN evidence before any merge. Each route keeps its own prior_last_replayed_at: a merged finding's age is that of its OLDEST unreplayed route, not its freshest.\nTWO DEFECTS WERE COUNTED AS FIVE ROWS. Routes {450,451} are one defect (a synthesised ordinal reaching the first join arm, found by a reviewer and an architect independently); routes {1393,1726} are one defect (the basename join). The normalizer fingerprints on path:line:category, and a coordinate does not identify an object across a rebase. That inflated the CRITICAL count from 1 to 3 -- a severity census that DRIVES TRIAGE, not a tidiness problem.",
  "head": "4e4ca5b",
  "independence_note": "THE GO WAS DRAFTED AND NOT PERSISTED. The convergence gate reported a procedural absence; what the absence covered was a missing contradictor. Filling the fields would have produced a compliant record of an uncontradicted GO -- and this is an item whose every previous round found a defect the round before believed closed. The verdict waits on the falsification read.",
- "status_note": "THE DRAFTED GO WAS FALSIFIED. It was never rendered, and this is why: an independent read broke four of its eight claims, one of them with a live HIGH."
+ "status_note": "THE DRAFTED GO WAS FALSIFIED. It was never rendered, and this is why: an independent read broke four of its eight claims, one of them with a live HIGH.",
+ "streak_discriminator": "THE STREAK HAS AN ANSWER, AND IT IS THE UNCOMFORTABLE ONE. Splitting the 13 findings this round produced by whether they concern code ROUND 4 ITSELF WROTE: 7 are about round-4 output, 6 are about surface that already existed. Findings about pre-existing code mean the review WIDENED its focus, and that terminates -- each new technique has a one-time yield, and the probe-liveness sweep and the falsification mandate were both first-use tonight. Findings about code this round created are NEW SURFACE, and that is the category that decides convergence. At 7 of 13, the process is generating defects at roughly the rate it closes them -- including a HIGH that IS its own fix. So the streak is not merely a widening lens: THE FIX RATE IS THE PROBLEM, NOT THE FINDING RATE, and no number of further rounds converges on its own. Round 5's plan must change how fixes are made, not how findings are hunted.",
+ "closure_species_note": "CLOSURES ARE RECORDED BY SPECIES, because the species have different failure modes and stating them as one lets a subject-absent closure inherit a ratcheted one's confidence. subject-absent: the subject is gone, NOTHING guards its return, and it reopens SILENTLY -- which is exactly what this round's HIGH did, :1133 returning through the error path of its own fix. fixed-with-ratchet: a guard exists and the guard can itself be checked for liveness. The two are not exclusive and the strongest closure is BOTH. This round: {'subject-absent+ratcheted': 12, 'fixed-with-ratchet': 1, 'subject-absent-only': 1}.\nA CORRECTION TO THIS VERY FIELD, recorded rather than quietly amended: the first classifier tested for SUBJECT-ABSENT before testing for a ratchet, so it reported 13 subject-absent and 1 ratcheted -- an either/or over a question whose answer is a pair. An instrument narrower than its question, in the tool built to audit that class, on the same night it was named four times."
 }
