@@ -509,7 +509,38 @@ character of the rebase:
   incident resolving this same file: removing `<<<<<<<`, `=======` and `>>>>>>>` but **not
   `|||||||`**, which kept the diff3 *base* section and silently duplicated records. Validate
   each line as JSON afterwards; do not resolve it by reading.
-- `.gitignore`.
+- `.gitignore` — the textual conflict is trivial (this side adds `_apalache-out/`, main adds
+  a roster block; disjoint, union them). **What matters is what main's side says**, below.
+
+**A defect in this branch that the rebase surfaces, and this one is mine.** Main now
+gitignores the roster pipeline control files:
+
+```
+# Roster pipeline control files — session state, never committed
+briefs/ACTIVE_TASK
+briefs/*-manifest.txt
+```
+
+**This branch commits both.** `briefs/ACTIVE_TASK` has been tracked since `8eb65ad` and
+still contains `mutation-campaign-313`; the roster protocol requires `rm -f
+briefs/ACTIVE_TASK` at phase end, so a committed one means the slot was never released.
+`briefs/<task>-manifest.txt` has been tracked and re-committed five times as its base went
+stale. A `.gitignore` rule does not untrack an already-tracked path, so after the rebase
+both remain committed and main's new rule is silently ineffective against exactly the two
+files it names.
+
+**And they cannot simply be removed, which is the part worth knowing before someone tries.**
+`checks/run-ratchet.js:115` resolves the scope gate's input as
+`briefs/<activeTask>-manifest.txt`, with the active task read from the committed
+`ACTIVE_TASK`. CI has no session state, so the gate can only run at all *because* these
+files are in the tree. Untracking them the way main intends moves `check-scope-diff.sh`
+from **asserting** to **not running** — the third state again, and this time it would be
+introduced deliberately while looking like cleanup.
+
+So the rebase forces a decision that is not textual: either the scope gate keeps a
+committed input and main's rule stays ineffective for this branch, or the input becomes
+session-local and the gate stops running in CI. **Both are defensible; silently doing the
+first by rebasing is not.**
 
 The PR is `CONFLICTING` / `DIRTY`, so this is a real conflict, not a projected one.
 **Re-derive the set before rebasing rather than trusting this list** — it has changed twice
