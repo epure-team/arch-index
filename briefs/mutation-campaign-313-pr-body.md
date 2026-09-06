@@ -182,7 +182,43 @@ verdict derivation is sound, the refusals are sound, and nothing has been mutate
 
 ---
 
+## The 24 open findings, and what they mean for merging
+
+**They are UNDECIDED, and the decision is Mathias's.** Not "known and accepted, merge
+anyway", and not "blockers, do not merge" — the branch has never been GO'd by its own
+review, and the evidence that would decide it is the campaign result, which arrives
+with this body or not at all. Stating this because a reviewer seeing "24 open" will
+otherwise read *unfinished branch*, and the author will not be here to correct it.
+
+**1 HIGH, 13 MEDIUM, 7 LOW, 3 INFO.** The severities matter more than the count:
+
+- **The single HIGH is in a CHECK, not in the shipped tool.** `checks/tree-boundary-anchor-is-structural.js`
+  prints "arms DERIVED from the type declaration, not written down here" while both
+  halves of its derivation filter on a name prefix — so a constructor without that
+  prefix can duplicate an anchor tag while the check reports the arms are pairwise
+  distinct and passes. It makes a guard weaker than it claims. **It does not make
+  `arch-mutants` produce a wrong answer**, and the fix is one character class.
+- **The 13 MEDIUM concentrate in the apparatus**, not the product: 3 in the ratchet
+  runner, 1 in a dispatch gate, 1 in a provenance script, 1 in the review record
+  itself. **3 are in `bin/arch_mutants/arch_mutants.ml`** and those are the ones a
+  merge decision should read first.
+- LOW and INFO are carried, named, and none is a correctness claim.
+
+**What each option costs.** Merging ships a tool whose verdict logic is reviewed and
+whose guards are, in one named place, weaker than their labels — with every one of
+those places written down here rather than waiting to be rediscovered. Not merging
+leaves 118 commits on a branch that is now safely on the remote, and the campaign
+evidence available whenever someone wants it. Neither is obviously right, which is why
+this is stated as a decision rather than a recommendation.
+
 ## What went wrong in producing this branch, and one of it changed the work
+
+**This section exists because the alternative is a reviewer finding these later and
+trusting nothing else in the body.** It is evidence of what was checked, not an
+argument against merging — the defects below were found, measured and recorded, and
+three of them are retractions of this branch's own published claims.
+
+
 
 Six review rounds hardened this machinery. The defects that mattered most were not
 found by any of it.
