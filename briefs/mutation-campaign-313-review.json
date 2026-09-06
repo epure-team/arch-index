@@ -1,9 +1,9 @@
 {
  "task": "mutation-campaign-313",
- "date": "2026-09-06T05:08:57+02:00",
+ "date": "2026-09-06T07:31:41+02:00",
  "status": "NO-GO",
  "mode": "full",
- "round": 4,
+ "round": 5,
  "cycle": 1,
  "no_go_round": 3,
  "auto_fixes_applied": [],
@@ -2666,36 +2666,50 @@
    "path": "checks/tree-boundary-non-git-checkout.js",
    "line": 153,
    "category": "gate-vacuous",
-   "status": "OPEN",
+   "status": "RESOLVED",
    "specialist": "reviewer",
    "first_seen_round": 4,
-   "last_replayed_at": "4e4ca5b",
-   "replay_verdict": "FOUND-AT-HEAD",
+   "last_replayed_at": "f6f78c1",
+   "replay_verdict": "SUBJECT-ABSENT-AT-HEAD",
    "fingerprint": "checks/tree-boundary-non-git-checkout.js:153:gate-vacuous",
    "summary": "A NEGATIVE ASSERTION IS GREEN FOR A TYPOGRAPHIC REASON. It forbids a phrase the honest message contains IN ORDER TO DENY IT, and passes only because the OCaml literal's continuation fill lands between `inside` and `another`, breaking adjacency.",
    "evidence": "VALIDATED BY EXECUTION, not carried forward as a sentence, and run on an IDLE WORKTREE (r4-ratchet at bcd835e) so no writer was disturbed. Baseline exit 0. Collapsing runs of spaces to one space in that single literal -- 4 fills, message semantically identical, it still denies the nesting -- gives exit 1, the failing assertion being 'it does NOT claim the checkout is nested inside another one -- expected false, got true'. Restored: exit 0, tree clean. NO DEFECT WAS INTRODUCED. The gate measures the source formatting of the thing it tests. Remedy: assert on PARSED STRUCTURE, never on raw text -- an absence over raw output is satisfied by any reflow, wrap or colour code, and no pattern-widening changes that.",
    "confidence": 5,
    "fix": "Assert on PARSED STRUCTURE, not raw text: match on an affirmative-wording vocabulary over whitespace-collapsed output, the way CHECK-51's probe 3 already does. Widening the pattern does not help -- any reflow satisfies an absence.",
    "surface": "pre-existing",
-   "surface_reason": "a round-3 check"
+   "surface_reason": "a round-3 check",
+   "prior_last_replayed_at": "4e4ca5b",
+   "resolved_round": 5,
+   "check": "checks/tree-boundary-non-git-checkout.js",
+   "red_verified": true,
+   "pre_fix_sha": "a1e60a9",
+   "closure_species": "fixed-with-ratchet",
+   "replay_note": "Replayed at f6f78c1 by the reviewer, not accepted from the agent that closed it, and every named ratchet re-proved red against the pre-fix tree by the reviewer with git checkout <sha> -- <path> plus a rebuild, never git stash. THE TYPOGRAPHIC FALSE-RED IS GONE and the reviewer re-proved it bilaterally: a purely typographic reformat leaves the new assertion green where the old one fired, and a real defect still turns it red. CLOSED ON THAT CLAIM ALONE -- the repair also opened a COVERAGE HOLE on the defect this finding names, which is filed SEPARATELY as a new HIGH rather than left to make this closure look larger than it is."
   },
   {
    "severity": "MEDIUM",
    "path": "checks/tree-boundary-non-git-checkout.js",
    "line": 138,
    "category": "gate-vacuous",
-   "status": "OPEN",
+   "status": "RESOLVED",
    "specialist": "reviewer",
    "first_seen_round": 4,
-   "last_replayed_at": "4e4ca5b",
-   "replay_verdict": "FOUND-AT-HEAD",
+   "last_replayed_at": "f6f78c1",
+   "replay_verdict": "SUBJECT-ABSENT-AT-HEAD",
    "fingerprint": "checks/tree-boundary-non-git-checkout.js:138:gate-vacuous",
    "summary": "THE SAME REGEX AT A SECOND SITE CANNOT BE RED AT ALL -- a third category, not a weaker version of the first. It forbids a refusal-only phrase on an ACCEPTANCE path.",
    "evidence": "MEASURED, not inferred from a failure to make it red: the check was instrumented to print what probe 3 actually examines, then restored. r.out is 1524 chars, exit 0, and it is the output of a SUCCEEDING campaign ('== Mutation campaign 1 ...'). The phrase appears only inside `refuse`. So the probe forbids something its path cannot emit; its green never weighed anything. 'I could not make it red' would have been weaker -- this is the CAUSE. THE ENUMERATION IS THREE, NOT TWO: green because the property holds; green for a reason unrelated to the property; CANNOT BE RED AT ALL. Collapsing the third into the first is the easy error because both look sound. Remedy differs from :153's: give it an assertion that bears, or remove it with the reason written. Keeping it is worse than one fewer green, because it counts.",
    "confidence": 5,
    "fix": "Give it an assertion that bears -- that a SUCCESS path emits no boundary diagnosis at all, over a structured vocabulary -- or delete it with the reason written. Do not keep it: a green that never weighed anything is worse than one fewer green, because it counts.",
    "surface": "pre-existing",
-   "surface_reason": "a round-3 check"
+   "surface_reason": "a round-3 check",
+   "prior_last_replayed_at": "4e4ca5b",
+   "resolved_round": 5,
+   "check": "checks/tree-boundary-non-git-checkout.js",
+   "red_verified": true,
+   "pre_fix_sha": "a1e60a9",
+   "closure_species": "fixed-with-ratchet",
+   "replay_note": "Replayed at f6f78c1 by the reviewer, not accepted from the agent that closed it, and every named ratchet re-proved red against the pre-fix tree by the reviewer with git checkout <sha> -- <path> plus a rebuild, never git stash. the cannot-be-red absence on an acceptance path is replaced by an assertion on what the engine is HANDED, which has no fallback vacuity: if the engine is never invoked the compared value becomes an explicit marker and the assertion fires. Falsifier: TENUE, with the old probe's vacuity re-measured by instrumentation (1524 chars of a SUCCEEDING campaign, the forbidden phrase living only inside refuse)."
   },
   {
    "severity": "MEDIUM",
@@ -2792,18 +2806,25 @@
    "path": "bin/arch_mutants/arch_mutants.ml",
    "line": 1378,
    "category": "correctness",
-   "status": "OPEN",
+   "status": "RESOLVED",
    "specialist": "falsifier",
    "first_seen_round": 4,
    "confidence": 5,
-   "last_replayed_at": "1a4f6d2",
-   "replay_verdict": "FOUND-AT-HEAD",
+   "last_replayed_at": "f6f78c1",
+   "replay_verdict": "SUBJECT-ABSENT-AT-HEAD",
    "fingerprint": "bin/arch_mutants/arch_mutants.ml:1378:correctness",
    "summary": "THE ROUND'S OWN FIX REOPENED THE DEFECT IT CLOSED, THROUGH ITS ERROR PATH. tracked_by tests `Sys.command ... = 0`, so EVERY non-zero exit reads as 'not tracked' -- conflating 'no' with 'I could not tell'. The repository then refuses its own artefact claiming it belongs to another tree: finding :1133 verbatim, by a new route.",
    "evidence": "FOUND BY THE FALSIFICATION READ AND REPRODUCED INDEPENDENTLY BY THE REVIEWER. Measured in a scratch repo: with a readable index `git ls-files --error-unmatch -- f.txt` exits 0; after `chmod 000 .git/index` it exits 128 while `git rev-parse --show-toplevel` still exits 0 -- rev-parse does not read the index. So the Some g/Some m branch IS reached, tracked_by answers false for a TRACKED file, the marker shrinks the boundary, and the diagnosis asserts either that there is no git repository or that the repository does not track the marker. Both false. The falsifier's own run, on the same fixture as probe 2 with the marker committed, printed exit 1 and foreign-tree claim=true, the ONLY difference from its passing control being chmod 000 on the index. Neither tree-boundary check has a probe where git fails other than by 'untracked'.",
    "fix": "Distinguish the three answers git can give: tracked (0), untracked (1), and COULD NOT DETERMINE (anything else, 128 among them). The third must not silently become 'untracked' -- the conservative direction here is to keep the enclosing repository's boundary, or to refuse with a diagnosis that says the index could not be read. Add a probe where ls-files fails for a reason other than untracked; its absence is why the fix shipped.",
    "surface": "round-4-output",
-   "surface_reason": "R4-B wrote tracked_by; the defect IS the fix"
+   "surface_reason": "R4-B wrote tracked_by; the defect IS the fix",
+   "prior_last_replayed_at": "1a4f6d2",
+   "resolved_round": 5,
+   "check": "checks/tree-boundary-git-cannot-answer.js",
+   "red_verified": true,
+   "pre_fix_sha": "a1e60a9",
+   "closure_species": "fixed-with-ratchet",
+   "replay_note": "Replayed at f6f78c1 by the reviewer, not accepted from the agent that closed it, and every named ratchet re-proved red against the pre-fix tree by the reviewer with git checkout <sha> -- <path> plus a rebuild, never git stash. tracked_by now returns Tracked | Untracked | Undetermined of int, three call-site arms, three outcomes, and Undetermined narrows under its OWN anchor whose refusal names the indeterminacy and quotes git's exit code. VERIFIED BY THE REVIEWER, and by the test that separates a value that EXISTS from one that ACTS: collapsing the third arm's ACTION onto the second's -- same diagnosis text, build exit 0, binary mtime CONFIRMED moved -- turns the check red with 6 assertions, one of them 'it does NOT assert the marker belongs to a different tree'. The check pins the effect, not the constructor."
   },
   {
    "severity": "MEDIUM",
@@ -2828,54 +2849,75 @@
    "path": "checks/one-engine-id-two-sites-is-refused.js",
    "line": 1,
    "category": "gate-vacuous",
-   "status": "OPEN",
+   "status": "RESOLVED",
    "specialist": "falsifier",
    "first_seen_round": 4,
    "confidence": 5,
-   "last_replayed_at": "1a4f6d2",
-   "replay_verdict": "FOUND-AT-HEAD",
+   "last_replayed_at": "f6f78c1",
+   "replay_verdict": "SUBJECT-ABSENT-AT-HEAD",
    "fingerprint": "checks/one-engine-id-two-sites-is-refused.js:1:gate-vacuous",
    "summary": "AN ASSERTION IS SATISFIED BY A DIFFERENT MECHANISM THAN THE ONE IT NAMES. 'the diagnostic names the shared id' searches the WHOLE stderr, unanchored to step 5b's sentence, so the pre-existing 8a ambiguity refusal -- which also prints an engine id -- satisfies it.",
    "evidence": "Instrumented and run against 0851761 by the falsifier: the assertion is GREEN there although 5b does not exist, satisfied by 8a's 'the report entry for lib/x.ml:15 (engine id \"1\", ...) matches 2 catalogued mutant sites'. Three of five assertions in that arm are already green before the fix; only 'no campaign row' and 'no mutant row' carry the load. NOT dead, however -- positive control at 4e4ca5b: dropping %S from 5b's message turns it red on all three arms.",
    "fix": "Anchor the needle on the sentence 5b itself emits, not on any occurrence of the id in stderr.",
    "surface": "round-4-output",
-   "surface_reason": "R4-D's own ratchet"
+   "surface_reason": "R4-D's own ratchet",
+   "prior_last_replayed_at": "1a4f6d2",
+   "resolved_round": 5,
+   "check": "checks/one-engine-id-two-sites-is-refused.js",
+   "red_verified": true,
+   "pre_fix_sha": "a1e60a9",
+   "closure_species": "fixed-with-ratchet",
+   "replay_note": "Replayed at f6f78c1 by the reviewer, not accepted from the agent that closed it, and every named ratchet re-proved red against the pre-fix tree by the reviewer with git checkout <sha> -- <path> plus a rebuild, never git stash. the shared-id assertion is anchored on step 5b's own sentence, PARSED into a handle-to-site-count map, instead of searched as a string anywhere in stderr. Falsifier: TENUE on both gestures, plus a third it imposed on itself."
   },
   {
    "severity": "MEDIUM",
    "path": "checks/mutant-tables-declare-their-version.js",
    "line": 1,
    "category": "gate-vacuous",
-   "status": "OPEN",
+   "status": "RESOLVED",
    "specialist": "falsifier",
    "first_seen_round": 4,
    "confidence": 5,
-   "last_replayed_at": "1a4f6d2",
-   "replay_verdict": "FOUND-AT-HEAD",
+   "last_replayed_at": "f6f78c1",
+   "replay_verdict": "SUBJECT-ABSENT-AT-HEAD",
    "fingerprint": "checks/mutant-tables-declare-their-version.js:1:gate-vacuous",
    "summary": "A KEY PROPERTY IS TESTED BY AN INEQUALITY OF VALUES: the stated property is that a consumer reading the GLOBAL version cannot learn the tables exist, but the assertion compares the two version STRINGS. It is green only because two independent numbers do not coincide today.",
    "evidence": "Instrumented by the falsifier at 4e4ca5b: global schema_version = 1.2, mutants_schema_version = 1.0, and the assertion is exactly 'these two strings differ'. A legitimate bump of mutants_schema_version to 1.2 turns it red with no property violated -- a false-red trap. Its sibling assertion (global unchanged before/after) is the one that carries the property.",
    "fix": "Delete this assertion or restate it over the KEY: that the global version's value is independent of whether the mutant tables exist. The sibling already covers it.",
    "surface": "round-4-output",
-   "surface_reason": "R4-A's own ratchet"
+   "surface_reason": "R4-A's own ratchet",
+   "prior_last_replayed_at": "1a4f6d2",
+   "resolved_round": 5,
+   "check": "checks/mutant-tables-declare-their-version.js",
+   "red_verified": true,
+   "pre_fix_sha": "a1e60a9",
+   "closure_species": "fixed-with-ratchet",
+   "replay_note": "Replayed at f6f78c1 by the reviewer, not accepted from the agent that closed it, and every named ratchet re-proved red against the pre-fix tree by the reviewer with git checkout <sha> -- <path> plus a rebuild, never git stash. the assertion was INVERTED -- red where the property held, green where it was violated -- and was DELETED rather than strengthened, with both measurements written in place. Seven assertions instead of eight: one green fewer, deliberately. Falsifier reproduced BOTH measurements."
   },
   {
    "severity": "MEDIUM",
    "path": "checks/source-hash-declares-its-derivation.js",
    "line": 1,
    "category": "gate-vacuous",
-   "status": "OPEN",
+   "status": "RESOLVED",
    "specialist": "falsifier",
    "first_seen_round": 4,
    "confidence": 5,
-   "last_replayed_at": "1a4f6d2",
-   "replay_verdict": "FOUND-AT-HEAD",
+   "last_replayed_at": "f6f78c1",
+   "replay_verdict": "SUBJECT-ABSENT-AT-HEAD",
    "fingerprint": "checks/source-hash-declares-its-derivation.js:1:gate-vacuous",
    "summary": "AN ASSERTION IS GREEN BY COMPARING TWO ABSENCES. 'the same declaration as probe 1' passes because both sides are null and String(null)===String(null).",
    "evidence": "Read directly out of the falsifier's red run, no instrumentation needed: the sibling 'a declaration is present at all' fires with expected true / got false, and immediately below, 'the same declaration as probe 1 -- null' passes. The file's own comment claims a neighbouring assertion neutralises this class; the neutralisation is that the NEIGHBOUR goes red, while the assertion itself stays green in exactly the state it was written against. It is live in the fixed tree, so this is not a cannot-be-red.",
    "fix": "Require both sides non-null before comparing them, and fail when either is null.",
    "surface": "round-4-output",
-   "surface_reason": "R4-A's own ratchet"
+   "surface_reason": "R4-A's own ratchet",
+   "prior_last_replayed_at": "1a4f6d2",
+   "resolved_round": 5,
+   "check": "checks/source-hash-declares-its-derivation.js",
+   "red_verified": true,
+   "pre_fix_sha": "a1e60a9",
+   "closure_species": "fixed-with-ratchet",
+   "replay_note": "Replayed at f6f78c1 by the reviewer, not accepted from the agent that closed it, and every named ratchet re-proved red against the pre-fix tree by the reviewer with git checkout <sha> -- <path> plus a rebuild, never git stash. the equality that passed by String(null)===String(null) now carries its own non-nullness. Falsifier: TENUE."
   },
   {
    "severity": "LOW",
@@ -2917,16 +2959,25 @@
    "path": "checks/dispatch-covers-open-findings.js",
    "line": 80,
    "category": "gate-vacuous",
-   "status": "OPEN",
+   "status": "RESOLVED",
    "specialist": "falsifier",
    "first_seen_round": 5,
    "confidence": 5,
-   "last_replayed_at": "168e88a",
-   "replay_verdict": "FOUND-AT-HEAD",
+   "last_replayed_at": "f6f78c1",
+   "replay_verdict": "SUBJECT-ABSENT-AT-HEAD",
    "fingerprint": "checks/dispatch-covers-open-findings.js:80:gate-vacuous",
    "summary": "OWNERSHIP IS VERBAL, AND MOSTLY FICTIONAL. The matcher tests `body.includes(path)` AND `body.includes(String(line))` as TWO INDEPENDENT substring searches anywhere in a section -- so a paragraph that names a file and, separately, uses that finding's line number as any other quantity, claims the finding.",
    "evidence": "MEASURED BY THE REVIEWER IN THE GATE'S OWN TREE, not read: of 21 OPEN findings recorded as owned, only SIX are owned by fingerprint; FIFTEEN are owned solely by the loose site match. One finding is claimed by NINE different sections. For a finding whose line is 1 -- and several are -- the digit '1' appearing anywhere in a section satisfies the line half unconditionally. The falsifier demonstrated the consequence on /tmp copies without writing to the tree: a paragraph reading 'I instrumented bin/arch_mutants/arch_mutants.ml and printed 1152 characters, then 2425, then 1378' -- three numbers used as output SIZES -- moved unowned from 4 to 1, claiming three findings with no fingerprint and no intent. And a section whose text says a finding was NOT looked at, NOT fixed and remains entirely unowned, followed by its fingerprint, moved unowned from 4 to 3: COMPLAINING ABOUT A FINDING CLOSES IT. R5-A named the fingerprint mechanism; it missed the site mechanism, which is the one that operates on 15 of the 21.",
-   "fix": "Match on STRUCTURE, not on text: an explicit owner field per finding, written deliberately, never a substring of prose. Until then the gate's 'dispatched' count is not evidence of anything. Same remedy as for the assertions this round repaired, one storey up -- and the reason the gate must be fixed BEFORE the HIGH, whose fix it would otherwise record unreadably."
+   "fix": "Match on STRUCTURE, not on text: an explicit owner field per finding, written deliberately, never a substring of prose. Until then the gate's 'dispatched' count is not evidence of anything. Same remedy as for the assertions this round repaired, one storey up -- and the reason the gate must be fixed BEFORE the HIGH, whose fix it would otherwise record unreadably.",
+   "prior_last_replayed_at": "168e88a",
+   "resolved_round": 5,
+   "check": "checks/ownership-is-a-record-not-a-mention.js",
+   "red_verified": true,
+   "pre_fix_sha": "a1e60a9",
+   "closure_species": "fixed-with-ratchet",
+   "replay_note": "Replayed at f6f78c1 by the reviewer, not accepted from the agent that closed it, and every named ratchet re-proved red against the pre-fix tree by the reviewer with git checkout <sha> -- <path> plus a rebuild, never git stash. ownership is now a RECORD with external references: fingerprint by EXACT equality, plus a commit= that must be a real object, an ancestor of HEAD, touching the finding's path or the named check, plus a check= that exists and is tracked. Both conventions printed every run. Verified by the reviewer: red against the old gate, green restored.",
+   "surface": "pre-existing",
+   "surface_reason": "the ownership gate was written in rounds 2-3 by the orchestrator"
   },
   {
    "severity": "HIGH",
@@ -2942,7 +2993,9 @@
    "fingerprint": "checks/tree-boundary-non-git-checkout.js:1:gate-vacuous",
    "summary": "THE REPAIR REMOVED A TYPOGRAPHIC FALSE-RED AND OPENED A COVERAGE HOLE ON THE VERY DEFECT ITS FINDING NAMES. The replacement vocabulary knows 'the campaign was about to run the OUTER tree's artefact' and 'belongs to a different tree', but NOT 'nested inside another one' -- which IS the original finding's defect.",
    "evidence": "REPRODUCED BY THE REVIEWER AFTER A FIRST INVALID ATTEMPT, and the invalid attempt is recorded below because it matters. Control, ONE thing changed: the Anchor_cwd literal now reads 'The boundary FELL BACK to the invocation directory itself. The artefact was reached by walking ancestor directories, so this checkout is nested inside another one.' -- the fall-back wording kept intact, the nesting claim added. The new assertion prints GREEN, 'it does NOT claim a nesting or a foreign tree -- false', and the whole check exits 0. The old assertion caught this. THE REVIEWER'S FIRST CONTROL WAS INVALID: it replaced the whole literal, dropping the fall-back wording too, so a DIFFERENT assertion fired and the check exited 1 -- which would have 'refuted' the falsifier. A control that changes two things cannot attribute its result. Same hole exists at checks/tree-boundary-tracked-marker.js:121-122, from which the construction was copied: systemic, not introduced here, but PROPAGATED by the repair.",
-   "fix": "Add the nesting wording to the affirmative vocabulary in both files, and add a probe whose defect is stated in each of the three phrasings -- the repair's own control used only the Anchor_git wording, so it tested the case where the defect reuses a phrase the vocabulary already knew."
+   "fix": "Add the nesting wording to the affirmative vocabulary in both files, and add a probe whose defect is stated in each of the three phrasings -- the repair's own control used only the Anchor_git wording, so it tested the case where the defect reuses a phrase the vocabulary already knew.",
+   "surface": "round-5-output",
+   "surface_reason": "R5-A's own repair opened this coverage hole"
   },
   {
    "severity": "MEDIUM",
@@ -2958,7 +3011,9 @@
    "fingerprint": "checks/tree-boundary-tracked-marker.js:38:correctness",
    "summary": "A SECOND CHECK CARRIES THE IDENTICAL UNRESOLVED PATH-ARGUMENT DEFECT: given a path it exits 2 having verified nothing.",
    "evidence": "Confirmed by execution rather than from the report: `node checks/tree-boundary-tracked-marker.js .` exits 2 at this HEAD; with no argument it exits 0. checks/ratchet-is-node-executable.js has the same shape with no live consequence -- it never spawns from another cwd -- so the pattern is at three sites with two live consequences. R5-A found it and LEFT IT UNFIXED because the dispatch scoped its point to one file; an unbriefed one-line check edit is the new surface this round exists to avoid. That restraint was correct and the finding is filed rather than smuggled.",
-   "fix": "Resolve argv[2] the way the repaired sibling now does, in a briefed change."
+   "fix": "Resolve argv[2] the way the repaired sibling now does, in a briefed change.",
+   "surface": "pre-existing",
+   "surface_reason": "R4-B wrote this check"
   },
   {
    "severity": "LOW",
@@ -2974,7 +3029,9 @@
    "fingerprint": "bin/arch_mutants/arch_mutant_db.ml:238:schema-drift",
    "summary": "TWO DEAD CONSTANTS, NOT ONE. mutants_schema_version is referenced from no .ml/.mli/.js/.sh -- the value reaching the database comes from the blob'd migration SQL -- and mutants_schema_version_key at line 240 is dead in exactly the same way.",
    "evidence": "Verified by search rather than accepted: grep across .ml/.mli/.js/.sh outside _build returns only the definition, a migration comment and two prose mentions. There is no .mli in bin/arch_mutants/. R5-A reported the first constant and missed the second, which the falsifier found.",
-   "fix": "Delete both, or make the migration read them so the SQL and the OCaml cannot drift."
+   "fix": "Delete both, or make the migration read them so the SQL and the OCaml cannot drift.",
+   "surface": "pre-existing",
+   "surface_reason": "R4-A wrote these constants"
   }
  ],
  "cross_runtime_findings": [],
@@ -3001,7 +3058,7 @@
  "escalation_needed": false,
  "escalation_reason": null,
  "normalized_by": "2.0.0",
- "open_findings_recorded": 25,
+ "open_findings_recorded": 22,
  "rounds_audit": [
   {
    "round": 1,
@@ -3099,9 +3156,38 @@
      "selection_reason": "SKIPPED. CHECK-51 and CHECK-52 were written into specs/mutation-campaign-313.md by the implementing groups themselves and were not independently audited."
     }
    ]
+  },
+  {
+   "round": 5,
+   "cycle": 1,
+   "reviewed_sha": "f6f78c1",
+   "fix_sha": "f6f78c1",
+   "fix_sha_reason": "the three R5 groups landed on this branch; the review reads the tree they produced",
+   "specialists_run": [
+    {
+     "name": "falsifier",
+     "selection_reason": "a single contradictor defined by its TARGET, run on R5-A's seven claims in an isolated worktree, briefed on the diff and the claims only -- not on the orchestrator's reasoning nor on the findings the round produced. It broke one claim and found the ownership matcher far worse than the group had reported."
+    }
+   ],
+   "specialists_skipped": [
+    {
+     "name": "reviewer",
+     "selection_reason": "the verification was the orchestrator's own -- content replays, red re-proofs of every ratchet, the collapse experiment, suite and full ratchet re-run. Real, and not independent."
+    },
+    {
+     "name": "architect",
+     "selection_reason": "not launched; the falsification read replaced the fan-out, as in round 4."
+    },
+    {
+     "name": "spec-compliance",
+     "selection_reason": "not launched."
+    }
+   ],
+   "strike": true,
+   "trace_schema_version": "1.0"
   }
  ],
- "summary": "ROUND 4 NO-GO. THE ROUND'S OWN FIX REOPENED THE DEFECT IT CLOSED, THROUGH ITS ERROR PATH. tracked_by tests `Sys.command ... = 0`, so every non-zero exit reads as 'not tracked' -- conflating 'no' with 'I could not tell'. Reproduced by the reviewer independently of the falsifier that found it: `git ls-files --error-unmatch` exits 128 on an unreadable index while `git rev-parse --show-toplevel` still exits 0, because rev-parse does not read the index. So the repository refuses its OWN artefact, asserting it belongs to another tree. That is finding :1133 verbatim -- wrong verdict carrying a wrong diagnosis -- returned by a new route, and neither tree-boundary check has a probe where git fails for any reason other than 'untracked'.\n\nTHE VERDICT WAS DRAFTED GO AND NEVER RENDERED, AND THAT DECISION IS THE ROUND'S MAIN RESULT. The convergence gate reported missing-trace and missing-loopback-audit. Filling those two fields would have produced a compliant record of an uncontradicted GO. What the two procedural absences covered was a MISSING CONTRADICTOR: rounds 1-3 each had independent specialists, and this one was assessed by the agent that wrote the briefs, dispatched the four groups and arbitrated their design rulings. A single falsification read was run instead of a fan-out -- defined by its TARGET rather than its coverage, briefed on the diff and the claims and deliberately NOT on the orchestrator's reasoning, because a reviewer given the framing inherits exactly what is missing. It broke four claims of eight.\n\nWHAT IT BROKE, BESIDES THE HIGH. A refusal WRITES before refusing: step 5a creates all four tables and stamps the schema version, so the source comment claiming the database is left as found is false as written -- and the check meant to catch that only observes the state before any invocation, the exact failure its own success banner names. And three assertions are green for reasons unrelated to what they say: one satisfied by a DIFFERENT refusal mechanism than the one it names, one testing a key property by an inequality of values that a legitimate version bump would falsely redden, one comparing two nulls.\n\nWHAT SURVIVED FALSIFICATION, and it is not nothing. The identity fix holds structurally: no id join arm, the synthesised ordinal cannot inhabit a name's slot, mutant_ids is keyed on the site key. source_hash declares its derivation in the stored value and BOTH branches carry the occurrence ordinal -- the falsifier executed the branch the ratchet does not cover and it holds. The reconciliation half of the completion guard holds: count_runs asks the database, not the counters. All ten new ratchets are red against the pre-round tree and green after, re-proved a third time by the falsifier. Build exit 0 and 255 SUCCESS / 0 FAILURE, remeasured.\n\nAND ONE ERROR IS THE REVIEWER'S OWN, RECORDED RATHER THAN ABSORBED. The falsification read was pointed at 4e4ca5b while the claims it was given described the post-replay state committed at 1a4f6d2 -- 3 findings carry resolved_round 4 in that tree, 14 at HEAD. Its 'A7 broken on the count' is a faithful report about the tree it was handed: a checker cut before the fix reporting the pre-fix answer. The count objection is withdrawn; its MOTIF objection stands and is filed -- 'each closed because its subject is absent' was wider than the closures it described, since one was closed by a FIX after being re-confirmed present. Two kinds of closure were stated as one.\n\n25 findings remain open: 1 HIGH, 15 MEDIUM, 6 LOW, 3 INFO. Thirteen were produced BY this round and its falsification -- keep that split visible, because a reader comparing 25 to 25 across rounds 3 and 4 would read stasis where the CRITICAL count went from 3 to 0 and the composition changed entirely.\n\nTHE CONVERGENCE GATE ADDS A SIGNAL THAT IS NOT SUPPRESSED HERE: novel-finding-streak, two consecutive rounds each classified a strike, ending at round 4. The review is finding NEW defects rather than converging on a shrinking set, and that is exactly what this round did -- it closed the CRITICAL family and then produced thirteen findings of its own, one of them a HIGH created by its own fix. A streak is the correct reading of that, and the honest response is to record it beside the NO-GO rather than to file the violation away. Round 5's plan is generated FROM this verdict, and its first question should be whether the streak reflects a codebase still yielding defects or a review that keeps widening its own lens.",
+ "summary": "ROUND 5 NO-GO, AND THE NO-GO IS NARROW: one HIGH remains open, and it was produced BY this round. Everything the round set out to do, it did, and the reviewer verified each closure by content and re-proved every ratchet red rather than accepting the agent that wrote it.\n\nWHAT CLOSED. The five assertions that did not weigh what their labels announced. One of them was not weak but INVERTED -- red where the property held, green where it was violated -- and was DELETED rather than strengthened, seven assertions instead of eight, one green fewer deliberately; an inverted probe is green on the old code, so no red-on-old-tree check would ever have caught it, which is the probe-liveness sweep earning its place. The ownership gate, which answered 'is this finding MENTIONED anywhere' while claiming to answer 'does it have an owner'. And the HIGH from round 4: tracked_by conflating 'no' with 'I could not tell'.\n\nTHE TEST THAT SEPARATES A VALUE THAT EXISTS FROM ONE THAT ACTS. A third answer helps only if a caller does something different with it. Collapsing Undetermined's ACTION onto Untracked's -- same diagnosis, build exit 0, binary mtime CONFIRMED moved -- turns the check red with six assertions. The reviewer's first two attempts at this were INVALID and are recorded: one did not compile and the binary never moved, so the check measured the previous build and returned green; and the reviewer's own `dune build | tail; echo $?` read TAIL's exit code, printing build=0 over a failed build. A control that does not rebuild is not a control, and a pipeline's status is its LAST element's.\n\nWHAT THE FALSIFICATION READ FOUND, and it is why this is NO-GO. R5-A's repair removed a typographic false-red and OPENED A COVERAGE HOLE on the defect its own finding names: the replacement vocabulary knows two phrasings and not the original one, so a fallback path asserting the nesting passes green. Reproduced by the reviewer with ONE thing changed -- the first attempt changed two and would have 'refuted' a correct report.\n\nAND THE GATE'S REPAIR EXPOSED THAT OWNERSHIP HAD BEEN FICTIONAL. Fifteen of twenty-one ownerships rested on a path substring and a bare line number found SEPARATELY anywhere in a section; one finding was claimed by nine sections; a paragraph using three line numbers as OUTPUT SIZES claimed three findings; and a section stating that a finding was never looked at, followed by its fingerprint, CLOSED it. Documenting a finding closed it, and the more thorough the document the more it closed. The published figures are marked UNRECOVERABLE -- not wrong, since it was never shown the nineteen were unowned, and not left standing either.\n\nWHAT IS NOT CLOSED AND IS NAMED RATHER THAN LEFT: ownership now proves a commit touching the path plus a tracked check, and does NOT prove the commit's work is RELATED to the finding. Three discriminators were built and correctly killed. The remedy is SAMPLING -- revert-and-re-run over a random sample with N and the selection stated -- which is unaffordable per finding and affordable per round, and it enters the next round's plan ranked with everything else rather than promoted for being the freshest known gap.\n\nTHE STREAK PERSISTS AND ITS COMPOSITION CHANGED, which is the reading the split makes possible and the round-4 verdict could not. novel-finding-streak fires again -- two consecutive strike rounds ending at round 5 -- and it is recorded, not silenced. But round 4's streak was 7 of 13 findings about its own output, and round 5's is 1 of 4. The review is still finding new defects; it is far less often finding defects IT JUST CREATED. A streak counts findings; the split says where they come from, and only the second answers whether the fix rate was the problem.",
  "gate_exit_status": 2,
  "gate_inconclusive_checks": 51,
  "gate_checks_total": 51,
@@ -3109,7 +3195,7 @@
  "merge_order_rule": "REPLAY BEFORE YOU MERGE, AND THE ORDER IS NOT A PREFERENCE. Two inflations compose here -- duplicates keyed on a coordinate, and statuses never re-measured -- and collapsing them in the wrong order destroys evidence irreversibly. Replay first: :1726 is marked closed on its OWN evidence, and the surviving CRITICAL routes then dedupe into one live finding that keeps its own status. Dedupe first: :1726 merges into the live CRITICAL BEFORE anyone replays it, and the merged record inherits ONE status for two differently-aged claims -- and 'NOT CLOSED' is the label most likely to survive a merge, being the more alarming one. That launders a stale status into a live record and cannot be undone afterwards. When routes do merge, KEEP EACH ROUTE'S last_replayed_at rather than collapsing to one: the merged finding's age is the age of its OLDEST unreplayed route, not of its freshest.",
  "census_shrank_defect_did_not": "READ THE CORRECTED CENSUS AS BOOKKEEPING, NOT AS PROGRESS. Four stale findings does NOT mean the defect is smaller. The round-3 architect diagnosed the CRITICAL at DESIGN level against 618acb9 -- that finding is live and recently measured. :1726 describing a symptom that is now closed is fully compatible with the underlying defect being entirely live by another route, and it is: load_generic still writes a synthesised ordinal into the field carrying a real engine id, and join arm 1 still trusts it. The count went down. The defect did not. Anyone reading the smaller number as movement on the thing rather than on the ledger has read it backwards.",
  "dedupe_note": "REPLAY RAN FIRST, THEN THIS. The order is not a preference: merging first would have made one record inherit ONE status for differently-aged claims, and 'ROUND-1 FINDING NOT CLOSED' -- the more alarming label -- is the one that survives a merge. :1726 was marked closed on ITS OWN evidence before any merge. Each route keeps its own prior_last_replayed_at: a merged finding's age is that of its OLDEST unreplayed route, not its freshest.\nTWO DEFECTS WERE COUNTED AS FIVE ROWS. Routes {450,451} are one defect (a synthesised ordinal reaching the first join arm, found by a reviewer and an architect independently); routes {1393,1726} are one defect (the basename join). The normalizer fingerprints on path:line:category, and a coordinate does not identify an object across a rebase. That inflated the CRITICAL count from 1 to 3 -- a severity census that DRIVES TRIAGE, not a tidiness problem.",
- "head": "4e4ca5b",
+ "head": "f6f78c1",
  "independence_note": "THE GO WAS DRAFTED AND NOT PERSISTED. The convergence gate reported a procedural absence; what the absence covered was a missing contradictor. Filling the fields would have produced a compliant record of an uncontradicted GO -- and this is an item whose every previous round found a defect the round before believed closed. The verdict waits on the falsification read.",
  "status_note": "THE DRAFTED GO WAS FALSIFIED. It was never rendered, and this is why: an independent read broke four of its eight claims, one of them with a live HIGH.",
  "streak_discriminator": "THE STREAK HAS AN ANSWER, AND IT IS THE UNCOMFORTABLE ONE. Splitting the 13 findings this round produced by whether they concern code ROUND 4 ITSELF WROTE: 7 are about round-4 output, 6 are about surface that already existed. Findings about pre-existing code mean the review WIDENED its focus, and that terminates -- each new technique has a one-time yield, and the probe-liveness sweep and the falsification mandate were both first-use tonight. Findings about code this round created are NEW SURFACE, and that is the category that decides convergence. At 7 of 13, the process is generating defects at roughly the rate it closes them -- including a HIGH that IS its own fix. So the streak is not merely a widening lens: THE FIX RATE IS THE PROBLEM, NOT THE FINDING RATE, and no number of further rounds converges on its own. Round 5's plan must change how fixes are made, not how findings are hunted.",
@@ -3122,5 +3208,6 @@
  "ownership_census_owed": "EVERY PUBLISHED OWNERSHIP FIGURE IS SUSPECT, NOT ONLY THE NEXT ONE. Declining to cite the dispatched count again is not enough: the counts ALREADY cited sit in three verdicts, and nobody re-reads a history. This is the ceiling series again -- the defect is not in the current reading, it is in the record.\n\nCONCRETELY: round 4 closed its dispatch question on '25 open, 19 dispatched, 6 deferred, 0 unowned'. That census came from this matcher. If 15 of 21 ownerships are established by a path substring plus a bare line number appearing anywhere in a section, that ZERO is not evidence that nothing was unowned -- it is evidence that every finding was MENTIONED somewhere. The reconciler built in round 2 to answer 'does any finding lack an owner' has been answering 'is any finding unmentioned', and the two diverge EXACTLY when a group writes about work it did not do, which is the case it exists to catch.\n\nOWED, and written down now rather than when convenient: once the structural matcher exists, RE-DERIVE the ownership census for every round and mark the published figures SUPERSEDED in the verdicts that carry them. Not before the fix -- a re-derivation by the broken instrument would only restate it.\n\nNOT AFFECTED, stated separately so it inherits neither confidence nor doubt: the 7-of-13 split. That classification asked WHICH CODE A FINDING CONCERNS -- round-4 output versus pre-existing surface -- and was made by hand from each finding's subject, never from the ownership matcher. It stands on its own evidence.\n\nRESOLVED AS SEQUENCING: the re-derivation is NOT its own object and NOT a follow-on. It is the SECOND HALF OF THE GATE FIX. A mechanism repair that leaves its own false outputs standing is a 90% fix -- the class refused all night. The argument that put the gate before the HIGH extends exactly: a test recorded by a broken recorder is unreadable, and A RECORDER WHOSE PAST OUTPUT IS STILL FALSE IS STILL BROKEN. A reader checking the HIGH's outcome would find the corrected reading beside three uncorrected ones with no way to tell which convention each was written under.\nAND IT MAY NOT BE BOOKKEEPING AT ALL, which is what decides it: re-deriving can move findings from HANDLED to UNHANDLED. That is WORK DISCOVERY -- findings believed closed re-entering the open set -- and it must be known before anything after the HIGH is planned, since a plan built on an uncorrected census inherits the defect that made round 4's '0 unowned' meaningless. Anything it surfaces enters the open set and is ranked with everything else rather than promoted for being fresh, the same rule applied to the two lines round 4 produced.\nORDER: R5-B -> falsify -> re-derive every round's census as R5-B's completion -> then the HIGH.\nSPLIT: the re-derivation is REVIEW work and the reviewer does it -- two concerns in one head is how the second gets done halfway, and R5-B's object is the mechanism. But R5-B's fix must MAKE IT POSSIBLE, which is a real design constraint on it: the gate must be runnable against a PAST state of the brief and the findings file rather than wired to HEAD; it must emit a machine-readable result carrying, per finding, its ownership status AND WHAT ESTABLISHES IT; and it must state the CONVENTION a reading was produced under.",
  "ownership_fix_ceiling": "THE FIX'S CEILING, NAMED BEFORE IT IS BUILT, the same way R4-D's was. An explicit owner field is the right structure and it does NOT close the class -- it closes the ACCIDENTAL half. It removes ownership claimed by a paragraph that happened to contain a path and a digit. It CANNOT remove an agent that writes `owner: R5-B` for work it did not do: a field written deliberately can be written falsely, by an agent under pressure to show coverage.\nSo the scope is MAKE OWNERSHIP DELIBERATE, NOT TRUTHFUL. A group told to make ownership trustworthy will report success when it has made it explicit. What makes a deliberate claim checkable is the same thing that makes an assertion checkable -- something OUTSIDE the claim that can contradict it: a finding marked owned must name the commit and the check that closed it, and a claim with neither is a claim, not a closure.",
  "superseded_ownership_figures": "THE PUBLISHED OWNERSHIP FIGURES ARE UNRECOVERABLE. Not wrong, and not left standing -- both of those readings are available and both are false. The annotation that matches what was measured: PRODUCED UNDER record-v0, WHICH CANNOT BE EVALUATED; NO OWNERSHIP CLAIM FROM THESE ROUNDS IS VERIFIABLE IN EITHER DIRECTION.\n'Wrong' over-claims -- it was never shown that the nineteen were unowned. Leaving them lets a reader take them at face value. Unrecoverable is a THIRD STATUS and it is the accurate one, the same distinction as 'could not make it red' versus 'does not depend on formatting': an absence of evidence stated as an absence of evidence.\nAffected, re-derived under record-v1 at their own commits: 899138c published '25 open, 19 dispatched, 6 deferred, 0 unowned' and re-derives to 25 unowned / 0 owned; 4e4ca5b re-derives to 22 / 0. Not a single ownership survives -- because record-v1 demands records that did not exist then, the convention having been invented after. The re-derivation therefore DISCOVERED NO WORK: it established that the record can no longer say anything about those rounds. A weaker result than hoped for, and the honest one.",
- "ownership_relatedness_gap": "THE GAP R5-B COULD NOT CLOSE IS SAMPLABLE, and sampling is the standard answer to a check that is correct and too expensive -- which neither the reviewer nor the roadmap session reached for once tonight. The gap: nothing distinguishes 'the commit contains work RELATED to the finding' from 'the commit touches the same file'. R5-B killed three discriminators correctly -- line proximity dies on findings at line 0 or 1, of which this verdict has several; a fingerprint in the commit message is self-corroborating, the same agent writing both in one breath; revert-plus-re-run is the right question and too expensive PER FINDING.\nBut it is unaffordable only EXHAUSTIVELY. Revert-and-re-run over a RANDOM SAMPLE OF N ownership records, with N and the selection method stated, converts an impossible check into an estimate -- and an estimate with a declared sample is enormously better than the current position, which is that nothing distinguishes the two at all. Five of five surviving is real evidence; one of five failing is a live defect no exhaustive check would ever have been run to find. THE RATCHET CANNOT AFFORD IT, BUT A ROUND CAN."
+ "ownership_relatedness_gap": "THE GAP R5-B COULD NOT CLOSE IS SAMPLABLE, and sampling is the standard answer to a check that is correct and too expensive -- which neither the reviewer nor the roadmap session reached for once tonight. The gap: nothing distinguishes 'the commit contains work RELATED to the finding' from 'the commit touches the same file'. R5-B killed three discriminators correctly -- line proximity dies on findings at line 0 or 1, of which this verdict has several; a fingerprint in the commit message is self-corroborating, the same agent writing both in one breath; revert-plus-re-run is the right question and too expensive PER FINDING.\nBut it is unaffordable only EXHAUSTIVELY. Revert-and-re-run over a RANDOM SAMPLE OF N ownership records, with N and the selection method stated, converts an impossible check into an estimate -- and an estimate with a declared sample is enormously better than the current position, which is that nothing distinguishes the two at all. Five of five surviving is real evidence; one of five failing is a live defect no exhaustive check would ever have been run to find. THE RATCHET CANNOT AFFORD IT, BUT A ROUND CAN.",
+ "round5_split": "THE NUMBER THE ROUND EXISTS TO PRODUCE: 1 of 4 findings this round produced concern code ROUND 5 ITSELF WROTE; 3 concern pre-existing surface. Round 4 was SEVEN of THIRTEEN. The acceptance criterion -- every fix carries a probe on its own error path, answered by execution -- was round 5's whole intervention, and this is the ratio it was meant to move. IT MOVED, from 54% to 25%. READ IT WITH ITS CAVEATS, both of which cut against the flattering reading: the denominators differ (13 against 4), so this is a direction and not a rate; and the one round-5-output finding is a HIGH -- a repair that opened a coverage hole on the very defect its own finding named -- so the class did not disappear, it got rarer and stayed severe."
 }
