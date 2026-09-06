@@ -444,6 +444,38 @@ queries that produced them are one `group by` each over `mutant_runs`; the colum
 `engine_status`, `selection_provenance`, `intended_tests`, `executed_tests`,
 `executed_superset`.
 
+### One experiment this branch specifies and does not perform
+
+`checks/dispatch-covers-open-findings.js` was rewritten to the `record-v1` convention
+precisely so that **prose about a finding stops counting as ownership of it** — the
+predecessor matched `body.includes(path) && body.includes(String(line))` as two
+independent substring searches, so a paragraph saying nobody had looked at a finding could
+close it. **That rewrite has not been tested on live data, and it will not be on this
+branch.**
+
+Two CI runs here (`fc0b496`, `7f5fa6a`) report byte-identical gate output — `24 OPEN, 0
+OWNED-dispatched, 0 owned-deferred, 0 owned-accepted, 24 unowned`, with an identical
+per-finding mention distribution. **That is not evidence for `record-v1`.** The gate reads
+one named file, `briefs/<task>-impl.md` (`checks/dispatch-covers-open-findings.js:134`),
+and both commits touched only `briefs/<task>-pr-body.md`. The gate's input did not change,
+so the identical output demonstrates determinism and nothing more. It was nearly published
+here as a confirmation.
+
+**The experiment that would test it**, for whoever wants the answer: commit a change to
+`briefs/<task>-impl.md` that discusses one or more OPEN findings by path and line — the
+shape the old matcher accepted — and writes **no** `OWNER` line for any of them. Then read
+the gate's four numbers.
+
+- **Unowned count unchanged** → `record-v1` holds: mention is not ownership.
+- **Unowned count falls** → the rewrite did not deliver what it promised, and that is a
+  larger finding than the red it was meant to make honest.
+
+Do not reconstruct the old matcher to compare against; an attempt to do so here returned 0
+matches while the gate itself printed *"prose in 13 section(s) matched it by
+path-and-line-substrings"* for a single finding. The reconstruction was wrong, and
+comparing a tool against a belief about the tool is the failure this whole branch exists to
+make harder. **Read what the gate prints.**
+
 ### What was still running when this stopped
 
 A background agent was executing the naive arm of the full campaign. As of this writing it
