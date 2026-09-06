@@ -35,7 +35,13 @@ const os = require('os');
 const path = require('path');
 const { execFileSync, spawnSync } = require('child_process');
 
-const repo = process.argv[2] || path.resolve(__dirname, '..');
+// RESOLVED, not taken as given. Every path below is joined onto this and then handed to
+// a subprocess spawned with a DIFFERENT cwd, so a relative argument -- `node <this> .`,
+// which is how a human runs it -- produced a driver path that existed when this process
+// tested it and did not exist when the driver was spawned from a scratch directory. The
+// check then exited 2 having verified nothing, while the argument-less form exited 0, so
+// no spec row exercised it.
+const repo = path.resolve(process.argv[2] || path.join(__dirname, '..'));
 const B = path.join(repo, '_build', 'default', 'bin');
 const MUT = path.join(B, 'arch_mutants', 'arch_mutants.exe');
 const SCHEMA = path.join(repo, 'architecture-schema.sql');
@@ -58,6 +64,33 @@ process.on('exit', () => { try { fs.rmSync(W, { recursive: true, force: true });
   const t = spawnSync('git', ['rev-parse', '--show-toplevel'], { cwd: W, encoding: 'utf8' });
   if (t.status === 0) fatal(`${W} is inside a git repository (${String(t.stdout).trim()}) — probes 3 and 4 would be vacuous. Set TMPDIR somewhere outside a checkout.`);
 }
+
+// ---- WHAT THE DIAGNOSES ARE MATCHED ON, and why it is not the obvious phrase ----------
+//
+// These three matchers replace `/nested inside another one/` used over the RAW output at two
+// sites. That phrase occurs in the honest FALLBACK diagnosis too -- inside the sentence "This
+// is NOT a claim that this checkout is nested inside another one", which exists precisely to
+// deny it. Probe 4's absence assertion was green only because the OCaml literal's continuation
+// padding lands runs of spaces between `inside` and `another`, breaking the adjacency the
+// regex needs. MEASURED at 85ff36d: collapsing runs of spaces to one space inside that single
+// literal -- four fills, the message semantically unchanged, still denying the nesting --
+// turned the assertion red. The gate was measuring the source formatting of the thing it
+// tested.
+//
+// So: match the RENDERED text with its whitespace collapsed, and key on wording that appears
+// ONLY in the affirmative diagnoses. Widening the old pattern does not help; an absence over
+// raw output is satisfied by any reflow, and widening moves the boundary rather than removing
+// it.
+//
+// AND EACH VOCABULARY IS ASSERTED IN BOTH POLARITIES, which is what keeps the absences from
+// rotting silently. SAYS_FOREIGN_TREE must be PRESENT on the git-anchored path (probes 1, 2)
+// and ABSENT on the fallback path (probe 4). A rewording of the git diagnosis that quietly
+// disarmed probe 4's absence therefore turns probes 1 and 2 RED rather than leaving a vacuous
+// green behind. Same construction for SAYS_FELL_BACK, asserted present in probe 4.
+const flat = (s) => String(s).replace(/\s+/g, ' ');
+const SAYS_FOREIGN_TREE = (s) =>
+  /the campaign was about to run the OUTER tree's artefact|belongs to a different tree/i.test(flat(s));
+const SAYS_FELL_BACK = (s) => /No boundary could be established|FELL BACK/i.test(flat(s));
 
 let fails = 0;
 const assertEq = (label, want, got) => {
@@ -82,7 +115,11 @@ function makeInner(dir, { gitInit, marker }) {
     const r = spawnSync('sqlite3', [db], { input: fs.readFileSync(f, 'utf8'), encoding: 'utf8' });
     if (r.status !== 0) fatal(`sqlite3 < ${f} failed: ${r.stderr}`);
   }
-  sh(path.join(dir, 'engine.sh'), '#!/bin/sh\nexit 0\n');
+  // The engine is invoked ONCE, with the wrapper path as its single argument -- that is the
+  // driver/engine contract (`{ ENV... } <engine> <wrapper>`). Recording that argument is how
+  // probe 3 can say something about the ACCEPTANCE path that an exit code cannot.
+  sh(path.join(dir, 'engine.sh'),
+    `#!/bin/sh\nprintf '%s' "$1" > ${JSON.stringify(path.join(dir, 'engine-argv1.txt'))}\nexit 0\n`);
   sh(path.join(dir, 'tests.sh'), '#!/bin/sh\nexit 0\n');
   fs.writeFileSync(path.join(dir, 'cat.ndjson'), '{"id":"1","file":"a.ml","line":1}\n');
   // `dune-project` is the tree-local marker: it is what says "this directory is the root of
@@ -123,6 +160,10 @@ for (const [n, gitInit] of [[1, false], [2, true]]) {
   assertEq('the outer tree\'s wrapper is REFUSED (exit 1)', 1, r.code);
   assertEq('the refusal names the outside path',
     'true', String(r.out.includes(path.join(outer, 'scripts', 'mutaml-wrapper.sh'))));
+  // The affirmative half of probe 4's absence. Asserted here so that a rewording of the
+  // git-anchored diagnosis cannot silently disarm probe 4: it turns this red instead.
+  assertEq('and the diagnosis is the foreign-tree one, which is TRUE here',
+    'true', String(SAYS_FOREIGN_TREE(r.out)));
 }
 
 // ---- PROBE 3: no repository anywhere above; the tree's OWN wrapper must be accepted --------
@@ -135,7 +176,27 @@ console.log('probe 3 — a non-git tree with no repository above it, invoked fro
   fs.mkdirSync(path.join(tree, 'sub'), { recursive: true });
   const r = runFrom(path.join(tree, 'sub'), '..');
   assertEq('the tree\'s own wrapper is accepted (exit 0)', 0, r.code);
-  assertEq('no nesting is asserted', 'false', String(/nested inside another one/i.test(r.out)));
+  // AN ASSERTION WAS REPLACED HERE, AND THE REASON IS THE POINT. It read
+  //
+  //     assertEq('no nesting is asserted', 'false', String(/nested inside another one/i.test(r.out)));
+  //
+  // and it COULD NOT BE RED -- a third category, not a weaker version of probe 4's. This is
+  // an ACCEPTANCE path: the guard did not fire, so no diagnosis of any kind was emitted.
+  // MEASURED at 85ff36d by instrumenting the check to print what it examines: r.out is 1524
+  // characters and is the output of a SUCCEEDING campaign ("== Mutation campaign 1 ..."); the
+  // forbidden phrase lives only inside `refuse`. It forbade something its path cannot emit,
+  // and a green that never weighed anything is worse than one fewer green because it counts.
+  // Any restatement of it over the diagnosis vocabulary has the same defect: with exit 0
+  // already asserted above, no boundary diagnosis can appear.
+  //
+  // What bears on THIS path is not what the refusal did not say, but WHICH ARTEFACT was
+  // accepted. The engine records the wrapper it is handed; FR-030's acceptance polarity is
+  // that it is the tree's OWN.
+  const rec = path.join(tree, 'engine-argv1.txt');
+  const handed = fs.existsSync(rec) ? fs.readFileSync(rec, 'utf8').trim() : '(the engine was never invoked)';
+  assertEq('the wrapper handed to the engine is the tree\'s OWN',
+    fs.realpathSync(path.join(tree, 'scripts', 'mutaml-wrapper.sh')),
+    fs.existsSync(handed) ? fs.realpathSync(handed) : handed);
 }
 
 // ---- PROBE 4: the honest fallback — no git, no marker -------------------------------------
@@ -150,10 +211,10 @@ console.log('probe 4 — no git and no tree marker: the refusal must not assert 
   // Refusing here is defensible — the boundary genuinely cannot be established — but the
   // DIAGNOSIS must be the true one.
   assertEq('it still refuses (exit 1), the narrower answer', 1, r.code);
-  assertEq('it does NOT claim the checkout is nested inside another one',
-    'false', String(/nested inside another one/i.test(r.out)));
+  assertEq('it does NOT claim a nesting or a foreign tree',
+    'false', String(SAYS_FOREIGN_TREE(r.out)));
   assertEq('it says the boundary fell back to the invocation directory',
-    'true', String(/no enclosing (git )?repository|fell back|working directory itself|not inside (a )?(git )?repositor/i.test(r.out)));
+    'true', String(SAYS_FELL_BACK(r.out)));
 }
 
 console.log('');
@@ -165,7 +226,7 @@ if (fails > 0) {
   console.error('  false diagnosis sends the reader hunting for a tree that does not exist.');
   process.exit(1);
 }
-console.log('tree-boundary-non-git: PASS — 4 of 4 probes over 9 assertions.');
+console.log('tree-boundary-non-git: PASS — 4 of 4 probes over 11 assertions.');
 console.log('  What would have made this non-zero: anchoring on `git rev-parse --show-toplevel`');
 console.log('  alone (probes 1 and 3), losing the guard where git IS present (probe 2), or keeping');
 console.log('  the nesting wording on the fallback path (probe 4).');
