@@ -27,3 +27,4 @@ scripts/check-quint-red.sh
 .gitignore
 checks/
 tezt/tests/must_null_ceiling.ml
+.github/workflows/ci.yml

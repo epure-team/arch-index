@@ -562,8 +562,31 @@ that it cannot pass by running nothing.** Its two tiers are self-contained check
 and population-dependent ones under `scripts/`; an **empty tier exits 2**, so a runner that
 discovered no checks fails rather than reporting success over an empty set. A reader seeing "PASS —
 every check that could run, ran, and none asserted" would otherwise have no way to tell that from a
-PASS with nothing to check. Five checks report UNRUN, each naming the precondition it lacks — a
-population, a campaign database — rather than being counted as passes.
+PASS with nothing to check. ~~Five checks report UNRUN, each naming the precondition it lacks — a population, a campaign
+database — rather than being counted as passes.~~
+
+**RETRACTED, and the retraction is worse than the claim.** I wrote that sentence from the
+implementing agent's summary without executing it. Measured: **three of the five UNRUN entries are
+not missing a precondition at all.** `checks/run-ratchet.js:103` spawns every campaign-tier check
+with NO ARGUMENTS, so `check-review-convergence.js` and `check-scope-diff.sh` print their own usage
+line and are counted as UNRUN — while the artefacts they need,
+`briefs/mutation-campaign-313-review.json` and `briefs/mutation-campaign-313-manifest.txt`, are
+both present in the tree.
+
+**And one of them asserts when given its input.** `bash scripts/check-scope-diff.sh
+briefs/mutation-campaign-313-manifest.txt` exits **1**, naming `.github/workflows/ci.yml` as
+out-of-manifest — the CI step this very round added for the ratchet. So the runner's closing line,
+"PASS — every check that could run, ran, and none asserted", is false in both halves, and it was
+concealing a real red for several commits.
+
+The empty-tier property I stated does hold: an empty tier exits 2. But *that* is not the way this
+runner passes over nothing — it passes by running checks **without their input** and reading the
+resulting usage message as an absent precondition. A guard that cannot pass on an empty set, and
+does pass on a set it declined to feed, is the narrower claim being read as the wider one, which is
+this task's own recurring defect in the artefact written to describe it.
+
+The manifest now carries `.github/workflows/ci.yml` and the scope gate returns 0. The runner's
+defect is round 4's, filed by the review that found it.
 
 **AC-20 is verified, and the reason matters more than the result.** The unverified state was a
 missing `--build-context` flag, not a limit of the fixture. Those two diagnoses send the next
