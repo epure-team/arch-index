@@ -430,8 +430,28 @@ contains main's work as well as the branch's — and the gate attributes it to t
 this task's base."** Its own documentation describes attributing a mid-phase third-party
 file to the task as a known blind spot; this is that blind spot reached through the merge
 ref rather than through a concurrent writer, and on a long-lived branch it will fire again
-for every file main touches outside the manifest. It is a `scope` finding of severity HIGH
-that is **not a defect in this branch's diff**, and it should not be read as one.
+for every file main touches outside the manifest.
+
+**It is deliberately not filed as a finding in this task's `review.json`.** The gate is
+shared infrastructure, not this branch's code — filing it here would attribute to this task
+a defect in a file the task neither owns nor can fix, which is precisely the misattribution
+the gate just committed against this branch, reproduced in its ledger. It is recorded
+against **roadmap 4.5** instead. This note exists so a reader who sees a HIGH `scope`
+assertion in CI knows it is **not a defect in this diff**, not to claim it as work here.
+
+**The correct pattern is already in this repository, one step away from the gate that gets
+it wrong.** `.github/workflows/ci.yml:326` passes
+`${{ github.event.pull_request.base.sha || 'HEAD~1' }}` to `arch-impact`; the same
+workflow reasons explicitly about merge-base semantics under `pull_request` at lines
+175-192. On a merge ref the task's own changes are `git diff HEAD^1 HEAD` — the first
+parent is the base branch — or the base comes from `base.sha`. Note that "compare against
+the merge-base rather than a recorded base" does **not** fix this: the recorded base
+`090f832` **is** the true merge-base here, and the gate fired anyway. The defect is in
+what HEAD means under `pull_request`, not in how the base was obtained.
+
+(One thing stated here at second hand and not verified from this branch: that
+`scripts/check-scope-diff.sh` is vendored byte-identically from `agent-roster`. No roster
+checkout was reachable to confirm it. The mechanism above does not depend on that claim.)
 
 ### Exactly what gates this merge, measured rather than assumed
 
