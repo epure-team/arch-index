@@ -126,8 +126,29 @@ console.log('probe 3 — the global schema_version never carried this fact');
 {
   const afterGlobal = sql(db, "SELECT value FROM comment_db_meta WHERE key='schema_version'");
   assertEq('the campaign did not touch the global schema_version', beforeGlobal, afterGlobal);
-  assertEq('so a consumer reading only that value cannot know the tables are here', 'true',
-    String(afterGlobal !== declared(db)));
+  // AN ASSERTION WAS REMOVED HERE, AND THE REASON IS THE POINT. It read
+  //
+  //     assertEq('so a consumer reading only that value cannot know the tables are here',
+  //              'true', String(afterGlobal !== declared(db)));
+  //
+  // The property is about a KEY -- the global `schema_version` must not be the place this
+  // fact is recorded -- and that line tested an INEQUALITY OF VALUES between two numbers
+  // maintained independently. It weighed nothing in either direction, and both halves were
+  // EXECUTED at 85ff36d rather than argued:
+  //
+  //   FALSE RED. Bump `mutants_schema_version` to 1.2 in mutants-schema-migration.sql (and
+  //   the constant documenting it in arch_mutant_db.ml). Nothing is violated -- the
+  //   declaration is still present exactly when the tables are, still under its own key,
+  //   still a <major>.<minor> version -- and the line fired: expected "true", got "false".
+  //
+  //   GREEN ON A REAL VIOLATION. Append to the migration an
+  //   `INSERT OR REPLACE INTO comment_db_meta(key,value) VALUES ('schema_version','1.13')`,
+  //   which is precisely the defect this probe exists to forbid: creating the tables now
+  //   stamps the GLOBAL version. The sibling above went red (expected "1.2", got "1.13")
+  //   and the removed line stayed GREEN, because 1.13 and 1.0 still differ.
+  //
+  // So it was red where the property held and green where it did not. The sibling above is
+  // the assertion that carries the property, and the second control is its positive control.
 }
 
 console.log('');
@@ -138,7 +159,7 @@ if (fails > 0) {
   console.error('  a consumer has no value — in either direction — on which it could refuse.');
   process.exit(1);
 }
-console.log('mutant-tables-declare-their-version: PASS — 3 probes, 8 assertions.');
+console.log('mutant-tables-declare-their-version: PASS — 3 probes, 7 assertions.');
 console.log('  What would have made this non-zero: creating the tables without declaring them');
 console.log('  (probe 2), or writing the declaration unconditionally so its absence means');
 console.log('  nothing (probe 1), or folding the fact into the index-wide schema_version (probe 3).');
