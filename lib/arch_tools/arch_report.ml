@@ -38,9 +38,58 @@
 (** A verdict count. Every member is present on every report, zero included: a consumer must never
     have to decide whether a missing key means "none" or "this producer does not use that
     verdict". *)
-let verdict_vocabulary =
-  [ "PASS"; "VIOLATION"; "POSSIBLE"; "UNKNOWN"; "UNKNOWN_NO_CONTRACT"; "NO_SOURCE"; "NO_TARGET";
-    "NOT_COMPUTED" ]
+type verdict =
+  | Pass
+  | Violation
+  | Possible
+  | Unknown
+  | Unknown_no_contract
+  | No_source
+  | No_target
+  | Not_computed
+
+(* The vocabulary is DERIVED from the type, not written beside it. Before
+   2026-09-06 it was a hand-written string list and [arch_rules]'s [failing]
+   was a hand-written disjunction of string equalities in another module, with
+   nothing binding the two: a ninth verdict would have failed nothing, silently.
+   Measured before changing anything, so the record is straight: coverage was
+   COMPLETE at that point -- [failing] named seven, the vocabulary held eight,
+   and the one it omitted was [PASS], which correctly must not fail. The gap was
+   LATENT, not live.
+
+   What a ninth constructor now costs, and what it does not:
+     - [string_of_verdict] below stops being exhaustive       -> compile error
+     - [arch_rules]'s [failing] stops being exhaustive        -> compile error
+     - omitting it from [all] leaves it out of the vocabulary -> the census
+       assertion in arch_rules dies loudly, because the counts no longer sum to
+       the rule count
+   [all] itself is hand-written and OCaml cannot enumerate a variant without a
+   ppx, so that last arm is a runtime failure rather than a compile one. Stated
+   rather than glossed: this makes the omission LOUD, not impossible. *)
+let all = [ Pass; Violation; Possible; Unknown; Unknown_no_contract; No_source; No_target; Not_computed ]
+
+let string_of_verdict = function
+  | Pass -> "PASS"
+  | Violation -> "VIOLATION"
+  | Possible -> "POSSIBLE"
+  | Unknown -> "UNKNOWN"
+  | Unknown_no_contract -> "UNKNOWN_NO_CONTRACT"
+  | No_source -> "NO_SOURCE"
+  | No_target -> "NO_TARGET"
+  | Not_computed -> "NOT_COMPUTED"
+
+let verdict_of_string = function
+  | "PASS" -> Some Pass
+  | "VIOLATION" -> Some Violation
+  | "POSSIBLE" -> Some Possible
+  | "UNKNOWN" -> Some Unknown
+  | "UNKNOWN_NO_CONTRACT" -> Some Unknown_no_contract
+  | "NO_SOURCE" -> Some No_source
+  | "NO_TARGET" -> Some No_target
+  | "NOT_COMPUTED" -> Some Not_computed
+  | _ -> None
+
+let verdict_vocabulary = List.map string_of_verdict all
 
 type producer = {
   p_name : string;
