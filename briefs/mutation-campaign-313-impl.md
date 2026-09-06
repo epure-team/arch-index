@@ -1256,3 +1256,200 @@ population-dependent campaign-tier scripts, unchanged by this group.
 * **I did not capture the ratchet summary line before my change**, only its tail, so the
   "36 passed" that would precede 37 is an inference from having added exactly one passing
   check — not a measurement. Stated as such rather than quoted as one.
+
+## Group R5-A — outcome
+
+Five assertions that did not weigh what their labels announced, plus the sixth point the
+dispatch attached to the same file. All measurements below were RE-TAKEN in this worktree
+(`/mnt/ssd-external-2to/arch-index-mutation-313`, branch `feat/mutation-campaign-313`) and
+none is carried forward from an earlier round's text.
+
+### Baseline, re-measured at `85ff36d` before anything was changed
+
+| | value |
+|---|---|
+| `dune build` | exit 0 |
+| tezt suite, `./_build/default/tezt/tests/main.exe --keep-going` | 255 SUCCESS / 0 FAILURE, exit 0 |
+| `node checks/run-ratchet.js` | 37 passed, 1 asserted, 0 harness errors, 4 not run |
+| the four checks in scope, run individually | all exit 0 |
+| `node checks/tree-boundary-non-git-checkout.js .` | exit 2 |
+
+The single baseline assertion is `checks/dispatch-covers-open-findings.js`, reporting 8 OPEN
+findings named nowhere in this brief — five of which are this group's.
+
+### What was wrong, what it is now, and the case that can be false
+
+Every repair below carries a claim of the form *this assertion goes RED when X, and X is a
+case the old assertion PASSED*. X is in every instance the exact gesture executed, not a
+category. Where the honest claim is a different shape — an assertion removed, or one that was
+red where the property HELD — it is written in that shape instead of dressed up as the first.
+Each control mutated the code under test, was built (`dune build` exit 0), was run against
+BOTH the old assertion (`git show 85ff36d:<file>`) and the new one, and was then reverted.
+
+**1. `checks/tree-boundary-non-git-checkout.js:153:gate-vacuous` — probe 4, the typographic green.**
+It forbade `nested inside another one` over the RAW output. The honest fallback message
+contains that phrase in order to deny it; the assertion was green because the OCaml literal's
+continuation fill lands between `inside` and `another`. Now matched over whitespace-collapsed
+output against wording that occurs ONLY in the affirmative diagnoses, the construction
+`checks/tree-boundary-tracked-marker.js` already uses.
+
+* The claim is NOT "red where the old was green" — it is the reverse, and saying so is the
+  point. **PC-A1**: collapse the 24 runs of spaces inside that one literal. The message is
+  semantically identical and still denies the nesting; **no defect is introduced**. Old check
+  exit 1 (a FALSE RED); new check exit 0.
+* **PC-A2**, so the new one is not merely insensitive: make the `Anchor_cwd` arm print the
+  `Anchor_git` diagnosis — a real defect, the one the probe exists for. Old exit 1, new exit 1.
+
+**2. Both polarities of each vocabulary, which is what stops an absence rotting.**
+`SAYS_FOREIGN_TREE` is now asserted PRESENT on the git-anchored path (probes 1 and 2) as well
+as ABSENT on the fallback path (probe 4).
+
+* **PC-A3**: reword the git diagnosis — `the campaign was about to run the OUTER tree's
+  artefact` → `... the enclosing checkout's binary` — nesting still affirmed. This is exactly
+  the edit that would leave probe 4's absence vacuous with no signal. **Old check exit 0
+  (green); new check exit 1** at probe 2. Probe 1 stayed green, correctly: its inner tree has
+  a marker and no git, so it takes the `Anchor_marker` arm, which was not reworded.
+
+**3. `checks/tree-boundary-non-git-checkout.js:138:gate-vacuous` — probe 3, the green that could
+not be red.** The same regex on an ACCEPTANCE path. Exit 0 is asserted one line above, so no
+diagnosis of any kind exists to forbid; it forbade something its path cannot emit. Replaced
+rather than widened — every restatement over the diagnosis vocabulary has the identical
+defect. What bears on an acceptance path is WHICH ARTEFACT was accepted, so the engine now
+records the wrapper it is handed (the driver/engine contract is `{ ENV } <engine> <wrapper>`)
+and the probe asserts it is the tree's OWN. That is FR-030's acceptance polarity, which
+nothing in this file previously asserted.
+
+* **PC-B**: hand the engine `selection_file` instead of the guarded `wrapper`. The campaign
+  still exits 0 and the tree's own wrapper is still resolved and guarded — only the value
+  actually used is wrong. **Old check exit 0 (green); new check exit 1**, got
+  `/tmp/arch-mutants-1118607/selection.tsv`.
+
+**4. `checks/tree-boundary-non-git-checkout.js:1:spec` — the path argument that verified
+nothing.** `process.argv[2]` was joined but never resolved, and the result was handed to a
+subprocess spawned from a scratch directory. `node checks/tree-boundary-non-git-checkout.js .`
+exited 2 at `85ff36d` and exits 0 now; so do the absolute-path form and the form invoked from
+a foreign cwd. X is that literal command line.
+
+**5. `checks/one-engine-id-two-sites-is-refused.js:1:gate-vacuous` — satisfied by a different
+mechanism.** `the diagnostic names the shared id` searched the WHOLE of stderr for the id in
+quotes, unanchored. Step 8a's ambiguity refusal — a different guard, on the join rather than
+on the catalogue — also renders an id in quotes. It now PARSES step 5b's own per-collision
+line into a map from handle to site count, compares that against the map the catalogue
+implies, and checks 5b's announced count against the block 5b then printed. Six assertions per
+refusing arm, was five.
+
+* **X1**: 5b reports one site too many (`List.length group + 1`) — a real defect, the operator
+  is told the wrong number. **Old exit 0; new exit 1**, `expected "1=2", got "1=3"`.
+* **X2**: 5b's line reworded into 8a's rendering, `(engine id %S, RUN-scoped) covers %d
+  entries:`. The id is still in stderr, still quoted; 5b's own sentence is gone. This
+  reproduces the finding's mechanism at HEAD. **Old exit 0; new exit 1**,
+  `expected "1=2", got "(none)"`.
+
+**6. `checks/mutant-tables-declare-their-version.js:1:gate-vacuous` — a KEY property tested by
+an inequality of VALUES.** REMOVED, with the reason written in place, so the claim here is not
+"red when X" and is not written as if it were. Both halves executed:
+
+* **FALSE RED**: bump `mutants_schema_version` 1.0 → 1.2 in `mutants-schema-migration.sql` and
+  in the constant documenting it. Nothing is violated — the declaration is still present
+  exactly when the tables are, under its own key, still `<major>.<minor>`. The assertion fired:
+  `expected "true", got "false"`.
+* **GREEN ON A REAL VIOLATION**: make the migration stamp the GLOBAL key
+  (`INSERT OR REPLACE ... VALUES ('schema_version','1.13')`), which is precisely the defect
+  the probe names. The SIBLING went red (`expected "1.2", got "1.13"`); the removed assertion
+  stayed GREEN, 1.13 and 1.0 still differing.
+
+So it was red where the property held and green where it did not, and the second control is
+the executed positive control for the sibling that carries the property. 7 assertions, was 8 —
+a green fewer, deliberately.
+
+**7. `checks/source-hash-declares-its-derivation.js:1:gate-vacuous` — green by comparing two
+absences.** `String(lineTag) === String(tagOf(h))` passed as `String(null) === String(null)`.
+The equality now requires both sides present before comparing them.
+
+* **X**: mutate both arms of `source_hash ~repo s` to return a bare `Digest.to_hex` — the
+  pre-fix shape, the state the whole file was written against. Old line printed
+  `✓ the same declaration as probe 1 — null` and **PASSED**; the new line **FIRED**.
+
+### What each new assertion actually examines, and whether that stream can contain what it forbids
+
+The question the round exists to force, answered per repair rather than asserted once:
+
+| assertion | examines | can that stream contain what it forbids? |
+|---|---|---|
+| probe 4, `SAYS_FOREIGN_TREE` absent | stdout+stderr of a REFUSING run, `Anchor_cwd` arm | **Yes** — PC-A2 made it, and it went red |
+| probes 1/2, `SAYS_FOREIGN_TREE` present | stdout+stderr of a REFUSING run, `Anchor_git`/`Anchor_marker` arms | affirmative, and PC-A3 removed it and it went red |
+| probe 3, wrapper handed to the engine | a file the engine writes; **not** a text stream | affirmative; PC-B changed the value and it went red |
+| 5b, parsed collision map | stderr of a REFUSING run | affirmative and structural; X1 and X2 both moved it |
+| probe 3 of the source-hash check | a value read back with `SELECT source_hash FROM mutants` | affirmative; X made both sides null and it went red |
+| probe 3 of the tables check (kept sibling) | two `SELECT value FROM comment_db_meta` reads | affirmative; the migration control moved it |
+
+No assertion added by this group is a negative over raw text except probe 4's, and that one is
+now bounded on the other side by an affirmative over the same vocabulary in probes 1 and 2 —
+which is what PC-A3 demonstrates rather than argues.
+
+### Measurements after the four commits, tree clean
+
+| | value |
+|---|---|
+| `dune build` | exit 0 |
+| tezt suite, `main.exe --keep-going` | 255 SUCCESS / 0 FAILURE, exit 0 |
+| `node checks/tree-boundary-non-git-checkout.js` | exit 0 — 11 assertions, was 9 |
+| `node checks/tree-boundary-non-git-checkout.js .` | exit 0 — was 2 |
+| `node checks/one-engine-id-two-sites-is-refused.js` | exit 0 — 3 refusing arms × 6 assertions + 1 control |
+| `node checks/mutant-tables-declare-their-version.js` | exit 0 — 3 probes, 7 assertions, was 8 |
+| `node checks/source-hash-declares-its-derivation.js` | exit 0 — 4 probes, 8 assertions |
+| `node checks/run-ratchet.js` | 37 passed, 1 asserted, 0 harness errors, 4 not run |
+| `md5sum scripts/check-scope-diff.sh` | `0e85c1f411588a91d1dd8ffe840f21b9`, unchanged |
+
+The ratchet total is UNCHANGED from baseline, and that is the honest reading: this group added
+no check, only assertions inside four existing ones, so the count could not move. The one
+assertion is still `checks/dispatch-covers-open-findings.js`, and it still fires after this
+section, because four of its eight unowned findings belong to other groups — one HIGH and two
+architecture findings in the driver, and one schema-drift finding under `scripts/lib/review/`.
+Naming five of eight does not clear a gate that fires on any.
+
+**AND THE FIRST DRAFT OF THIS PARAGRAPH CLEARED IT BY ACCIDENT, WHICH IS WORTH RECORDING.**
+It listed those four findings by their exact fingerprints, to say why the gate would stay red.
+`checks/dispatch-covers-open-findings.js` matches a finding to a section with
+`section.body.includes(finding.fingerprint)`, so writing a fingerprint down IS the act of
+claiming it: the ratchet went to **38 passed, 0 asserted** and this group silently took
+ownership of four findings it has not looked at. Measured, then reverted — the four are now
+described in prose and the gate is back to 37/1. A gate whose ownership predicate is
+"the string appears in the section" is the same defect class this group spent its day removing
+from four checks, one storey up; it is left as an observation, not fixed here.
+
+Findings this section claims, by fingerprint, so the gate can see them:
+`checks/tree-boundary-non-git-checkout.js:153:gate-vacuous`,
+`checks/tree-boundary-non-git-checkout.js:138:gate-vacuous`,
+`checks/tree-boundary-non-git-checkout.js:1:spec`,
+`checks/one-engine-id-two-sites-is-refused.js:1:gate-vacuous`,
+`checks/mutant-tables-declare-their-version.js:1:gate-vacuous`,
+`checks/source-hash-declares-its-derivation.js:1:gate-vacuous`.
+
+### Not done, not covered, and one thing found on the way
+
+* **A SECOND INSTANCE OF DEFECT 4, LEFT UNFIXED AND REPORTED RATHER THAN FOUND LATER.**
+  `checks/tree-boundary-tracked-marker.js:38` carries the identical unresolved
+  `process.argv[2]`, and `node checks/tree-boundary-tracked-marker.js .` exits **2**, measured
+  at this HEAD. It is a one-line fix. I did not make it: the dispatch scoped point 6 to "the
+  same file as 1 and 2", and an unbriefed edit to a check is exactly the new surface this
+  round is trying not to manufacture. `checks/ratchet-is-node-executable.js:34` has the same
+  shape and does NOT have the defect (exit 0 with `.`), because it never spawns from another
+  cwd — so this is two instances of a pattern with one live consequence, not three.
+* **`Arch_mutant_db.mutants_schema_version` IS DEAD.** Found while building the false-red
+  control: bumping it alone changed nothing, because the value that reaches the database comes
+  from `mutants-schema-migration.sql`, embedded via `[%blob]`. The constant is referenced from
+  no `.ml`, `.mli`, `.js` or `.sh` in the tree. Not filed, not fixed — reported here.
+* **The falsifier's original observation at `0851761` was NOT re-executed.** Rebuilding that
+  tree was not attempted. X2 above reproduces the same mechanism at HEAD, which is why; the
+  0851761 result is the falsifier's measurement and is not restated as mine.
+* **`tezt/tests/must_null_ceiling.ml` untouched**, as instructed — its constant is a shared
+  gate held by another session.
+* **No push, no PR, no merge.** Public repository. Nothing was written outside this worktree;
+  `scripts/check-scope-diff.sh`, `bin/arch_rules/arch_rules.ml`, `lib/arch_tools/arch_sel.ml`
+  and `lib/arch_tools/arch_graph.ml` are unmodified.
+* **The spec CHECK table was NOT updated.** No check was added or removed, only assertions
+  inside existing ones, and the table records checks. If it records assertion counts, this
+  section's numbers are the source and the table is stale by them.
+* **PC-A1 measures the fallback literal only.** Whether the `Anchor_git` and `Anchor_marker`
+  literals carry the same latent typographic dependence in OTHER checks was not swept.
