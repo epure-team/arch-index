@@ -82,11 +82,19 @@ publishes no survivor at all. The alternative — publishing 4159 survivors — 
 the false confidence the ⊤ machinery exists to refuse. The soundness rule works. Its cost
 is now visible for the first time, on real code.
 
-The same shape has been reached independently in this repository on roadmap 3.1, with a
-different tool and different corpora: at 54.4% / 59.5% unresolved edges no cone is ⊤-free,
-so every generated rule lands on `UNKNOWN`. Two tools, two corpora, both correctly
-reporting that they cannot tell. That suggests **the product is the named frontier — the
-`top_bounded` provenance itself — rather than the verdict.**
+**A convergence with roadmap 3.1 was claimed here and then withdrawn on measurement.** 3.1
+reports `UNKNOWN` broadly too, and the two results looked like one finding about soundness
+under ⊤. They are not. `bin/arch_rules/arch_rules.ml:589-605` filters its escaping set over
+the forward closure of *that rule's own source set*, so 3.1's ⊤ is computed **per rule**: a
+rule whose own cone holds no ⊤ node passes, and a corpus-wide 54.4% unresolved does not
+imply every cone is contaminated. Nothing global is broadcast there.
+
+So the two cases differ in mechanism, and the difference matters for what this branch owes
+next. **3.1's frontier is the frontier; this tool's is a granularity defect** — one
+measurement applied to 4931 rows, where 5.8% of the graph nullifies 100% of the output.
+That makes the empty output here substantially more fixable than a shared finding about the
+approach would have suggested. It also means the fix has precedent inside this repository:
+**per-rule scoping is what the shipped verdict path already does.**
 
 ### Three things the execution found that six review rounds could not
 
@@ -266,6 +274,99 @@ those places written down here rather than waiting to be rediscovered. Not mergi
 leaves 118 commits on a branch that is now safely on the remote, and the campaign
 evidence available whenever someone wants it. Neither is obviously right, which is why
 this is stated as a decision rather than a recommendation.
+
+## Next steps, in order, with what each one has to prove
+
+The three blockers are independent in cause and dependent in value: fixing #2 and #3 without
+#1 changes nothing a user sees, because the output stays empty; fixing #1 alone surfaces
+1659 verdicts of which 0 are actionable noise-free. **Do them in this order.** Each step
+below names the change, the measurement that decides whether it worked, and the result that
+would say it did not.
+
+### Step 1 — scope the ⊤ measurement to the mutant, not to the corpus
+
+**The change.** `cone_escapes` (`bin/arch_mutants/arch_mutants.ml:121`) computes the forward
+closure of *all* test roots and collects every ⊤-holding key inside it. Its result feeds
+`selection_provenance` (:139) once per campaign, at `report` (:659) and at `run_campaign`
+(:2067) — the two sites already share the binding, so the rule stays in one place.
+
+What soundness actually requires per mutant is narrower: the selection for a mutant at site
+`S` is *the tests whose forward closure contains `S`*, and it can only be unsound if some
+path into `S` is unknown — that is, if a **caller** of `S` holds a ⊤ edge. The graph already
+exposes what this needs: `Arch_graph.closure (SS.singleton s_key) g.bwd` is the set of keys
+that can reach `S`, and `g.tops` is keyed the same way. No change to
+`lib/arch_tools/arch_graph.ml` is required, and none should be made — it is out of scope for
+this work.
+
+**Decide before implementing:** whether the predicate is ⊤-in-the-backward-cone-of-`S` (an
+unknown caller could route a test into `S`) or ⊤-anywhere-on-a-test-to-`S`-path. They differ
+on ⊤ edges held by a test's own descendants that do not reach `S`. The first is the one this
+tool's soundness argument needs; the second is what the current global reading approximates.
+Write the choice down where the rule lives, because the docstring at :129 is the place the
+previous duplication was caught.
+
+**The measurement that decides it.** Re-run `full-selected` and group by provenance. Today
+the answer is one row, `top_bounded|4931`. Success is a **distribution** — some
+`proved_superset`, some `top_bounded` — and at least one published SURVIVED.
+
+**What would say it did not work.** Still a single row. Two readings then, and they need
+separating rather than guessing: either the ⊤ frontier genuinely covers every backward cone
+on this corpus (a real result, and the same one 3.1 reached), or the new predicate is still
+being evaluated corpus-wide. Distinguish them by picking one mutant in a leaf module with no
+higher-order callers and checking its backward cone by hand. **A uniform value across a
+heterogeneous population is the tell that caught this the first time; it will catch it
+again.**
+
+### Step 2 — stop reporting mutants no test could ever reach
+
+2500 of 4931 runs have `intended_tests = 0` and `executed_tests = 0`. Nothing ran, so
+SURVIVED means only that the site is outside the test cone (`unreached: 3668` in
+`plan.json`) — which the plan already knew before the campaign started. These rows cost 51%
+of the run's wall clock and produce no signal.
+
+**The change is a decision, not a patch:** either exclude zero-intended sites at catalogue
+time, or keep them and give them a status of their own — `UNREACHED` is honest and
+`SURVIVED` is not, because the two mean opposite things to a reader deciding where to write
+a test. Prefer the second: the count of unreachable-by-any-test code is itself a useful
+output, and silently dropping it would hide it. What must not survive this step is one
+status covering both.
+
+**The measurement.** Runs where `executed_tests = 0` and status is `SURVIVED`: 2500 today, 0
+after. Total catalogued should not fall if the second option is taken — the rows move
+status, they do not disappear.
+
+### Step 3 — make the A/B an actual comparison
+
+`ab-naive.db` and `ab-selected.db` are md5-identical over every run row and both carry
+profile `group` in `mutant_campaigns`, written 48 seconds apart. The same configuration ran
+twice. Before any wall-clock claim is made, the two arms must be shown to differ.
+
+**Order matters here:** run this *after* step 1, because the naive arm is the case that
+exposes the third gap below, and running it now would measure a selection whose provenance is
+constant anyway.
+
+**The gap it exposes.** `selection_provenance` reads only `sound` and `escapes`. When the
+whole suite runs there is no selection whose soundness could fail — the executed set is a
+superset of the intended set by construction — yet the rule still returns `top_bounded` and
+publishes nothing. That is demonstrable over-conservatism, and it needs a third provenance
+meaning *exhaustive*, distinct from `proved_superset` (which claims a proof about a
+selection) and from `top_bounded` (which claims ignorance about one).
+
+**The measurement.** Two databases with different md5s over their run rows, different
+`profile` values in `mutant_campaigns`, and a wall-clock ratio reported with both arms'
+elapsed times and the mutant count each covered. **Report the expected ratio alongside the
+observed one** — selection is worth having only if it is materially faster, and a ratio near
+1.0 is a result about this corpus that should be published rather than retried until it
+improves.
+
+### What none of these steps touches
+
+`scripts/check-mutaml-integration.sh` still returns **3**. The formal tier stays
+**E0m-abstract** — the committed ITF trace is generated and never consumed, because nothing
+here is wired to `ocaml-quint-connect`. And `checks/run-ratchet.js` still never builds, so
+every ratchet figure in this record remains unevaluable as gate output. None of the three
+steps above improves any of those; they are named here so that finishing the three is not
+mistaken for finishing the item.
 
 ## What went wrong in producing this branch, and one of it changed the work
 
