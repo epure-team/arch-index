@@ -136,6 +136,52 @@ function campaign(name, catalogue, report) {
   return { code: r.status, stdout: r.stdout || '', stderr: r.stderr || '', db };
 }
 
+// ---- THE 5b BLOCK, PARSED. ---------------------------------------------------------------
+// Step 5b prints one line per colliding handle, and this is its shape, verbatim from
+// `Printf.eprintf "    engine id %S (RUN-scoped) is claimed by %d sites:\n"`:
+//
+//     engine id "dup" (RUN-scoped) is claimed by 2 sites:
+//
+// WHY IT IS PARSED AND NOT SEARCHED FOR. The assertion here used to be
+// `r.stderr.includes('"' + id + '"')` over the WHOLE of stderr, unanchored to any sentence.
+// That is satisfied by any diagnostic that happens to render an engine id in quotes, and
+// step 8a's ambiguity refusal -- an ENTIRELY DIFFERENT mechanism, on the join rather than on
+// the catalogue -- does exactly that: `(engine id "1", RUN-scoped)`. Measured by the
+// falsifier against 0851761, a tree in which 5b DOES NOT EXIST: the assertion was green
+// there, satisfied by 8a. 8a's rendering puts the comma inside the parentheses and never
+// says "is claimed by", so it cannot match the shape below.
+//
+// What is read out is a STRUCTURE -- a map from handle to the number of sites 5b says claims
+// it -- and it is compared against the map the catalogue itself implies. That is strictly
+// more than the old line asked: the old one wanted the id to appear somewhere; this one wants
+// 5b to have named EVERY colliding handle, ONLY the colliding handles, with the RIGHT number
+// of sites each, and to have announced a count that agrees with the block it then printed.
+const parse5b = (stderr) => {
+  const header = /(\d+) engine id\(s\) in this catalogue address more than one SELECTED site/.exec(stderr);
+  const claims = new Map();
+  const re = /engine id "([^"\n]*)" \(RUN-scoped\) is claimed by (\d+) sites:/g;
+  let m;
+  while ((m = re.exec(stderr)) !== null) claims.set(m[1], Number(m[2]));
+  return { announced: header ? Number(header[1]) : null, claims };
+};
+
+// The site key as the driver computes it, so "how many sites claim this handle" is asked of
+// the same coordinate the driver refuses on and not of the list length.
+const siteKeyOf = (c) =>
+  [c.file, c.line, c.col_start, c.col_end, c.replacement, c.occurrence === undefined ? '' : c.occurrence].join('\u0000');
+const expectedCollisions = (catalogue) => {
+  const byId = new Map();
+  for (const c of catalogue) {
+    if (!byId.has(c.id)) byId.set(c.id, []);
+    byId.get(c.id).push(c);
+  }
+  const out = new Map();
+  for (const [id, group] of byId)
+    if (new Set(group.map(siteKeyOf)).size > 1) out.set(id, group.length);
+  return out;
+};
+const renderMap = (m) => [...m.entries()].sort().map(([k, v]) => `${k}=${v}`).join(', ') || '(none)';
+
 const SITE_A = { file: 'lib/x.ml', line: 15, col_start: 3, col_end: 9, replacement: 'true' };
 const SITE_B = { file: 'lib/x.ml', line: 15, col_start: 11, col_end: 15, replacement: 'false' };
 const SITE_C = { file: 'lib/x.ml', line: 16, col_start: 3, col_end: 9, replacement: 'true' };
@@ -165,11 +211,16 @@ function refusingArm(label, catalogue, report) {
   // Measured at 664e0d8: this was 2. A refusal that had already inserted the mutants would
   // be a refusal after a partial write, which is a different and weaker thing.
   assertEq('no mutant row was written either', '0', sql(r.db, 'SELECT count(*) FROM mutants'));
-  // The diagnostic must NAME the shared id. A refusal an operator cannot act on sends them
-  // to read this source, which is the failure mode a bare exit code has.
-  const named = catalogue.filter((c, i) => catalogue.findIndex((o) => o.id === c.id) !== i)[0].id;
-  assertEq(`the diagnostic names the shared id ${JSON.stringify(named)}`, true,
-    r.stderr.includes(JSON.stringify(named)) || r.stderr.includes(`"${named}"`));
+  // The diagnostic must NAME the shared id, and must do it IN 5b's OWN SENTENCE. A refusal
+  // an operator cannot act on sends them to read this source, which is the failure mode a
+  // bare exit code has -- but a refusal produced by some other guard, whose message merely
+  // mentions an id, is not this guard being exercised at all.
+  const want = expectedCollisions(catalogue);
+  const got = parse5b(r.stderr);
+  assertEq('step 5b names exactly the colliding handles, with the site count of each',
+    renderMap(want), renderMap(got.claims));
+  assertEq('and the count 5b announces agrees with the block 5b then printed',
+    String(want.size), String(got.announced));
 }
 
 refusingArm('NUMBERED — two sites both claiming the engine id "1"',
