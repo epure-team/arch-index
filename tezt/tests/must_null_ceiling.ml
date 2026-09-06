@@ -89,6 +89,49 @@ let must_null_query =
   "SELECT count(*) FROM calls WHERE kind = 'MUST' AND callee_id IS NULL AND callee_name NOT \
    LIKE 'Stdlib.%'"
 
+(* COMPOSITION, added 2026-09-06 (roadmap 4.11). The count above cannot be read
+   alone: it does not say WHAT it counted, and its own failure message asserted
+   the wrong thing. This query splits the same rows -- it changes neither the
+   population nor the verdict -- by whether the callee's ROOT module is one this
+   index holds:
+
+     root-outside-index   no module file or library directory of that name is
+                          indexed, so no resolver could ever have resolved it;
+     root-is-indexed      the root IS indexed and the name still did not
+                          resolve -- either re-exported from a library that is
+                          not ([tezt/lib/arch_tezt.ml:20-21] is [include Tezt]
+                          / [include Tezt.Base]) or reached through a module
+                          alias to one ([lib/arch_tools/arch_db.ml:97] is
+                          [module Ty = Caqti_type.Std]).
+
+   Measured on main at 090f832: 254 outside / 129 indexed-root, of 383. *)
+
+(* The claim the failure message used to make, made testable. A row is a
+   RESOLVER MISS only if the name it calls is one this index actually holds.
+   [resolver_miss_query] counts those; [name_match_control_query] is its
+   positive control -- the same equality over RESOLVED calls, which must be
+   non-zero, because an equality that can never match returns 0 whatever the
+   tree contains.
+
+   Measured on main at 090f832: 0 misses against a control of 4437. So every
+   one of the 383 was an external leaf and none was a miss -- which is why the
+   failure message no longer says otherwise. Logged rather than asserted: a new
+   failure mode is a verdict change, and this ratchet is recalibrated one branch
+   at a time. Promoting the miss count to an assertion belongs with the
+   population change (roadmap 4.11, second slice), not here. *)
+let resolver_miss_query =
+  "SELECT count(*) FROM calls c WHERE c.kind = 'MUST' AND c.callee_id IS NULL AND c.callee_name \
+   NOT LIKE 'Stdlib.%' AND EXISTS (SELECT 1 FROM functions f WHERE f.name = c.callee_name)"
+
+let name_match_control_query =
+  "SELECT count(*) FROM calls c WHERE c.callee_id IS NOT NULL AND EXISTS (SELECT 1 FROM \
+   functions f WHERE f.name = c.callee_name)"
+let must_null_composition_query =
+  "WITH r AS (SELECT lower(substr(callee_name, 1, instr(callee_name || '.', '.') - 1)) AS root \
+   FROM calls WHERE kind = 'MUST' AND callee_id IS NULL AND callee_name NOT LIKE 'Stdlib.%') \
+   SELECT count(*) FROM r WHERE EXISTS (SELECT 1 FROM modules m WHERE m.path LIKE '%/' || r.root \
+   || '.ml' OR m.path LIKE '%/' || r.root || '/%' OR m.path LIKE r.root || '/%')"
+
 (* Recalibrated 2026-09-03 (feat/exn-raise-sets): 260 → 289. The +29 rows are
    the new [lib/arch_index/arch_index_exn.ml]'s calls into compiler-libs
    ([Ident.*], [Path.*], [Types.get_desc], [Predef.*]) and [Tast_iterator] —
@@ -327,16 +370,31 @@ let register () =
            reflecting a shrunk codebase"
           total min_total_calls ;
       let must_null = Db.int conn must_null_query in
-      Log.info "calls=%d  MUST-with-NULL-callee(Stdlib excluded)=%d  ceiling=%d" total must_null
-        ceiling ;
+      let indexed_root = Db.int conn must_null_composition_query in
+      let outside_root = must_null - indexed_root in
+      let resolver_misses = Db.int conn resolver_miss_query in
+      let name_match_control = Db.int conn name_match_control_query in
+      if name_match_control = 0 then
+        Test.fail
+          "the resolver-miss test cannot match anything: 0 resolved calls satisfy f.name = \
+           callee_name, so its 0 misses would be a property of the query rather than of the tree" ;
+      Log.info
+        "calls=%d  MUST-with-NULL-callee(Stdlib excluded)=%d  [root outside index: %d, root \
+         indexed: %d]  resolver misses=%d (control: %d resolved calls match by that test)  \
+         ceiling=%d"
+        total must_null outside_root indexed_root resolver_misses name_match_control ceiling ;
       if must_null > ceiling then
         Test.fail
           "%d calls rows are kind=MUST with callee_id IS NULL (Stdlib excluded), above the \
-           ceiling of %d (+%d). Each one is a resolver miss stamped as a proven external leaf: \
-           arch_graph.ml emits no TOP marker for it, so the real callee is reported UNREACHABLE \
-           with confidence. Either resolve those references or emit them as MAY_TOP so the TOP \
-           frontier survives."
-          must_null ceiling (must_null - ceiling) ;
+           ceiling of %d (+%d). Of these, %d have a root module this index does not hold and %d \
+           have one it does. A row is a call LEAVING THE INDEXED UNIVERSE stamped as a proven \
+           external leaf: arch_graph.ml emits no TOP marker for it, so the real callee is \
+           reported UNREACHABLE with confidence. It is NOT necessarily a resolver miss -- this \
+           message asserted that until 2026-09-06 and it was false of every row then present: \
+           measured on main at 090f832, 0 of 383 named a function this index holds under that \
+           name, against a positive control of 4437 resolved calls that do. Either resolve those \
+           references or emit them as MAY_TOP so the TOP frontier survives."
+          must_null ceiling (must_null - ceiling) outside_root indexed_root ;
       (* Enforce the tightening half of the one-directional invariant: advisory
          only, never a failure. *)
       if must_null < clean_measured - headroom then
