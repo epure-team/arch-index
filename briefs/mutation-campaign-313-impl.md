@@ -645,3 +645,154 @@ does not rest on the count.)
 **This section exists because its absence was a defect.** Group B's outcome was recorded in a
 commit message and nowhere in this brief, and `checks/dispatched-groups-were-executed.js` was right
 to fire on it: a commit message is not the register a later reader consults.
+
+## Group C — outcome
+
+**Date:** 2026-09-06T00:57:00+02:00 · Base `6930d3c`, HEAD `2da633a`, worktree
+`/mnt/ssd-external-2to/r3-spec`. Scope: `specs/mutation-campaign-313.md` and this file. No file
+under `bin/`, `lib/`, `scripts/`, `checks/`, `tezt/` or `.github/` was touched, which is why
+`dune build` exit 0 and 255 of 255 SUCCESS below are a control rather than a result.
+
+**This group was planned, given a worktree, and no agent was ever launched for it — the third
+dispatch failure in three rounds, and the first that nothing detected.** Its ten findings stood
+open verbatim from round 2 and a round-3 review re-found eight of them. The absence of this
+section is how the non-execution went unnoticed: Group A and Group B each wrote one, Group C's
+table sat under a heading with nothing under it, and no gate reads a heading. `dispatch-covers-
+open-findings.js` names findings the brief mentions, and Group C's findings WERE mentioned — in
+the plan table. Naming a finding in a plan and closing it are not the same state, and the check
+cannot currently tell them apart. **Filed for round 4: the check should distinguish a finding named
+in a dispatch table from one named in an outcome section.**
+
+### The claims block — two thirds coverage, four dangling references
+
+Reconciled with a throwaway parser rather than by reading. Before: 26 requirement records against
+34 in the body, 21 acceptance-criterion records against 34, 24 check records against 33; FR-027..
+FR-034, AC-21..AC-28 and CHECK-11..CHECK-19 absent entirely; and four dangles — CHECK-23 and
+CHECK-26 pointing at an absent AC-24, AC-30 and AC-33 at an absent FR-031. FR-030, the one
+requirement round 1 found wholly unimplemented, had no record, so the graph could not say whether
+it was asserted, deferred or done.
+
+After: **34 requirement, 46 acceptance-criterion and 50 check records, matching the body exactly in
+both directions; zero dangling references; every requirement reachable from at least one
+acceptance criterion; no duplicate ids.** The four dangles closed by construction, as the finding
+predicted. Two acceptance criteria — AC-41 (FR-009, the schema-version doc row) and AC-46 (FR-026,
+the `analysis_coverage` prohibition) — are reachable from no check, and both say so in their own
+row. Neither could be closed here: the guard each needs lives in `scripts/`, which is out of this
+group's scope, and inventing a check row for a script that does not exist would be the defect this
+group is about.
+
+### The seven untraced ratchet checks — the ones defending the CRITICAL and five HIGHs
+
+The Runnable Checks table listed **13 of the 20** checks in `checks/` that belong to this task
+(the twenty-first, `mid-caller-shadow-attribution.js`, is issue #41's and correctly absent), and
+the seven it omitted were exactly round 3's new ones. CHECK-32 asserts the RUNNER covers every
+check on disk; nothing asserted the SPEC did, so the table read as complete. Now enumerated as
+CHECK-34..CHECK-50, with `AC-35..AC-40` and `AC-43` added to hold them: the join and the
+zero-narrowed `--diff` got acceptance criteria of their own, `tree-boundary-non-git-checkout.js`
+attaches to AC-24, `unmapped-survivor-carries-its-verdict.js` to AC-32 **and** AC-10. The seven new
+tezt cases are traced alongside them. Verified afterwards, mechanically: every `checks/…` and
+`scripts/…` path the spec names exists on disk, and every task check on disk is named by the spec.
+
+**`node checks/tree-boundary-non-git-checkout.js .` exits 2, checking nothing.** Found by running
+it, not by reading it. It resolves the repository root from `process.argv[2]` without
+`path.resolve`, then spawns `_build/default/bin/arch_mutants/arch_mutants.exe` with a *different*
+working directory, so a relative `.` fails to spawn and it reports `arch-mutants plan failed …
+undefined`. The ten sibling checks share the same argv line and survive `.` only because they
+never change directory before spawning. Every row now prescribes the argument-less form, which
+exits 0. **Filed for round 4: `path.resolve` that argument where it is read.**
+
+### FR-013's carve-out — the premise is false, and the guard cannot see the record
+
+FR-013 excluded `report`'s `unmapped` records because they had "no provenance in existence to
+accompany them". Round 3's own fix gave them one: the record now carries `selection_provenance`,
+`verdict` and `verdict_basis` beside its `status`. The carve-out is **retracted**; FR-013 applies
+without exception.
+
+The guard was not corrected, because `scripts/` is another block's scope. What was done instead is
+to write down what it cannot see and to make the property traceable to a check that can. Positive
+control executed here rather than quoted: a copy of `bin/arch_mutants/*.ml` with those three keys
+deleted from the unmapped record leaves `scripts/check-status-provenance.sh` at **exit 0**,
+printing `inspected 26 JSON record(s) … PASS — 0 offending emitter(s)`. Its key regex names
+`engine_status`; the record's key is `status`. CHECK-22 and CHECK-30 are worse than blind — both
+build their own fixtures and never read `bin/arch_mutants/`, so no edit to the driver can move
+either. All three checks bound to AC-10 are therefore incapable of failing on this record.
+CHECK-43 is bound to AC-10 for that reason. **Filed for round 4: widen the regex, drop the header
+exclusion.**
+
+### The four smaller repairs, each verified against the code rather than the finding text
+
+- **The Clarifications table, two rows.** "What does a new test that reaches nothing produce?" states FR-021 (slice 4) and "May a profile over-select?" states FR-023 (slice 5), both in the present indicative, both unmarked, and both PRECEDING every deferral marker in the document — the first is far below them. Both now carry the marker, and the second row's over-selection half, which IS implemented, is separated from its `granularity` half, which is not.
+- **CHECK-15's row.** It described a boundary the implementation stopped having: "git rev-parse --show-toplevel, falling back to the working directory". Round 3 replaced that with the NEARER of the git toplevel and the checkout's own `dune-project`, plus a cwd fallback whose refusal message explicitly disclaims nesting — three anchors, restated from `working_tree_root` and `type tree_anchor` rather than from the old sentence. Its citations of `locate_wrapper` at `:787` and `locate_impact` at `:875` were stale by roughly four hundred lines; they are at `:1184` and `:1276`.
+- **Seven requirements with no acceptance criterion** — FR-003, FR-009, FR-010, FR-017, FR-021, FR-024, FR-026 — now have AC-39, AC-41, AC-42, AC-43, AC-44, AC-45 and AC-46. FR-003 was the sharpest: round 3 implemented it (inclusion, refusing before any campaign row exists) and added a tezt case while giving it neither criterion nor check, so a round-2 finding was closed in code and open in traceability. It is CHECK-45 now.
+- **The rest.** CHECK-1 named a tezt title that does not exist — "engine" where the case says "wrapper", and `--title` matching nothing makes tezt exit **3**, measured, so following the row produced no red at all. Nine rows prescribed `dune test --force`, which this branch's own brief documents as aborting at the first failure; all nine now name the built binary with `--title`. The front matter's `status: live` and the claims header's `spec_lifecycle: draft` disagreed; the header is now `live`. AC-4, AC-5, AC-6 fold into CHECK-1 (their assertions are inside its case) and AC-23 into CHECK-14; AC-26 gets CHECK-48. FR-012's `arch_mutants.ml:122` is anchored on `let proof = escapes = [] && sound` with `:221` demoted to a hint. The Runnable Checks preamble said "0 passes, 1 assertion fired, >=2 error", collapsing the exit-3 "refused / did not really run" that FR-032 exists to distinguish; the convention now names 3 explicitly.
+- **CHECK-32/33's `for":[]` justification** reasoned that inventing an AC "would be a dangling reference of exactly the shape review round 3 found four of". A dangling reference is a pointer to an id that does not exist; writing the AC into the body and the claims block creates none — which is precisely how the four real dangles were closed. `for":[]` is kept, with the honest reason: these verify a property of the spec document and its harness rather than of the product, and the claims schema has no record type for that. CHECK-11..CHECK-13 carry `for":[]` for a second, different reason — they target the Quint model's P1..P3, and P-ids are not AC-ids.
+
+### One finding closed by re-measurement, not by editing
+
+Round 2's MEDIUM against FR-002 — "`executed_tests` records what the wrapper INTENDED to run, so
+the second set is a second copy of the first" — **no longer holds at this head.** Round 3's
+unobserved-run work made the executed set come from `executed_by_id`, filled from the wrapper's
+trace file: an attempted mutant carries the observed list into `insert_run` and into the JSON, and
+an unobserved one gets no run row and publishes `"executed_tests": null` with the planned set kept
+separately under `intended_tests`. FR-002's text now says so and names the anchor. Verified by
+reading the code at this head, not by reading the fix note.
+
+### Citations: content anchors, coordinates demoted to hints
+
+Adopted mid-task, and applied to every citation touched. A citation attached to CONTENT fails
+loudly when it rots — you search for the text, it is not there, you know. A bare coordinate cannot
+self-check: it lands on whatever now occupies that line, and a plausible landing is
+indistinguishable from a correct one. Four citations in rows this group did not otherwise touch
+were audited and found stale, and all four were converted:
+`tezt/lib/arch_tezt.ml:777` for `Fixture.malformed_contract` (it is at `:807`); `arch_mutants.ml:1024`
+for the `count(*)` that opened the phantom comment (`:1521`); `arch_mutants.ml:1584` for the per-run
+provenance key — which now lands on an `| Impact_refused ->` arm in an unrelated match, the exact
+failure mode; and `arch_mutants.ml:348-349` for the closed status vocabulary, which is in a
+different file (`bin/arch_mutants/arch_mutant_db.ml`, `type status`). A fifth,
+`Option.value ~default:sel.sel_executed` at `:1425-1427`/`:1575`/`:1703`, no longer exists at all —
+`grep` returns nothing — and is now marked as a record of where the defect was rather than a
+pointer to live code. Every coordinate this group wrote names its file and a searchable anchor in
+the same sentence.
+
+### Quality gates
+
+`dune build` → **exit 0**. `./_build/default/tezt/tests/main.exe --keep-going` → **exit 0, 255 of
+255 executed, 255 SUCCESS, 0 FAILURE** — unchanged, as it must be for a group that touched no code.
+`node checks/run-ratchet.js` → exit 0.
+
+Every CHECK command in the spec was executed at this head and its exit code recorded:
+
+| Command | Exit |
+|---|---|
+| `main.exe --title "mutants: run drives the wrapper once per mutant with the declared set"` (CHECK-1) | 0 |
+| `main.exe --title "mutants: run drives the ENGINE once per mutant with the declared set"` (CHECK-1's OLD title) | **3** — selects nothing |
+| CHECK-2, CHECK-3, CHECK-4, CHECK-5 (tezt titles) | 0, 0, 0, 0 |
+| CHECK-14, CHECK-16, CHECK-18, CHECK-19 (tezt titles) | 0, 0, 0, 0 |
+| CHECK-34, CHECK-36, CHECK-38, CHECK-41 (new tezt titles) | 0, 0, 0, 0 |
+| CHECK-44, CHECK-45, CHECK-46, CHECK-47, CHECK-48, CHECK-49 (new tezt titles) | 0, 0, 0, 0, 0, 0 |
+| `node checks/outcome-join-is-site-identity.js` (CHECK-35) | 0 |
+| `node checks/empty-scope-and-unmatched-block-completion.js` (CHECK-37) | 0 |
+| `node checks/arch-impact-boundary-refuses-empty.js` (CHECK-39) | 0 |
+| `node checks/tree-boundary-non-git-checkout.js` (CHECK-40) | 0 |
+| `node checks/tree-boundary-non-git-checkout.js .` — the relative-argument form | **2** — checks nothing |
+| `node checks/unmapped-survivor-carries-its-verdict.js` (CHECK-43) | 0 |
+| `node checks/genuine-99-is-not-a-refusal.js` (CHECK-42) | 0 |
+| `scripts/check-status-provenance.sh bin/arch_mutants` (CHECK-7) | 0 |
+| `scripts/check-status-provenance.sh <copy with the unmapped record's provenance deleted>` | **0 — the positive control, and it did not fire** |
+| `checks/status-provenance-per-record.sh` (CHECK-22) | 0 |
+| `node checks/status-scan-eof-is-not-a-pass.js` (CHECK-30) | 0 |
+| `grep -rn analysis_coverage bin/arch_mutants/ mutants-schema-migration.sql` (FR-026) | 1 — no match, the prohibition holds |
+
+CHECK-6 and CHECK-10 are DEFERRED and their titles select nothing, so both exit 3 by construction;
+their rows say so rather than implying a run. CHECK-8, CHECK-9, CHECK-11..CHECK-13, CHECK-15,
+CHECK-17, CHECK-20, CHECK-21, CHECK-23..CHECK-29 and CHECK-31..CHECK-33 were not re-run here: they
+were unchanged by this group, and `node checks/run-ratchet.js` covers the `checks/` tier.
+
+### Filed for round 4, not fixed here
+
+1. `scripts/check-status-provenance.sh` — drop the `unmapped` exclusion from the header and widen the key regex beyond `engine_status`; the record FR-013 now covers is invisible to it, proven by a positive control that did not fire.
+2. `checks/tree-boundary-non-git-checkout.js:38` — `path.resolve` the `process.argv[2]` root; a relative argument makes the check exit 2 while checking nothing.
+3. FR-026 / AC-46 — write the `analysis_coverage` grep guard, give it a CHECK-N, red-verify it against a fixture that inserts a row.
+4. FR-009 / AC-41 — nothing verifies the `docs/schema.md` row exists or is honest.
+5. `checks/dispatch-covers-open-findings.js` — a finding named in a dispatch TABLE counts as owned; nothing distinguishes that from a finding named in an OUTCOME section. This group went undispatched for a round with the check green.
+6. Nothing fails when a check is added to `checks/` and not listed in the spec's Runnable Checks table. CHECK-32 covers the runner; the spec's own coverage is enumerated by hand and drifted to 13 of 20.
