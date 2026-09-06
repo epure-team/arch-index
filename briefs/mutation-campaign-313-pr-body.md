@@ -205,8 +205,8 @@ mattering. Findings handed to the roadmap session separately.
 
 ## What a GO on this branch can and cannot mean
 
-**No campaign has ever run.** Measured, not assumed: no database under `~/dev` or
-`/mnt/ssd-external-2to` carries a `mutants` table. There are no kills, no survivors, no
+**No campaign has ever run.** Measured, not assumed: no database on this machine, inside
+the repository or on its scratch volumes, carries a `mutants` table. There are no kills, no survivors, no
 attributions. The machinery's intended output has never been observed by anyone.
 
 **But the mechanism underneath it now has been, and that is new since round 3.** This section
@@ -712,22 +712,73 @@ this work.
 
 Every number in "The campaign, executed" was measured against SQLite databases that are
 **not committed and not committable** — they are build artefacts of a run over another
-project. They are at `/mnt/ssd-external-2to/miaou-campaign/`:
+project, held on a local scratch volume. **They are therefore not evidence anyone else can
+inspect.** What follows is the recipe to regenerate them, so the figures are reproducible
+rather than merely reported.
 
-| file | what it holds |
-|---|---|
-| `full-selected.db` | the 4931-run campaign: 772 KILLED, 4159 SURVIVED, `top_bounded` on every row |
-| `ab-selected.db` / `ab-naive.db` | the void 76-mutant pair — md5-identical over every run row, both profile `group`; superseded, nothing rests on it |
-| `full-naive.db` | the naive arm, completed after the stop: 4929 runs, 774 KILLED, 4155 SURVIVED |
-| `plan.json` | `test_cone_escapes` (358), `indexed_functions` (6169), `test_roots` (1124), `unreached` (3668) |
+**Target.** `miaou`, `src/` in full — 173 tracked `.ml` files, 28 518 lines; test suite in
+`test/`, 68 alcotest executables. Any OCaml project with an alcotest suite works; the
+figures below are specific to that one.
 
-The corpus is `miaou`, `src/` entire, at `/mnt/ssd-external-2to/miaou-campaign` (detached
-at `c859ec8`). The engine is mutaml 0.3 from a throwaway switch at
-`/mnt/ssd-external-2to/mutaml-pilot`. **If that disk is cleared, every figure in this
-body becomes unverifiable** — the claims remain readable, the evidence does not. The
-queries that produced them are one `group by` each over `mutant_runs`; the columns are
-`engine_status`, `selection_provenance`, `intended_tests`, `executed_tests`,
-`executed_superset`.
+**Prerequisites, and two of them are non-obvious.**
+
+1. `mutaml` 0.3 in a throwaway opam switch (do not install it into the project switch).
+2. **`(lang dune 3.2)` in `dune-project`.** At 3.3 and above, mutaml 0.3 silently writes no
+   `.muts` files: the build exits 0, prints `Writing mutation info to …`, and nothing
+   exists. Bisected — 3.0/3.1/3.2 work, 3.3/3.4/3.5/3.10/3.15 do not. Lowering the version
+   makes dune regenerate the `.opam` files.
+3. `(instrumentation (backend mutaml))` in every `dune` file under `src/` (20 of them).
+4. `MUTAML_SEED` set explicitly. `arch-mutants --seed` is recorded in the database **and
+   never passed to the engine** (a defect, listed above); mutaml's own default is a random
+   seed *per file*, so without the environment variable a campaign can stamp `seed 42` over
+   a catalogue built from random ones.
+
+**Then, in order.**
+
+```
+arch-index index --repo <project> --db <db>        # build the index
+arch-mutants plan   --db <db> --out plan.json      # test cone, targets, ⊤ escapes
+arch-mutants run    --db <db> --plan plan.json \
+                    --test-cmd <adapter> --catalogue <muts>
+arch-mutants verdict --db <db>                     # published verdicts
+```
+
+The `--test-cmd` adapter maps a test name to the executable that runs it; a `testmap.tsv`
+derived from the index is enough. Give it an env switch for the naive arm (run the whole
+suite regardless of selection) so both arms share one script and one catalogue.
+
+**Three things that will stop the run, all of them upstream of any measurement.**
+
+- **`run` rejects any index arch-index itself produces.** Anonymous functions are named
+  `<fun:L:C>` by the indexer; `<` and `>` fail `name_is_safe`, so it exits 2 before writing
+  anything. The error advises `--tests` exclusion, which the selector's globs cannot express
+  (no negation, no character classes). Work around it by rewriting those names in a copy of
+  the database.
+- **Dune's shared cache replays the ppx output without re-running it.** After `rm -rf
+  _build` the log shows every `Writing mutation info` line with no file on disk. Verify
+  instrumentation by the presence of `.muts` files, never by grepping the log.
+- **mutaml mutates `/` as integer division**, so `Eio.Path.(env#fs / path)` breaks the
+  instrumented build with an unlocated error (`File "_none_", line 1`). Rewrite the site as
+  `Eio.Path.( / ) env#fs path`.
+
+Exclude any test requiring a tty from **both** arms, or it hangs before mutation.
+
+**What the databases should then contain**, so a re-run can be compared rather than trusted.
+Four tables: `mutants`, `mutant_runs`, `mutant_kills`, `mutant_campaigns`. The queries behind
+every figure in this body are one `GROUP BY` each over `mutant_runs`, on the columns
+`engine_status`, `selection_provenance`, `intended_tests`, `executed_tests` and
+`executed_superset`. The four-mutant divergence is an `ATTACH` of the two arms and a join on
+`mutant_id`:
+
+```sql
+SELECT s.engine_status, t.engine_status, count(*)
+FROM mutant_runs s JOIN naive.mutant_runs t USING (mutant_id)
+GROUP BY 1, 2;
+```
+
+Expect `completed_at` to stay NULL: mutants exceeding mutaml's 20 s timeout are killed
+before the wrapper writes its trace line, so they are executed-but-unobserved → PENDING →
+the campaign is never stamped complete. On a real repository that is the nominal case.
 
 ### One experiment this branch specifies and does not perform
 
