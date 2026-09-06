@@ -80,11 +80,24 @@ This branch adds **15** rows to the metric, and they are not one class:
   therefore all of them. That is the inert "never in this index, carries no signal about a resolver
   miss" class the ratchet's own re-scope note names alongside Stdlib. The module makes those calls
   because `Arch_db.open_ro` is read-only and a campaign has to write.
-- **3** `Arch_tezt.Temp.dir` call sites added to `tezt/tests/mutants.ml`, 0 on main. These are
-  **not** the inert class — `Arch_tezt` is in this repository, so they are the signal-carrying
-  residue the ratchet exists to notice. They are an instance of a shape main already carries at
-  39 / 26 / 16 rows for `Check.option` / `Temp.file` / `Temp.dir`, not a new defect, but they are an
-  addition to the class that matters and this PR says so rather than filing them with the twelve.
+- **12** `Arch_tezt.Temp.*` call sites added by this branch's tezt tests. **CORRECTED: these are
+  ALSO the inert class.** An earlier version of this section called them the signal-carrying
+  residue, reasoning that `Arch_tezt` is a module in this repository. That reasoned from the
+  module PATH, not from where the callee lives. Measured: `tezt/lib/arch_tezt.ml` is
+  `include Tezt` / `include Tezt.Base`, so `Arch_tezt.Temp` **is** `Tezt.Temp`, re-exported — the
+  callee comes from the *tezt* package and is no more in this index than `Stdlib` is. The
+  principle the `Stdlib.` exclusion states — "never part of this index, so the row carries zero
+  signal about a resolver miss" — covers them exactly.
+
+  So this branch adds **no signal-carrying rows at all**: all of its additions are calls that
+  leave the indexed universe, and none of them is a resolver miss. That is a weaker claim than
+  the one it replaces and it is the true one.
+
+  The wider point belongs to the metric, not to this branch: the exclusion is implemented as a
+  NAME (`Stdlib.%`) where the property is MEMBERSHIP — is this callee outside the indexed
+  universe, so that no resolver could ever have resolved it? Patching in `Arch_tezt.%` beside
+  `Stdlib.%` would move the boundary rather than remove it. That re-baselining is roadmap 4.11's
+  and is deliberately not done here: a shared gate is recalibrated by one branch at a time.
 
 `must_null_ceiling.ml` is **identical to main** in this branch, deliberately. A first version
 recalibrated it and that was withdrawn: a shared gate must be recalibrated by one branch at a time,
