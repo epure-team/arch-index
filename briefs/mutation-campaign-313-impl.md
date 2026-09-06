@@ -1656,3 +1656,30 @@ Nothing imposed was skipped. Two things a falsification read should know:
 - The old matcher is retained verbatim inside the new file, running on every invocation. It
   decides nothing. It exists so the two numbers are produced by one process over one corpus, and
   so nobody has to re-run an old revision to compare.
+
+### The three affordances were exercised, not just written
+
+Affordance 1 and 2 are claims about a program and were run rather than asserted. The brief and
+the verdict as they stood at `10f51bf` were extracted with `git show` into a scratch directory
+OUTSIDE the repository, and the gate was pointed at them:
+
+```
+node checks/dispatch-covers-open-findings.js --brief=<scratch>/impl.md \
+  --verdict=<scratch>/review.json --repo=<this checkout> --json=<scratch>/out.json
+```
+
+It read that past state, resolved commits against this checkout rather than the scratch
+directory, and produced a stamped machine-readable table: `record-v1`, 29 open, `mention-v0`
+23 owned / 6 unowned, `record-v1` 0 owned / 29 unowned. That is the shape a corrected census of
+an earlier round takes, on one round, with no census claimed.
+
+### One thing about the terrain that the brief got wrong
+
+The brief for this group stated the worktree had a single writer. It did not: `639353f`
+("plan(313): the census re-derivation is the gate fix's second half") landed from another writer
+after the baseline was read and before the first commit here. Its effect on this group's corpus
+was measured rather than assumed — it changed ONE line, the `ownership_census_owed` string, and
+the finding population is byte-identical on both sides: 144 findings, 29 OPEN non-scope at
+`10f51bf` and at `639353f`. Every number in this section is therefore unaffected. Recording it
+because a reader re-deriving these figures will find a commit between the stated HEAD and the
+first commit of this group, and should not have to work out for themselves whether it mattered.
