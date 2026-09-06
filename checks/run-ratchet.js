@@ -96,10 +96,36 @@ for (const t of tiers) {
   }
 }
 
+// Campaign-tier checks are population-dependent: each one's own Usage: comment names the path
+// it needs (a review.json, a qa-state.json, a manifest). The repository's own documented
+// convention for those paths — .claude/commands/roster-review.md, roster-qa.md,
+// roster-implement.md — is briefs/<task>-{review.json,qa-state.json,manifest.txt}, where
+// <task> is the content of briefs/ACTIVE_TASK. Running these with NO argument at all never
+// exercises the precondition they document: it only makes them print their own usage line,
+// which reads like "declined to run" but is really "never asked to do anything".
+const ACTIVE_TASK_FILE = path.join(root, 'briefs', 'ACTIVE_TASK');
+const activeTask = fs.existsSync(ACTIVE_TASK_FILE)
+  ? fs.readFileSync(ACTIVE_TASK_FILE, 'utf8').trim()
+  : null;
+
+const REQUIRED_ARG_BY_BASENAME = activeTask
+  ? {
+      'check-review-convergence.js': path.join('briefs', `${activeTask}-review.json`),
+      'check-qa-convergence.js': path.join('briefs', `${activeTask}-qa-state.json`),
+      'check-scope-diff.sh': path.join('briefs', `${activeTask}-manifest.txt`),
+    }
+  : {};
+
+const extraArgsFor = (rel) => {
+  const arg = REQUIRED_ARG_BY_BASENAME[path.basename(rel)];
+  return arg ? [arg] : [];
+};
+
 const runOne = (rel) => {
   const abs = path.join(root, rel);
+  const extra = extraArgsFor(rel);
   const argv0 = rel.endsWith('.js') ? process.execPath : '/usr/bin/env';
-  const args = rel.endsWith('.js') ? [abs] : ['bash', abs];
+  const args = rel.endsWith('.js') ? [abs, ...extra] : ['bash', abs, ...extra];
   const r = spawnSync(argv0, args, {
     cwd: root,
     encoding: 'utf8',
