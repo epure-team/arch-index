@@ -1113,3 +1113,146 @@ complete**, and the brief says so rather than letting a reviewer infer a guarant
 
 Only the third can fail on a reconstruction that has already happened. The first two shape
 what a future author writes; they do not detect what a future author wrote.
+
+## Group R4-D — outcome
+
+Worked in `/mnt/ssd-external-2to/arch-index-mutation-313` on `feat/mutation-campaign-313`,
+from `664e0d8b9f970df59cf926da176014d60854a5b1`, sole writer, three atomic commits, tree
+clean. Baseline **re-measured, not cited**: `dune build` exit 0; the tezt suite via
+`./_build/default/tezt/tests/main.exe --keep-going` gives **255 SUCCESS / 0 FAILURE**, exit
+0 — the same numbers the dispatch quoted, which is why they are stated here as a
+measurement of mine rather than as agreement.
+
+**The objective was to make the reconstruction OBVIOUS, not impossible, and one mechanism
+overshot in a useful direction: a reconstruction was already live and is now refused.**
+
+### The finding, and the half of it that was already mitigated
+
+Step 5a in `run` is commented *"THE CATALOGUE MUST BE AN INJECTION FROM ids TO SITE KEYS"*
+and its code checks one direction: no two entries may share a site key. The other direction
+was never checked, and it is reachable — a generic catalogue's `id` is author-supplied and
+**required** (a record without one dies at load), so two entries at different column spans
+can both claim one id.
+
+Measured at `664e0d8`, on two entries at `lib/x.ml:15` — cols 3-9 replacing with `true`,
+reported SURVIVED; cols 11-15 replacing with `false`, reported KILLED — both claiming the
+engine id `"1"`:
+
+* two `mutants` rows were written, so the **sites** were correctly distinguished;
+* `Hashtbl.replace mutant_ids s.s_id id` overwrote, so **both** selections resolved to the
+  col-11 row;
+* ONE `mutant_runs` row persisted: `mutant_id` = the col-11 site, `engine_status` =
+  **SURVIVED**. That is the col-3 site's verdict stored against the col-11 mutant — a false
+  attribution, the exact failure this round exists to remove;
+* the KILLED verdict was rejected by `UNIQUE(campaign_id, mutant_id)` and lost, and the
+  operator's only diagnostic was the raw SQLite constraint message.
+
+**And what did NOT happen, recorded so nobody reads this as bigger than it is.** The
+campaign did **not** read as complete. The reconciliation guard — already in the tree from
+an earlier group — saw 1 row against 2 attempts, withheld `completed_at`, published
+`"completed": false` and exited 1. So this was a **wrong row, not a silent success**: a real
+mitigation doing its job. What remained was a false attribution written into `mutant_runs`
+and a constraint error handed to an operator in place of a cause.
+
+### The three mechanisms, and what each is worth
+
+**1. Type and naming — shapes what a future author writes; prevents nothing.** `s_id :
+string` is now `s_engine_id : Engine_run_id.t`. The module exposes two constructors naming
+the two ends of the wrapper protocol (`of_catalogue`, `of_wrapper_trace`) and two renderers
+named for the **channel** they feed (`for_wrapper_argv` for the selection file's first field
+and hence `MUTAML_MUTANT`; `to_display_string` for diagnostics and the `engine_mutant_id`
+column). There is deliberately no `to_string`. The same rule was applied to the two
+renderers that already existed and were named for their type: `engine_name_to_string` →
+`engine_name_for_display`, `site_key_to_string` → `site_key_for_display`.
+
+**This does not close the hole, and the module's own docstring says so** rather than leaving
+a reviewer to infer a guarantee. Both legitimate uses need a string, so the type must have a
+renderer, and `to_display_string a = to_display_string b` reconstitutes exactly the
+comparison an unexposed equality was meant to forbid — as does OCaml's structural equality,
+which still applies to an abstract type. What is bought is that the wrong thing now has to
+be written out with a channel named inside it, so it reads as wrong **at the call site**
+instead of as ordinary. Legibility, not prevention.
+
+**2. Identity-bearing operations typed on `site_key`.** `mutant_ids` — the map standing
+between a selection and the database row its verdict is written to — was keyed on the engine
+id. That is the deleted join arm wearing a hashtable: an identity-bearing operation keyed on
+a run-scoped coordinate. It is now keyed on `site_key`, so weakening the refusal below
+cannot quietly reintroduce a verdict stored against the wrong row.
+
+**3. The refusal — the only part that can fail on a reconstruction that has already
+happened.** New step **5b**, beside 5a and *before* the campaign row exists, so a refusal
+leaves the database as it was found: no engine id may address more than one SELECTED site.
+The id is the wrapper's only handle — two sites under one id cannot be activated separately,
+and the trace line that returns cannot be attributed to either — so there is no correct
+choice to make, which is 5a's own doctrine reached along the other axis. The diagnostic
+names the shared id and every site claiming it.
+
+Mechanism 3 as the dispatch named it — `checks/join-independent-of-id-shape.js` — was
+**already delivered** by `c9091b4`/`45f6140`, with all four arms (numbered, named, mixed,
+degenerate). I re-ran it here rather than assuming: it passes. **I built nothing for it and
+claim no credit for it**; the dispatch listed it as a deliverable and it was already done.
+
+### The ratchet
+
+`checks/one-engine-id-two-sites-is-refused.js` — new, self-contained, exit 0 pass / 1
+assertion fired / ≥2 setup failure. **It is a RULE, not a regression test**, and its own
+header says which:
+
+* three **refusing** arms state the property under vocabularies sharing no lexical shape —
+  NUMBERED (`"1"`/`"1"`), NAMED (`"m1"`/`"m1"`), and AMONG-THREE where a well-formed third
+  entry does not rescue the pair. A fix that special-cased numeric ids would read red on the
+  named arm;
+* one **CONTROL** arm runs the identical catalogue with distinct ids and must still
+  complete, with each verdict on its own site. A blanket refusal reads red rather than
+  green — this is what stops it from being a check that cannot fail;
+* each refusing arm asserts the database is left as found (`mutant_campaigns`,
+  `mutant_runs` **and** `mutants` all zero) and that the diagnostic **names** the shared id.
+  A refusal an operator cannot act on is a refusal that sends them to read the source.
+
+**Red-verified** by `git checkout 664e0d8b9f970df59cf926da176014d60854a5b1 --
+bin/arch_mutants/arch_mutants.ml` and rebuilding — never by `git stash`: exit 1, **12
+assertions fired** across the three refusing arms, with the control arm **green in both the
+red and the green run**, which is what makes the failure attributable to the property rather
+than to the check merely telling two trees apart.
+
+**What it does not cover, stated rather than inferred:**
+
+* it cannot stop a future author comparing two engine handles in code, and nothing can — see
+  mechanism 1's ceiling above. A comparison with no observable consequence is invisible to
+  it;
+* it looks only at **selected** sites. Duplicate ids among catalogue entries that no target
+  reaches are not refused, because no such id is ever handed to the wrapper;
+* it says nothing about ids that collide only after some future normalisation (trimming,
+  case folding). There is none today; if one is added, this check passes while the collision
+  is reintroduced inside it.
+
+### Measurements at `HEAD` (this commit's parent chain, tree clean)
+
+| | value |
+|---|---|
+| `dune build` | exit 0 |
+| tezt suite, `main.exe --keep-going` | 255 SUCCESS / 0 FAILURE, exit 0 |
+| `node checks/one-engine-id-two-sites-is-refused.js` | exit 0 — 3 refusing arms + 1 control |
+| same check, `arch_mutants.ml` restored to `664e0d8` | exit 1 — 12 assertions, control green |
+| `node checks/run-ratchet.js`, before this section was written | 37 passed, 1 asserted, 0 harness errors, 4 not run |
+| `node checks/run-ratchet.js`, after it | **38 passed, 0 asserted**, 0 harness errors, 4 not run |
+
+The single remaining assertion was `checks/dispatched-groups-were-executed.js`, reporting
+R4-D planned with no outcome section. **This section is what closes it**, and the honest
+reading of that is narrow: it closes because the section exists, so the ratchet measures the
+presence of this text and not the truth of it. The four "not run" are the
+population-dependent campaign-tier scripts, unchanged by this group.
+
+### Steps skipped, and one judgement call
+
+* **No push, no PR, no merge.** Public repository; the dispatch forbade it.
+* **`scripts/check-scope-diff.sh` untouched** (vendored, md5 `0e85c1f411588a91d1dd8ffe840f21b9`),
+  as were `bin/arch_rules/arch_rules.ml`, `lib/arch_tools/arch_sel.ml` and
+  `lib/arch_tools/arch_graph.ml`. Nothing was written to `/home/mathias/dev/arch-index`.
+* **The spec CHECK table was edited** (CHECK-52) although the dispatch did not ask for it,
+  because every other check in this branch is documented there and an undocumented one is a
+  check the next reader does not know exists. The ratchet was re-run **after** that edit to
+  confirm the added line shifted no fingerprint: same 37/1/0/4.
+* **I did not capture the ratchet summary line before my change**, only its tail, so the
+  "36 passed" that would precede 37 is an inference from having added exactly one passing
+  check — not a measurement. Stated as such rather than quoted as one.
