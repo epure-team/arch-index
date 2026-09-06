@@ -1857,3 +1857,126 @@ false-positive already recorded in this round against a sibling check
 (`checks/tree-boundary-non-git-checkout.js:153`). The wording was changed and the matcher was
 left alone, which is the correct direction: widening the matcher to tolerate the denial would
 have moved the boundary rather than removed it.
+
+## Group R6-A — outcome
+
+One HIGH, and it was created by the previous round's repair.
+
+OWNER checks/tree-boundary-non-git-checkout.js:1:gate-vacuous | status=dispatched | commit=41380380dd2ce5f3f9cea0346e82bcab7bb22cbf | check=checks/tree-boundary-anchor-is-structural.js | by=R6-A
+
+### The reproduction, replayed before anything was repaired
+
+One variable turned, and only one. The `Anchor_cwd` literal kept its fall-back
+vocabulary and gained the affirmative sentence: *"The artefact was reached by walking
+ancestor directories, so this checkout is nested inside another one."* Rebuilt — the
+binary moved from 7 324 600 to 7 324 536 bytes and its mtime advanced, so a compilation
+really happened and the check was not reading the previous one.
+
+`checks/tree-boundary-non-git-checkout.js` printed `✓ it does NOT claim a nesting or a
+foreign tree — false` and exited **0**. So did `checks/tree-boundary-tracked-marker.js`.
+So did a **third** file the report did not name, `checks/tree-boundary-git-cannot-answer.js`,
+built from the same construction — though for that one the control is not a hole, since it
+has no fallback-arm probe; its shared weakness is that only wording separated its arms.
+
+The coordinator's warning about the invalid first control was respected: replacing the
+whole literal drops the fall-back wording too, a different assertion fires, and the check
+exits 1 — a result that would have "refuted" a correct report. A control that turns two
+variables cannot attribute its outcome.
+
+### The repair is not a third phrase, and that was the coordinator's correction
+
+The brief first asked for a vocabulary firing on all THREE phrasings. That criterion
+perpetuates the class: **three is only the count seen so far**, the previous repair knew
+**two** and failed for exactly that reason, and a fourth phrasing next month passes green.
+
+So the arm is now observable **structurally**. `bin/arch_mutants/arch_mutants.ml` gained
+`anchor_tag`, an exhaustive match on `type tree_anchor` with **no wildcard**, and the
+refusal prints `arch-mutants: boundary-anchor=<tag>` on its own line. Which arm decided the
+boundary is now settled without reading a word of prose. Reword every diagnosis and the tag
+does not move.
+
+It also discriminates where no phrase could. `SAYS_FOREIGN_TREE` is true under **both** the
+git arm and the marker arm, so a guard that had collapsed those two into one passed every
+probe in every sibling check before this round. Three checks now assert the exact tag per
+refusing probe.
+
+POSITIVE CONTROL on the exhaustiveness, measured and not asserted: adding a fifth
+constructor to `type tree_anchor` and building produced
+`Error (warning 8 [partial-match]): this pattern-matching is not exhaustive` at both sites,
+exit 1. The constructor was reverted immediately.
+
+### What could NOT be made structural, and is now labelled as an enumeration
+
+Whether the English sentence beside the tag is **true of that arm** is not decidable by any
+mechanism — the diagnoses are free literals sitting next to a tag chosen by the constructor,
+and a lying literal is invisible to the tag. So the phrase matchers stay, `SAYS_NESTED` is
+added as the third, and each is asserted in **both** polarities.
+
+The honest part is the labelling. Each file now states, **in its header and in its success
+line** and not in a buried comment, that the ARM is enforced as a property while the PROSE is
+an ENUMERATED SET of three phrasings that a fourth defeats. Shipping an enumeration under a
+title promising a property is where this check started; it is what produced this HIGH.
+
+### Falsifiable claims
+
+- `checks/tree-boundary-non-git-checkout.js` and `checks/tree-boundary-tracked-marker.js`
+  become RED when the `Anchor_cwd` diagnosis keeps its fall-back wording and adds an
+  affirmative nesting claim. **X is a case both PASSED at d39d167** — measured above.
+  After the repair: exit 1, **exactly one** assertion fired in each, every other probe green,
+  so the failure is attributable to the phrasing and not to the check telling two trees apart.
+- `checks/tree-boundary-git-cannot-answer.js` becomes RED when the undetermined arm's tag
+  collapses into the marker arm's. X passed before, because at d39d167 no tag existed at all.
+  Measured: 2 assertions fired, exit 1, **every wording assertion still green** — which is the
+  point, no phrase could see it.
+- `checks/tree-boundary-anchor-is-structural.js` becomes RED when the driver stops naming its
+  arm, and when two arms share a tag. Both X passed before; the first IS the state at d39d167.
+
+### Where an absence was deliberately NOT added
+
+`checks/tree-boundary-git-cannot-answer.js` did not get the nesting absence assertion. Every
+probe in it takes the marker or the undetermined arm, neither of which can emit a nesting
+claim truthfully, so the assertion would be one no probe there could turn red — a green that
+weighs nothing, the exact defect removed from a sibling this round. Under-claiming was chosen
+over coverage theatre. The affirmative anchor for that phrasing lives in
+`checks/tree-boundary-tracked-marker.js`, whose new probe 5 exists for it: a nested checkout
+that is its own repository takes the git arm, the one layout where claiming a nesting is TRUE.
+
+Symmetrically, no assertion was added to the ACCEPTANCE probes forbidding the anchor tag. The
+tag is emitted by `refuse`; an accepted wrapper cannot print one, so forbidding it there would
+be the same weightless green the round-5 repair correctly deleted.
+
+### Measured, with corpus and build state
+
+| what | before (d39d167) | after (this section's parent) |
+| --- | --- | --- |
+| `dune build` | exit 0 | exit 0 |
+| `./_build/default/tezt/tests/main.exe --keep-going` | exit 0, 255 SUCCESS / 0 FAILURE, all 255 ordinals present | exit 0, 255 SUCCESS / 0 FAILURE, all 255 ordinals present — unchanged |
+| `node checks/run-ratchet.js` | 39 passed, 1 asserted, 0 harness errors, 4 not run | 40 passed, 1 asserted, 0 harness errors, 4 not run |
+| `checks/tree-boundary-non-git-checkout.js` | 4 probes, 11 assertions, exit 0 | 4 probes, 16 assertions, exit 0 |
+| `checks/tree-boundary-tracked-marker.js` | 4 probes, 10 assertions, exit 0 | 5 probes, 17 assertions, exit 0 |
+| `checks/tree-boundary-anchor-is-structural.js` | did not exist; exit 1 when run against that source | 2 properties, 15 assertions, exit 0 |
+
+The extra pass is the new check; nothing that passed before stopped passing. The one asserted
+gate is the same one in both runs — the ownership gate — expected while findings remain without
+a record, and the four not-run each name their own precondition, unchanged.
+
+What the gate says about this section, and it says it in its own words: **`closed (HIGH 1)`**,
+naming commit `41380380dd2ce5f3f9cea0346e82bcab7bb22cbf` and
+`checks/tree-boundary-anchor-is-structural.js`. It was the only HIGH; the 21 findings that
+remain unowned are INFO 3, LOW 7, MEDIUM 11. Under `record-v1` this section owns **1** and
+claims nothing else — which was the requirement, since the matcher closes what a report
+mentions and a talkative report claims more than it did.
+
+### Steps taken, and traps not repaid
+
+Every commit was verified by `git show --stat`, never by the memory of the gesture: the
+`git checkout <sha> -- <path>` used for the red proofs writes the INDEX as well as the file,
+and `git status` was read after each one to confirm it. Every mutation was reverted by `cp`
+from a pristine copy or by `git checkout HEAD -- <path>`, never by `git stash`. The binary's
+mtime and size were read at every rebuild, so no check was ever measured against a stale
+compilation. No exit code was taken from the tail of a pipeline, and no count was read from a
+log whose producer had not returned.
+
+Nothing outside this worktree was written. `scripts/check-scope-diff.sh` is untouched
+(md5 `0e85c1f411588a91d1dd8ffe840f21b9`), as are the other vendored and shared-gate paths.
+Nothing was pushed and no PR was opened.
