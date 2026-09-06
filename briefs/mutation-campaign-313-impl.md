@@ -964,3 +964,39 @@ manifesting five times.
   CI. Blocked on a campaign at real scale, which has not run.
 - `arch_mutants.ml:1929` and `briefs/mutation-campaign-313-impl.md:0` — informational;
   the set of unexercised assumptions and a count corroboration. Carried, not actioned.
+
+## Group R4-D — make the reconstruction obvious, NOT impossible
+
+Serialised behind R4-B: it touches `bin/arch_mutants/arch_mutants.ml`, and two concerns in
+one head is how the second gets done halfway.
+
+**The ceiling is stated first, because a group told to make something impossible will report
+success when it has made it inconvenient.** R4-A closed the original conflation in the type:
+`site_key` is a distinct record with NO identifier field, so an identity cannot carry an
+engine id by construction, and `engine_name` splits `Engine_declared` from `Report_ordinal`.
+That part IS a compiler guarantee. What remains open is different and smaller: `s_id` is a
+bare `string`, so a future author can compare two of them and reconstitute the deleted join
+arm under a name no grep anticipates.
+
+**An abstract type with unexposed equality does NOT close that hole.** Both legitimate uses —
+telling the wrapper which mutant to build, and naming an entry in a diagnostic — require
+rendering to a string. The type therefore needs a renderer, and the moment it has one,
+`render a = render b` reconstitutes exactly the comparison the abstraction forbade.
+Abstraction MOVES the escape hatch; it does not remove it. That is the same argument as a
+cleverer grep, one layer up, and this round has already refused it once for probe 4.
+
+So the deliverable is three mechanisms with three different lifetimes, **none of them
+complete**, and the brief says so rather than letting a reviewer infer a guarantee:
+
+1. **Name the renderer for its PURPOSE, never its type** — `for_wrapper_argv`,
+   `to_display_string`; never a bare `to_string`. Then `to_display_string a =
+   to_display_string b` reads as wrong AT THE CALL SITE rather than as ordinary. This buys
+   legibility, not prevention.
+2. **Keep every identity-bearing operation typed on `site_key`**, so the wrong thing is not
+   merely visible but requires a deliberate detour to reach.
+3. **`join-independent-of-id-shape.js` is what actually CATCHES a reconstruction**, because
+   it diverges under any name: one report against a numbered, a named, a mixed and a
+   degenerate catalogue, asserting the joins agree.
+
+Only the third can fail on a reconstruction that has already happened. The first two shape
+what a future author writes; they do not detect what a future author wrote.
