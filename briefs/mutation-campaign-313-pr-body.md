@@ -399,6 +399,40 @@ lines, written by the same person who built the gate, on the evening he opened h
 PR — which is not a gate any more. The red states something true: **these 24 findings
 belong to nobody.** CI logs expire; this paragraph does not.
 
+### The red acquired a second assertion, and that one is a false positive in the scope gate
+
+Between `7f5fa6a` and `1442c7f` the ratchet went from **39 passed / 1 asserted** to **38
+passed / 2 asserted**. No commit of mine caused it: both touched only
+`briefs/<task>-pr-body.md`.
+
+The new assertion is `scripts/check-scope-diff.sh`, exit 1, **HIGH — out-of-manifest
+change: `lib/arch_tools/arch_report.ml`**. This branch has never touched that file:
+
+```
+git diff --name-status 090f832..HEAD -- lib/arch_tools/arch_report.ml   → empty
+git diff --name-status 090f832..origin/main -- lib/arch_tools/arch_report.ml → M
+```
+
+Main changed it (#92, `062f2dd` and `b120765`). CI runs on `event=pull_request`, which
+checks out the **merge ref**, so the diff the gate takes against this task's manifest base
+contains main's work as well as the branch's — and the gate attributes it to the task.
+
+**Three independent confirmations, because a single one would not settle it:**
+
+- **Positive control.** `bash scripts/check-scope-diff.sh briefs/<task>-manifest.txt` run
+  against the branch alone exits **0**. Same gate, same manifest, no finding.
+- **Timing.** `b120765` landed on main at `2026-09-06T09:38:08Z`. The last run without the
+  assertion started at `09:20:37Z`; the first run with it started at `09:42:07Z`. The
+  assertion appears in the first run begun after main moved, not after any commit here.
+- **The named file.** It is not a file this task's work could plausibly reach.
+
+**The gate cannot distinguish "this task changed the file" from "main changed it since
+this task's base."** Its own documentation describes attributing a mid-phase third-party
+file to the task as a known blind spot; this is that blind spot reached through the merge
+ref rather than through a concurrent writer, and on a long-lived branch it will fire again
+for every file main touches outside the manifest. It is a `scope` finding of severity HIGH
+that is **not a defect in this branch's diff**, and it should not be read as one.
+
 ### Exactly what gates this merge, measured rather than assumed
 
 `repos/epure-team/arch-index/branches/main/protection` returns:
