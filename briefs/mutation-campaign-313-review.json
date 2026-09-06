@@ -364,7 +364,10 @@
    "red_verified": null,
    "reopened_at_round": 3,
    "reopened_from_round": 2,
-   "reopen_note": "Re-found by the round-3 review on this HEAD, by two specialists independently."
+   "reopen_note": "Re-found by the round-3 review on this HEAD, by two specialists independently.",
+   "last_replayed_at": "0851761b637c46e524cd354abca3fa04acde3681",
+   "replay_verdict": "SUBJECT-ABSENT",
+   "replay_note": "Replayed by CONTENT at 0851761, not by coordinate -- the coordinate no longer lands on the subject. the basename join is gone: `same_path` is full-path equality with only a leading ./ normalised, `by_site` discriminates on cols and replacement, and `refuse_ambiguous` exists. The claim describes code that is not there. NOT auto-resolved: a HIGH+ closes only with a linked proven-red check, and groups R4-A and R4-B will settle it by execution. Recorded so the row stops being counted as a live defect it no longer is."
   },
   {
    "severity": "HIGH",
@@ -1381,7 +1384,10 @@
    "red_verified": null,
    "reopened_at_round": 3,
    "reopened_from_round": 2,
-   "reopen_note": "Re-found by the round-3 review on this HEAD, by two specialists independently."
+   "reopen_note": "Re-found by the round-3 review on this HEAD, by two specialists independently.",
+   "last_replayed_at": "0851761b637c46e524cd354abca3fa04acde3681",
+   "replay_verdict": "SUBJECT-ABSENT",
+   "replay_note": "Replayed by CONTENT at 0851761, not by coordinate -- the coordinate no longer lands on the subject. guard_inside_tree now branches on a three-way anchor (Anchor_git / Anchor_marker / Anchor_cwd) and under Anchor_cwd explicitly REFUSES to claim nesting. The described failure mode is addressed. NOT auto-resolved: a HIGH+ closes only with a linked proven-red check, and groups R4-A and R4-B will settle it by execution. Recorded so the row stops being counted as a live defect it no longer is."
   },
   {
    "severity": "MEDIUM",
@@ -1460,7 +1466,10 @@
    "red_verified": null,
    "reopened_at_round": 3,
    "reopened_from_round": 2,
-   "reopen_note": "Re-found by the round-3 review on this HEAD, by two specialists independently."
+   "reopen_note": "Re-found by the round-3 review on this HEAD, by two specialists independently.",
+   "last_replayed_at": "0851761b637c46e524cd354abca3fa04acde3681",
+   "replay_verdict": "SUBJECT-ABSENT",
+   "replay_note": "Replayed by CONTENT at 0851761, not by coordinate -- the coordinate no longer lands on the subject. same as :1393 and it is one of the three CRITICALs. Labelled 'ROUND-1 FINDING NOT CLOSED' -- it IS closed. The label was inherited across two rounds and never replayed. NOT auto-resolved: a HIGH+ closes only with a linked proven-red check, and groups R4-A and R4-B will settle it by execution. Recorded so the row stops being counted as a live defect it no longer is."
   },
   {
    "severity": "HIGH",
@@ -1657,7 +1666,10 @@
    "red_verified": null,
    "reopened_at_round": 3,
    "reopened_from_round": 2,
-   "reopen_note": "Re-found by the round-3 review on this HEAD, by two specialists independently."
+   "reopen_note": "Re-found by the round-3 review on this HEAD, by two specialists independently.",
+   "last_replayed_at": "0851761b637c46e524cd354abca3fa04acde3681",
+   "replay_verdict": "SUBJECT-ABSENT",
+   "replay_note": "Replayed by CONTENT at 0851761, not by coordinate -- the coordinate no longer lands on the subject. the boundary is chosen by HOW it was found, and the git-repository case is one of three, not the only one. The claim describes the earlier single-anchor version. NOT auto-resolved: a HIGH+ closes only with a linked proven-red check, and groups R4-A and R4-B will settle it by execution. Recorded so the row stops being counted as a live defect it no longer is."
   },
   {
    "severity": "HIGH",
@@ -1977,7 +1989,9 @@
    "resolved_round": null,
    "check": null,
    "pre_fix_sha": "618acb97afc069dc24acb3e5ae354f08a12143cd",
-   "red_verified": null
+   "red_verified": null,
+   "last_replayed_at": "618acb9",
+   "replay_verdict": "CONFIRMED-AT-ROUND-3"
   },
   {
    "severity": "HIGH",
@@ -1996,7 +2010,9 @@
    "resolved_round": null,
    "check": null,
    "pre_fix_sha": "618acb97afc069dc24acb3e5ae354f08a12143cd",
-   "red_verified": null
+   "red_verified": null,
+   "last_replayed_at": "618acb9",
+   "replay_verdict": "CONFIRMED-AT-ROUND-3"
   },
   {
    "severity": "HIGH",
@@ -2015,7 +2031,9 @@
    "resolved_round": null,
    "check": null,
    "pre_fix_sha": "618acb97afc069dc24acb3e5ae354f08a12143cd",
-   "red_verified": null
+   "red_verified": null,
+   "last_replayed_at": "618acb9",
+   "replay_verdict": "CONFIRMED-AT-ROUND-3"
   },
   {
    "severity": "HIGH",
@@ -2034,7 +2052,9 @@
    "resolved_round": null,
    "check": null,
    "pre_fix_sha": "618acb97afc069dc24acb3e5ae354f08a12143cd",
-   "red_verified": null
+   "red_verified": null,
+   "last_replayed_at": "618acb9",
+   "replay_verdict": "CONFIRMED-AT-ROUND-3"
   },
   {
    "severity": "LOW",
@@ -2053,7 +2073,9 @@
    "resolved_round": null,
    "check": null,
    "pre_fix_sha": "618acb97afc069dc24acb3e5ae354f08a12143cd",
-   "red_verified": null
+   "red_verified": null,
+   "last_replayed_at": "618acb9",
+   "replay_verdict": "CONFIRMED-AT-ROUND-3"
   },
   {
    "severity": "INFO",
@@ -2072,7 +2094,9 @@
    "resolved_round": null,
    "check": null,
    "pre_fix_sha": "618acb97afc069dc24acb3e5ae354f08a12143cd",
-   "red_verified": null
+   "red_verified": null,
+   "last_replayed_at": "618acb9",
+   "replay_verdict": "CONFIRMED-AT-ROUND-3"
   },
   {
    "severity": "CRITICAL",
@@ -2091,7 +2115,9 @@
    "resolved_round": null,
    "check": null,
    "pre_fix_sha": "618acb97afc069dc24acb3e5ae354f08a12143cd",
-   "red_verified": null
+   "red_verified": null,
+   "last_replayed_at": "618acb9",
+   "replay_verdict": "CONFIRMED-AT-ROUND-3"
   },
   {
    "severity": "HIGH",
@@ -2110,7 +2136,9 @@
    "resolved_round": null,
    "check": null,
    "pre_fix_sha": "618acb97afc069dc24acb3e5ae354f08a12143cd",
-   "red_verified": null
+   "red_verified": null,
+   "last_replayed_at": "618acb9",
+   "replay_verdict": "CONFIRMED-AT-ROUND-3"
   },
   {
    "severity": "HIGH",
@@ -2129,7 +2157,9 @@
    "resolved_round": null,
    "check": null,
    "pre_fix_sha": "618acb97afc069dc24acb3e5ae354f08a12143cd",
-   "red_verified": null
+   "red_verified": null,
+   "last_replayed_at": "618acb9",
+   "replay_verdict": "CONFIRMED-AT-ROUND-3"
   },
   {
    "severity": "HIGH",
@@ -2148,7 +2178,9 @@
    "resolved_round": null,
    "check": null,
    "pre_fix_sha": "618acb97afc069dc24acb3e5ae354f08a12143cd",
-   "red_verified": null
+   "red_verified": null,
+   "last_replayed_at": "618acb9",
+   "replay_verdict": "CONFIRMED-AT-ROUND-3"
   },
   {
    "severity": "HIGH",
@@ -2167,7 +2199,9 @@
    "resolved_round": null,
    "check": null,
    "pre_fix_sha": "618acb97afc069dc24acb3e5ae354f08a12143cd",
-   "red_verified": null
+   "red_verified": null,
+   "last_replayed_at": "618acb9",
+   "replay_verdict": "CONFIRMED-AT-ROUND-3"
   },
   {
    "severity": "MEDIUM",
@@ -2186,7 +2220,9 @@
    "resolved_round": null,
    "check": null,
    "pre_fix_sha": "618acb97afc069dc24acb3e5ae354f08a12143cd",
-   "red_verified": null
+   "red_verified": null,
+   "last_replayed_at": "618acb9",
+   "replay_verdict": "CONFIRMED-AT-ROUND-3"
   },
   {
    "severity": "MEDIUM",
@@ -2205,7 +2241,9 @@
    "resolved_round": null,
    "check": null,
    "pre_fix_sha": "618acb97afc069dc24acb3e5ae354f08a12143cd",
-   "red_verified": null
+   "red_verified": null,
+   "last_replayed_at": "618acb9",
+   "replay_verdict": "CONFIRMED-AT-ROUND-3"
   },
   {
    "severity": "MEDIUM",
@@ -2224,7 +2262,9 @@
    "resolved_round": null,
    "check": null,
    "pre_fix_sha": "618acb97afc069dc24acb3e5ae354f08a12143cd",
-   "red_verified": null
+   "red_verified": null,
+   "last_replayed_at": "618acb9",
+   "replay_verdict": "CONFIRMED-AT-ROUND-3"
   },
   {
    "severity": "MEDIUM",
@@ -2243,7 +2283,9 @@
    "resolved_round": null,
    "check": null,
    "pre_fix_sha": "618acb97afc069dc24acb3e5ae354f08a12143cd",
-   "red_verified": null
+   "red_verified": null,
+   "last_replayed_at": "618acb9",
+   "replay_verdict": "CONFIRMED-AT-ROUND-3"
   },
   {
    "severity": "MEDIUM",
@@ -2262,7 +2304,9 @@
    "resolved_round": null,
    "check": null,
    "pre_fix_sha": "618acb97afc069dc24acb3e5ae354f08a12143cd",
-   "red_verified": null
+   "red_verified": null,
+   "last_replayed_at": "618acb9",
+   "replay_verdict": "CONFIRMED-AT-ROUND-3"
   },
   {
    "severity": "LOW",
@@ -2281,7 +2325,9 @@
    "resolved_round": null,
    "check": null,
    "pre_fix_sha": "618acb97afc069dc24acb3e5ae354f08a12143cd",
-   "red_verified": null
+   "red_verified": null,
+   "last_replayed_at": "618acb9",
+   "replay_verdict": "CONFIRMED-AT-ROUND-3"
   },
   {
    "severity": "INFO",
@@ -2300,7 +2346,9 @@
    "resolved_round": null,
    "check": null,
    "pre_fix_sha": "618acb97afc069dc24acb3e5ae354f08a12143cd",
-   "red_verified": null
+   "red_verified": null,
+   "last_replayed_at": "618acb9",
+   "replay_verdict": "CONFIRMED-AT-ROUND-3"
   },
   {
    "severity": "MEDIUM",
@@ -2524,7 +2572,9 @@
    "resolved_round": null,
    "check": null,
    "pre_fix_sha": "618acb97afc069dc24acb3e5ae354f08a12143cd",
-   "red_verified": null
+   "red_verified": null,
+   "last_replayed_at": "618acb9",
+   "replay_verdict": "CONFIRMED-AT-ROUND-3"
   },
   {
    "severity": "MEDIUM",
@@ -2547,7 +2597,9 @@
    "resolved_round": null,
    "check": null,
    "pre_fix_sha": "618acb97afc069dc24acb3e5ae354f08a12143cd",
-   "red_verified": null
+   "red_verified": null,
+   "last_replayed_at": "618acb9",
+   "replay_verdict": "CONFIRMED-AT-ROUND-3"
   },
   {
    "severity": "LOW",
@@ -2570,7 +2622,9 @@
    "resolved_round": null,
    "check": null,
    "pre_fix_sha": "618acb97afc069dc24acb3e5ae354f08a12143cd",
-   "red_verified": null
+   "red_verified": null,
+   "last_replayed_at": "618acb9",
+   "replay_verdict": "CONFIRMED-AT-ROUND-3"
   }
  ],
  "cross_runtime_findings": [],
@@ -2671,5 +2725,6 @@
  "summary": "Round 3 NO-GO. THE CRITICAL IS NOT CLOSED AND IS NOW DIAGNOSED AT THE DESIGN LEVEL. Two specialists reproduced the original verdict inversion independently, by different routes, on this HEAD. PUT THE CONTRADICTION FIRST, NOT THE MECHANISM: the migration states that engine identifiers are NOT TRUSTED FOR IDENTITY and marks the column storing them as no part of any identity; the driver makes the engine id the FIRST join key. Two documents in one repository, each internally coherent, disagreeing about a load-bearing property, with nothing marking either as superseding the other. A reader who consults one is confirmed; a reader who consults both must decide which is stale with nothing to go on. That absent third statement is why a synthesised id can do damage at all. THE MECHANISM: load_generic writes the report's physical line counter into the same field that carries a real engine id, and the highest-priority join arm cross-checks on file and line only. So the join is decided by the LEXICAL FORM of the catalogue's identifiers \u2014 a catalogue numbered 1,2 misjoins and silently commits inverted verdicts, while the IDENTICAL report against m1,m2 refuses. No fixture using named ids can see this, and every reasonable fixture uses named ids, which is why two rewrites shrank the defect without removing it: both corrected the symptom, and the symptom is the only thing visible from inside a well-named fixture. The fix is architectural \u2014 split the field so a synthesised ordinal cannot inhabit the engine-id slot, make the site key the sole discriminator, and let a present engine id corroborate and refuse rather than select. THREE SIBLING HIGHS ARE THE SAME FAMILY, and it is worth naming as one: a claim and an implementation disagreeing, with the claim being what people read. source_hash stores two incomparable derivations in one column with nothing recording which, and its real branch is exercised nowhere. Schema 1.13 is INERT \u2014 a database carrying a completed campaign reports 1.2. run-ratchet states a fatality rule it does not implement, so a self-contained check can be permanently neutered by exiting 3 while the runner prints PASS. FOUR MORE HIGH, each executed: a duplicate site key silently ERASES a SURVIVED verdict while the campaign publishes complete, because a caught UNIQUE violation leaves the counters incremented and completed_at stamped; the repaired tree boundary refuses a legitimate invocation INSIDE THIS REPOSITORY, from a git-tracked nested dune-project, with a diagnosis that is false; and run-ratchet reports PASS while skipping checks it declined to feed, one of which asserts when given its input \u2014 concealing a real red for several commits. THE COST OF THE DISPATCH DEFECT IS NOT WHAT EITHER OF US ASSUMED. Group C was not ten deferred traceability findings; the group that went undispatched contained the architecture pass that DIAGNOSED THE ROUND'S CRITICAL, delayed by two rounds of symptom-fixing. An undispatched group is not a deferred increment of value: its value is unknown until it runs, and here it was the largest in the round. That is the argument for the dispatched-to-executed assertion, and a reader who sees 'group C was dispatched late' will otherwise assume the cost was proportional to its size. Four dispatch failures occurred in this task by four distinct mechanisms, one of them committed in the message announcing the previous one. WHAT HELD, and it is substantial. Eighteen ratchet checks were independently red-verified this round, each failure attributable, where rounds 1 and 2 found five vacuous \u2014 no check failed to go red. The traceability graph now matches the document exactly in both directions, 34/46/50, zero dangling references, where it covered two thirds with four. AC-20 is verified against a real mutaml 0.3: the wrapper is invoked twice, once per mutant and not once per engine run, so the per-mutant selection this whole design rests on is OBSERVED rather than argued. FR-003 moved from no criterion, no check and no code to enforced before the engine starts. A COUNT CAVEAT THAT REPEATS THE ROUND-2 ONE: the two CRITICAL entries are ONE defect, found independently by two specialists at two line numbers, and the normalizer did not merge them because it fingerprints on path:line:category. Roadmap 4.10 already carries that; this verdict is its second instance. The cross-runtime pass is DEGRADED on both runtimes since round 1 and the breaker forbids a re-probe absent a digest change, so this review is again one notch weaker than the two-model guarantee and does not claim otherwise. NO CAMPAIGN HAS EVER RUN: no database carries a mutants table, so what a GO here could support is that the machinery is correct, never that it produces attributable kills. Gates at 618acb9: dune build exit 0; 255 of 255 executed with --keep-going, 0 failures; ratchet 407 against a ceiling of 432; run-ratchet PASS. GATE: exit 2, DEGRADED, zero violations \u2014 51 of 51 links inconclusive for the reason recorded as its own finding since round 2, the ratchet checks not being node-runnable paths. Per the skill, exit 2 fails closed and is surfaced to the human rather than routed. The verdict is NO-GO on its own merits regardless. A MEASURED COST, NOT A TIDINESS PROBLEM: the three CRITICALs are ONE defect found by three routes and two HIGHs are ONE boundary, because the normalizer fingerprints on path:line:category and a coordinate does not identify an object across a rebase. The duplicate count INFLATED A SEVERITY CENSUS THAT DRIVES TRIAGE \u2014 the same class as the ceiling metric's fun:LINE:COL and a citation's file:line, and in each the remedy is the one already written here: anchor on content, keep the coordinate as a hint.",
  "gate_exit_status": 2,
  "gate_inconclusive_checks": 51,
- "gate_checks_total": 51
+ "gate_checks_total": 51,
+ "replay_provenance_note": "Every OPEN finding now carries `last_replayed_at`. A finding is a statement ABOUT A COMMIT; OPEN is a value someone set at a past commit, not a measurement against HEAD. Of 25 open, 21 were seen by a specialist reading 618acb9 during round 3; 4 were INHERITED from rounds 1-2 and had never been replayed. Replaying those 4 found ALL 4 describing code that is no longer there -- including one of the three CRITICALs. The open-findings census is a count of claims about past trees."
 }
