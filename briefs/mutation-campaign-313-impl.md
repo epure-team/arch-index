@@ -842,6 +842,59 @@ the site key: it must carry the anchor OCCURRENCE ordinal, sourced from the muta
 spec and never from a report's line counter; and a multi-candidate key REFUSES rather
 than picks, written next to the key because the tempting implementation is `LIMIT 1`.
 
+## Group R4-A — outcome
+
+Executed in `/mnt/ssd-external-2to/arch-index-mutation-313` on
+`feat/mutation-campaign-313`, branched from
+`0851761b637c46e524cd354abca3fa04acde3681`. Two atomic commits: `c9091b4` (the six
+ratchet checks, committed RED) and `45f6140` (the fix). `dune build` clean; the tezt
+suite run with `--keep-going` reports **255/255 SUCCESS, 0 failures** — the count comes
+from `main.exe --keep-going`, never from `dune test --force`, which stops at the first
+failure and under-reports.
+
+**The design ruling was taken as given and implemented, not re-litigated.** The engine id
+is demoted and kept: `engine_name` is a sum type (`Engine_declared of string` /
+`Report_ordinal of int`), so a synthesised report ordinal can no longer occupy the field
+a real engine name lives in — the type-checker refuses the confusion instead of a comment
+discouraging it. `run`'s join has NO id arm at all; the site key decides, and it carries
+the anchor OCCURRENCE ordinal read from the mutation specification. A multi-candidate key
+refuses, and the refuse-never-choose rule is written beside the `site_key` type because
+the tempting implementation is `LIMIT 1`. `engine_mutant_id` is still stored, labelled
+RUN-scoped at its column, in the driver, and in the write layer.
+
+**Six checks, each red before and green after, with the pre-fix sha recorded.** Red was
+re-proved on the fixed tree with
+`git checkout 0851761b637c46e524cd354abca3fa04acde3681 -- bin/arch_mutants
+mutants-schema-migration.sql`, rebuild, run, restore — never `git stash`, which is a trap
+in this repository.
+
+| check (all under `checks/`) | red at 0851761 | green at 45f6140 |
+| --- | --- | --- |
+| `join-independent-of-id-shape.js` | 1 | 0 |
+| `site-key-collision-is-refused.js` | 1 | 0 |
+| `completed-requires-persisted-runs.js` | 1 | 0 |
+| `source-hash-declares-its-derivation.js` | 1 | 0 |
+| `mutant-tables-declare-their-version.js` | 1 | 0 |
+| `identity-doctrine-is-resolved.sh` | 1 | 0 |
+
+**Red is necessary and not sufficient, and the difference is labelled.** Two of the six
+are RULES — they fire on cases nobody wrote and that the found defect never exhibited.
+`join-independent-of-id-shape` runs four arms over one report: numbered, named, a MIXED
+`['1','m2']` catalogue where only one id collides with an ordinal, and a DEGENERATE
+single mutant whose id equals its own ordinal. The mixed arm is where a partial residue
+would live and no pure arm can see it; measured at the pre-fix sha it degrades WORSE than
+the numbered case — one verdict inverted and one lost outright (`cols 11-15` came back
+empty). The degenerate arm is GREEN on the broken code by construction: there is nothing
+to permute with, so it asserts the property rather than the permutation.
+`completed-requires-persisted-runs` induces its write failure with a SQLite trigger rather
+than by replaying the UNIQUE violation that revealed the bug, so it covers any cause of a
+rejected write. The other four are closer to regression tests over a widened input, and
+the report says which is which rather than presenting six passes without labels.
+
+**What is NOT closed by this group.** The FR-030 tree boundary (`guard_inside_tree`,
+`checks/run-ratchet.js`) was untouched by design: R4-B and R4-C own those files and a
+second writer in one file is how a clean resolution deletes something.
+
 ## Group R4-B — the FR-030 tree boundary
 
 **Rows closed by this group:** `bin/arch_mutants/arch_mutants.ml:984`,
