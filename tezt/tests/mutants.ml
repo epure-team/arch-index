@@ -425,13 +425,22 @@ let wrapper_path () = Filename.concat (repo_root ()) "scripts/mutaml-wrapper.sh"
    soundness contract at all — and the whole claim is that the same report publishes three
    different verdicts. A harness that could only build one index would make two of those
    three arms unreachable while the assertions still read as if they covered them. *)
-let campaign_setup_on ?(extra_env = []) ~db ~tests ~name ~engine_body ~report () =
+(* [?catalogue] and [?plan_tests] are WIDENINGS of this harness, not changes to it: both
+   default to what every existing caller already got. The join between report entries and
+   catalogued sites is only testable with two mutants on ONE line, which the shared
+   catalogue deliberately does not have; and FR-003's subset prohibition is only reachable
+   when the plan and the run were computed from DIFFERENT test selections. *)
+let campaign_setup_on ?(extra_env = []) ?catalogue:(catalogue_text = campaign_catalogue)
+    ?plan_tests ?(extra_argv = []) ~db ~tests ~name ~engine_body ~report () =
   let dir = Temp.dir (name ^ "_campaign") in
   let plan_file = Filename.concat dir "plan.json" in
-  let _, plan_out = mutants ["plan"; db; "--tests"; tests; "--format"; "json"] in
+  let _, plan_out =
+    mutants
+      ["plan"; db; "--tests"; Option.value ~default:tests plan_tests; "--format"; "json"]
+  in
   write_file plan_file plan_out ;
   let catalogue = Filename.concat dir "catalogue.ndjson" in
-  write_file catalogue campaign_catalogue ;
+  write_file catalogue catalogue_text ;
   let report_file = Filename.concat dir "report.ndjson" in
   write_file report_file report ;
   let engine = Filename.concat dir "engine.sh" in
@@ -443,7 +452,7 @@ let campaign_setup_on ?(extra_env = []) ~db ~tests ~name ~engine_body ~report ()
   let argv extra =
     ["run"; db; "--plan"; plan_file; "--engine"; engine; "--test-cmd"; "true";
      "--catalogue"; catalogue; "--report"; report_file; "--tests"; tests]
-    @ extra
+    @ extra_argv @ extra
   in
   let run extra = run_command ~env (arch_mutants ()) (argv extra) in
   (* The JSON surface is read through the SPLIT runner. The driver routes the
@@ -2194,4 +2203,468 @@ let register_diff_bounded_survivor_unrecheckable () =
           Batch.eq_string b
             ~msg:"a ⊤-bounded SURVIVED is un-recheckable; a proved one is not"
             (sites b ~what:"scope" "unrecheckable" ds) "lib/y.ml:35") ;
+  Lwt.return_unit
+
+(* ------------------------------------------------------------------------ *)
+(* ROUND 3 — the driver and the wrapper                                     *)
+(* ------------------------------------------------------------------------ *)
+
+(* THE JOIN. Engine outcomes were matched to catalogued sites by
+   `Filename.basename file` plus LINE alone, consuming duplicates in list order
+   and never refusing — so two mutants on one line had their KILLED/SURVIVED
+   verdicts stored against EACH OTHER, and a `mutant_kills` row landed on a file
+   that merely shared a basename, under `attribution = singleton_executed_set`,
+   the one attribution that claims to name a killer.
+
+   Both discriminators were present and discarded: the schema's key is
+   UNIQUE(file_path, line, col_start, col_end, replacement, source_hash), and
+   the engine's own id is carried by the catalogue record AND by the report
+   entry.
+
+   Asserted on the DATABASE keyed by COLUMN, never on a rendered line: the
+   inversion is invisible in any rendering that groups by file and line, which
+   is why it survived two review rounds. *)
+let two_on_one_line_catalogue =
+  {|{"id":"m1","file":"lib/x.ml","line":15,"col_start":3,"col_end":9,"replacement":"true"}
+{"id":"m2","file":"lib/x.ml","line":15,"col_start":11,"col_end":15,"replacement":"false"}
+|}
+
+let register_run_join_is_site_identity () =
+  Test.register ~__FILE__
+    ~title:"mutants: two mutants on one line keep their own verdicts, and an ambiguous \
+            entry is refused"
+    ~tags:["mutants"; "run"; "join"]
+  @@ fun () ->
+  let db, _, _, run_json =
+    campaign_setup_on ~db:(load_fixture "mutants_join" campaign_stream)
+      ~tests:"file:test/**" ~name:"mutants_join" ~catalogue:two_on_one_line_catalogue
+      ~engine_body:(stub_engine ["m1"; "m2"])
+        (* The engine reports the SECOND mutant first. A join that consumes
+           duplicates in list order pairs each outcome with the other site. *)
+      ~report:
+        {|{"file":"lib/x.ml","line":15,"status":"KILLED","id":"m2","col_start":11,"col_end":15,"replacement":"false"}
+{"file":"lib/x.ml","line":15,"status":"SURVIVED","id":"m1","col_start":3,"col_end":9,"replacement":"true"}
+|}
+      ()
+  in
+  (* The AMBIGUOUS case, on its own database: a report entry naming an id the
+     catalogue does not know and carrying neither a column span nor a
+     replacement matches BOTH sites and can be told apart from neither. *)
+  let db2, _, run2, _ =
+    campaign_setup_on ~db:(load_fixture "mutants_join_ambiguous" campaign_stream)
+      ~tests:"file:test/**" ~name:"mutants_join_ambiguous"
+      ~catalogue:two_on_one_line_catalogue ~engine_body:(stub_engine ["m1"; "m2"])
+      ~report:{|{"file":"lib/x.ml","line":15,"status":"KILLED","id":"zz"}
+|}
+      ()
+  in
+  Batch.run (fun b ->
+      let _ = run_json ["--format"; "json"] in
+      Db.with_db db (fun conn ->
+          Batch.eq_string_opt b
+            ~msg:"the mutant at columns 3-9 keeps the SURVIVED the engine gave IT"
+            (Db.string_opt conn
+               "SELECT r.engine_status FROM mutant_runs r JOIN mutants m ON m.id = \
+                r.mutant_id WHERE m.col_start = 3")
+            (Some "SURVIVED") ;
+          Batch.eq_string_opt b
+            ~msg:"the mutant at columns 11-15 keeps the KILLED the engine gave IT"
+            (Db.string_opt conn
+               "SELECT r.engine_status FROM mutant_runs r JOIN mutants m ON m.id = \
+                r.mutant_id WHERE m.col_start = 11")
+            (Some "KILLED") ;
+          (* The traceability column must travel with the site it belongs to,
+             or a mispairing leaves no trace even in the column that exists to
+             record one. *)
+          Batch.eq_string_opt b ~msg:"the engine id travels with its own site"
+            (Db.string_opt conn
+               "SELECT r.engine_mutant_id FROM mutant_runs r JOIN mutants m ON m.id = \
+                r.mutant_id WHERE m.col_start = 3")
+            (Some "m1")) ;
+      let code, output = run2 [] in
+      Batch.exit_code b
+        ~msg:"two indistinguishable candidates must be REFUSED, not resolved by list order"
+        ~expected:1 (code, output) ;
+      Batch.contains b ~msg:"the refusal must say the sites could not be told apart"
+        ~haystack:output "INDISTINGUISHABLE" ;
+      Db.with_db db2 (fun conn ->
+          Batch.eq_int b ~msg:"no kill row may be written on a coin flip"
+            (Db.int conn "SELECT count(*) FROM mutant_kills") 0 ;
+          Batch.eq_int b ~msg:"a refused join leaves the campaign incomplete"
+            (Db.int conn
+               "SELECT count(*) FROM mutant_campaigns WHERE completed_at IS NOT NULL")
+            0)) ;
+  Lwt.return_unit
+
+(* A --diff whose narrowing leaves ZERO mutants used to produce a COMPLETED
+   campaign with no run rows, which `verdict` published as all-zero counts —
+   an empty read reported in the same words as a clean one. And
+   `report_entries_unmatched`, a total join failure when it equals the report's
+   size, was published in the JSON and left out of the `complete` conjunction.
+
+   The impact stub names a function this index does not carry, so rules 1 and 2
+   select nothing and there is no prior campaign for rule 3 to draw on. *)
+let register_run_empty_scope_and_unmatched () =
+  Test.register ~__FILE__
+    ~title:"mutants: a --diff narrowed to zero is refused, and an unmatched report entry \
+            blocks completion"
+    ~tags:["mutants"; "run"; "diff"]
+  @@ fun () ->
+  let dir = Temp.dir "mutants_empty_scope_stub" in
+  let impact = Filename.concat dir "impact.sh" in
+  write_exec impact
+    "#!/bin/sh\ncat <<'J'\n{\"touched\": [{\"name\":\"no_such_function\",\"how\":\"line\"}]}\nJ\n" ;
+  let db, _, run, _ =
+    campaign_setup_on ~extra_env:[("ARCH_IMPACT", impact)]
+      ~db:(load_fixture "mutants_empty_scope" campaign_stream) ~tests:"file:test/**"
+      ~name:"mutants_empty_scope" ~engine_body:(stub_engine ["m1"; "m2"; "m3"])
+      ~report:all_survived ()
+  in
+  (* The other half, on its own database and with no --diff at all: every report
+     entry names a site the catalogue does not hold. *)
+  let db2, _, _, run2_json =
+    campaign_setup_on ~db:(load_fixture "mutants_unmatched" campaign_stream)
+      ~tests:"file:test/**" ~name:"mutants_unmatched"
+      ~engine_body:(stub_engine ["m1"; "m2"; "m3"])
+      ~report:
+        {|{"file":"lib/nowhere.ml","line":99,"status":"KILLED","id":"ghost1"}
+{"file":"lib/nowhere.ml","line":98,"status":"KILLED","id":"ghost2"}
+|}
+      ()
+  in
+  Batch.run (fun b ->
+      let code, output = run ["--diff"; "HEAD~1..HEAD"] in
+      Batch.exit_code b
+        ~msg:"a --diff that narrows the catalogue to zero must be REFUSED with exit 1"
+        ~expected:1 (code, output) ;
+      Batch.contains b ~msg:"the refusal must name the conflation it is preventing"
+        ~haystack:output "nothing to test" ;
+      Db.with_db db (fun conn ->
+          Batch.eq_int b ~msg:"a refused scope must leave no campaign table behind"
+            (Db.int conn
+               "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='mutant_campaigns'")
+            0) ;
+      (match Batch.expect b (Json.parse ~what:"unmatched run"
+                               (let _, out, _ = run2_json ["--format"; "json"] in out))
+       with
+      | None -> ()
+      | Some j ->
+          int_of b ~what:"unmatched run" "report_entries_unmatched" j 2 ;
+          Option.iter
+            (fun c ->
+              Batch.eq_string b
+                ~msg:"a total join failure must leave the campaign incomplete"
+                (string_of_bool c) "false")
+            (Batch.expect b (Json.bool ~what:"completed" "completed" j))) ;
+      Db.with_db db2 (fun conn ->
+          Batch.eq_int b
+            ~msg:"completed_at must stay NULL when no report entry matched a site"
+            (Db.int conn
+               "SELECT count(*) FROM mutant_campaigns WHERE completed_at IS NOT NULL")
+            0)) ;
+  Lwt.return_unit
+
+(* An `arch-impact` answer whose entries the reader cannot understand — a
+   renamed `name` field — was dropped by `List.filter_map` with NO count, so a
+   touched set silently shrunk from twelve to three was indistinguishable from a
+   correct set of three, and every mutant outside it published as "not at risk"
+   rather than "not looked at". *)
+let register_run_impact_entries_counted () =
+  Test.register ~__FILE__
+    ~title:"mutants: arch-impact entries the reader cannot understand are counted, never \
+            dropped"
+    ~tags:["mutants"; "run"; "diff"]
+  @@ fun () ->
+  let dir = Temp.dir "mutants_impact_renamed_stub" in
+  let impact = Filename.concat dir "impact.sh" in
+  write_exec impact
+    "#!/bin/sh\ncat <<'J'\n{\"touched\": [{\"fn\":\"covered\",\"how\":\"line\"},{\"fn\":\"other\",\"how\":\"line\"}]}\nJ\n" ;
+  let db, _, run, _ =
+    campaign_setup_on ~extra_env:[("ARCH_IMPACT", impact)]
+      ~db:(load_fixture "mutants_impact_renamed" campaign_stream) ~tests:"file:test/**"
+      ~name:"mutants_impact_renamed" ~engine_body:(stub_engine ["m1"; "m2"; "m3"])
+      ~report:all_survived ()
+  in
+  Batch.run (fun b ->
+      let code, output = run ["--diff"; "HEAD~1..HEAD"] in
+      Batch.exit_code b ~msg:"unreadable touched entries must abort the campaign"
+        ~expected:2 (code, output) ;
+      (* The COUNT, not the word: "2 of them" is a number worked out from the
+         stub's own two entries, and a message that merely mentions the field
+         name would satisfy a grep while counting nothing. *)
+      Batch.contains b ~msg:"the refusal must say HOW MANY entries it could not read"
+        ~haystack:output "2 of them carry no string `name` field" ;
+      Db.with_db db (fun conn ->
+          Batch.eq_int b ~msg:"nothing is written when the scope could not be read"
+            (Db.int conn
+               "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='mutant_campaigns'")
+            0)) ;
+  Lwt.return_unit
+
+(* A survivor the index maps to no function was published as
+   {file, line, status, id, mutation} — a naked engine status — inside a document
+   whose own top-level key said survivors publish as UNKNOWN. And the headline
+   counted `List.length survivors`, which excludes the unmapped, so a report
+   holding one surviving mutant read "0 survived" while `--fail-on-survivors`
+   counted it. *)
+let register_report_unmapped_survivor_carries_verdict () =
+  Test.register ~__FILE__
+    ~title:"mutants: an unmapped survivor carries its verdict and is counted in the headline"
+    ~tags:["mutants"; "report"]
+  @@ fun () ->
+  (* campaign_stream_top holds one ⊤ edge INSIDE the test cone, so the published
+     verdict is UNKNOWN and not SURVIVED — which is what makes a naked
+     "SURVIVED" on the record visibly the wrong answer rather than a shorthand
+     for the right one. *)
+  let db = load_fixture "mutants_unmapped_survivor" campaign_stream_top in
+  let dir = Temp.dir "mutants_unmapped_survivor_report" in
+  let report_file = Filename.concat dir "report.ndjson" in
+  write_file report_file
+    {|{"file":"lib/zzz_unmapped.ml","line":999,"status":"SURVIVED","id":"u1","mutation":"a && b -> a || b"}
+|} ;
+  Batch.run (fun b ->
+      (match
+         mutants_json b ~what:"unmapped survivor"
+           ["report"; db; report_file; "--tests"; "file:test/**"; "--format"; "json"]
+       with
+      | None -> ()
+      | Some j -> (
+          (* The premise, asserted rather than assumed: if the fixture stopped
+             producing a ⊤-bounded selection the assertions below would still
+             pass while checking nothing. *)
+          Batch.eq_string b ~msg:"the fixture really is ⊤-bounded"
+            (match Json.member "survivors_publish_as" j with
+            | Some (`String v) -> v
+            | other -> Json.show other)
+            "UNKNOWN" ;
+          match expect b (Json.list ~what:"report" "unmapped" j) with
+          | None -> ()
+          | Some [ `Assoc f ] ->
+              let field k =
+                match List.assoc_opt k f with Some (`String v) -> Some v | _ -> None
+              in
+              Batch.eq_string_opt b
+                ~msg:"the unmapped record carries a VERDICT, not a naked status"
+                (field "verdict") (Some "UNKNOWN") ;
+              Batch.eq_string_opt b
+                ~msg:"and its selection provenance travels with it (FR-013)"
+                (field "selection_provenance") (Some "top_bounded") ;
+              Batch.eq_string_opt b
+                ~msg:"the engine status is kept BESIDE the verdict, never instead of it"
+                (field "status") (Some "SURVIVED") ;
+              Batch.eq_int b ~msg:"the basis the verdict was derived from is present"
+                (match field "verdict_basis" with
+                | Some s when String.length s > 0 -> 1
+                | _ -> 0)
+                1
+          | Some l ->
+              Batch.note b "expected exactly one unmapped record, got %d" (List.length l))) ;
+      let code, text =
+        mutants ["report"; db; report_file; "--tests"; "file:test/**"]
+      in
+      Batch.exit_code b ~msg:"the text rendering must succeed" ~expected:0 (code, text) ;
+      (* The headline is what a reader acts on, and it contradicted the gate on
+         the same run: one surviving mutant, "0 survived". *)
+      Batch.contains b ~msg:"the headline counts the unmapped survivor" ~haystack:text
+        "1 mutant(s) in the report: 1 survived" ;
+      Batch.contains b ~msg:"and names the unmapped share inline" ~haystack:text
+        "1 of them unmapped to any indexed function" ;
+      Batch.contains b ~msg:"the unmapped survivor's own line carries its verdict"
+        ~haystack:text "UNKNOWN lib/zzz_unmapped.ml:999") ;
+  Lwt.return_unit
+
+(* The shell-injection allowlist excluded the apostrophe — an ordinary OCaml
+   identifier character (`aux'`, `loop'`, `test_foo'`) — so ONE such name
+   anywhere in the reaching set aborted the WHOLE campaign at exit 2 with no
+   campaign row. It is also the one excluded character the wrapper demonstrably
+   handles: every name is POSIX-quoted before substitution.
+
+   The negative control travels with it: comma, tab and newline stay refused,
+   because they are the separators the refusal message itself argues for. *)
+let prime_stream =
+  {|{"type":"function","name":"test_alpha'","file_path":"test/alpha_test.ml","line_start":1,"line_end":5}
+{"type":"function","name":"covered","file_path":"lib/x.ml","line_start":10,"line_end":20}
+{"type":"call","caller_name":"test_alpha'","caller_file":"test/alpha_test.ml","callee_name":"covered","callee_file":"lib/x.ml","call_site":"test/alpha_test.ml:2","kind":"MUST"}
+|}
+
+let comma_stream =
+  {|{"type":"function","name":"test_a,b","file_path":"test/alpha_test.ml","line_start":1,"line_end":5}
+{"type":"function","name":"covered","file_path":"lib/x.ml","line_start":10,"line_end":20}
+{"type":"call","caller_name":"test_a,b","caller_file":"test/alpha_test.ml","callee_name":"covered","callee_file":"lib/x.ml","call_site":"test/alpha_test.ml:2","kind":"MUST"}
+|}
+
+let one_mutant_catalogue =
+  {|{"id":"m1","file":"lib/x.ml","line":15,"col_start":3,"col_end":9,"replacement":"true"}
+|}
+
+let register_run_accepts_prime_suffixed_test_name () =
+  Test.register ~__FILE__
+    ~title:"mutants: a prime-suffixed test name runs to completion; a comma is still refused"
+    ~tags:["mutants"; "run"; "names"]
+  @@ fun () ->
+  let db, work, _, run_json =
+    campaign_setup_on ~db:(load_fixture "mutants_prime" prime_stream)
+      ~tests:"file:test/**" ~name:"mutants_prime" ~catalogue:one_mutant_catalogue
+      ~engine_body:(stub_engine ["m1"])
+      ~report:
+        {|{"file":"lib/x.ml","line":15,"status":"KILLED","id":"m1","col_start":3,"col_end":9,"replacement":"true"}
+|}
+      ()
+  in
+  let db2, _, run2, _ =
+    campaign_setup_on ~db:(load_fixture "mutants_comma" comma_stream) ~tests:"file:test/**"
+      ~name:"mutants_comma" ~catalogue:one_mutant_catalogue
+      ~engine_body:(stub_engine ["m1"]) ~report:all_survived ()
+  in
+  Batch.run (fun b ->
+      let code, out, _ = run_json ["--format"; "json"] in
+      Batch.exit_code b ~msg:"a prime-suffixed name must not abort the campaign" ~expected:0
+        (code, out) ;
+      (* The name really did reach the wrapper: the trace line is what proves the
+         campaign RAN rather than merely exiting 0. *)
+      Batch.eq_string_opt b ~msg:"the wrapper executed the prime-suffixed test"
+        (executed_for work "m1") (Some "test_alpha'") ;
+      Db.with_db db (fun conn ->
+          Batch.eq_int b ~msg:"the campaign wrote its run row" 
+            (Db.int conn "SELECT count(*) FROM mutant_runs") 1) ;
+      (* The negative control. A comma is a TSV separator and would silently
+         split one test into two, so it stays refused. *)
+      let code2, out2 = run2 [] in
+      Batch.exit_code b ~msg:"a comma in a test name is still refused" ~expected:2
+        (code2, out2) ;
+      Db.with_db db2 (fun conn ->
+          Batch.eq_int b ~msg:"and still writes no campaign table"
+            (Db.int conn
+               "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='mutant_campaigns'")
+            0)) ;
+  Lwt.return_unit
+
+(* FR-003 — the engine is NEVER invoked with a SUBSET of the intended set. The
+   only relation computed anywhere was a cardinality comparison, which an
+   executed set of EQUAL size with a member substituted satisfies while
+   violating the requirement outright.
+
+   The fixture makes the violation real rather than hypothetical: the plan is
+   computed over `file:test/**` (so lib/z.ml's mutant intends t_beta), the run
+   is scoped to `test/alpha_test.ml` alone, and a `suite`-granularity profile
+   then replaces the executed set with the run's own test list — which does not
+   contain t_beta. *)
+let register_run_refuses_subset_executed_set () =
+  Test.register ~__FILE__
+    ~title:"mutants: an executed set that is not a superset of the intended set is refused"
+    ~tags:["mutants"; "run"; "fr003"]
+  @@ fun () ->
+  let db, _, run, _ =
+    campaign_setup_on ~db:(load_fixture "mutants_subset" campaign_stream)
+      ~tests:"file:test/alpha_test.ml" ~plan_tests:"file:test/**" ~name:"mutants_subset"
+      ~extra_argv:["--profile"; "cargo-mutants"]
+      ~engine_body:(stub_engine ["m1"; "m2"; "m3"]) ~report:all_survived ()
+  in
+  (* The negative control: the SAME profile and the same index with plan and run
+     agreeing on the selection must run to completion. Without it, "refuse every
+     suite-granularity campaign" would pass the assertion above. *)
+  let db2, _, run2, _ =
+    campaign_setup_on ~db:(load_fixture "mutants_subset_ok" campaign_stream)
+      ~tests:"file:test/**" ~name:"mutants_subset_ok"
+      ~extra_argv:["--profile"; "cargo-mutants"]
+      ~engine_body:(stub_engine ["m1"; "m2"; "m3"]) ~report:all_survived ()
+  in
+  Batch.run (fun b ->
+      let code, output = run [] in
+      Batch.exit_code b ~msg:"a subset executed set must abort before the engine runs"
+        ~expected:2 (code, output) ;
+      Batch.contains b ~msg:"the refusal must cite FR-003" ~haystack:output "FR-003" ;
+      Batch.contains b ~msg:"and NAME the test that would not have run" ~haystack:output
+        "t_beta" ;
+      Db.with_db db (fun conn ->
+          Batch.eq_int b ~msg:"no campaign table is left behind"
+            (Db.int conn
+               "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='mutant_campaigns'")
+            0) ;
+      let code2, output2 = run2 [] in
+      Batch.exit_code b
+        ~msg:"a genuine superset under the same profile still runs to completion"
+        ~expected:0 (code2, output2) ;
+      Db.with_db db2 (fun conn ->
+          Batch.eq_int b ~msg:"and writes its three run rows"
+            (Db.int conn "SELECT count(*) FROM mutant_runs") 3)) ;
+  Lwt.return_unit
+
+(* FR-030's boundary was `git rev-parse --show-toplevel` ALONE, so `git init` —
+   not the layout — decided whether the guard fired at all. A checkout that is
+   NOT itself a repository but sits inside one resolves its toplevel to the OUTER
+   repo, the boundary spans both trees, and the outer tree's wrapper is handed to
+   the engine: issue #77, unrefused.
+
+   The boundary is now the NEARER of the git toplevel and the checkout's own
+   `dune-project`, and the sibling test above covers the git-initialised
+   polarity: this one covers the case `git init` used to flip. *)
+let register_run_refuses_outside_non_git_tree () =
+  Test.register ~__FILE__
+    ~title:"mutants: a checkout that is not itself a repository still refuses the outer \
+            wrapper"
+    ~tags:["mutants"; "run"; "provenance"]
+  @@ fun () ->
+  let db = load_fixture "mutants_outside_nongit" campaign_stream in
+  let root = Temp.dir "mutants_outside_nongit_nest" in
+  let outer = Filename.concat root "outer" in
+  let inner = Filename.concat outer "inner" in
+  let outer_wrapper = Filename.concat outer "scripts/mutaml-wrapper.sh" in
+  if
+    Sys.command
+      (Printf.sprintf "mkdir -p %s %s"
+         (Filename.quote (Filename.concat outer "scripts"))
+         (Filename.quote inner))
+    <> 0
+  then Test.fail "could not lay out the nested checkout fixture" ;
+  write_exec outer_wrapper "#!/bin/sh\nexit 0\n" ;
+  (* The OUTER tree is the repository; the inner one deliberately is NOT. That is
+     the whole fixture: `git rev-parse` inside `inner` answers with `outer`. *)
+  let git_code, git_out = run_command ~cwd:outer "git" ["init"; "-q"; "."] in
+  if git_code <> 0 then Test.fail "could not make the outer tree a repository:\n%s" git_out ;
+  (* The inner checkout's own root marker — what says "the campaign belongs to
+     THIS tree" where git cannot. *)
+  write_file (Filename.concat inner "dune-project") "(lang dune 3.0)\n" ;
+  let plan_file = Filename.concat inner "plan.json" in
+  let _, plan_out = mutants ["plan"; db; "--tests"; "file:test/**"; "--format"; "json"] in
+  write_file plan_file plan_out ;
+  let catalogue = Filename.concat inner "catalogue.ndjson" in
+  write_file catalogue campaign_catalogue ;
+  let report_file = Filename.concat inner "report.ndjson" in
+  write_file report_file all_survived ;
+  let engine = Filename.concat inner "engine.sh" in
+  write_exec engine "#!/bin/sh\nexit 0\n" ;
+  let invoke cwd =
+    run_command ~cwd "/usr/bin/env"
+      (["-u"; "ARCH_MUTANTS_WRAPPER"; "-u"; "ARCH_IMPACT"; "-u"; "ARCH_MUTANTS"]
+      @ (arch_mutants ()
+        :: ["run"; db; "--plan"; plan_file; "--engine"; engine; "--test-cmd"; "true";
+            "--catalogue"; catalogue; "--report"; report_file; "--tests"; "file:test/**"]))
+  in
+  Batch.run (fun b ->
+      let code, output = invoke inner in
+      Batch.exit_code b
+        ~msg:"a NON-git inner checkout must still refuse the outer tree's wrapper"
+        ~expected:1 (code, output) ;
+      Batch.contains b ~msg:"the refusal must name the outside path" ~haystack:output
+        outer_wrapper ;
+      Db.with_db db (fun conn ->
+          Batch.eq_int b ~msg:"and leave no campaign table behind"
+            (Db.int conn
+               "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='mutant_campaigns'")
+            0) ;
+      (* The other polarity, and the reason the fix is not simply "refuse more":
+         the inner tree's OWN wrapper must be accepted. Without this, a guard
+         that refused everything would pass the assertion above. *)
+      if
+        Sys.command
+          (Printf.sprintf "mkdir -p %s"
+             (Filename.quote (Filename.concat inner "scripts")))
+        <> 0
+      then Test.fail "could not lay out the inner tree's own wrapper" ;
+      write_exec (Filename.concat inner "scripts/mutaml-wrapper.sh")
+        (read_file (wrapper_path ())) ;
+      let code2, output2 = invoke inner in
+      Batch.exit_code b ~msg:"the inner tree's OWN wrapper is accepted" ~expected:0
+        (code2, output2)) ;
   Lwt.return_unit

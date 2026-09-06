@@ -25,7 +25,7 @@ append-only history is the record of the re-scoping rather than a contradiction 
 | `bin/arch_mutants/arch_mutants.ml` | modification | `run` and its driver. `cone_escapes` was **extracted out of `plan`** so `run` shares the same binding rather than a second copy of the fold — the duplicate-call-site problem this campaign was itself created to notice. |
 | `bin/arch_mutants/dune` | modification | `sqlite3`, `unix`, `ppx_blob`, and the preprocessor dependency on the migration. |
 | `lib/arch_index/arch_index_db.ml` | modification | `current_schema_version` `1.10` → **`1.13`**. |
-| `docs/schema.md` | modification | `1.11` and `1.12` recorded as burned, `1.13` for the four tables. |
+| `docs/schema.md` | modification | `1.13` for the four tables, with what that number does and does not gate. **Corrected in round 3:** this row previously said "`1.11` and `1.12` recorded as burned", which the rebase made false — both landed on main and `1.13` follows `1.12` directly with no hole. |
 | `tezt/tests/mutants.ml`, `tezt/tests/main.ml` | modification | Five new cases, existing registration pattern, `Fixture.flat` reused. |
 | `scripts/mutaml-wrapper.sh` | addition | The per-mutant test command. Reads `MUTAML_MUTANT`, resolves it through the driver-written selection table, runs only those tests. **Refuses (exit 2) on an unset or uncatalogued mutant** rather than falling back to the whole suite — a fallback would silently turn a selection bug into a passing campaign. |
 | `scripts/check-mutant-key.sh` | addition | Counts rows **rejected** by the UNIQUE constraint, never a `GROUP BY`. |
@@ -39,10 +39,15 @@ later a second branch was found holding `1.12`, so `1.13`. Both collisions came 
 sessions reading the same base and deducing the same next number. **The protocol's blind spot is
 that a branch freezes the number when it is written and it is only confirmed at merge**, and this
 branch is additionally invisible to any sweep because it is not pushed — the push authorisation is
-Mathias's alone. Numbers are now assigned by the roadmap session rather than deduced. Both burned
-numbers are documented next to the gap, stating the durable consequence rather than the transient
-state of a branch: if the claiming branch never lands, the number is a hole like `1.6`, and a later
-reuse would be a superset numbered beneath `1.13`.
+Mathias's alone. Numbers are now assigned by the roadmap session rather than deduced.
+
+**Corrected in round 3, because the sentence that stood here had gone stale.** It read "both
+burned numbers are documented next to the gap", and there is no gap: `1.11` and `1.12` were
+both claimed by branches that have since LANDED on main, so `1.13` follows `1.12` directly
+and nothing is burned. The transient state of two in-flight branches was written down as a
+durable consequence, and a rebase then made it false with nothing to notice — the same class
+as a fingerprint keyed on a line number. `docs/schema.md` now records the durable fact
+instead: what `1.13` gates, and what it does not.
 
 **Three files were touched outside the manifest**, all necessary and none silently absorbed:
 `bin/arch_mutants/arch_mutant_db.ml` (the new module), `bin/arch_mutants/dune` (its build stanza)
@@ -419,3 +424,129 @@ Nothing is deferred yet. When a finding is deferred it is named under this headi
 reason, and `dispatch-covers-open-findings.js` counts it as DEFERRED rather than DISPATCHED —
 the state that could not be written down before round 2, and the reason three findings could not
 be told apart from an oversight.
+
+## Round 3 — Group B: the driver and the wrapper
+
+**Status: COMPLETED** for group B only. Groups A and C are other blocks' scope and nothing
+here touches their files.
+
+**Four findings in this group were the same defect cited twice**, once by round 1 and once
+by round 2 after a rebase moved the line. Each was fixed once, and the round-1 and round-2
+fingerprints are both named here so neither reads as unowned:
+
+| The defect | round 1 | round 2 |
+|---|---|---|
+| the outcome join | `arch_mutants.ml:1393:architecture` | `arch_mutants.ml:1726:architecture` |
+| the zero-narrowed `--diff` | `arch_mutants.ml:1456:architecture` | `arch_mutants.ml:1836:architecture` |
+| the arch-impact boundary | `arch_mutants.ml:938:architecture` | `arch_mutants.ml:1168:architecture` |
+| the tree boundary | `arch_mutants.ml:967:spec` | `arch_mutants.ml:984:correctness` |
+
+### THE JOIN (CRITICAL) — `arch_mutants.ml:1726` / `:1393`
+
+Engine outcomes were joined to catalogued sites by `Filename.basename` plus line, consuming
+duplicates in list order and never refusing. Both discriminators were present and discarded:
+the schema's key is `UNIQUE(file_path, line, col_start, col_end, replacement, source_hash)`,
+and the engine's own id is carried by the catalogue record AND by the report entry.
+
+The join is now, in order: the engine id **cross-checked against file and line** (so a
+synthesised id cannot pull an outcome onto an unrelated site); failing that the site key —
+full path, line, and every column span and replacement the report actually carries; and
+where two candidates survive both, a **refusal**, because taking the head of the list is a
+coin flip recorded as a fact in the table that exists to say which test proved what. The
+report adapters now carry `m_cols` and `m_repl` — they were dropped at the door — and
+`load_mutaml` derives its entry id the way `load_mutaml_catalogue` derives the catalogue's,
+so the two halves of the identity agree by construction rather than by coincidence.
+
+`same_site`, the `--diff` deleted-test recheck, carried the same conflation and is fixed with
+it: `prior_mutant` now projects `col_start`, `col_end` and `replacement` out of `mutants`, and
+the recheck matches on that key. `rechecked_for_deleted_tests` publishes the full key.
+
+### The zero-narrowed `--diff` — `:1836` / `:1456`
+
+`run_campaign` now REFUSES when the narrowing leaves nothing, before the work directory or
+the campaign row exists; `!unmatched = 0` joined the `complete` conjunction; wrapper refusals
+are counted over the report's own entries rather than over the `matched` partition alone,
+which is why two real refusals could previously reach `n_refused` by no path; and `verdict`
+says **"this campaign ATTEMPTED NOTHING"** with an `attempted_nothing` key, because six zeroes
+is also what a campaign in which nothing survived looks like.
+
+### The arch-impact boundary — `:1168` / `:938`
+
+Entries the reader cannot understand — a renamed `name` field — are now COUNTED and refused
+rather than dropped by `List.filter_map` with no count.
+
+**The empty-array refusal is NOT at the boundary, and that is a correction to the finding's
+own suggested fix.** Refusing `Impact_ok []` there breaks the deleted-test rule: rules 1 and
+2 selecting nothing is exactly what a documentation-only range does, and rule 3 can still
+select mutants. Putting it at the boundary turned three tezt cases red — which is how the
+mistake was caught, by execution. The refusal belongs where the UNION of the three rules is
+known, and it names an empty `touched` array as the cause when it was one. Probe 4 of the
+ratchet is what holds it there.
+
+### The tree boundary — `:984` / `:967`, and `:1002`
+
+The boundary was `git rev-parse --show-toplevel` alone, so `git init` — not the layout —
+decided whether FR-030's guard fired. It is now the **nearer of the git toplevel and the
+checkout's own `dune-project`**, and the refusal's diagnosis is chosen by HOW the boundary
+was found: outside a repository with no marker it says the boundary fell back to the
+invocation directory and explicitly does not claim a nesting, which is `:1002`'s finding.
+
+### Exit 99 — `scripts/mutaml-wrapper.sh:120`
+
+The wrapper remaps a **test command's** 99 to 1 (the driver reads every non-0/124 code as
+KILLED, and a failing test under a mutation is a kill) and names the original on stderr. The
+driver holds the second half: a refusal is 99 **and no trace line**, since every refusal path
+exits before the trace is written. That half applies to the **mutaml path only** — there
+REFUSED is inferred from a raw exit code, whereas a generic report's status string is written
+explicitly and overriding it with a guess would be this very finding again.
+
+### The rest
+
+`report`'s provenance decision is no longer a second copy: `selection_provenance` is
+extracted beside `cone_escapes` and called from both sites, and the docstring that asserted
+this before it was true now says so with the retraction attached. `executed_superset` tests
+INCLUSION (`missing_from_executed`), and FR-003 — which had no criterion, no CHECK and no
+code — is enforced before the engine runs, naming the tests that would not have run.
+Unmapped survivors carry `verdict`, `selection_provenance` and `verdict_basis` in JSON and
+print their verdict in text, and the headline counts them with their share named inline. The
+apostrophe joined the test-name allowlist (comma, tab and newline stay refused).
+`producer_run_id INTEGER` — no `REFERENCES` — is restored and populated where the schema has
+`producer_runs`. `docs/schema.md` records what `1.13` does and does not gate, and two stale
+brief sentences about "burned" numbers are corrected above.
+
+### Ratchet — five NEW node checks, each proven red
+
+Written in **node**, not bash: the convergence gate resolves a check as `node <path>`, which
+is why this branch's nine bash checks came back inconclusive.
+
+| Finding | Check | Proven red at |
+|---|---|---|
+| the outcome join | `checks/outcome-join-is-site-identity.js` | exit 1, 8 of 12 assertions — the KILLED/SURVIVED inversion, the kill row against `lib/a/main.ml` under `t_alpha`, and no refusal on an indistinguishable pair. Probe 4 (an ordinary campaign) stayed green throughout |
+| the zero-narrowed `--diff` | `checks/empty-scope-and-unmatched-block-completion.js` | exit 1, 7 of 14 — `completed: true` with `report_entries_unmatched: 1`, an unmatched refusal counted 0, and a zero-narrowed scope completing |
+| the arch-impact boundary | `checks/arch-impact-boundary-refuses-empty.js` | exit 1, 2 of 13 — the two message assertions; the refusal itself had already moved downstream by then, which is what the message assertions distinguish |
+| the tree boundary | `checks/tree-boundary-non-git-checkout.js` | exit 1, 6 of 9 — the non-git inner checkout ran the outer wrapper at exit 0, and the no-repository tree refused its OWN wrapper while asserting a nesting. Probe 2 (git-initialised) stayed green, which is what makes the others attributable |
+| exit 99 | `checks/genuine-99-is-not-a-refusal.js` | exit 1, 3 of 8 — a runner exiting 99 produced no run row and `mutants_refused_by_wrapper: 2` |
+| unmapped survivors | `checks/unmapped-survivor-carries-its-verdict.js` | exit 1, 8 of 14 — no verdict, no provenance, and `"1 mutant(s) in the report: 0 survived"` |
+
+### tezt — seven new cases, 255 of 255 SUCCESS
+
+`register_run_join_is_site_identity`, `register_run_empty_scope_and_unmatched`,
+`register_run_impact_entries_counted`, `register_report_unmapped_survivor_carries_verdict`,
+`register_run_accepts_prime_suffixed_test_name`, `register_run_refuses_subset_executed_set`,
+`register_run_refuses_outside_non_git_tree`. The two with no `checks/` counterpart were
+proven red by reverting their own target in place and restoring it — `git stash` was not
+used: the apostrophe case fired 3 assertions with `'` removed from the allowlist, and the
+FR-003 case fired 3 with the guard deleted.
+
+`campaign_setup_on` gained `?catalogue`, `?plan_tests` and `?extra_argv`. All three are
+WIDENINGS: every existing caller gets exactly what it got before. No existing assertion was
+weakened.
+
+### Not done, and why
+
+- `scripts/check-status-profile.sh`'s exclusion at `check-status-provenance.sh:24-27` is
+  named in this finding's fix text and is **left alone**: that file is group A's scope this
+  round and a second writer in it would be the concurrent-edit hazard, not a fix.
+- `1.13` is documented rather than made to gate. Making it gate needs a version identity of
+  the migration's own, stamped by `Arch_mutant_db.open_and_migrate` — a schema change, which
+  is not on this branch.

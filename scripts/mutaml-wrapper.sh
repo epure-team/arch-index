@@ -29,7 +29,9 @@
 #   ARCH_MUTANTS_TRACE      append-only TSV this script writes one line to per invocation:
 #                             <engine id>\t<executed count>\t<executed,…>\t<exit code>
 #
-# Exit: the test command's own exit code, which is what the engine reads.
+# Exit: the test command's own exit code, which is what the engine reads — EXCEPT that a
+#       test command exiting 99 is remapped to 1, because 99 is this script's refusal code
+#       and a code cannot mean two things at the boundary a third-party engine reads.
 #
 #       THE REFUSAL CODE IS 99, AND IT HAD TO BE A DISTINCTIVE ONE. mutaml persists the RAW
 #       exit code, not the label it prints: src/runner/runner.ml:109-110 saves
@@ -116,5 +118,25 @@ else
   esac
 fi
 
+# 99 IS THIS WRAPPER'S, END TO END. Forwarding the test command's own exit code unchanged
+# meant a runner that legitimately exits 99 arrived at the driver as THIS SCRIPT'S refusal:
+# the mutant lost its run row, could never be KILLED, landed in PENDING and blocked the
+# campaign's completion — a real test failure read as "never attempted". Reserving a code in
+# a third-party tool's exit space is only sound if the reservation is enforced at the one
+# place both meanings pass through, which is here.
+#
+# 1 is the honest remap: the driver's adapter reads 0 as SURVIVED, 124 as TIMEOUT and every
+# other code as KILLED, and a test command exiting non-zero under a mutation IS a kill. The
+# code is not swallowed — it is named on stderr, so an operator debugging a runner still
+# sees the value the runner actually produced.
+if [ "$rc" -eq "$ARCH_MUTANTS_REFUSAL_EXIT" ]; then
+  printf 'mutaml-wrapper: the test command exited %d for mutant %s, which is the code this wrapper reserves for a REFUSAL. It ran, so this is an ordinary test failure and is reported as exit 1. Only THIS script exits %d, and only without writing a trace line.\n' \
+    "$rc" "$mut" "$ARCH_MUTANTS_REFUSAL_EXIT" >&2
+  rc=1
+fi
+
+# The trace line is the discriminator the driver relies on: it exists for every mutant whose
+# tests were actually attempted, and for none that this script refused — `fail` exits above,
+# before this point.
 printf '%s\t%s\t%s\t%s\n' "$mut" "${#tests[@]}" "$executed" "$rc" >> "$ARCH_MUTANTS_TRACE"
 exit "$rc"

@@ -13,6 +13,10 @@ open Arch_tools
 module SS = Arch_graph.SS
 module SM = Arch_graph.SM
 
+(* Aliased here rather than beside its first use: `selection_provenance` and
+   `executed_is_superset` below are the shared rules two commands call, and both need it. *)
+module MDb = Arch_mutant_db
+
 let usage =
   {|arch-mutants — mutation testing targeted by the call graph.
 
@@ -105,6 +109,46 @@ let cone_escapes (g : Arch_graph.t) test_keys =
   ( reachable,
     List.rev (SM.fold (fun k _ acc -> if SS.mem k reachable then k :: acc else acc) g.tops [])
   )
+
+(** THE selection-provenance rule, in ONE place.
+
+    It was a three-arm decision written out twice, byte-identical, at the head of [report]
+    and again at the head of [run_campaign] — while [report]'s own docstring claimed the
+    provenance came from the shared bindings "never from a second copy of the rule". A
+    widened signature bought a shared INGREDIENT ([cone_escapes]); it did not buy a shared
+    RULE, and a duplicated call site is the exact class this campaign exists to detect.
+
+    [cone_escapes] is taken as a parameter rather than recomputed here so the ⊤-edge
+    measurement stays the single binding [plan] and [run] already share. *)
+let selection_provenance ~sound ~escapes =
+  if not sound then MDb.No_contract
+  else if escapes <> [] then MDb.Top_bounded
+  else MDb.Proved_superset
+
+(** Test-set INCLUSION, not cardinality.
+
+    FR-003 forbids invoking the engine with a SUBSET of the intended set "under any
+    circumstances", and the only relation computed anywhere was
+    [List.length executed > List.length intended] — which is satisfied by an executed set of
+    equal or greater size with a member SUBSTITUTED, the precise violation FR-003 names.
+    [superset] answers the question FR-003 asks; [missing] names the members that make the
+    answer no, because a boolean cannot be acted on. *)
+let missing_from_executed ~intended ~executed =
+  let have = List.fold_left (fun a t -> SS.add t a) SS.empty executed in
+  List.sort_uniq compare (List.filter (fun t -> not (SS.mem t have)) intended)
+
+let executed_is_superset ~intended ~executed =
+  missing_from_executed ~intended ~executed = []
+
+(** WIDENED: a proper superset. This is what the report's `executed_superset` key has always
+    meant — the profile's granularity made the executed set bigger than the reaching set —
+    and it is a different question from FR-003's, which is whether the executed set CONTAINS
+    the intended one at all. Both are computed from inclusion now; the old
+    [List.length executed > List.length intended] answered neither, since an equal-sized set
+    with a member substituted satisfies it while violating FR-003. *)
+let executed_is_widened ~intended ~executed =
+  executed_is_superset ~intended ~executed
+  && List.length (List.sort_uniq compare executed) > List.length (List.sort_uniq compare intended)
 
 let plan (t : Arch_db.t) (g : Arch_graph.t) test_keys heuristic fmt maxlist =
   let reachable, escapes = cone_escapes g test_keys in
@@ -328,8 +372,6 @@ let refusal_exit_code = 99
     outcome the engine produced, it is the absence of an attempt. *)
 let refused_status = "REFUSED"
 
-module MDb = Arch_mutant_db
-
 (** Every string a report adapter can hand the run loop, classified TOTALLY (FR-031).
 
     Three arms and no catch-all, because each has a different consequence and folding any
@@ -354,7 +396,23 @@ let is_wrapper_refusal s = match classify_engine_status s with
   | Wrapper_refused -> true
   | Engine_status _ | Unrecognised_status _ -> false
 
-type mutant = { file : string; line : int; status : string; id : string; mutation : string option }
+(** One entry of the ENGINE's own report.
+
+    [m_cols] and [m_repl] are carried because they are half of the site identity the
+    [mutants] table's UNIQUE key is built from. They were previously dropped at the door
+    and the join was then left with nothing but a basename and a line — which is how two
+    mutants on one line came to have their verdicts stored against each other. They are
+    OPTIONS because a report is a third party's file: absent means "this engine did not
+    say", never "they are equal". *)
+type mutant = {
+  file : string;
+  line : int;
+  status : string;
+  id : string;
+  mutation : string option;
+  m_cols : (int * int) option;
+  m_repl : string option;
+}
 
 let load_generic path =
   let ic = try open_in path with Sys_error e -> die ("arch-mutants: " ^ e) in
@@ -387,9 +445,15 @@ let load_generic path =
                            verdict, and a survivor counted as anything else is a defect \
                            silently deleted."
                           path !n bad refused_status)) ;
+                 let num k = match List.assoc_opt k a with Some (`Int i) -> Some i | _ -> None in
                  acc := { file = f; line = l; status = s;
                           id = Option.value ~default:(string_of_int !n) (str "id");
-                          mutation = str "mutation" } :: !acc
+                          mutation = str "mutation";
+                          m_cols =
+                            (match (num "col_start", num "col_end") with
+                            | Some cs, Some ce -> Some (cs, ce)
+                            | _ -> None);
+                          m_repl = str "replacement" } :: !acc
              | _ -> die (Printf.sprintf "arch-mutants: %s:%d: mutant record missing file/line/status" path !n))
          | _ -> die (Printf.sprintf "arch-mutants: %s:%d: record is not a JSON object" path !n)
      done
@@ -440,13 +504,23 @@ let load_mutaml path =
               let m = match List.assoc_opt "mutant" a with Some (`Assoc m) -> m | _ -> [] in
               let loc = match List.assoc_opt "loc" m with Some (`Assoc l) -> l | _ -> [] in
               let start = match List.assoc_opt "loc_start" loc with Some (`Assoc s) -> s | _ -> [] in
+              let stop = match List.assoc_opt "loc_end" loc with Some (`Assoc s) -> s | _ -> [] in
+              (* The SAME arithmetic [load_mutaml_catalogue] uses for the catalogue side, so
+                 the two halves of the site key are computed once and cannot disagree. *)
+              let col p = match (List.assoc_opt "pos_cnum" p, List.assoc_opt "pos_bol" p) with
+                | Some (`Int c), Some (`Int b) -> Some (c - b)
+                | _ -> None
+              in
+              let repl = match List.assoc_opt "repl" m with Some (`String r) -> Some r | _ -> None in
               match
                 (List.assoc_opt "pos_fname" start, List.assoc_opt "pos_lnum" start)
               with
               | Some (`String f), Some (`Int l) when f <> "" ->
                   { file = f; line = l; status;
-                    id = (match List.assoc_opt "number" m with Some (`Int n) -> string_of_int n | _ -> string_of_int (i + 1));
-                    mutation = (match List.assoc_opt "repl" m with Some (`String r) -> Some r | _ -> None) }
+                    id = (match List.assoc_opt "number" m with Some (`Int n) -> Filename.remove_extension f ^ ":" ^ string_of_int n | _ -> string_of_int (i + 1));
+                    mutation = repl;
+                    m_cols = (match (col start, col stop) with Some a, Some b -> Some (a, b) | _ -> None);
+                    m_repl = repl }
               | _ ->
                   die
                     (Printf.sprintf
@@ -469,16 +543,14 @@ let load_mutaml path =
     SURVIVED read off a report is a real test gap ONLY under [proved_superset]. Under
     [top_bounded] or [no_contract] the tests that would have killed it may never have run,
     and calling it a survivor accuses a test that was never given the chance. The provenance
-    is therefore computed from the SAME two bindings [run] uses ([cone_escapes] and
-    [Arch_db.contract_ok]), never from a second copy of the rule. *)
+    is therefore computed by the SAME function [run] calls, {!selection_provenance}, over the
+    same two bindings ([cone_escapes] and [Arch_db.contract_ok]). That sentence was FALSE
+    when it was first written: the three-arm rule was spelled out here and again in
+    [run_campaign], byte for byte, and a shared ingredient is not a shared rule. *)
 let report (t : Arch_db.t) (g : Arch_graph.t) mutants test_keys repo fmt maxlist =
   let _, escapes = cone_escapes g test_keys in
   let sound = Arch_db.contract_ok t "mutants" in
-  let provenance =
-    if not sound then MDb.No_contract
-    else if escapes <> [] then MDb.Top_bounded
-    else MDb.Proved_superset
-  in
+  let provenance = selection_provenance ~sound ~escapes in
   (* Every survivor in this report shares one selection, so they share one verdict — but it
      is DERIVED through [published_verdict] rather than spelled out here, so `report` cannot
      drift from `verdict`'s rule. *)
@@ -586,7 +658,24 @@ let report (t : Arch_db.t) (g : Arch_graph.t) mutants test_keys repo fmt maxlist
                      `Assoc
                        [ ("file", `String m.file); ("line", `Int m.line);
                          ("status", `String m.status); ("id", `String m.id);
-                         ("mutation", match m.mutation with Some x -> `String x | None -> `Null) ])
+                         ("mutation", match m.mutation with Some x -> `String x | None -> `Null);
+                         (* FR-013 here TOO. This record is the one a reader copies out for a
+                            survivor nobody could map, and it used to carry a naked
+                            `status: SURVIVED` while the document above it said survivors
+                            publish as UNKNOWN — two answers to one question in one object,
+                            with the naked one attached to the record. Unmapped is a fact
+                            about the INDEX, never about the verdict. *)
+                         ("selection_provenance",
+                          `String (MDb.provenance_to_string provenance));
+                         ("verdict", `String (MDb.verdict_to_string survivor_verdict));
+                         ("verdict_basis", `String (MDb.verdict_basis survivor_outcome));
+                         ("function", `Null);
+                         ("unmapped_reason",
+                          `String
+                            "the index maps this file and line into no function span, so no \
+                             reaching test set can be computed for it. The verdict is \
+                             unaffected: it is derived from the status and the selection \
+                             provenance, neither of which depends on the mapping") ])
                    unmapped));
              ("total", `Int (List.length mutants)) ]))
   else (
@@ -596,8 +685,19 @@ let report (t : Arch_db.t) (g : Arch_graph.t) mutants test_keys repo fmt maxlist
     Printf.printf "  • selection provenance: %s — %s\n"
       (MDb.provenance_to_string provenance)
       (MDb.provenance_caveat provenance) ;
-    Printf.printf "  • %d mutant(s) in the report: %d survived, %d killed%s\n" (List.length mutants)
-      (List.length survivors) !killed
+    (* survivors + unmapped, which is the total `--fail-on-survivors` already gates on. The
+       headline used to print [List.length survivors] alone, so a report holding one
+       surviving mutant read "1 mutant(s) in the report: 0 survived, 0 killed" while the
+       bullet below it reported the survivor and the gate would have failed on it. The
+       unmapped share is named INLINE rather than left to a later line, because the summary
+       is what a reader acts on. *)
+    Printf.printf "  • %d mutant(s) in the report: %d survived%s, %d killed%s\n"
+      (List.length mutants)
+      (List.length survivors + List.length unmapped)
+      (if unmapped <> [] then
+         Printf.sprintf " (%d of them unmapped to any indexed function)" (List.length unmapped)
+       else "")
+      !killed
       (if !errored > 0 then Printf.sprintf ", %d errored (counted neither way)" !errored else "") ;
     if !refused > 0 then
       Printf.printf
@@ -609,7 +709,19 @@ let report (t : Arch_db.t) (g : Arch_graph.t) mutants test_keys repo fmt maxlist
         "  • %d survivor(s) could not be mapped to an indexed function — reported here rather \
          than dropped, because a dropped survivor is a defect that silently disappears:\n"
         (List.length unmapped) ;
-      List.iter (fun m -> Printf.printf "      %s:%d\n" m.file m.line) (take maxlist unmapped)) ;
+      (* The VERDICT, exactly as a mapped survivor gets it. Printing only the location left
+         the one shape in this rendering that carries no verdict at all. *)
+      List.iter
+        (fun m ->
+          Printf.printf "      %s %s:%d%s\n"
+            (MDb.verdict_to_string survivor_verdict)
+            m.file m.line
+            (match m.mutation with Some x -> Printf.sprintf "  (%s)" x | None -> "") ;
+          Printf.printf "        engine status %s under %s — %s\n"
+            (String.uppercase_ascii m.status)
+            (MDb.provenance_to_string provenance)
+            (MDb.verdict_basis survivor_outcome))
+        (take maxlist unmapped)) ;
     print_endline "" ;
     if survivors = [] then
       print_endline
@@ -961,12 +1073,43 @@ let resolve_binary cmd =
 
 let real_path p = try Unix.realpath p with Unix.Unix_error _ -> p
 
-(** The working tree, resolved ONCE. Computed lazily so a campaign that never walks an
-    ancestor never pays for a subprocess, and so the value cannot drift between the two
-    call sites that consult it. *)
+(** HOW the boundary was established, carried alongside it because the refusal's DIAGNOSIS
+    depends on it and printing the wrong one is its own defect: a fallback boundary that
+    asserts "this checkout is nested inside another one" sends the reader hunting for a
+    tree that does not exist. *)
+type tree_anchor =
+  | Anchor_git  (** `git rev-parse --show-toplevel` answered *)
+  | Anchor_marker  (** a `dune-project` above the working directory: the checkout's own root *)
+  | Anchor_cwd  (** neither: the boundary is the invocation directory, and nothing is claimed *)
+
+(** The nearest ancestor of [d] holding a tree-local marker of a checkout root.
+
+    `dune-project` is the marker. It is what says "this directory is the root of the
+    project the campaign belongs to" in exactly the case git cannot answer — an unpacked
+    tarball, a vendored subtree, an out-of-tree copy — and every OCaml source tree this
+    driver can be pointed at carries one. *)
+let marker_root d =
+  let rec up d =
+    if Sys.file_exists (Filename.concat d "dune-project") then Some d
+    else
+      let parent = Filename.dirname d in
+      if parent = d then None else up parent
+  in
+  up d
+
+(** The boundary, resolved ONCE. Computed lazily so a campaign that never walks an ancestor
+    never pays for a subprocess, and so the value cannot drift between the two call sites
+    that consult it.
+
+    It is the NEARER of the git toplevel and the checkout's own marker root, not the git
+    toplevel alone. Anchoring on git alone made `git init` — rather than the layout —
+    decide whether FR-030's guard fires at all: a checkout that is not itself a repository
+    but sits inside one resolves its toplevel to the OUTER repo, the boundary spans both
+    trees, and the outer tree's wrapper is handed to the engine. That is issue #77
+    unrefused, and `git init` in the inner tree flipped it. *)
 let working_tree_root =
   lazy
-    (let cwd = Sys.getcwd () in
+    (let cwd = real_path (Sys.getcwd ()) in
      let out = Filename.temp_file "arch-mutants-toplevel" ".txt" in
      let code =
        Sys.command
@@ -981,10 +1124,22 @@ let working_tree_root =
            v
      in
      (try Sys.remove out with Sys_error _ -> ()) ;
-     real_path (if code = 0 && value <> "" then value else cwd))
+     let git = if code = 0 && value <> "" then Some (real_path value) else None in
+     let marker = Option.map real_path (marker_root cwd) in
+     (* Both, when present, are ancestors of the working directory, so "nearer" is simply
+        the longer path. The DEEPER boundary is the safer one: it can only narrow what the
+        campaign is allowed to reach. *)
+     match (git, marker) with
+     | Some g, Some m -> if String.length m > String.length g then (m, Anchor_marker) else (g, Anchor_git)
+     | Some g, None -> (g, Anchor_git)
+     | None, Some m -> (m, Anchor_marker)
+     | None, None -> (cwd, Anchor_cwd))
+
+let tree_root () = fst (Lazy.force working_tree_root)
+let tree_anchor () = snd (Lazy.force working_tree_root)
 
 let inside_tree path =
-  let root = Lazy.force working_tree_root in
+  let root = tree_root () in
   let p = real_path path in
   let prefix = if String.length root > 0 && root.[String.length root - 1] = '/' then root else root ^ "/" in
   p = root
@@ -997,18 +1152,29 @@ let inside_tree path =
 let guard_inside_tree ~what path =
   if inside_tree path then path
   else
+    let root = tree_root () in
+    (* The diagnosis is chosen by HOW the boundary was found, never asserted. Under
+       [Anchor_cwd] there is no enclosing repository and no marker, so there is no nesting
+       to report and claiming one is simply false. *)
+    let diagnosis =
+      match tree_anchor () with
+      | Anchor_git ->
+          "The boundary is the enclosing git repository (`git rev-parse --show-toplevel`).            The artefact was reached by walking ancestor directories, so this checkout is            nested inside another one and the campaign was about to run the OUTER tree's            artefact."
+      | Anchor_marker ->
+          "The boundary is this checkout's own root, found as the nearest `dune-project`            above the working directory — nearer than any git repository, or with no git            repository at all. The artefact was reached by walking PAST that root, so it            belongs to a different tree."
+      | Anchor_cwd ->
+          "No boundary could be established: `git rev-parse --show-toplevel` did not            answer and there is no `dune-project` above the working directory. The boundary            therefore FELL BACK to the invocation directory itself, which is the narrower            and safer answer. This is NOT a claim that this checkout is nested inside            another one — nothing here can tell whether it is."
+    in
     refuse
       (Printf.sprintf
-         "arch-mutants: %s resolved to %s, which is OUTSIDE the working tree %s.\n\
-          It was reached by walking ancestor directories, so this checkout is nested inside \
-          another one and the campaign was about to run the OUTER tree's artefact. That is \
-          issue #77: the outer tree's binary is unmutated, every mutant survives, and the \
-          report becomes a page of false test gaps that reads exactly like a real finding. \
-          Refusing rather than producing it.\n\
+         "arch-mutants: %s resolved to %s, which is OUTSIDE the boundary %s.\n\
+          %s That is issue #77's mechanism: the outer tree's binary is unmutated, every \
+          mutant survives, and the report becomes a page of false test gaps that reads \
+          exactly like a real finding. Refusing rather than producing it.\n\
           What would make this work: build the artefact inside %s, or name the one you mean \
           explicitly with ARCH_MUTANTS_WRAPPER / ARCH_IMPACT — an override that names an \
           existing path is honoured, because there you chose it."
-         what path (Lazy.force working_tree_root) (Lazy.force working_tree_root))
+         what path root diagnosis root)
 
 (** The wrapper the engine will call once per mutant. [ARCH_MUTANTS_WRAPPER] overrides;
     otherwise it is found by walking up from the working directory, the same resolution
@@ -1165,19 +1331,46 @@ let run_impact ~impact ~db_path ~repo ~range =
     match json with
     | `Assoc a -> (
         match List.assoc_opt "touched" a with
+        (* An EMPTY `touched` array is NOT refused here, and the distinction is the whole
+           point. Rules 1 and 2 selecting nothing is legitimate — a documentation-only range
+           touches no indexed function — and rule 3, the deleted-test recheck, can still
+           select mutants on its own. What must never happen is the campaign proceeding once
+           ALL THREE rules have selected nothing, and that is refused where the union is
+           known, in [run_campaign] after the narrowing, naming an empty touched set as the
+           cause when it was one. Refusing here instead would have broken the deleted-test
+           rule, which is the case this driver's own tezt suite exercises. *)
         | Some (`List l) ->
-            Impact_ok
-              (List.filter_map
-                 (function
-                   | `Assoc f -> (
-                       let str k =
-                         match List.assoc_opt k f with Some (`String s) -> Some s | _ -> None
-                       in
-                       match str "name" with
-                       | Some n -> Some { i_name = n; i_how = Option.value ~default:"?" (str "how") }
-                       | None -> None)
-                   | _ -> None)
-                 l)
+            (* Entries the reader cannot understand are COUNTED, never dropped. They used to
+               go through `List.filter_map` with no count at all, so an arch-impact that
+               renamed `name` shrank the touched set silently — and a set silently shrunk
+               from twelve to three is indistinguishable from a correct set of three. *)
+            let parsed =
+              List.filter_map
+                (function
+                  | `Assoc f -> (
+                      let str k =
+                        match List.assoc_opt k f with Some (`String s) -> Some s | _ -> None
+                      in
+                      match str "name" with
+                      | Some n -> Some { i_name = n; i_how = Option.value ~default:"?" (str "how") }
+                      | None -> None)
+                  | _ -> None)
+                l
+            in
+            let dropped = List.length l - List.length parsed in
+            if dropped > 0 then
+              die
+                (Printf.sprintf
+                   "arch-mutants: %s --format json returned %d `touched` entr(ies) and %d of \
+                    them carry no string `name` field, so they could not be read. Refusing \
+                    rather than scoping the campaign on the %d that could: a touched set \
+                    silently shrunk is indistinguishable from a correct small one, and every \
+                    mutant outside it would publish as 'not at risk' rather than 'not looked \
+                    at'. No campaign row was written.\n\
+                    What this usually means: arch-impact's `touched` entry shape changed and \
+                    the field is no longer called `name`."
+                   impact (List.length l) dropped (List.length parsed)) ;
+            Impact_ok parsed
         | _ ->
             die
               (Printf.sprintf
@@ -1211,6 +1404,13 @@ let run_impact ~impact ~db_path ~repo ~range =
 type prior_mutant = {
   pk_file : string;
   pk_line : int;
+  (* The other half of the site key the `mutants` UNIQUE constraint is built from. It was
+     projected away, so the deleted-test recheck matched on (basename, line) and inherited
+     the outcome join's conflation: two mutants on one line could not be told apart, and
+     slice 4 reads the very table that conflation corrupts. *)
+  pk_col_start : int;
+  pk_col_end : int;
+  pk_repl : string;
   pk_outcome : MDb.outcome;
   pk_kills : int;
   pk_sole_test : string option;
@@ -1223,14 +1423,15 @@ module Prior_shape = struct
   let i = Rows.i
 
   (* file_path, line, engine_status, selection_provenance, one kill row's test_name,
-     kill count. The provenance travels in the SAME projection as the status: this is the
-     only place either is read, so there is no second site at which they could be paired
-     with a value from a different row (FR-013, FR-033). *)
-  let row = Ty.(t2 (t3 s i s) (t3 s s i))
+     kill count, then col_start, col_end and replacement. The provenance travels in the
+     SAME projection as the status: this is the only place either is read, so there is no
+     second site at which they could be paired with a value from a different row (FR-013,
+     FR-033). The three site columns travel in it for the same reason. *)
+  let row = Ty.(t3 (t3 s i s) (t3 s s i) (t3 i i s))
 
-  let cells ((file, line, status), (prov, test, kills)) =
+  let cells ((file, line, status), (prov, test, kills), (cs, ce, repl)) =
     [ text_cell file; int_cell line; text_cell status; text_cell prov; text_cell test;
-      int_cell kills ]
+      int_cell kills; int_cell cs; int_cell ce; text_cell repl ]
 end
 
 (** What a prior outcome lets us conclude about ATTRIBUTION, which is the only question
@@ -1265,7 +1466,7 @@ let prior_mutants (t : Arch_db.t) =
       (List.filter_map
          (fun row ->
            match row with
-           | [ file_c; line_c; status_c; prov_c; test_c; kills_c ] ->
+           | [ file_c; line_c; status_c; prov_c; test_c; kills_c; cs_c; ce_c; repl_c ] ->
                let text = function
                  | Arch_db.Text s -> Some s
                  | Arch_db.Nul | Arch_db.Int _ | Arch_db.Real _ -> None
@@ -1305,6 +1506,9 @@ let prior_mutants (t : Arch_db.t) =
                Some
                  { pk_file = Option.value ~default:"" (text file_c);
                    pk_line = Option.value ~default:0 (int_of line_c);
+                   pk_col_start = Option.value ~default:0 (int_of cs_c);
+                   pk_col_end = Option.value ~default:0 (int_of ce_c);
+                   pk_repl = Option.value ~default:"" (text repl_c);
                    pk_outcome = { MDb.o_status = status; o_provenance = provenance };
                    pk_kills = kills;
                    pk_sole_test = (if kills = 1 then text test_c else None) }
@@ -1315,7 +1519,8 @@ let prior_mutants (t : Arch_db.t) =
              k.test_name FROM \
              mutant_kills k WHERE k.mutant_id = m.id AND k.campaign_id = l.cid ORDER BY \
              k.test_name LIMIT 1), (SELECT count(*) FROM mutant_kills k WHERE k.mutant_id = \
-             m.id AND k.campaign_id = l.cid) FROM mutants m JOIN (SELECT mutant_id AS mid, \
+             m.id AND k.campaign_id = l.cid), m.col_start, m.col_end, m.replacement FROM \
+             mutants m JOIN (SELECT mutant_id AS mid, \
              MAX(campaign_id) AS cid FROM mutant_runs GROUP BY mutant_id) l ON l.mid = m.id \
              JOIN mutant_runs r ON r.mutant_id = m.id AND r.campaign_id = l.cid ORDER BY m.id"
             ()))
@@ -1340,18 +1545,25 @@ type diff_scope = {
   ds_by_function : SS.t;  (** the union of rules 1 and 2, as function NAMES *)
   ds_prior_known : bool;
   ds_deleted_tests : string list;
-  ds_recheck : (string * int) list;
+  ds_recheck : prior_mutant list;  (** carried whole: the recheck match is the SITE KEY *)
   ds_unrecheckable : (string * int) list;
   ds_file_granular : int;
 }
 
-let same_site (file, line) (s : site) =
-  line = s.s_line
-  && (file = s.s_file || Filename.basename file = Filename.basename s.s_file)
+(** The deleted-test recheck's site match. It used to be
+    [line = s_line && (file = s_file || basename file = basename s_file)] over a pair
+    projected down to (file, line), so it carried the outcome join's conflation: two mutants
+    on one line were one site, and two files sharing a basename were one file. The prior row
+    carries the full key — the same columns the `mutants` UNIQUE constraint is built from —
+    so the match is that key. This will be load-bearing for slice 4, which reads the
+    `mutant_kills` table the conflation corrupts. *)
+let same_site (p : prior_mutant) (s : site) =
+  p.pk_line = s.s_line && p.pk_file = s.s_file && p.pk_col_start = s.s_col_start
+  && p.pk_col_end = s.s_col_end && p.pk_repl = s.s_repl
 
 let in_scope ds (sel : selection) =
   (match sel.sel_fn with Some fn -> SS.mem fn ds.ds_by_function | None -> false)
-  || List.exists (fun site -> same_site site sel.sel_site) ds.ds_recheck
+  || List.exists (fun p -> same_site p sel.sel_site) ds.ds_recheck
 
 (** Build the scope. Nothing here writes: this runs BEFORE the campaign row exists, so a
     refusal leaves no campaign behind to be misread as "no survivors". *)
@@ -1435,7 +1647,7 @@ let compute_diff_scope (t : Arch_db.t) (g : Arch_graph.t) test_keys ~db_path ~re
           ( List.filter_map
               (fun p ->
                 match prior_attribution p with
-                | Pa_known tn when SS.mem tn deleted_set -> Some (p.pk_file, p.pk_line)
+                | Pa_known tn when SS.mem tn deleted_set -> Some p
                 | Pa_known _ | Pa_no_test_kills_it | Pa_never_known -> None)
               rows,
             List.filter_map
@@ -1497,11 +1709,7 @@ let run_campaign (t : Arch_db.t) (g : Arch_graph.t) test_keys ~db_path ~plan_pat
   (* 2. Selection provenance — ONE binding, shared with `plan`, never recomputed. *)
   let _, escapes = cone_escapes g test_keys in
   let sound = Arch_db.contract_ok t "mutants" in
-  let provenance =
-    if not sound then MDb.No_contract
-    else if escapes <> [] then MDb.Top_bounded
-    else MDb.Proved_superset
-  in
+  let provenance = selection_provenance ~sound ~escapes in
   (* 3. The plan, the catalogue, and the mapping between them. *)
   let targets = load_plan plan_path in
   let sites = load_catalogue ~from catalogue_path in
@@ -1565,7 +1773,7 @@ let run_campaign (t : Arch_db.t) (g : Arch_graph.t) test_keys ~db_path ~plan_pat
           sel_fn = (match !best with Some tg -> Some tg.t_fn | None -> None);
           sel_intended = intended;
           sel_executed = executed;
-          sel_superset = List.length executed > List.length intended;
+          sel_superset = executed_is_widened ~intended ~executed;
           sel_hash = source_hash ~repo s })
       sites
   in
@@ -1585,6 +1793,40 @@ let run_campaign (t : Arch_db.t) (g : Arch_graph.t) test_keys ~db_path ~plan_pat
     | None -> (selections, [], 0)
     | Some ds ->
         let keep, drop = List.partition (in_scope ds) selections in
+        (* A narrowing that leaves NOTHING is refused here, before a single row exists.
+           [load_catalogue]'s empty-catalogue refusal fires BEFORE this narrowing and
+           cannot see the case; without this, a `--diff` that selected nothing produced a
+           COMPLETED campaign with zero runs, which `verdict` then published as all-zero
+           counts. That is the one conflation this whole design refuses: an empty read is
+           not a clean read. *)
+        if keep = [] then
+          refuse
+            (Printf.sprintf
+               "arch-mutants: --diff %s narrowed the catalogue from %d mutant(s) to ZERO. A \
+                campaign over an EMPTY SET would select nothing and read as 'nothing to \
+                test' — it would report no survivors for the same reason a campaign that \
+                found none does — so it is REFUSED rather than run: no campaign row was \
+                written.\n\
+                %s\n\
+                Selection is by FUNCTION, so a mutant is in scope only when the index maps \
+                its site into a selected one; %d of the excluded mutant(s) map to no \
+                indexed function at all. The deleted-test rule re-selected %d mutant(s).\n\
+                What would make this non-empty: a range that touches a function the index \
+                carries and the catalogue has a mutant inside."
+               ds.ds_range (List.length selections)
+               (if ds.ds_touched = [] then
+                  Printf.sprintf
+                    "%s answered with an EMPTY `touched` array, so rules 1 and 2 selected \
+                     nothing at all. That is legitimate on its own — a documentation-only \
+                     range touches no indexed function — but here the deleted-test rule \
+                     added nothing either, so the union is empty."
+                    ds.ds_impact_path
+                else
+                  Printf.sprintf "The scope came from %s, which named %d touched function(s): %s."
+                    ds.ds_impact_path (List.length ds.ds_touched)
+                    (String.concat ", " (take 5 ds.ds_touched)))
+               (List.length (List.filter (fun s -> s.sel_fn = None) drop))
+               (List.length ds.ds_recheck)) ;
         (keep, drop, List.length (List.filter (fun s -> s.sel_fn = None) drop))
   in
   (* 4. The work directory: the selection the wrapper reads, and the trace it writes. *)
@@ -1616,9 +1858,43 @@ let run_campaign (t : Arch_db.t) (g : Arch_graph.t) test_keys ~db_path ~plan_pat
     && String.for_all
          (fun c ->
            (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
-           || String.contains "_-.:/+@= " c)
+           (* The apostrophe is an ordinary OCaml identifier character — `aux'`, `loop'`,
+              `test_foo'` — and one such name anywhere in the reaching set used to abort the
+              WHOLE campaign at exit 2 with no campaign row. It is also the one excluded
+              character the wrapper demonstrably handles: every name is POSIX-quoted before
+              substitution, with an embedded quote closed and reopened the '\'' way. Comma,
+              tab and newline stay refused — they are the TSV's own separators, which is what
+              the refusal message argues for. *)
+           || String.contains "_-.:/+@= '" c)
          n
   in
+  (* FR-003 — the engine is NEVER invoked with a SUBSET of the intended set, under any
+     circumstances. It had no acceptance criterion, no check and no code: the only relation
+     computed anywhere was a cardinality comparison, which an executed set of equal size with
+     a member SUBSTITUTED satisfies while violating the requirement outright. It is checked
+     HERE, before the selection file is written and before any row exists, because a campaign
+     that ran the wrong tests reports survivors that are accusations against tests nobody
+     gave the chance. *)
+  List.iter
+    (fun sel ->
+      match missing_from_executed ~intended:sel.sel_intended ~executed:sel.sel_executed with
+      | [] -> ()
+      | missing ->
+          die
+            (Printf.sprintf
+               "arch-mutants: FR-003 — the executed test set for mutant %s at %s:%d is NOT a \
+                superset of the intended set: %d of %d intended test(s) would not run (%s). \
+                A campaign is allowed to run MORE tests than the plan requires and never \
+                fewer; a missing test turns a mutant it would have killed into a survivor, \
+                which is a false accusation against a real test. No campaign row was \
+                written.\n\
+                Where this comes from: the plan's reaching set and the profile's addressable \
+                set were computed from different test selections. Run `plan` and `run` with \
+                the same --tests."
+               sel.sel_site.s_id sel.sel_site.s_file sel.sel_site.s_line
+               (List.length missing) (List.length sel.sel_intended)
+               (String.concat ", " (take 5 missing))))
+    selections ;
   List.iter
     (fun sel ->
       List.iter
@@ -1627,7 +1903,8 @@ let run_campaign (t : Arch_db.t) (g : Arch_graph.t) test_keys ~db_path ~plan_pat
             die
               (Printf.sprintf
                  "arch-mutants: the test name %S, reaching mutant %s at %s:%d, carries a \
-                  character outside the allowed set (letters, digits, space and _-.:/+@=). \
+                  character outside the allowed set (letters, digits, space, apostrophe and \
+                  _-.:/+@=). \
                   It would be written into the selection the wrapper reads and then spliced \
                   into a command line, so a name like this is a code-execution vector from \
                   the analysed repository's own source, and a comma or tab in it would \
@@ -1646,6 +1923,20 @@ let run_campaign (t : Arch_db.t) (g : Arch_graph.t) test_keys ~db_path ~plan_pat
               (String.concat "," sel.sel_executed))
           selections)) ;
   write_file trace_file "" ;
+  (* The index run this selection was derived from, where the schema records one. Read
+     through the READ-ONLY handle, before the writer opens: on the flat schema there is no
+     `producer_runs` table and NULL is the honest answer, not a missing one. *)
+  let producer_run_id =
+    if not (Arch_db.has_table t "producer_runs") then None
+    else
+      match
+        Arch_db.rows t ~params_ty:Arch_db.Ty.unit ~shape:Arch_db.Rows.t1
+          ~to_cells:Arch_db.Rows.c1
+          "SELECT CAST(MAX(id) AS TEXT) FROM producer_runs" ()
+      with
+      | [ Arch_db.Text v ] :: _ -> int_of_string_opt v
+      | _ -> None
+  in
   (* 5. Open the database and write the campaign row. Only now: everything that could
      refuse has refused. *)
   let db =
@@ -1660,7 +1951,7 @@ let run_campaign (t : Arch_db.t) (g : Arch_graph.t) test_keys ~db_path ~plan_pat
     try
       MDb.insert_campaign db ~engine ~engine_version ~seed ~engine_path
         ~test_runner_path:runner_path ~profile:profile_name
-        ~granularity:(granularity_to_string granularity)
+        ~granularity:(granularity_to_string granularity) ~producer_run_id
     with MDb.Write_failed m ->
       prerr_endline ("arch-mutants: " ^ m) ;
       finish 2
@@ -1715,28 +2006,84 @@ let run_campaign (t : Arch_db.t) (g : Arch_graph.t) test_keys ~db_path ~plan_pat
       if from = "mutaml" then load_mutaml report_path else load_generic report_path
     else []
   in
-  (* Report entries carry a location, not the engine's wrapper id, so they are matched to
-     catalogued sites by (file, line), consuming duplicates in order. An entry that
-     matches nothing catalogued is counted rather than dropped. *)
+  (* 8a. THE JOIN — the engine's outcomes onto the catalogued sites.
+
+     It used to be [Filename.basename file = basename && line = line], consuming duplicates
+     in list order and never refusing. Two mutants on one line therefore had their
+     KILLED/SURVIVED verdicts stored against EACH OTHER, and a `mutant_kills` row — the one
+     record in this schema that claims to name a killer — was written against a different
+     FILE whenever two paths shared a basename. Both were executed, not argued.
+
+     What makes that indefensible rather than merely coarse is that BOTH discriminators were
+     already present and thrown away: the schema's own key is
+     UNIQUE(file_path, line, col_start, col_end, replacement, source_hash), and the engine's
+     id is carried by the catalogue record AND by the report entry.
+
+     So, in order:
+
+       1. the ENGINE'S OWN ID, cross-checked against file and line so an id a generic
+          adapter had to synthesise cannot pull an outcome onto an unrelated site;
+       2. failing that, the SITE KEY — full path (never a basename), line, and every column
+          and replacement the report actually carries. A field the report omits is not
+          treated as equal, it is simply not discriminating;
+       3. and where two catalogued sites survive both, the driver REFUSES. Taking the head
+          of the list there is a coin flip recorded as a fact, in a table whose whole
+          purpose is to say which test proved what. *)
   let pending_sites = ref selections in
   let unmatched = ref 0 in
   let attempted = ref [] in
+  (* Full-path equality, with a leading "./" normalised away on both sides and NOTHING
+     else. A basename comparison is what this fix exists to remove: `lib/a/main.ml` and
+     `lib/b/main.ml` are two different mutants and no amount of convenience makes them one. *)
+  let strip_dot p = if String.length p > 2 && String.sub p 0 2 = "./" then String.sub p 2 (String.length p - 2) else p in
+  let same_path a b = strip_dot a = strip_dot b in
+  let by_id (m : mutant) sel =
+    sel.sel_site.s_id = m.id && sel.sel_site.s_line = m.line && same_path sel.sel_site.s_file m.file
+  in
+  let by_site (m : mutant) sel =
+    sel.sel_site.s_line = m.line
+    && same_path sel.sel_site.s_file m.file
+    && (match m.m_cols with
+       | Some (cs, ce) -> sel.sel_site.s_col_start = cs && sel.sel_site.s_col_end = ce
+       | None -> true)
+    && (match m.m_repl with Some r -> sel.sel_site.s_repl = r | None -> true)
+  in
+  let refuse_ambiguous (m : mutant) candidates =
+    Printf.eprintf
+      "arch-mutants: the report entry for %s:%d (engine id %S, status %s) matches %d \
+       catalogued mutant sites that are INDISTINGUISHABLE from what the report carries:\n"
+      m.file m.line m.id (String.uppercase_ascii m.status) (List.length candidates) ;
+    List.iter
+      (fun sel ->
+        Printf.eprintf "      %s:%d cols %d-%d replacement %S (engine id %S)\n"
+          sel.sel_site.s_file sel.sel_site.s_line sel.sel_site.s_col_start
+          sel.sel_site.s_col_end sel.sel_site.s_repl sel.sel_site.s_id)
+      candidates ;
+    Printf.eprintf
+      "  The report names no id this catalogue knows, and carries no column span or \
+       replacement that tells these sites apart. Taking the first would pair this outcome \
+       with a mutant chosen by LIST ORDER — which is how a KILLED and a SURVIVED came to be \
+       stored against each other, and a kill attributed to a test that never touched the \
+       site. Refusing instead. No run row was written for this entry and the campaign is \
+       NOT complete.\n\
+       What would make this joinable: a report that echoes the catalogue's id, its column \
+       span, or its replacement text.\n" ;
+    ignore (finish 1 : 'a)
+  in
   List.iter
     (fun (m : mutant) ->
-      let base p = Filename.basename p in
-      let rec take acc = function
-        | [] -> None
-        | sel :: tl
-          when sel.sel_site.s_line = m.line
-               && base sel.sel_site.s_file = base m.file ->
-            Some (sel, List.rev_append acc tl)
-        | sel :: tl -> take (sel :: acc) tl
+      let consume sel =
+        pending_sites := List.filter (fun s -> s != sel) !pending_sites ;
+        attempted := (sel, m) :: !attempted
       in
-      match take [] !pending_sites with
-      | Some (sel, rest) ->
-          pending_sites := rest ;
-          attempted := (sel, m) :: !attempted
-      | None -> incr unmatched)
+      match List.filter (by_id m) !pending_sites with
+      | [ sel ] -> consume sel
+      | _ :: _ :: _ as amb -> refuse_ambiguous m amb
+      | [] -> (
+          match List.filter (by_site m) !pending_sites with
+          | [ sel ] -> consume sel
+          | [] -> incr unmatched
+          | _ :: _ :: _ as amb -> refuse_ambiguous m amb))
     outcomes ;
   let matched = List.rev !attempted in
   (* 8b. THREE populations, separated before anything is persisted. Each was previously
@@ -1760,8 +2107,41 @@ let run_campaign (t : Arch_db.t) (g : Arch_graph.t) test_keys ~db_path ~plan_pat
      ATTEMPTED. A trace line exists, so the executed set is carried alongside the outcome as
      a plain [string list]. The lookup is gone from the three places downstream that used to
      redo it with a default, which is why it can no longer silently succeed. *)
+  (* A refusal is 99 AND NO TRACE LINE. The wrapper writes its trace line last and every
+     refusal path exits before reaching it, so the absence is the discriminator — and it is
+     the second half of reserving 99 end to end. `scripts/mutaml-wrapper.sh` already remaps a
+     test command's own 99 to 1, but a THIRD-PARTY wrapper cannot be made to, and the driver
+     must not read a runner's legitimate 99 as "never attempted": that turns a real test
+     failure into a mutant that can never be killed and a campaign that can never complete.
+
+     It applies to the MUTAML path only, and that restriction is not caution: there REFUSED
+     is INFERRED from a raw exit code, which is what makes 99 ambiguous. In a generic report
+     the status string is written explicitly by whoever produced the file, and a driver that
+     overrode an explicit REFUSED with a guess drawn from a trace line would be doing the
+     very thing this whole finding is about. *)
   let refused_runs, engine_reported =
-    List.partition (fun (_, (m : mutant)) -> is_wrapper_refusal m.status) matched
+    List.partition
+      (fun (sel, (m : mutant)) ->
+        is_wrapper_refusal m.status
+        && not (from = "mutaml" && Hashtbl.mem executed_by_id sel.sel_site.s_id))
+      matched
+  in
+  let reclassified_99 = ref 0 in
+  let engine_reported =
+    List.map
+      (fun (sel, (m : mutant)) ->
+        if is_wrapper_refusal m.status then (
+          incr reclassified_99 ;
+          Printf.eprintf
+            "arch-mutants: %s:%d (engine id %s) carries the wrapper's refusal code, but the \
+             wrapper WROTE A TRACE LINE for it — so its tests did run and this is the test \
+             command's own exit status, not a refusal. Recording it as KILLED, which is what \
+             a non-zero test run under a mutation means. Only a refusal leaves no trace \
+             line.\n"
+            sel.sel_site.s_file sel.sel_site.s_line sel.sel_site.s_id ;
+          (sel, { m with status = MDb.status_to_string MDb.Killed }))
+        else (sel, m))
+      engine_reported
   in
   let unobserved_runs, attempted =
     List.partition_map
@@ -1771,7 +2151,17 @@ let run_campaign (t : Arch_db.t) (g : Arch_graph.t) test_keys ~db_path ~plan_pat
         | Some executed -> Either.Right (sel, m, executed))
       engine_reported
   in
-  let n_refused = List.length refused_runs and n_unobserved = List.length unobserved_runs in
+  (* A refusal whose report entry matched NO catalogued site used to reach [n_refused] by
+     no path at all: refusals are partitioned out of [matched], and [matched] is what the
+     partition runs over. Two real refusals were invisible that way. The count is therefore
+     taken over the report entries the adapter produced — every refusal the wrapper made —
+     while [refused_runs] stays the list of the ones that could be NAMED with a site. *)
+  let unmatched_refused =
+    List.length (List.filter (fun (m : mutant) -> is_wrapper_refusal m.status) outcomes)
+    - List.length refused_runs - !reclassified_99
+  in
+  let n_refused = List.length refused_runs + unmatched_refused
+  and n_unobserved = List.length unobserved_runs in
   (* 9. Persist one run row per ATTEMPTED mutant. A mutant with no row is PENDING by that
      absence — never SURVIVED. *)
   let killed = ref 0 and survived = ref 0 and timed_out = ref 0 and errored = ref 0 in
@@ -1808,7 +2198,7 @@ let run_campaign (t : Arch_db.t) (g : Arch_graph.t) test_keys ~db_path ~plan_pat
                    ~engine_mutant_id:(Some sel.sel_site.s_id) ~status ~provenance
                    ~intended:(List.length sel.sel_intended)
                    ~executed:(List.length executed)
-                   ~superset:(List.length executed > List.length sel.sel_intended)
+                   ~superset:(executed_is_widened ~intended:sel.sel_intended ~executed)
                with MDb.Write_failed msg -> prerr_endline ("arch-mutants: " ^ msg)) ;
               (* FR-007: attribution ONLY when it is genuinely known. A singleton executed
                  set is the one case the driver can prove by itself; an engine that names
@@ -1833,8 +2223,13 @@ let run_campaign (t : Arch_db.t) (g : Arch_graph.t) test_keys ~db_path ~plan_pat
      cannot quietly stamp a campaign complete while a mutant was never tested or its
      executed set was never seen. *)
   let pending = catalogued - n_attempted in
+  (* [!unmatched] belongs in this conjunction and was published only in the JSON. A run
+     whose report entries matched NO catalogued site at all — a total join failure, measured
+     at 2 of 2 — was stamped complete on the strength of `pending = 0`, which is trivially
+     true when the outcomes never reached the sites. *)
   let complete =
     (not refused) && engine_code = 0 && pending = 0 && n_refused = 0 && n_unobserved = 0
+    && !unmatched = 0
   in
   (* Parenthesised, and it matters: without them the trailing `;` binds INSIDE the `with`
      handler, so every line below would run only on a write failure and a successful
@@ -1911,7 +2306,18 @@ let run_campaign (t : Arch_db.t) (g : Arch_graph.t) test_keys ~db_path ~plan_pat
             ("functions_reached_by_touched_tests", strings ds.ds_reached);
             ("prior_attribution_available", `Bool ds.ds_prior_known);
             ("deleted_tests", strings ds.ds_deleted_tests);
-            ("rechecked_for_deleted_tests", `List (List.map site_json ds.ds_recheck));
+            ("rechecked_for_deleted_tests",
+             `List
+               (List.map
+                  (fun (p : prior_mutant) ->
+                    (* The full key, published: a reader who has to reconcile this list with
+                       the `mutants` table needs the columns the table is keyed on, not a
+                       file and a line that name two rows. *)
+                    `Assoc
+                      [ ("file", `String p.pk_file); ("line", `Int p.pk_line);
+                        ("col_start", `Int p.pk_col_start); ("col_end", `Int p.pk_col_end);
+                        ("replacement", `String p.pk_repl) ])
+                  ds.ds_recheck));
             (* The honest half of rule 3. A mutant nobody could attribute cannot be shown
                to be safe from the deletion, so it is named rather than skipped. *)
             ("unrecheckable", `List (List.map site_json ds.ds_unrecheckable)) ]
@@ -2004,7 +2410,13 @@ let run_campaign (t : Arch_db.t) (g : Arch_graph.t) test_keys ~db_path ~plan_pat
                           ("intended_tests", `List (List.map (fun s -> `String s) sel.sel_intended));
                           ("executed_tests", `List (List.map (fun s -> `String s) executed));
                           ("executed_superset",
-                           `Bool (List.length executed > List.length sel.sel_intended)) ])
+                           `Bool (executed_is_widened ~intended:sel.sel_intended ~executed));
+                          (* Named, not just denied: FR-003 forbids invoking the engine
+                             with a SUBSET, and a bare `false` cannot be acted on. *)
+                          ("intended_tests_not_executed",
+                           `List
+                             (List.map (fun t -> `String t)
+                                (missing_from_executed ~intended:sel.sel_intended ~executed))) ])
                     attempted) ) ]))
   else (
     Printf.printf "== Mutation campaign %d\n" campaign_id ;
@@ -2159,7 +2571,11 @@ let run_campaign (t : Arch_db.t) (g : Arch_graph.t) test_keys ~db_path ~plan_pat
           (match sel.sel_fn with Some f -> f | None -> "(unmapped — persisted, not dropped)") ;
         Printf.printf "      intended %d, executed %d%s\n" (List.length sel.sel_intended)
           (List.length executed)
-          (if List.length executed > List.length sel.sel_intended then " (SUPERSET)" else ""))
+          (match missing_from_executed ~intended:sel.sel_intended ~executed with
+          | [] -> if executed_is_widened ~intended:sel.sel_intended ~executed then " (SUPERSET)" else ""
+          | missing ->
+              Printf.sprintf " — NOT A SUPERSET: %d intended test(s) did not run (%s)"
+                (List.length missing) (String.concat ", " (take 5 missing))))
       (take maxlist attempted) ;
     if maxlist > 0 && n_attempted > maxlist then
       Printf.printf "  … and %d more (--max-list 0 for all)\n" (n_attempted - maxlist)) ;
@@ -2453,7 +2869,12 @@ let verdict_cmd (t : Arch_db.t) ~only_campaign ~fmt ~maxlist =
                                (fun v -> (MDb.verdict_to_string v, `Int (count_of v findings)))
                                all_verdicts));
                          ("findings", `List (List.map finding_json (take maxlist findings)));
-                         ("findings_total", `Int (List.length findings)) ])
+                         ("findings_total", `Int (List.length findings));
+                         (* A campaign with no finding of any kind attempted NOTHING. Said
+                            as its own key rather than left for a reader to infer from six
+                            zeroes, because six zeroes is also what a campaign in which
+                            nothing survived looks like, and those are not the same fact. *)
+                         ("attempted_nothing", `Bool (findings = [])) ])
                    per_campaign)) ]))
   else
     List.iter
@@ -2470,6 +2891,13 @@ let verdict_cmd (t : Arch_db.t) ~only_campaign ~fmt ~maxlist =
           (fun v ->
             Printf.printf "  • %-19s %d\n" (MDb.verdict_to_string v) (count_of v findings))
           all_verdicts ;
+        if findings = [] then
+          print_endline
+            "  • this campaign ATTEMPTED NOTHING: it holds no run row and no catalogued \
+             site, so every count above is zero by ABSENCE. That is not \"nothing \
+             survived\" and must never be read as it. What would have made it non-zero: a \
+             selection that was not narrowed away — a `--diff` range touching an indexed \
+             function the catalogue has a mutant inside" ;
         if count_of MDb.V_survived findings = 0 then
           print_endline
             "  • 0 published SURVIVED. What would have made it non-zero: a mutant the \

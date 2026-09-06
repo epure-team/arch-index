@@ -55,6 +55,14 @@ let () =
   Mutants.register_report_provenance () ;
   Mutants.register_report_status_vocabulary () ;
   Mutants.register_diff_bounded_survivor_unrecheckable () ;
+  (* Round 3 — the driver and the wrapper. *)
+  Mutants.register_run_join_is_site_identity () ;
+  Mutants.register_run_empty_scope_and_unmatched () ;
+  Mutants.register_run_impact_entries_counted () ;
+  Mutants.register_report_unmapped_survivor_carries_verdict () ;
+  Mutants.register_run_accepts_prime_suffixed_test_name () ;
+  Mutants.register_run_refuses_subset_executed_set () ;
+  Mutants.register_run_refuses_outside_non_git_tree () ;
   Decision_lint.register_aliases () ;
   Decision_lint.register_smt_noise () ;
   Decision_lint.register_smt_mute () ;

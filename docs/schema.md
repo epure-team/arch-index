@@ -275,6 +275,23 @@ and forcing a shared constant across two intentionally-independent binaries woul
 | `1.12` | `imported_findings` table — foreign analysers' findings imported from SARIF 2.1.0 (`bin/arch_sarif_load`, `specs/reporting-and-integration.md` FR-010/FR-012, roadmap 2.3). Additive: one new table, no existing column touched, so every `1.11` query keeps answering the same number. It is versioned anyway, because the table is what makes `arch-report`'s `sarif_import` section distinguish *imported nothing* from *has no import channel* — on a `1.11` database that section is `not_analysed` and must stay so rather than render as `covered` with zero findings. **The rows are `heuristic` facts and no verdict query reads them**: `imported_findings` creates no `calls` row, no `callee_id` and no edge kind, which is the structural half of ADR 002's guarantee — an imported fact cannot discharge a ⊤ because nothing that computes a verdict can see it. `resolution TEXT NOT NULL CHECK(resolution IN ('resolved','unresolved'))`: a `uri` matching zero or several indexed modules is recorded `unresolved` with a NULL `module_id`, never attached to the first candidate | `architecture-schema.sql` (additive table); `bin/arch_load` unchanged — the NDJSON contract neither carries nor accepts imported findings, so its independent version stays `1.2` |
 | `1.13` | `mutant_campaigns`, `mutants`, `mutant_runs`, `mutant_kills` — executed mutation campaigns (roadmap item 3.13, `specs/mutation-campaign-313.md`). Four additive tables, written by `arch-mutants run`; nothing existing is touched, so an older consumer reads the database unchanged. Versioned because the four tables carry facts no earlier query can answer and a consumer comparing two runs must have a version to refuse against: `mutant_runs.selection_provenance` (`CHECK(... IN ('proved_superset','top_bounded','no_contract'))`) is what makes a stored `SURVIVED` readable at all, and reading a status without it is a false accusation against a test that may never have run. The PUBLISHED VERDICT is **not** stored — it is derived from the status and the provenance — and PENDING is the ABSENCE of a `mutant_runs` row in a campaign whose `completed_at` is NULL, so neither widens the four-value `engine_status` vocabulary. Deliberately not named `mutation_*`: `functions.mutation_sites` is taken and counts imperative state writes | `mutants-schema-migration.sql` (additive tables) |
 
+**`1.13` GATES NOTHING IT DESCRIBES, and that is recorded here rather than left to be
+discovered.** The stamp lives in `lib/arch_index/arch_index_db.ml`'s `current_schema_version`
+and is written by the MAIN-schema indexer, whose `architecture-schema.sql` creates none of
+the four mutant tables. The only producer that creates them is `arch-mutants run`, through
+`mutants-schema-migration.sql`, and that producer neither reads nor writes `schema_version`
+at all (`grep -n schema_version bin/arch_mutants/*.ml` returns nothing). So a database can
+carry the `1.13` stamp with no mutant table in it, and can carry all four tables with no
+stamp at all — which is the flat schema `arch-load` writes, the one every test in this
+campaign uses.
+
+What the number therefore means today: a RESERVATION of `1.13` against the four tables, so
+no later change reuses it, plus the documentation above. It is not a gate, and a consumer
+must probe for the tables (`Arch_db.has_table`) rather than compare a version — which is
+what `arch-mutants` itself does. Making it a gate needs a version identity of the migration's
+own, stamped by `Arch_mutant_db.open_and_migrate`; that is a schema change and is not on this
+branch.
+
 Versions `1.1` and `1.2` are retroactive: both migrations were applied to `main` before this
 versioning mechanism existed, so `schema_version` never actually recorded them at the time — this
 table is the authoritative record now. Every schema change from here on must add a row before

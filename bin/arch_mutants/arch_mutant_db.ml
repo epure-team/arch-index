@@ -245,12 +245,13 @@ let close db = ignore (Sqlite3.db_close db : bool)
     Called only AFTER the engine has been resolved: an unresolvable engine writes no
     campaign row at all, because an empty campaign must never read as "no survivors". *)
 let insert_campaign db ~engine ~engine_version ~seed ~engine_path ~test_runner_path
-    ~profile ~granularity =
+    ~profile ~granularity ~producer_run_id =
   run db ~what:"mutant_campaigns"
     "INSERT INTO mutant_campaigns(engine, engine_version, seed, engine_path, \
-     test_runner_path, profile, granularity) VALUES (?,?,?,?,?,?,?)"
+     test_runner_path, profile, granularity, producer_run_id) VALUES (?,?,?,?,?,?,?,?)"
     [ text engine; opt_text engine_version; opt_text seed; text engine_path;
-      text test_runner_path; opt_text profile; text granularity ] ;
+      text test_runner_path; opt_text profile; text granularity;
+      (match producer_run_id with Some i -> int i | None -> Sqlite3.Data.NULL) ] ;
   Int64.to_int (Sqlite3.last_insert_rowid db)
 
 (** The site row. [INSERT OR IGNORE] then read the id back, so a re-run over unchanged

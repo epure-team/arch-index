@@ -16,6 +16,21 @@
 --     Storing either would widen a vocabulary that `bin/arch_mutants/arch_mutants.ml`'s
 --     bucketing depends on being closed.
 --
+-- WHAT WAS DELETED, AND WHAT SHOULD HAVE BEEN. The measurement above is about the
+-- REFERENCES clause, and the columns were deleted with it — the wrong half. A plain
+-- `INTEGER` with no referential action works on both schemas, which is precisely the move
+-- this file already makes for `mutants.function_name`, and it was confirmed by execution:
+-- an identical table with a bare INTEGER column accepted both NULL and a value under
+-- `PRAGMA foreign_keys = ON`, while the REFERENCES form rejected even a bound NULL. As
+-- shipped without it, a campaign carried NO link of any kind back to the index run its
+-- selection was derived from. `producer_run_id` is therefore restored below as a plain
+-- INTEGER: populated with the latest `producer_runs.id` where the main schema has that
+-- table, NULL on the flat schema, and NULL is a real answer there rather than a missing one.
+--
+-- `mutants.function_id` is NOT restored, and the asymmetry is deliberate: `function_name`
+-- already carries that link in a form both schemas can produce, so an integer id would be a
+-- second, weaker answer to a question already answered.
+--
 -- NO FOREIGN KEY LEAVES THESE FOUR TABLES, and that is a measurement rather than a
 -- preference. `mutants.function_id REFERENCES functions(id)` and
 -- `mutant_campaigns.producer_run_id REFERENCES producer_runs(id)` were both here and both
@@ -57,6 +72,12 @@ CREATE TABLE IF NOT EXISTS mutant_campaigns (
     profile TEXT,                  -- the test-invocation profile that was asked for
     granularity TEXT NOT NULL
         CHECK(granularity IN ('case', 'group', 'suite')),
+
+    -- Which index run this campaign's selection was derived from. A plain INTEGER with NO
+    -- REFERENCES clause, so it resolves on the flat schema (which has no `producer_runs`
+    -- table) as well as on the main one. NULL means "this database records no producer
+    -- run", which is the flat schema's honest answer and not a missing value.
+    producer_run_id INTEGER,
 
     started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     -- NULL means the campaign is still open OR was interrupted. A mutant with no
