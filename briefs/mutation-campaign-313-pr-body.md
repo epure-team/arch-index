@@ -368,6 +368,81 @@ every ratchet figure in this record remains unevaluable as gate output. None of 
 steps above improves any of those; they are named here so that finishing the three is not
 mistaken for finishing the item.
 
+## State at the stop — what is here, and what is not
+
+This branch was stopped deliberately with the PR open and red. Everything below is
+recorded because it is **not** recoverable from the repository alone, and whoever picks
+this up should not have to reconstruct it.
+
+### The PR is red, and the red is not a code failure
+
+Run `34023261190` on head `fc0b496`. Job `build`, step by step: `Build` **success**,
+`Unit and integration tests` **success**, `Ratchet checks` **failure**, everything after
+it skipped by cascade. `run-ratchet: 39 passed, 1 asserted, 0 harness error(s), 5 not
+run.`
+
+The single assertion is `checks/dispatch-covers-open-findings.js`, exit 1:
+
+```
+24 OPEN finding(s) of every severity — 0 OWNED-dispatched, 0 owned-deferred,
+0 owned-accepted, 24 unowned.
+```
+
+**The gate is blocking on exactly the decision this body defers to Mathias.** The section
+above says the 24 findings are undecided and his call; the gate requires an OWNER record
+per finding — `dispatched`, `deferred` or `accepted`, each with a reason. Both are
+coherent and they are incompatible: until those lines are written, this PR is red by
+construction.
+
+It was left red on purpose. Satisfying it would have taken ten minutes and 24 `deferred`
+lines, written by the same person who built the gate, on the evening he opened his own
+PR — which is not a gate any more. The red states something true: **these 24 findings
+belong to nobody.** CI logs expire; this paragraph does not.
+
+### A rebase is owed, and its conflict has a known shape
+
+Base at the time of writing: this branch sits on `090f832`; `origin/main` has since moved
+to `1adc3c7` (#91). One commit, one file, and it is the one file this branch also
+touches: `tezt/tests/must_null_ceiling.ml`, +65/−7 upstream, 66/66 lines apart from this
+side.
+
+**The constant regions do not overlap** — this side carries `clean_measured = 407` with
+its two-class attribution comment, main's side carries 383 unchanged plus a new
+composition block above it. The resolution is a union of two comment blocks plus the
+constant, not a contested value.
+
+**Re-derive 407; do not carry it.** Main's new lines shift every position-encoded lambda
+in that file, which is the mechanism that has already produced a wrong ceiling twice in
+this work.
+
+### The campaign data lives outside this repository
+
+Every number in "The campaign, executed" was measured against SQLite databases that are
+**not committed and not committable** — they are build artefacts of a run over another
+project. They are at `/mnt/ssd-external-2to/miaou-campaign/`:
+
+| file | what it holds |
+|---|---|
+| `full-selected.db` | the 4931-run campaign: 772 KILLED, 4159 SURVIVED, `top_bounded` on every row |
+| `ab-selected.db` / `ab-naive.db` | the 76-mutant pair — md5-identical over every run row, both profile `group` |
+| `full-naive.db` | catalogued only, **0 runs**: the missing naive arm |
+| `plan.json` | `test_cone_escapes` (358), `indexed_functions` (6169), `test_roots` (1124), `unreached` (3668) |
+
+The corpus is `miaou`, `src/` entire, at `/mnt/ssd-external-2to/miaou-campaign` (detached
+at `c859ec8`). The engine is mutaml 0.3 from a throwaway switch at
+`/mnt/ssd-external-2to/mutaml-pilot`. **If that disk is cleared, every figure in this
+body becomes unverifiable** — the claims remain readable, the evidence does not. The
+queries that produced them are one `group by` each over `mutant_runs`; the columns are
+`engine_status`, `selection_provenance`, `intended_tests`, `executed_tests`,
+`executed_superset`.
+
+### What was still running when this stopped
+
+A background agent was executing the naive arm of the full campaign. If it completed, it
+produced the wall-clock comparison this branch does not have, into `full-naive.db`. If it
+did not, that database is still at 0 runs and **step 3 of the next steps has no input**.
+Check the row count before assuming either.
+
 ## What went wrong in producing this branch, and one of it changed the work
 
 **This section exists because the alternative is a reviewer finding these later and
