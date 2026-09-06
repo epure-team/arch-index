@@ -43,16 +43,19 @@ for (const line of text.split('\n')) {
   if (m) headings.push(m[1].trim());
 }
 
-// A planned group announces itself as "Group X — <something>"; its execution announces itself as
+// A planned group announces itself as "Group <label> — <something>", the label being a letter
+// ("A") or a round-qualified tag ("R4-A"). A single-letter pattern was blind to the latter and
+// reported "3 planned, 3 executed" while three round-4 groups went uncounted: an instrument
+// narrower than its own question, returning a silence that reads as an answer.; its execution announces itself as
 // "Group X — outcome". Both forms are the brief's own convention, not invented here.
 const planned = new Map();
 const executed = new Set();
 for (const h of headings) {
-  const m = /^Group\s+([A-Z])\s*[—-]\s*(.*)$/i.exec(h);
+  const m = /^Group\s+([A-Za-z0-9][A-Za-z0-9-]*)\s*[—-]\s*(.*)$/i.exec(h);
   if (!m) continue;
-  const [, letter, rest] = m;
-  if (/^outcome\b/i.test(rest.trim())) executed.add(letter.toUpperCase());
-  else if (!planned.has(letter.toUpperCase())) planned.set(letter.toUpperCase(), h);
+  const [, label, rest] = m;
+  if (/^outcome\b/i.test(rest.trim())) executed.add(label.toUpperCase());
+  else if (!planned.has(label.toUpperCase())) planned.set(label.toUpperCase(), h);
 }
 
 if (planned.size === 0) {

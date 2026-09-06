@@ -796,3 +796,118 @@ were unchanged by this group, and `node checks/run-ratchet.js` covers the `check
 4. FR-009 / AC-41 — nothing verifies the `docs/schema.md` row exists or is honest.
 5. `checks/dispatch-covers-open-findings.js` — a finding named in a dispatch TABLE counts as owned; nothing distinguishes that from a finding named in an OUTCOME section. This group went undispatched for a round with the check green.
 6. Nothing fails when a check is added to `checks/` and not listed in the spec's Runnable Checks table. CHECK-32 covers the runner; the spec's own coverage is enumerated by hand and drifted to 13 of 20.
+
+---
+
+# Round 4 — dispatch
+
+Groups are labelled `R4-` because rounds 1-3 already used the bare letters and the
+outcome gate matches a heading at any level; reusing `A` would let a round-3 outcome
+section satisfy a round-4 group. That is the same false-match this round is about.
+
+The round-3 census counted 3 CRITICALs and 10 HIGHs. **It over-counts**: the three
+CRITICALs are ONE defect found by three routes, and two of the HIGHs are ONE boundary.
+The normalizer fingerprints on `path:line:category`, and a coordinate does not identify
+an object across a rebase. The groups below are cut along the DEFECTS, not the rows, so
+a group closes several rows at once by construction.
+
+## Group R4-A — mutant identity
+
+**Rows closed by this group**, cited in full so the coverage gate matches on the pair and
+not on a bare number appearing somewhere in the prose:
+`bin/arch_mutants/arch_mutants.ml:450`, `bin/arch_mutants/arch_mutants.ml:451`,
+`bin/arch_mutants/arch_mutants.ml:1726`, `bin/arch_mutants/arch_mutants.ml:2024`,
+`bin/arch_mutants/arch_mutants.ml:2202`, `bin/arch_mutants/arch_mutants.ml:1020`,
+`bin/arch_mutants/arch_mutants.ml:1393`, `bin/arch_mutants/arch_mutants.ml:103`,
+`bin/arch_mutants/arch_mutants.ml:76`.
+
+The identity defect and everything that rests on it. `arch_mutants.ml:450` and `:451`
+(both CRITICAL, the same synthesised id reaching the first join arm by two routes) and
+`:1726` (the round-1 finding never closed); `:2024` the schema/driver contradiction that
+PERMITS them; `:2202` the silently erased SURVIVED with `completed_at` still stamped;
+`:1020` `source_hash` holding two incomparable derivations in one column; `:1393` the
+`(basename, line)` join discarding the columns the UNIQUE key is built from; `:103` the
+schema version inert in both directions; `:76` the exit-code contract stated once and
+contradicted in the same file.
+
+**Design ruling, taken and not assumed** — the engine id is DEMOTED, not promoted, and
+it is KEPT, recorded and labelled run-scoped. An engine id is a coordinate, not an
+identity: it is assigned by one run of one engine over one catalogue, and nothing about
+the mutant determines it. Re-run, reorder, change the adapter, and the same mutant gets
+a different number — which is how a stored verdict becomes attributed to a different
+mutant with no error. When two coherent documents disagree, the one asserting a PROPERTY
+(the migration: these are not reliable for identity) prevails over the one asserting a
+MECHANISM (the driver: how the code joined the day it was written). Two constraints on
+the site key: it must carry the anchor OCCURRENCE ordinal, sourced from the mutation
+spec and never from a report's line counter; and a multi-candidate key REFUSES rather
+than picks, written next to the key because the tempting implementation is `LIMIT 1`.
+
+## Group R4-B — the FR-030 tree boundary
+
+**Rows closed by this group:** `bin/arch_mutants/arch_mutants.ml:984`,
+`bin/arch_mutants/arch_mutants.ml:967`, `bin/arch_mutants/arch_mutants.ml:1133`.
+
+`arch_mutants.ml:984`, `:967` and `:1133` — one boundary, three rows. Both polarities
+must be pinned: the guard passes what it must refuse (an inner checkout that is not
+itself a repository, where `git rev-parse` returns the ENCLOSING repository) AND refuses
+what it must pass (a legitimate invocation from `poc/decision-lint` inside this very
+repository, with a FALSE diagnosis). Serialised behind R4-A: both write
+`arch_mutants.ml`, and two writers in one file is how a clean resolution deletes
+something.
+
+## Group R4-C — the ratchet that cannot fail
+
+**Rows closed by this group:** `checks/run-ratchet.js:130`, `checks/run-ratchet.js:81`,
+`checks/run-ratchet.js:80`, `checks/run-ratchet.js:74`.
+
+`run-ratchet.js:130` the fatality rule stated in the header and not implemented;
+`:81` the campaign tier spawning every check with no arguments; `:80` the two-tier cut
+made on the wrong axis; `:74` `checks/` having no notion of a non-check file.
+
+## Group R4-C — outcome
+
+Ran in an isolated worktree (`wip/r4-ratchet`, branched at
+`0851761b637c46e524cd354abca3fa04acde3681`), two atomic commits, tree clean. Both
+findings fixed with a new self-contained check each, and **I re-proved both reds myself
+rather than accepting the agent's report**: `ratchet-tier-fatality-is-enforced.js` and
+`campaign-checks-receive-their-required-argument.js` each exit 0 on the fixed runner and
+exit 1 against `run-ratchet.js` restored to the pre-fix sha. The fatality check fires on
+exit 3 (the code that revealed the bug) AND on exit 5 (another the rule covers) — the
+second was already fatal before the fix, which is what makes the check's scope wider
+than its trigger.
+
+**A claim of mine was refuted, and the refutation is the valuable half.** My dispatch
+brief told the agent to expect `check-scope-diff.sh` to exit 1 on `.github/workflows/ci.yml`
+being out of manifest. Measured: it exits **0**. `ci.yml` sits at manifest line 30, added
+by `ac08d1a` — my own commit, several commits before I wrote the brief. I carried a red I
+had already closed, from a round-3 finding, without re-verifying it against HEAD, and
+then relayed it to the roadmap session, which repeated it back to me. A finding is a
+statement about a commit; quoting one at a later commit without re-running it is how a
+closed defect keeps being paid for. `:81` therefore stands on its two live halves — three
+scripts printed a usage line while their inputs were present — and its third clause, the
+concealed red, is retracted.
+
+`check-scope-diff.sh` was NOT touched: it is vendored, byte-identical to `agent-roster`'s
+`origin/next` at md5 `0e85c1f411588a91d1dd8ffe840f21b9`. Re-measured here, it carries NO
+staleness predicate at all — `grep -cE 'is-ancestor|merge-base'` returns 0. So the fix I
+filed this morning as a replacement was an ADDITION: five hand-repaired stale-base
+incidents in one day are not five misses of a check, they are the absence of one,
+manifesting five times.
+
+## Deferred, with reasons
+
+**Rows carried, cited in full:** `bin/arch_mutants/arch_mutants.ml:2818`,
+`mutants-schema-migration.sql:73`, `checks/dispatched-groups-were-executed.js:30`,
+`specs/mutation-campaign-313.md:284`, `bin/arch_mutants/arch_mutants.ml:1929`,
+`briefs/mutation-campaign-313-impl.md:0`.
+
+- `arch_mutants.ml:2818` and `mutants-schema-migration.sql:73` — slice 4 and slice 5,
+  deferred by explicit human instruction before this round opened. Named here so the
+  deferral is a recorded state and not an absence.
+- `checks/dispatched-groups-were-executed.js:30` — a CI-blocking gate asserting over the
+  prose of a markdown brief. A real design objection to a check I wrote; it needs a
+  decision about what belongs in CI, not a patch, and that decision is not this round's.
+- `specs/mutation-campaign-313.md:284` — AC-19's population clause is unexercisable in
+  CI. Blocked on a campaign at real scale, which has not run.
+- `arch_mutants.ml:1929` and `briefs/mutation-campaign-313-impl.md:0` — informational;
+  the set of unexercised assumptions and a count corroboration. Carried, not actioned.
