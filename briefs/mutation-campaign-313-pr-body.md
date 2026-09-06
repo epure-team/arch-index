@@ -58,11 +58,67 @@ primitive state before it could ship green and empty. Every check in this PR tha
 been shown capable of reporting non-zero, and a `sed` matching nothing is reported as a failure
 rather than a pass, so a stale mutation cannot masquerade as a caught one.
 
+## The campaign, executed — and what it says about the design
+
+It ran. Corpus: `miaou`, `src/` entire — 392 `.ml` files, 64 661 lines, 6169 indexed
+functions, 1124 test roots. Engine mutaml 0.3, profile `group`, runner `alcotest`.
+
+```
+full-selected.db   4976 catalogued · 4931 runs → 772 KILLED, 4159 SURVIVED
+```
+
+`arch-mutants verdict` on the 76-mutant pair publishes **KILLED 60, SURVIVED 0,
+UNKNOWN 15, UNKNOWN_NO_CONTRACT 0, PENDING 1**, and prints its own falsifier without
+being asked:
+
+> 0 published SURVIVED. What would have made it non-zero: a mutant the engine reported
+> SURVIVED whose selection provenance is `proved_superset` — a bounded selection publishes
+> UNKNOWN instead, on purpose.
+
+**Read that number as a result about the design, not about the implementation.** Every
+one of the 4931 runs carries `selection_provenance = top_bounded`; not one is
+`proved_superset`. So the tool answers *I cannot tell* about its entire population and
+publishes no survivor at all. The alternative — publishing 4159 survivors — is exactly
+the false confidence the ⊤ machinery exists to refuse. The soundness rule works. Its cost
+is now visible for the first time, on real code.
+
+The same shape has been reached independently in this repository on roadmap 3.1, with a
+different tool and different corpora: at 54.4% / 59.5% unresolved edges no cone is ⊤-free,
+so every generated rule lands on `UNKNOWN`. Two tools, two corpora, both correctly
+reporting that they cannot tell. That suggests **the product is the named frontier — the
+`top_bounded` provenance itself — rather than the verdict.**
+
+### Three things the execution found that six review rounds could not
+
+None of these is visible in a diff. All three appeared within twenty minutes of the first
+real run.
+
+1. **The provenance is computed once per campaign, not once per mutant.** `cone_escapes`
+   (`bin/arch_mutants/arch_mutants.ml:121`) takes the whole test cone and
+   `selection_provenance` (:139) derives one value, applied to every row — hence
+   `top_bounded` on 4931 of 4931. It is one measurement broadcast 4931 times, not 4931
+   verdicts. On this corpus **358 ⊤ escapes against 6169 indexed functions, 5.8%**, nullify
+   100% of the output. Soundness for a given mutant depends only on its own backward cone;
+   nothing in the rule requires the global reading, only its granularity does.
+
+2. **Half the population is vacuous.** 2500 of the 4931 runs have `intended_tests = 0` and
+   `executed_tests = 0` — mutants in code the test cone never reaches (`unreached: 3668`).
+   A SURVIVED where no test ran is not a test gap. The campaign agent reached the same 2500
+   by a different route ("sites mapping to no indexed function"). **The actionable
+   population is 1659, not 4159**, and this record previously said 4159.
+
+3. **The A/B compared nothing.** `ab-naive.db` and `ab-selected.db` have an identical md5
+   over every run row, and both carry profile `group` in `mutant_campaigns`, 48 seconds
+   apart. The same configuration ran twice. The naive arm of the full campaign has 0 runs.
+   **There is no wall-clock naive-vs-selected measurement in this branch** — the 60/15 pair
+   quoted above is one configuration, not a comparison.
+
 ## What this does NOT establish
 
-**The campaign mechanism has never been observed running.** It is established by reading the
-engine's source. `scripts/check-mutaml-integration.sh` returns **3** — unverified — and that must
-not be read as covered. The pilot measurement on a real corpus comes after this merges.
+**The three blockers above are unfixed on this branch.** The campaign establishes that the
+machinery executes on real code and that the ⊤ rule holds; it does not establish that the
+capability produces an exploitable answer. On this corpus it produces none.
+`scripts/check-mutaml-integration.sh` still returns **3**.
 
 Formal evidence tier is **E0m-abstract**: the model's invariants are verified by checkers re-run at
 the gate (typecheck, a 20 000-sample invariant run, an Apalache temporal check, and a red harness
@@ -276,10 +332,18 @@ began when someone asked why it had not.
 
 ### What the campaign's numbers are, and are not
 
-One run. On a corpus scoped after correcting a fifty-fold error. Driven by an agent
-instructed to reduce scope only on its own measurement and to report the candidates it
-discarded. They are evidence that the machinery executes on real code — not that the
-capability is validated.
+One run. On a corpus scoped after correcting a fifty-fold error. They are evidence that
+the machinery executes on real code — not that the capability is validated.
+
+**Two figures were published from this run before they were checked, and both were
+wrong in the same direction.** "4159 survivors" was reported as the headline population;
+2500 of them had no test run at all, so the real figure is 1659 — an overstatement of
+2.5x. And a 60/15 result was reported as an A/B between naive and selected profiles; the
+two databases are md5-identical and carry the same profile, so it is one configuration
+reported as a comparison. Both were caught by querying the databases rather than by
+reading the report about them, which is the only method that would have caught either.
+The lesson is not that the numbers were wrong — it is that a summary statistic was
+published from an artefact whose columns had not been inspected once.
 
 ### Every ratchet figure in this record is unevaluable as gate output
 
