@@ -612,3 +612,36 @@ branch can improve its testing and degrade this metric in the same commit**, and
 tell that from a regression. It arrives as headroom silently consumed rather than as a red, which
 is worse: a red gets argued about, and twenty of twenty-five spent is noticed only by the branch
 that finds five left.
+
+## Group B — outcome
+
+Executed. Nine findings closed, each with an executed positive control and, for every
+CRITICAL/HIGH, a new node ratchet check proven red.
+
+**The CRITICAL.** The outcome join is now the engine id cross-checked against file and line, then
+the full site key — path never a basename, line, every column span and replacement the report
+carries — then **refusal** where two candidates remain indistinguishable. `load_generic` and
+`load_mutaml` now carry the columns and replacement they were dropping at the door. Control before:
+exit 1, 8 of 12 assertions, reproducing the review's inversion and its wrong-file kill row. After:
+exit 0. Probe 4, an ordinary campaign, stayed green throughout, which is what makes the other three
+attributable.
+
+Also closed: the zero-narrowed `--diff` refuses before any row exists and unmatched report entries
+block completion; the arch-impact boundary counts and refuses unreadable entries; the tree boundary
+is the nearer of the git toplevel and the checkout's own `dune-project`, with its diagnosis chosen
+by how the boundary was found; exit 99 is disambiguated by the absence of a trace line; unmapped
+survivors carry their verdict and provenance and the headline count includes them. **FR-003 is
+enforced rather than approximated** — set inclusion is tested and a selection that would not run
+every intended test is refused before the engine starts, naming the tests that would have been
+skipped.
+
+**One fix the review proposed was refused, on a measurement.** Placing the empty-array refusal at
+the arch-impact boundary turned existing tezt cases red, because the deleted-test re-verification
+rule legitimately runs on an empty `touched` set. It sits where the union of the three diff rules
+is known. A reviewer's suggested remedy is a hypothesis, not a finding. (The brief earlier said
+three cases; a round-3 reviewer reproducing the patch measured two, and named both. The argument
+does not rest on the count.)
+
+**This section exists because its absence was a defect.** Group B's outcome was recorded in a
+commit message and nowhere in this brief, and `checks/dispatched-groups-were-executed.js` was right
+to fire on it: a commit message is not the register a later reader consults.
