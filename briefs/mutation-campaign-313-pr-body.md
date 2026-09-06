@@ -446,10 +446,21 @@ queries that produced them are one `group by` each over `mutant_runs`; the colum
 
 ### What was still running when this stopped
 
-A background agent was executing the naive arm of the full campaign. If it completed, it
-produced the wall-clock comparison this branch does not have, into `full-naive.db`. If it
-did not, that database is still at 0 runs and **step 3 of the next steps has no input**.
-Check the row count before assuming either.
+A background agent was executing the naive arm of the full campaign. As of this writing it
+had not: `full-naive.db` holds **4976 mutants catalogued and 0 runs, and no `.timing` file
+exists at all.**
+
+That shape matters more than the zero. The catalogue was built, so the setup succeeded;
+**execution never began.** This is not a partial run, not a slow one, and there is no
+fragment to salvage or to wait a little longer for. **Step 3 of the next steps has no
+input**, and the wall-clock naive-vs-selected comparison does not exist in this branch in
+any form.
+
+The agent's own state was equally unknown at the stop: last output ten minutes prior,
+neither finished nor exited, and **no way from here to distinguish progressing from
+stuck.** Saying "in progress" would imply knowledge nobody had. Re-check the row count and
+the process before assuming either — the same distinction this branch draws between a
+green, a red, and a run that never happened, applied to a process rather than to CI.
 
 ## What went wrong in producing this branch, and one of it changed the work
 
