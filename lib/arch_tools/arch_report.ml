@@ -57,7 +57,12 @@ type verdict =
    and the one it omitted was [PASS], which correctly must not fail. The gap was
    LATENT, not live.
 
-   What a ninth constructor now costs, and what it does not:
+   What a ninth constructor now costs, and what it does not. This list was
+   asserted complete in the first version of this commit and was not: a fourth
+   case existed, where the value was added to the type, to [string_of_verdict]
+   and to [all] but forgotten in a hand-written [verdict_of_string]. That case is
+   gone rather than documented -- [verdict_of_string] is now derived by search
+   over [all], so there is no second place to forget. Found in review.
      - [string_of_verdict] below stops being exhaustive       -> compile error
      - [arch_rules]'s [failing] stops being exhaustive        -> compile error
      - omitting it from [all] leaves it out of the vocabulary -> the census
@@ -78,16 +83,13 @@ let string_of_verdict = function
   | No_target -> "NO_TARGET"
   | Not_computed -> "NOT_COMPUTED"
 
-let verdict_of_string = function
-  | "PASS" -> Some Pass
-  | "VIOLATION" -> Some Violation
-  | "POSSIBLE" -> Some Possible
-  | "UNKNOWN" -> Some Unknown
-  | "UNKNOWN_NO_CONTRACT" -> Some Unknown_no_contract
-  | "NO_SOURCE" -> Some No_source
-  | "NO_TARGET" -> Some No_target
-  | "NOT_COMPUTED" -> Some Not_computed
-  | _ -> None
+(* Inverse of [string_of_verdict] by SEARCH over [all], not a second hand-written
+   match. A parallel match would need its own arm per constructor and would carry a
+   [| _ -> None] catch-all, so a ninth value added to the type, to
+   [string_of_verdict] and to [all] but forgotten HERE would compile clean and die
+   only at runtime. Deriving it removes that case rather than documenting it --
+   there is no longer a place to forget. *)
+let verdict_of_string s = List.find_opt (fun v -> string_of_verdict v = s) all
 
 let verdict_vocabulary = List.map string_of_verdict all
 
