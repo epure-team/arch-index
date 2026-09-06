@@ -419,8 +419,11 @@ Between `7f5fa6a` and `1442c7f` the ratchet went from **39 passed / 1 asserted**
 passed / 2 asserted**. No commit of mine caused it: both touched only
 `briefs/<task>-pr-body.md`.
 
-The new assertion is `scripts/check-scope-diff.sh`, exit 1, **HIGH — out-of-manifest
-change: `lib/arch_tools/arch_report.ml`**. This branch has never touched that file:
+The new assertion is `scripts/check-scope-diff.sh`, exit 1, and it names **two** files, not
+one — **HIGH, out-of-manifest change: `lib/arch_tools/arch_report.ml` and
+`bin/arch_rules/arch_rules.ml`.** This branch has never touched either, and the second is a
+file this task is *explicitly forbidden* to modify. Both arrived on main in #92
+(`062f2dd`, `b120765`). Taking `arch_report.ml` as the example:
 
 ```
 git diff --name-status 090f832..HEAD -- lib/arch_tools/arch_report.ml   → empty
@@ -445,6 +448,20 @@ this task's base."** Its own documentation describes attributing a mid-phase thi
 file to the task as a known blind spot; this is that blind spot reached through the merge
 ref rather than through a concurrent writer, and on a long-lived branch it will fire again
 for every file main touches outside the manifest.
+
+**That prediction has since been confirmed by the runs themselves.** The scope finding was
+absent at `7f5fa6a` (39 passed, 1 asserted), and from `1442c7f` onward — the first run after
+main moved — it names both files and the ratchet reads 38 passed, 2 asserted, unchanged
+across every run since. **Eight runs on this branch have now failed**, not one; the count
+is stable because the cause is stable. The gate is not intermittent and it is not
+responding to anything in this diff.
+
+**And this reframes the rebase from housekeeping into a correction.** Rebasing does not
+merely unblock CI: it closes the `base...HEAD` range over main's commits, so these two
+accusations disappear because the work stops being attributed here. Left un-rebased, the
+gate will keep charging this branch with every file main touches, indefinitely. The five
+re-commits of this task's manifest "as its base went stale", recorded elsewhere in this
+body, are the same phenomenon seen from the other end.
 
 **It is deliberately not filed as a finding in this task's `review.json`.** The gate is
 shared infrastructure, not this branch's code — filing it here would attribute to this task
