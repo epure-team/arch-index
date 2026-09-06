@@ -68,11 +68,27 @@ Generic mutant format (NDJSON, one object per line):
 
 let die msg = prerr_endline msg ; exit 2
 
-(** A REFUSAL, distinct from [die]'s error. Exit 1 is FR-030's code: the campaign was
-    well-formed and the operator's request understood, and the tool declined to act because
-    acting would have produced a plausible-looking answer about the wrong tree. It is kept
-    apart from 2 (a malformed request or an unusable environment) and from 3 (a callee
-    refusing to answer us) so a caller can tell the three apart without parsing prose. *)
+(** A REFUSAL, distinct from [die]'s error.
+
+    THE EXIT-CODE CONTRACT, stated by KIND and not by the one FR that first needed it. The
+    docstring here used to read "exit 1 is FR-030's code", which was narrower than the code
+    it described the day it was written and grew more so: the file already exited 1 for a
+    join it could not disambiguate, which is not FR-030 at all. A contract stated once and
+    contradicted elsewhere in the same file is not a contract a caller can rely on.
+
+      0  the campaign ran and its record is consistent with what it published;
+      1  a REFUSAL: the request was well-formed and understood, and the tool declined to act
+         because acting would have produced a plausible-looking answer that was wrong. Every
+         site that exits 1 says which refusal it is, in words, on stderr:
+           * FR-030, the tree boundary — a wrapper or an arch-impact resolved from an
+             ENCLOSING checkout, so every mutant would survive against an unmutated binary;
+           * a catalogue offering one site key to two mutants (two verdicts, one row);
+           * a report entry that matches two catalogued sites indistinguishably;
+           * a campaign whose persisted rows do not account for its attempts.
+      2  a malformed request or an unusable environment: nothing was attempted;
+      3  a CALLEE refused to answer us (FR-032) — neither a failure nor an empty result.
+
+    The three are kept apart so a caller can tell them apart without parsing prose. *)
 let refuse msg = prerr_endline msg ; exit 1
 let take n l = if n <= 0 then l else List.filteri (fun i _ -> i < n) l
 
@@ -396,22 +412,84 @@ let is_wrapper_refusal s = match classify_engine_status s with
   | Wrapper_refused -> true
   | Engine_status _ | Unrecognised_status _ -> false
 
+(* ------------------------------------------------------------------ *)
+(* IDENTITY DOCTRINE (resolved, round 4).                              *)
+(*                                                                    *)
+(* Two documents in this branch each held a coherent and mutually      *)
+(* exclusive theory of what identifies a mutant, and nothing said      *)
+(* which governed. mutants-schema-migration.sql: a mutant is           *)
+(* identified by where the mutation is and what it replaces, "never by *)
+(* an engine-assigned id (engine ids are not trusted for identity)".   *)
+(* This file: the join's FIRST key was the engine's own id. A reader   *)
+(* could satisfy either and be following the project, which is why the *)
+(* same defect survived three rounds of review — each round fixed the  *)
+(* symptom the driver's own theory made visible.                       *)
+(*                                                                    *)
+(* THE MIGRATION PREVAILS. Not by seniority: an engine id is a         *)
+(* COORDINATE, not an identity. It is handed out by one run of one     *)
+(* engine over one catalogue and nothing in the mutant determines it — *)
+(* re-run the engine, reorder the catalogue, or change the adapter and *)
+(* the same mutant gets a different number. A verdict keyed on a       *)
+(* position is misattributed the moment the position moves, silently   *)
+(* and with no error, which is exactly what was measured here. And     *)
+(* when two coherent documents contradict, the one asserting a         *)
+(* PROPERTY outranks the one asserting a MECHANISM: the migration's    *)
+(* claim is checkable and stays true, while this file's described how  *)
+(* the code happened to join on the day it was written.                *)
+(*                                                                    *)
+(* So: the SITE KEY is the sole discriminant of identity. The engine   *)
+(* id is DEMOTED, not deleted — it is recorded beside the run as "what *)
+(* the engine called this thing", RUN-scoped, useful for reading an    *)
+(* engine's output back, and never consulted by any join.              *)
+(* checks/identity-doctrine-is-resolved.sh holds both halves.          *)
+(* ------------------------------------------------------------------ *)
+
+(** What an engine calls a mutant — and how much that name is worth.
+
+    A sum type rather than a [string], because the defect that survived three reviews was a
+    SYNTHESISED ordinal — the report file's own physical line counter — living in the same
+    [id : string] field as a real engine-assigned name. Nothing in the type stopped it, and
+    from inside a fixture whose catalogue ids are named ([m1], [m2]) the confusion is
+    invisible: it only bites when the catalogue happens to be numbered 1, 2, at which point
+    the ordinals collide with the ids and the join silently becomes list order. Two
+    constructors make the compiler refuse the conflation that a comment could only
+    discourage.
+
+    [Report_ordinal] is deliberately an [int] and not a [string]: there is no way to hand it
+    to something expecting a name without saying so. *)
+type engine_name =
+  | Engine_declared of string
+      (** the report (or the catalogue) actually wrote this id. RUN-scoped: it names this
+          mutant in THIS engine invocation's output and nowhere else. *)
+  | Report_ordinal of int
+      (** NOT a name. The position of the record in the report file, kept only so a
+          diagnostic can point at the offending line. Never joined on, never stored. *)
+
+(** For messages only. It says WHAT IT IS, because a bare "3" in a diagnostic reads as an
+    engine id and sends the reader looking for one in the engine's output. *)
+let engine_name_to_string = function
+  | Engine_declared s -> s
+  | Report_ordinal n -> Printf.sprintf "<report record %d: the engine declared no id>" n
+
+let declared_name = function Engine_declared s -> Some s | Report_ordinal _ -> None
+
 (** One entry of the ENGINE's own report.
 
-    [m_cols] and [m_repl] are carried because they are half of the site identity the
-    [mutants] table's UNIQUE key is built from. They were previously dropped at the door
-    and the join was then left with nothing but a basename and a line — which is how two
-    mutants on one line came to have their verdicts stored against each other. They are
-    OPTIONS because a report is a third party's file: absent means "this engine did not
-    say", never "they are equal". *)
+    [m_cols], [m_repl] and [m_occurrence] are carried because they ARE the site identity the
+    [mutants] table's UNIQUE key is built from. They were previously dropped at the door and
+    the join was then left with nothing but a basename and a line — which is how two mutants
+    on one line came to have their verdicts stored against each other. They are OPTIONS
+    because a report is a third party's file: absent means "this engine did not say", never
+    "they are equal". *)
 type mutant = {
   file : string;
   line : int;
   status : string;
-  id : string;
+  m_name : engine_name;
   mutation : string option;
   m_cols : (int * int) option;
   m_repl : string option;
+  m_occurrence : int option;
 }
 
 let load_generic path =
@@ -447,13 +525,29 @@ let load_generic path =
                           path !n bad refused_status)) ;
                  let num k = match List.assoc_opt k a with Some (`Int i) -> Some i | _ -> None in
                  acc := { file = f; line = l; status = s;
-                          id = Option.value ~default:(string_of_int !n) (str "id");
+                          (* THE SPLIT. What used to be
+                             [Option.value ~default:(string_of_int !n) (str "id")] wrote the
+                             report's physical LINE COUNTER into the same field a real engine
+                             name lives in, and the join then compared that field against the
+                             catalogue's ids. A catalogue numbered 1, 2 therefore matched the
+                             ordinals 1, 2 and the join became list order wearing an id's
+                             clothes; the identical report against a catalogue named m1, m2
+                             missed that arm and was correct. The ordinal is now a different
+                             CONSTRUCTOR, so it cannot reach anything that wants a name. *)
+                          m_name =
+                            (match str "id" with
+                            | Some id -> Engine_declared id
+                            | None -> Report_ordinal !n);
                           mutation = str "mutation";
                           m_cols =
                             (match (num "col_start", num "col_end") with
                             | Some cs, Some ce -> Some (cs, ce)
                             | _ -> None);
-                          m_repl = str "replacement" } :: !acc
+                          m_repl = str "replacement";
+                          (* Which occurrence of the anchor this is, as the MUTATION
+                             SPECIFICATION states it — never a position in this file. See
+                             [site]'s [s_occurrence]. *)
+                          m_occurrence = num "occurrence" } :: !acc
              | _ -> die (Printf.sprintf "arch-mutants: %s:%d: mutant record missing file/line/status" path !n))
          | _ -> die (Printf.sprintf "arch-mutants: %s:%d: record is not a JSON object" path !n)
      done
@@ -517,10 +611,21 @@ let load_mutaml path =
               with
               | Some (`String f), Some (`Int l) when f <> "" ->
                   { file = f; line = l; status;
-                    id = (match List.assoc_opt "number" m with Some (`Int n) -> Filename.remove_extension f ^ ":" ^ string_of_int n | _ -> string_of_int (i + 1));
+                    (* Same split as [load_generic]: mutaml's own "<file>:<n>" is a real
+                       declared name; the entry's position in the array is not one, and
+                       saying so is the whole of the fix. *)
+                    m_name =
+                      (match List.assoc_opt "number" m with
+                      | Some (`Int n) ->
+                          Engine_declared (Filename.remove_extension f ^ ":" ^ string_of_int n)
+                      | _ -> Report_ordinal (i + 1));
                     mutation = repl;
                     m_cols = (match (col start, col stop) with Some a, Some b -> Some (a, b) | _ -> None);
-                    m_repl = repl }
+                    m_repl = repl;
+                    (* mutaml addresses every mutant by a column span, so it has no anchor
+                       occurrence to state. NOT 0 and not 1: absent means "this engine did
+                       not say", which is a different fact from "the first one". *)
+                    m_occurrence = None }
               | _ ->
                   die
                     (Printf.sprintf
@@ -587,7 +692,7 @@ let report (t : Arch_db.t) (g : Arch_graph.t) mutants test_keys repo fmt maxlist
                "arch-mutants: mutant %s (%s:%d) carries status %S, which is neither one of \
                 KILLED | SURVIVED | TIMEOUT | ERROR nor %s. Refusing to guess: counting it \
                 as anything at all deletes a defect from the list."
-               m.id m.file m.line bad refused_status)
+               (engine_name_to_string m.m_name) m.file m.line bad refused_status)
       | Wrapper_refused -> incr refused
       | Engine_status (MDb.Killed | MDb.Timeout) -> incr killed
       | Engine_status MDb.Errored -> incr errored
@@ -628,7 +733,12 @@ let report (t : Arch_db.t) (g : Arch_graph.t) mutants test_keys repo fmt maxlist
                 (List.map
                    (fun (m, fn, reaching) ->
                      `Assoc
-                       [ ("file", `String m.file); ("line", `Int m.line); ("id", `String m.id);
+                       [ ("file", `String m.file); ("line", `Int m.line);
+                         ("id", `String (engine_name_to_string m.m_name));
+                         (* RUN-scope, stated in the payload rather than left for the reader
+                            to assume: this names the mutant in ONE engine invocation's
+                            output. It is not a key and nothing may join on it. *)
+                         ("id_scope", `String "engine_run");
                          ("mutation", match m.mutation with Some x -> `String x | None -> `Null);
                          ("function", `String fn);
                          (* FR-013: the status this record carries is SURVIVED, so its
@@ -657,7 +767,9 @@ let report (t : Arch_db.t) (g : Arch_graph.t) mutants test_keys repo fmt maxlist
                    (fun m ->
                      `Assoc
                        [ ("file", `String m.file); ("line", `Int m.line);
-                         ("status", `String m.status); ("id", `String m.id);
+                         ("status", `String m.status);
+                         ("id", `String (engine_name_to_string m.m_name));
+                         ("id_scope", `String "engine_run");
                          ("mutation", match m.mutation with Some x -> `String x | None -> `Null);
                          (* FR-013 here TOO. This record is the one a reader copies out for a
                             survivor nobody could map, and it used to carry a naked
@@ -798,9 +910,12 @@ let known_profiles =
   [ ("case", Case); ("group", Group); ("suite", Suite); ("alcotest", Group);
     ("cargo-mutants", Suite) ]
 
-(** One mutant as the ENGINE's own catalogue describes it: a site plus the id the engine
-    will export in [MUTAML_MUTANT]. The engine id is carried for traceability only — it is
-    never part of a mutant's identity, exactly as an engine-assigned test id is not. *)
+(** One mutant as the ENGINE's own catalogue describes it: a SITE, plus the id the engine
+    will export in [MUTAML_MUTANT].
+
+    [s_id] is RUN-SCOPED and is used for exactly two things: telling the wrapper which mutant
+    to activate, and reading the wrapper's trace line back. It is never an identity and no
+    join consults it — see the IDENTITY DOCTRINE above. *)
 type site = {
   s_id : string;
   s_file : string;
@@ -808,7 +923,61 @@ type site = {
   s_col_start : int;
   s_col_end : int;
   s_repl : string;
+  s_occurrence : int option;
+      (** WHICH OCCURRENCE OF THE ANCHOR this mutant is, when the engine addresses mutants by
+          an anchor rather than by a column span — [scripts/mutate-check.sh] already prints
+          [(anchor x<n>)], so two mutants can share a file, a line, an anchor and a
+          replacement and differ in nothing else.
+
+          It comes from the MUTATION SPECIFICATION — the catalogue record — and from nowhere
+          else. Taking it from a position in the report file would be the defect this round
+          removes, reintroduced under a new name: a report position is a coordinate of one
+          run, and the site key must not depend on one.
+
+          [None] means the specification stated no occurrence, which is a different fact from
+          "the first". Two catalogue entries that are both [None] on an otherwise identical
+          site key are INDISTINGUISHABLE, and the driver refuses them rather than choosing. *)
 }
+
+(** The SITE KEY: the sole discriminant of a mutant's identity, and the OCaml counterpart of
+    [UNIQUE(file_path, line, col_start, col_end, replacement, source_hash)] in
+    mutants-schema-migration.sql — the occurrence ordinal reaches that key through
+    [source_hash], which is why [source_hash] carries it.
+
+    REFUSE ON COLLISION, NEVER CHOOSE. If two mutants resolve to one site key the honest
+    output is a refusal. The tempting implementation is to take one — [LIMIT 1], or the head
+    of a list — and a later reader WILL write it, which is why the rule is stated here beside
+    the key and not only in a commit message. Taking one turns an honest "I cannot attribute
+    this" into a false attribution, which is precisely the failure this whole round removes:
+    nothing distinguishes the candidates, so any choice is list order recorded as a fact. *)
+type site_key = {
+  k_file : string;
+  k_line : int;
+  k_col_start : int;
+  k_col_end : int;
+  k_repl : string;
+  k_occurrence : int option;
+}
+
+(* Full-path equality with a leading "./" normalised away and NOTHING else. A basename
+   comparison is what an earlier round removed: [lib/a/main.ml] and [lib/b/main.ml] are two
+   different mutants and no amount of convenience makes them one. *)
+let strip_dot p =
+  if String.length p > 2 && String.sub p 0 2 = "./" then String.sub p 2 (String.length p - 2)
+  else p
+
+let same_path a b = strip_dot a = strip_dot b
+
+let site_key s =
+  { k_file = strip_dot s.s_file; k_line = s.s_line; k_col_start = s.s_col_start;
+    k_col_end = s.s_col_end; k_repl = s.s_repl; k_occurrence = s.s_occurrence }
+
+let site_key_to_string k =
+  Printf.sprintf "%s:%d cols %d-%d replacement %S%s" k.k_file k.k_line k.k_col_start k.k_col_end
+    k.k_repl
+    (match k.k_occurrence with
+    | Some n -> Printf.sprintf " occurrence %d" n
+    | None -> " (no occurrence stated)")
 
 (** One target as [arch-mutants plan --format json] emitted it. [run] consumes the plan
     rather than recomputing the site→function mapping: the mapping is computed once,
@@ -897,7 +1066,12 @@ let load_mutaml_catalogue path =
                       s_line = ints start "pos_lnum";
                       s_col_start = ints start "pos_cnum" - ints start "pos_bol";
                       s_col_end = ints stop "pos_cnum" - ints stop "pos_bol";
-                      s_repl = repl })
+                      s_repl = repl;
+                      (* mutaml addresses every mutant by an exact column span, so its
+                         specification states no anchor occurrence. [None] rather than 1:
+                         "not stated" and "the first" are different facts, and only the
+                         former may be refused as ambiguous. *)
+                      s_occurrence = None })
                   number
           | _ -> None)
         entries
@@ -973,7 +1147,13 @@ let load_catalogue ~from path =
                    acc :=
                      { s_id = id; s_file = f; s_line = l;
                        s_col_start = num "col_start" 0; s_col_end = num "col_end" 0;
-                       s_repl = Option.value ~default:"" (str "replacement") }
+                       s_repl = Option.value ~default:"" (str "replacement");
+                       (* From the mutation SPECIFICATION — this record — and never from a
+                          position in any report. Absent is a real answer. *)
+                       s_occurrence =
+                         (match List.assoc_opt "occurrence" a with
+                         | Some (`Int i) -> Some i
+                         | _ -> None) }
                      :: !acc
                | _ ->
                    die
@@ -987,16 +1167,36 @@ let load_catalogue ~from path =
     close_in ic ;
     List.rev !acc
 
-(** [Digest.to_hex (Digest.string ...)] — the repository's existing idiom (see
-    [Arch_index_compare]'s body hash).
+(** The two DERIVATION TAGS [source_hash] can stamp. They are part of the stored value, so a
+    consumer reads the derivation out of the column with plain SQL and needs no access to
+    this file. *)
+let hash_from_source_line = "line"
 
-    Hashing the mutated SOURCE LINE is what makes the site key survive an edit above the
-    mutant and refuse to conflate two different texts that landed on the same span. When
-    the source cannot be read the hash degrades to the site descriptor itself: still
-    stable, still discriminating between two replacements at one span, but it no longer
-    notices a rewrite of the line. That degradation is named here rather than hidden,
-    because a hash that silently stops discriminating is a key that silently stops being
-    one. *)
+let hash_from_site_descriptor = "site"
+
+(** [<derivation>:<32-hex MD5>] — the repository's existing digest idiom (see
+    [Arch_index_compare]'s body hash), with the derivation written INTO the value.
+
+    Why the tag exists. This column is half of [UNIQUE(file_path, line, col_start, col_end,
+    replacement, source_hash)], and it held two INCOMPARABLE derivations in one TEXT field
+    with nothing recording which had been used — the same design error as an engine ordinal
+    sharing a field with an engine name, in the very column the identity key is built from:
+
+      * [line] — the digest of the actual source line. This is what makes the key survive an
+        edit ABOVE the mutant (the line moves, the hash follows) and refuse to conflate two
+        different texts that landed on one span.
+      * [site] — the digest of a synthetic site descriptor, used when the source cannot be
+        read. Still stable and still discriminating between two replacements at one span,
+        but it will never notice a rewrite of the line.
+
+    The degradation used to be named only in this docstring, which is to say only to a reader
+    of the OCaml and never to a consumer holding the database. It is now in the value.
+
+    THE OCCURRENCE ORDINAL IS HASHED IN, in both arms, and that is load-bearing rather than
+    tidy: the site key distinguishes two mutants on one anchor by their occurrence, but the
+    DATABASE's uniqueness runs through this column, so a hash that ignored the ordinal would
+    re-collapse in storage exactly the pair the key had just told apart.
+    checks/source-hash-declares-its-derivation.js pins all of it. *)
 let source_hash ~repo s =
   let path = if Filename.is_relative s.s_file then Filename.concat repo s.s_file else s.s_file in
   let line =
@@ -1012,13 +1212,17 @@ let source_hash ~repo s =
         close_in_noerr ic ;
         r
   in
+  let occ = match s.s_occurrence with Some n -> string_of_int n | None -> "" in
   match line with
-  | Some l -> Digest.to_hex (Digest.string l)
+  | Some l ->
+      Printf.sprintf "%s:%s" hash_from_source_line
+        (Digest.to_hex (Digest.string (Printf.sprintf "%s\x00occurrence=%s" l occ)))
   | None ->
-      Digest.to_hex
-        (Digest.string
-           (Printf.sprintf "site\x00%s\x00%d\x00%d\x00%d\x00%s" s.s_file s.s_line s.s_col_start
-              s.s_col_end s.s_repl))
+      Printf.sprintf "%s:%s" hash_from_site_descriptor
+        (Digest.to_hex
+           (Digest.string
+              (Printf.sprintf "site\x00%s\x00%d\x00%d\x00%d\x00%s\x00occurrence=%s" s.s_file
+                 s.s_line s.s_col_start s.s_col_end s.s_repl occ)))
 
 (** Resolve a PATH-or-path command to an absolute binary, or [None].
 
@@ -1947,6 +2151,65 @@ let run_campaign (t : Arch_db.t) (g : Arch_graph.t) test_keys ~db_path ~plan_pat
     MDb.close db ;
     exit code
   in
+  (* 5a. THE CATALOGUE MUST BE AN INJECTION FROM ids TO SITE KEYS — checked BEFORE the
+     campaign row exists, so a refusal here leaves the database exactly as it was found.
+
+     Once the site key is the sole discriminant of identity, a catalogue offering two
+     DIFFERENT mutants under one site key is a catalogue this driver cannot honour: it has two
+     verdicts and one row to put them in. What used to happen was measured, not argued — the
+     two entries collapsed into ONE `mutants` row (INSERT OR IGNORE, then read the id back),
+     both report entries resolved to the same `mutant_id`, the second `insert_run` violated
+     UNIQUE(campaign_id, mutant_id), and its exception was caught and printed to stderr and
+     nothing else. The counters had already been incremented, so the campaign published
+     `survived: 1` while the database held one row, stamped `completed_at`, and DELETED a
+     survivor in silence — a lost survivor indistinguishable from no survivor, the one
+     conflation this design exists to refuse.
+
+     REFUSE, DO NOT RESOLVE. There is no correct choice available: nothing in the two entries
+     distinguishes them, so picking one (a `LIMIT 1`, a list head) turns an honest "I cannot
+     attribute this" into a false attribution — the same failure in a new costume. What makes
+     two such entries legitimately distinct is an anchor OCCURRENCE ordinal stated by the
+     mutation specification; that is what the operator is told to add. *)
+  let collisions =
+    let tbl = Hashtbl.create 64 in
+    List.iter (fun sel -> Hashtbl.add tbl (site_key sel.sel_site) sel) selections ;
+    Hashtbl.fold
+      (fun k _ acc ->
+        if List.mem_assoc k acc then acc
+        else
+          match Hashtbl.find_all tbl k with
+          | _ :: _ :: _ as group -> (k, group) :: acc
+          | _ -> acc)
+      tbl []
+  in
+  (match collisions with
+  | [] -> ()
+  | _ ->
+      Printf.eprintf
+        "arch-mutants: the catalogue gives %d site key(s) to more than one mutant. A site key \
+         is the WHOLE of a mutant's identity here (mutants-schema-migration.sql: identity is \
+         where the mutation is and what it replaces, never an engine-assigned id), so two \
+         entries sharing one have two verdicts and a single row to store them in:\n"
+        (List.length collisions) ;
+      List.iter
+        (fun (k, group) ->
+          Printf.eprintf "    %s\n" (site_key_to_string k) ;
+          List.iter
+            (fun sel ->
+              Printf.eprintf "      claimed by engine id %S (RUN-scoped)\n" sel.sel_site.s_id)
+            group)
+        collisions ;
+      Printf.eprintf
+        "  Refusing, rather than choosing one. Nothing in these entries tells them apart, so \
+         any choice would be list order recorded as a fact — and the previous behaviour was \
+         worse than a wrong choice: the rows collapsed, the second verdict was rejected by \
+         UNIQUE(campaign_id, mutant_id), the exception was printed and swallowed, and the \
+         campaign completed with a SURVIVOR deleted. No campaign row was written.\n\
+         What would make this catalogue acceptable: an `occurrence` ordinal on each entry, \
+         from the mutation specification (the anchor occurrence `scripts/mutate-check.sh` \
+         already counts) — never a position in a report file, which is a coordinate of one \
+         run and not a property of the mutant.\n" ;
+      ignore (finish 1 : 'a)) ;
   let campaign_id =
     try
       MDb.insert_campaign db ~engine ~engine_version ~seed ~engine_path
@@ -2006,40 +2269,31 @@ let run_campaign (t : Arch_db.t) (g : Arch_graph.t) test_keys ~db_path ~plan_pat
       if from = "mutaml" then load_mutaml report_path else load_generic report_path
     else []
   in
-  (* 8a. THE JOIN — the engine's outcomes onto the catalogued sites.
+  (* 8a. THE JOIN — the engine's outcomes onto the catalogued sites. ONE key: the SITE.
 
-     It used to be [Filename.basename file = basename && line = line], consuming duplicates
-     in list order and never refusing. Two mutants on one line therefore had their
-     KILLED/SURVIVED verdicts stored against EACH OTHER, and a `mutant_kills` row — the one
-     record in this schema that claims to name a killer — was written against a different
-     FILE whenever two paths shared a basename. Both were executed, not argued.
+     History, because it is the argument. The join was first [Filename.basename file = basename
+     && line = line], consuming duplicates in list order and never refusing: two mutants on one
+     line had their KILLED/SURVIVED verdicts stored against EACH OTHER, and a `mutant_kills`
+     row — the one record in this schema that claims to name a killer — was written against a
+     different FILE whenever two paths shared a basename. Round 3 added the site key but put
+     the ENGINE'S OWN ID in front of it, and that arm carried the defect forward in a form no
+     fixture could see: a generic report carries no id, so the adapter synthesised one from
+     the record's position in the file, and against a catalogue whose ids happened to be
+     numbered 1, 2 the "id" arm matched report line N to catalogue entry N. List order, wearing
+     an id's clothes. The IDENTICAL report against a catalogue named m1, m2 fell through to the
+     site key and was correct — which is why every named fixture passed.
 
-     What makes that indefensible rather than merely coarse is that BOTH discriminators were
-     already present and thrown away: the schema's own key is
-     UNIQUE(file_path, line, col_start, col_end, replacement, source_hash), and the engine's
-     id is carried by the catalogue record AND by the report entry.
+     There is now no id arm. Per the IDENTITY DOCTRINE at the top of this file, an engine id is
+     a COORDINATE of one engine run and the migration's property claim governs: identity is
+     where the mutation is and what it replaces. What the report actually carries decides, and
+     a field the report omits is not treated as equal — it is simply not discriminating.
 
-     So, in order:
-
-       1. the ENGINE'S OWN ID, cross-checked against file and line so an id a generic
-          adapter had to synthesise cannot pull an outcome onto an unrelated site;
-       2. failing that, the SITE KEY — full path (never a basename), line, and every column
-          and replacement the report actually carries. A field the report omits is not
-          treated as equal, it is simply not discriminating;
-       3. and where two catalogued sites survive both, the driver REFUSES. Taking the head
-          of the list there is a coin flip recorded as a fact, in a table whose whole
-          purpose is to say which test proved what. *)
+     Where two catalogued sites survive that, the driver REFUSES. Taking the head of the list
+     is a coin flip recorded as a fact, in a table whose whole purpose is to say which test
+     proved what. *)
   let pending_sites = ref selections in
   let unmatched = ref 0 in
   let attempted = ref [] in
-  (* Full-path equality, with a leading "./" normalised away on both sides and NOTHING
-     else. A basename comparison is what this fix exists to remove: `lib/a/main.ml` and
-     `lib/b/main.ml` are two different mutants and no amount of convenience makes them one. *)
-  let strip_dot p = if String.length p > 2 && String.sub p 0 2 = "./" then String.sub p 2 (String.length p - 2) else p in
-  let same_path a b = strip_dot a = strip_dot b in
-  let by_id (m : mutant) sel =
-    sel.sel_site.s_id = m.id && sel.sel_site.s_line = m.line && same_path sel.sel_site.s_file m.file
-  in
   let by_site (m : mutant) sel =
     sel.sel_site.s_line = m.line
     && same_path sel.sel_site.s_file m.file
@@ -2047,27 +2301,29 @@ let run_campaign (t : Arch_db.t) (g : Arch_graph.t) test_keys ~db_path ~plan_pat
        | Some (cs, ce) -> sel.sel_site.s_col_start = cs && sel.sel_site.s_col_end = ce
        | None -> true)
     && (match m.m_repl with Some r -> sel.sel_site.s_repl = r | None -> true)
+    && (match m.m_occurrence with Some o -> sel.sel_site.s_occurrence = Some o | None -> true)
   in
   let refuse_ambiguous (m : mutant) candidates =
     Printf.eprintf
-      "arch-mutants: the report entry for %s:%d (engine id %S, status %s) matches %d \
+      "arch-mutants: the report entry for %s:%d (engine id %s, status %s) matches %d \
        catalogued mutant sites that are INDISTINGUISHABLE from what the report carries:\n"
-      m.file m.line m.id (String.uppercase_ascii m.status) (List.length candidates) ;
+      m.file m.line (engine_name_to_string m.m_name) (String.uppercase_ascii m.status)
+      (List.length candidates) ;
     List.iter
       (fun sel ->
-        Printf.eprintf "      %s:%d cols %d-%d replacement %S (engine id %S)\n"
-          sel.sel_site.s_file sel.sel_site.s_line sel.sel_site.s_col_start
-          sel.sel_site.s_col_end sel.sel_site.s_repl sel.sel_site.s_id)
+        Printf.eprintf "      %s (engine id %S, RUN-scoped)\n"
+          (site_key_to_string (site_key sel.sel_site))
+          sel.sel_site.s_id)
       candidates ;
     Printf.eprintf
-      "  The report names no id this catalogue knows, and carries no column span or \
-       replacement that tells these sites apart. Taking the first would pair this outcome \
-       with a mutant chosen by LIST ORDER — which is how a KILLED and a SURVIVED came to be \
-       stored against each other, and a kill attributed to a test that never touched the \
-       site. Refusing instead. No run row was written for this entry and the campaign is \
-       NOT complete.\n\
-       What would make this joinable: a report that echoes the catalogue's id, its column \
-       span, or its replacement text.\n" ;
+      "  The report carries no column span, replacement or anchor occurrence that tells these \
+       sites apart, and an engine id is not consulted: it is a coordinate of one engine run, \
+       not an identity, so joining on it is how a verdict came to be stored against the wrong \
+       mutant in the first place. Taking the first candidate would pair this outcome with a \
+       mutant chosen by LIST ORDER. Refusing instead. No run row was written for this entry \
+       and the campaign is NOT complete.\n\
+       What would make this joinable: a report that echoes the catalogue's column span, its \
+       replacement text, or the anchor occurrence its mutation specification states.\n" ;
     ignore (finish 1 : 'a)
   in
   List.iter
@@ -2076,14 +2332,10 @@ let run_campaign (t : Arch_db.t) (g : Arch_graph.t) test_keys ~db_path ~plan_pat
         pending_sites := List.filter (fun s -> s != sel) !pending_sites ;
         attempted := (sel, m) :: !attempted
       in
-      match List.filter (by_id m) !pending_sites with
+      match List.filter (by_site m) !pending_sites with
       | [ sel ] -> consume sel
-      | _ :: _ :: _ as amb -> refuse_ambiguous m amb
-      | [] -> (
-          match List.filter (by_site m) !pending_sites with
-          | [ sel ] -> consume sel
-          | [] -> incr unmatched
-          | _ :: _ :: _ as amb -> refuse_ambiguous m amb))
+      | [] -> incr unmatched
+      | _ :: _ :: _ as amb -> refuse_ambiguous m amb)
     outcomes ;
   let matched = List.rev !attempted in
   (* 8b. THREE populations, separated before anything is persisted. Each was previously
@@ -2195,7 +2447,15 @@ let run_campaign (t : Arch_db.t) (g : Arch_graph.t) test_keys ~db_path ~plan_pat
             (fun mutant_id ->
               (try
                  MDb.insert_run db ~campaign_id ~mutant_id
-                   ~engine_mutant_id:(Some sel.sel_site.s_id) ~status ~provenance
+                   (* RUN-SCOPED, recorded and MARKED as such: what the engine called this
+                      thing in THIS invocation. The report's own declared name is preferred
+                      over the catalogue's because it is the one that appears in the engine
+                      output a reader will be holding; a synthesised report ordinal is not a
+                      name and the type says so, so it falls back rather than being stored.
+                      Nothing joins on this — see the IDENTITY DOCTRINE at the top. *)
+                   ~engine_mutant_id:
+                     (Some (Option.value ~default:sel.sel_site.s_id (declared_name m.m_name)))
+                   ~status ~provenance
                    ~intended:(List.length sel.sel_intended)
                    ~executed:(List.length executed)
                    ~superset:(executed_is_widened ~intended:sel.sel_intended ~executed)
@@ -2227,9 +2487,36 @@ let run_campaign (t : Arch_db.t) (g : Arch_graph.t) test_keys ~db_path ~plan_pat
      whose report entries matched NO catalogued site at all — a total join failure, measured
      at 2 of 2 — was stamped complete on the strength of `pending = 0`, which is trivially
      true when the outcomes never reached the sites. *)
+  (* THE RECONCILIATION. Every conjunct above is arithmetic over this process's own
+     counters, and those counters are incremented BEFORE the write. So the campaign could —
+     and did — publish `survived: 1` for a row the database had rejected, with the exception
+     caught by `prerr_endline` and `completed_at` stamped regardless. A survivor lost that way
+     is indistinguishable from a survivor that never existed, which is the single conflation
+     this whole design refuses.
+     The fix is to ask the DATABASE, not the counters: the rows that exist must equal the
+     mutants attempted. Anything less leaves `completed_at` NULL, which is precisely the
+     schema's encoding for "partial" — and it is reported with BOTH numbers, because
+     "0 of 1 persisted" is what an operator acts on and "a write failed" is not. *)
+  let runs_persisted =
+    try MDb.count_runs db ~campaign_id
+    with MDb.Write_failed m ->
+      prerr_endline ("arch-mutants: " ^ m) ;
+      (* Unknown, and unknown must not read as agreement: -1 can equal no attempt count. *)
+      -1
+  in
+  let reconciled = runs_persisted = n_attempted in
+  if not reconciled then
+    Printf.eprintf
+      "arch-mutants: RECONCILIATION FAILED — %d run row(s) persisted against %d mutant(s) \
+       attempted. The counters this campaign published were incremented before the writes, so \
+       a verdict has been reported that reached no table. completed_at is NOT being stamped: \
+       a campaign whose rows do not account for its attempts must read as PARTIAL, because a \
+       survivor lost to a failed write is otherwise indistinguishable from a survivor that \
+       was never there.\n"
+      runs_persisted n_attempted ;
   let complete =
     (not refused) && engine_code = 0 && pending = 0 && n_refused = 0 && n_unobserved = 0
-    && !unmatched = 0
+    && !unmatched = 0 && reconciled
   in
   (* Parenthesised, and it matters: without them the trailing `;` binds INSIDE the `with`
      handler, so every line below would run only on a write failure and a successful
@@ -2341,6 +2628,10 @@ let run_campaign (t : Arch_db.t) (g : Arch_graph.t) test_keys ~db_path ~plan_pat
              ("selection_provenance", `String (MDb.provenance_to_string provenance));
              ("selection_caveat", `String (MDb.provenance_caveat provenance));
              ("mutants_catalogued", `Int catalogued); ("mutants_attempted", `Int n_attempted);
+             (* Read back from the database, not counted in memory. Published so a consumer
+                can make the same comparison the completeness gate makes. *)
+             ("run_rows_persisted", `Int runs_persisted);
+             ("attempts_reconciled_with_rows", `Bool reconciled);
              ("mutants_pending", `Int pending);
              (* FR-031: the wrapper declined to run these mutants' tests, so they have no
                 outcome of any kind. Never folded into killed/survived/errored. *)
@@ -2579,7 +2870,10 @@ let run_campaign (t : Arch_db.t) (g : Arch_graph.t) test_keys ~db_path ~plan_pat
       (take maxlist attempted) ;
     if maxlist > 0 && n_attempted > maxlist then
       Printf.printf "  … and %d more (--max-list 0 for all)\n" (n_attempted - maxlist)) ;
-  finish (if refused then 3 else 0)
+  (* 3 = the engine REFUSED (FR-032, the callee declined to answer); 1 = the campaign ran but
+     its rows do not account for its attempts, which must not be reported as success — a
+     zero exit on an unreconciled campaign is exactly how a lost survivor stayed invisible. *)
+  finish (if refused then 3 else if not reconciled then 1 else 0)
 
 (* ------------------------------------------------------------------ *)
 (* verdict — the PUBLISHED verdict over what `run` persisted           *)

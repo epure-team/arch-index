@@ -122,9 +122,27 @@ const REPORT = [
   { file: 'lib/x.ml', line: 15, status: 'SURVIVED', col_start: 3, col_end: 9, replacement: 'true' },
 ];
 
+// FOUR ARMS, and the last two are the ones nobody had written.
+//
+// Two PURE arms — wholly numbered, wholly named — are necessary and NOT sufficient. A residue
+// of id-shape sensitivity that required EVERY catalogue id to be numeric would pass both of
+// them: each arm would be individually right, and the agreement assertion would be comparing
+// two correct answers. That is the difference between a check that distinguishes two trees and
+// a check that enforces a property.
+//
+//   MIXED — ['1', 'm2']: one entry collides with a report line ordinal and the other does not.
+//     A partial residue lives exactly here, and it degrades worse than the pure numbered case:
+//     the colliding entry is captured by the ordinal while the second entry then finds its own
+//     site already consumed, so one verdict is inverted AND one is lost.
+//   DEGENERATE — a single mutant whose id '1' coincides with the ordinal 1 by accident. There
+//     is nothing to permute with, so the collision is INVISIBLE and this arm is green on the
+//     broken code too. It is here deliberately: it states the property (the answer does not
+//     depend on the id) rather than exhibiting a permutation, and it is what stops a future
+//     rewrite from "fixing" the join by special-casing multi-candidate lines.
 const arms = [
-  { label: 'numbered 1,2 — collides with the report file\'s own line ordinals', ids: ['1', '2'] },
-  { label: 'named m1,m2 — cannot collide with any ordinal', ids: ['m1', 'm2'] },
+  { name: 'numbered', label: "numbered 1,2 — both ids collide with the report file's line ordinals", ids: ['1', '2'] },
+  { name: 'named', label: 'named m1,m2 — neither id can collide with any ordinal', ids: ['m1', 'm2'] },
+  { name: 'mixed', label: "MIXED 1,m2 — the first id collides with an ordinal, the second does not", ids: ['1', 'm2'] },
 ];
 
 const observed = [];
@@ -135,27 +153,54 @@ for (const arm of arms) {
     { id: arm.ids[0], file: 'lib/x.ml', line: 15, col_start: 3, col_end: 9, replacement: 'true' },
     { id: arm.ids[1], file: 'lib/x.ml', line: 15, col_start: 11, col_end: 15, replacement: 'false' },
   ];
-  const r = campaign('arm-' + arm.ids.join('_'), cat, REPORT, arm.ids);
+  const r = campaign('arm-' + arm.name, cat, REPORT, arm.ids);
   if (r.code !== 0) {
     console.log(`  ✗ the campaign did not run (exit ${r.code})`);
     console.log(r.stderr.split('\n').slice(0, 10).map((l) => '      | ' + l).join('\n'));
     fails++;
-    observed.push({ a: `exit ${r.code}`, b: `exit ${r.code}` });
+    observed.push({ name: arm.name, a: `exit ${r.code}`, b: `exit ${r.code}` });
     continue;
   }
   const at3 = sql(r.db, 'SELECT r.engine_status FROM mutant_runs r JOIN mutants m ON m.id=r.mutant_id WHERE m.col_start=3');
   const at11 = sql(r.db, 'SELECT r.engine_status FROM mutant_runs r JOIN mutants m ON m.id=r.mutant_id WHERE m.col_start=11');
   assertEq('cols 3-9 / replacement "true" is the SURVIVED one', 'SURVIVED', at3);
   assertEq('cols 11-15 / replacement "false" is the KILLED one', 'KILLED', at11);
-  observed.push({ a: at3, b: at11 });
+  observed.push({ name: arm.name, a: at3, b: at11 });
 }
 
-// THE GENERAL ASSERTION. Not "each arm is right" — "the two arms are the SAME answer". A
-// join that still consults the id in any residual way makes these diverge, whatever the
-// particular mechanism, because the two catalogues differ in nothing else.
-console.log('differential — the two arms describe the same two mutants and the same report');
-assertEq('the verdict at cols 3-9 does not depend on the id vocabulary', observed[0].a, observed[1].a);
-assertEq('the verdict at cols 11-15 does not depend on the id vocabulary', observed[0].b, observed[1].b);
+// The degenerate arm: ONE mutant, its id equal to its own report ordinal. Nothing to permute
+// with, so this is green on the broken code as well — which is the point. It asserts the
+// PROPERTY on the case where the defect is invisible, and it joins the differential below on
+// the one column it has.
+console.log('arm — DEGENERATE: a single mutant whose id \'1\' equals its report ordinal by accident');
+{
+  const cat = [{ id: '1', file: 'lib/x.ml', line: 15, col_start: 3, col_end: 9, replacement: 'true' }];
+  const rep = [{ file: 'lib/x.ml', line: 15, status: 'SURVIVED', col_start: 3, col_end: 9, replacement: 'true' }];
+  const r = campaign('arm-degenerate', cat, rep, ['1']);
+  if (r.code !== 0) {
+    console.log(`  ✗ the campaign did not run (exit ${r.code})`);
+    console.log(r.stderr.split('\n').slice(0, 10).map((l) => '      | ' + l).join('\n'));
+    fails++;
+    observed.push({ name: 'degenerate', a: `exit ${r.code}`, b: null });
+  } else {
+    const at3 = sql(r.db, 'SELECT r.engine_status FROM mutant_runs r JOIN mutants m ON m.id=r.mutant_id WHERE m.col_start=3');
+    assertEq('the lone mutant carries its own verdict', 'SURVIVED', at3);
+    assertEq('exactly one run row, so nothing was matched twice', '1', sql(r.db, 'SELECT count(*) FROM mutant_runs'));
+    observed.push({ name: 'degenerate', a: at3, b: null });
+  }
+}
+
+// THE GENERAL ASSERTION. Not "each arm is right" — "every arm is the SAME answer". A join that
+// still consults the id in any residual way, total or partial, makes these diverge, whatever
+// the particular mechanism, because the catalogues differ in nothing else.
+console.log('differential — every arm describes the same mutants under the same report');
+{
+  const base = observed[0];
+  for (const o of observed.slice(1)) {
+    assertEq(`cols 3-9: ${o.name} agrees with ${base.name}`, base.a, o.a);
+    if (o.b !== null && base.b !== null) assertEq(`cols 11-15: ${o.name} agrees with ${base.name}`, base.b, o.b);
+  }
+}
 
 console.log('');
 if (fails > 0) {
@@ -167,7 +212,7 @@ if (fails > 0) {
   console.error('  holds each verdict against the wrong mutant with no error of any kind.');
   process.exit(1);
 }
-console.log('join-independent-of-id-shape: PASS — 2 arms, 6 assertions.');
+console.log('join-independent-of-id-shape: PASS — 4 arms (numbered, named, MIXED, degenerate).');
 console.log('  What would have made this non-zero: any join arm that compares a report-side id');
 console.log('  against a catalogue id, since a generic report carries none and the driver must');
 console.log('  then invent one from the record\'s position in the file.');

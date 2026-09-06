@@ -219,6 +219,26 @@ let query_int db sql values =
     re-applying is a no-op, and a database that predates it would otherwise fail with
     "no such table" — which reads as a bug in the driver rather than as a missing
     migration. *)
+(** The version of the four mutant tables, declared by the code that CREATES them.
+
+    It is NOT the index's [schema_version], and that separation is the fix rather than an
+    aesthetic. Both directions of the old arrangement were measured and both were inert:
+    [Arch_index_db.current_schema_version = "1.13"] is stamped by the main indexer, whose
+    architecture-schema.sql creates none of these tables — so 1.13 does not imply they exist;
+    and [open_and_migrate] created all four while writing no version at all — so a database
+    carrying a FINISHED campaign reported whatever its indexer happened to stamp (measured at
+    1.2, arch-load's flat-schema version). Between the two there was no value, in either
+    direction, on which a consumer could refuse.
+
+    The declaration below means exactly "these four tables exist at this version", and its
+    ABSENCE means exactly "they may not". The write itself lives in the migration SQL, so a
+    database migrated by hand (`sqlite3 <db> < mutants-schema-migration.sql`, which the file's
+    own header documents) carries it too. This constant is what a consumer compares against.
+    checks/mutant-tables-declare-their-version.js executes both directions. *)
+let mutants_schema_version = "1.0"
+
+let mutants_schema_version_key = "mutants_schema_version"
+
 let open_and_migrate db_path =
   if not (Sys.file_exists db_path) then fail "no such db: %s" db_path ;
   let db = Sqlite3.db_open db_path in
@@ -280,6 +300,24 @@ let insert_mutant db ~file_path ~line ~col_start ~col_end ~replacement ~source_h
   | Some id -> id
   | None -> fail "the mutant site row for %s:%d could not be read back" file_path line
 
+(** How many run rows this campaign has ACTUALLY persisted.
+
+    The campaign's completeness used to be decided from the driver's own in-memory counters
+    and never once from the database. Those counters are incremented before the write, so a
+    rejected insert published a verdict that reached no table — and the caught-and-printed
+    exception left `completed_at` stamped anyway. This is the question the reconciliation
+    asks; see [run]'s completeness gate. *)
+let count_runs db ~campaign_id =
+  match query_int db "SELECT count(*) FROM mutant_runs WHERE campaign_id = ?" [ int campaign_id ] with
+  | Some n -> n
+  | None -> fail "the run count for campaign %d could not be read back" campaign_id
+
+(** [engine_mutant_id] is RUN-SCOPED and is stored for exactly one purpose: reading this
+    campaign's rows back against the engine's own output. It is NOT an identity, nothing joins
+    on it, and it must never become a key — see the IDENTITY DOCTRINE in arch_mutants.ml and
+    the same paragraph in mutants-schema-migration.sql. An engine id is a coordinate handed
+    out by one run of one engine over one catalogue; re-run the engine or reorder the
+    catalogue and the same mutant gets a different one. *)
 let insert_run db ~campaign_id ~mutant_id ~engine_mutant_id ~status ~provenance ~intended
     ~executed ~superset =
   run db ~what:"mutant_runs"

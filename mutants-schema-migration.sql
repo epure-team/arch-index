@@ -8,6 +8,33 @@
 -- counts imperative state writes, which is a different fact entirely. A campaign here is
 -- about mutation TESTING; a mutation_site there is about mutating memory.
 --
+-- =============================================================================
+-- IDENTITY DOCTRINE (resolved, round 4) -- THIS FILE PREVAILS.
+-- =============================================================================
+-- This file and bin/arch_mutants/arch_mutants.ml each held a coherent and mutually
+-- exclusive theory of what identifies a mutant, and nothing anywhere said which one
+-- governed. This file: identity is where the mutation is and what it replaces, "never by
+-- an engine-assigned id (engine ids are not trusted for identity)", with
+-- `mutant_runs.engine_mutant_id` "NOT part of any identity". The driver: the join's FIRST
+-- key was the engine's own id. A reader could satisfy either and be following the project,
+-- which is why the same defect survived three rounds of review -- each round fixed the
+-- symptom the driver's own theory made visible, and a catalogue whose ids happened to be
+-- numbered 1, 2 still had its verdicts stored against the wrong mutants.
+--
+-- THE RESOLUTION: THIS FILE PREVAILS, and not by seniority. An engine id is a COORDINATE,
+-- not an identity -- it is handed out by one run of one engine over one catalogue, nothing
+-- in the mutant determines it, and re-running the engine or reordering the catalogue gives
+-- the same mutant a different number. A verdict keyed on a position is misattributed the
+-- moment the position moves, silently and with no error. And when two coherent documents
+-- contradict, the one asserting a PROPERTY outranks the one asserting a MECHANISM: the
+-- claim here is checkable and stays true, while the driver's described how the code
+-- happened to join on the day it was written.
+--
+-- The engine id is DEMOTED, not deleted. `engine_mutant_id` is kept, RUN-SCOPED and marked
+-- as such at its column: it records what the engine called this thing in one invocation,
+-- which is genuinely useful for reading an engine's output back, and no join may consult
+-- it. checks/identity-doctrine-is-resolved.sh holds both halves of this.
+--
 -- What is stored and what is not:
 --   * the ENGINE STATUS is stored (`mutant_runs.engine_status`, four values);
 --   * the PUBLISHED VERDICT is never stored — it is derived from the status and
@@ -99,10 +126,25 @@ CREATE TABLE IF NOT EXISTS mutants (
     col_start INTEGER NOT NULL,
     col_end INTEGER NOT NULL,
     replacement TEXT NOT NULL,
-    -- Digest.to_hex (Digest.string <source line>) — the repository's existing idiom,
-    -- see lib/arch_index/arch_index_compare.ml. It is what makes the key survive an
-    -- edit ABOVE the mutant (the line moves, the hash follows) and refuse to conflate
-    -- two different texts that landed on the same line/column span.
+    -- `<derivation>:<32-hex MD5>`. THE DERIVATION IS PART OF THE VALUE, so a consumer
+    -- holding this database reads it with plain SQL and needs no access to the OCaml:
+    --   'line:<hex>' -- the digest of the actual source line. This is what makes the key
+    --                   survive an edit ABOVE the mutant (the line moves, the hash
+    --                   follows) and refuse to conflate two different texts that landed
+    --                   on the same line/column span.
+    --   'site:<hex>' -- the DEGRADED derivation, used when the source cannot be read: the
+    --                   digest of a synthetic site descriptor. Still stable, still
+    --                   discriminating between two replacements at one span, but it will
+    --                   never notice a rewrite of the line.
+    -- The two are incomparable, and this column used to hold both with nothing recording
+    -- which -- the same design error as an engine id in an identity field, in the very
+    -- column the UNIQUE key below is built from. It was named only in a driver docstring,
+    -- which is to say only to a reader of the OCaml and never to a consumer holding the
+    -- database.
+    -- Both derivations hash in the anchor OCCURRENCE ordinal, and that is load-bearing:
+    -- the site identity distinguishes two mutants on one anchor by that ordinal, and
+    -- uniqueness here runs through this column, so a hash that ignored it would
+    -- re-collapse in storage the pair the identity had just told apart.
     source_hash TEXT NOT NULL,
 
     -- NULLABLE ON PURPOSE: a mutant the index cannot map to a function is PERSISTED,
@@ -135,8 +177,11 @@ CREATE TABLE IF NOT EXISTS mutant_runs (
     campaign_id INTEGER NOT NULL REFERENCES mutant_campaigns(id) ON DELETE CASCADE,
     mutant_id INTEGER NOT NULL REFERENCES mutants(id) ON DELETE CASCADE,
 
-    -- The engine's own id for this mutant (mutaml: "<file-without-ext>:<n>"). Kept for
-    -- traceability back into the engine's output; NOT part of any identity.
+    -- The engine's own id for this mutant (mutaml: "<file-without-ext>:<n>"), stored with
+    -- RUN-SCOPE: it names this mutant in ONE engine invocation's output and nowhere else.
+    -- Kept because reading a campaign's rows back against that output is a real need; NOT
+    -- part of any identity, and no join may consult it -- see the IDENTITY DOCTRINE at the
+    -- head of this file for why a coordinate cannot serve as one.
     engine_mutant_id TEXT,
 
     -- Closed to four values, and the OCaml consumer matches on it TOTALLY. A fifth
@@ -206,3 +251,36 @@ CREATE TABLE IF NOT EXISTS mutant_kills (
 
 CREATE INDEX IF NOT EXISTS idx_mutant_kills_campaign ON mutant_kills(campaign_id);
 CREATE INDEX IF NOT EXISTS idx_mutant_kills_test     ON mutant_kills(test_name);
+
+-- =============================================================================
+-- THE VERSION DECLARATION FOR THESE FOUR TABLES.
+--
+-- Deliberately NOT the index-wide `schema_version`, and that separation is the fix rather
+-- than a preference. Both directions of the previous arrangement were measured and both
+-- were inert. `lib/arch_index/arch_index_db.ml` stamps `current_schema_version = '1.13'`
+-- "for the executed-mutation-campaign tables", but it is the MAIN INDEXER that writes it
+-- and architecture-schema.sql creates none of the four tables above -- so 1.13 does not
+-- imply they exist. And `Arch_mutant_db.open_and_migrate` created all four while writing
+-- no version at all -- so a database carrying a FINISHED campaign reported whatever its
+-- indexer happened to stamp (measured at 1.2, arch-load's own flat-schema version).
+-- Between the two there was no value, in either direction, on which a consumer could
+-- refuse.
+--
+-- This key means exactly "the four mutant tables exist at this version"; its ABSENCE means
+-- exactly "they may not". It is written HERE, in the migration, so the hand-applied path
+-- this file's own header documents (`sqlite3 <db> < mutants-schema-migration.sql`) stamps
+-- it as well as the driver does. `Arch_mutant_db.mutants_schema_version` is the constant a
+-- consumer compares against; the two are bumped together.
+--
+-- comment_db_meta is created IF NOT EXISTS with the shape BOTH schemas already give it
+-- (architecture-schema.sql and arch-load's flat schema declare it identically), so this
+-- stays additive on a database that has it and self-sufficient on one that does not.
+-- =============================================================================
+
+CREATE TABLE IF NOT EXISTS comment_db_meta (
+    key TEXT PRIMARY KEY,
+    value TEXT
+);
+
+INSERT OR REPLACE INTO comment_db_meta(key, value)
+VALUES ('mutants_schema_version', '1.0');
