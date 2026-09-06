@@ -1,9 +1,9 @@
 {
  "task": "mutation-campaign-313",
- "date": "2026-09-06T03:20:06+02:00",
- "status": "NO-GO",
+ "date": "2026-09-06T04:49:09+02:00",
+ "status": "DRAFT-PENDING-INDEPENDENT-READ",
  "mode": "full",
- "round": 3,
+ "round": 4,
  "cycle": 1,
  "no_go_round": 3,
  "auto_fixes_applied": [],
@@ -356,18 +356,19 @@
    "fingerprint": "bin/arch_mutants/arch_mutants.ml:1393:architecture",
    "specialist": "architect",
    "fid": "bin/arch_mutants/arch_mutants.ml:1393:architecture#de9c13c9",
-   "status": "OPEN",
+   "status": "RESOLVED",
    "first_seen_round": 1,
-   "resolved_round": null,
-   "check": null,
-   "pre_fix_sha": "91e95b6cdbddafe022d81aa6ee1838f5196a6541",
-   "red_verified": null,
+   "resolved_round": 4,
+   "check": "join-independent-of-id-shape.js + site-key-collision-is-refused.js",
+   "pre_fix_sha": "0851761b637c46e524cd354abca3fa04acde3681",
+   "red_verified": true,
    "reopened_at_round": 3,
    "reopened_from_round": 2,
    "reopen_note": "Re-found by the round-3 review on this HEAD, by two specialists independently.",
-   "last_replayed_at": "0851761b637c46e524cd354abca3fa04acde3681",
-   "replay_verdict": "SUBJECT-ABSENT",
-   "replay_note": "Replayed by CONTENT at 0851761, not by coordinate -- the coordinate no longer lands on the subject. the basename join is gone: `same_path` is full-path equality with only a leading ./ normalised, `by_site` discriminates on cols and replacement, and `refuse_ambiguous` exists. The claim describes code that is not there. NOT auto-resolved: a HIGH+ closes only with a linked proven-red check, and groups R4-A and R4-B will settle it by execution. Recorded so the row stops being counted as a live defect it no longer is."
+   "last_replayed_at": "4e4ca5b",
+   "replay_verdict": "SUBJECT-ABSENT-AT-HEAD",
+   "replay_note": "Replayed BY CONTENT at 4e4ca5b by the reviewer, not accepted from the implementing agent's report. the basename join survives ONLY as a history comment at :2443 ('The join was first [Filename.basename ...'). same_path is full-path equality; by_site discriminates on cols, replacement and the occurrence ordinal; refuse_ambiguous exists at two sites. Every named ratchet was itself re-proved by the reviewer: red against the pre-fix tree via git checkout <sha> -- <path> then rebuild, green after, no git stash.",
+   "prior_last_replayed_at": "0851761b637c46e524cd354abca3fa04acde3681"
   },
   {
    "severity": "HIGH",
@@ -1458,18 +1459,19 @@
    "fingerprint": "bin/arch_mutants/arch_mutants.ml:1726:architecture",
    "specialist": "architect",
    "fid": "bin/arch_mutants/arch_mutants.ml:1726:architecture#89713bdf",
-   "status": "OPEN",
+   "status": "RESOLVED",
    "first_seen_round": 2,
-   "resolved_round": null,
-   "check": null,
-   "pre_fix_sha": "9e22f64c7e8afaf41a921806aedfc37cda60625f",
-   "red_verified": null,
+   "resolved_round": 4,
+   "check": "join-independent-of-id-shape.js + site-key-collision-is-refused.js",
+   "pre_fix_sha": "0851761b637c46e524cd354abca3fa04acde3681",
+   "red_verified": true,
    "reopened_at_round": 3,
    "reopened_from_round": 2,
    "reopen_note": "Re-found by the round-3 review on this HEAD, by two specialists independently.",
-   "last_replayed_at": "0851761b637c46e524cd354abca3fa04acde3681",
-   "replay_verdict": "SUBJECT-ABSENT",
-   "replay_note": "Replayed by CONTENT at 0851761, not by coordinate -- the coordinate no longer lands on the subject. same as :1393 and it is one of the three CRITICALs. Labelled 'ROUND-1 FINDING NOT CLOSED' -- it IS closed. The label was inherited across two rounds and never replayed. NOT auto-resolved: a HIGH+ closes only with a linked proven-red check, and groups R4-A and R4-B will settle it by execution. Recorded so the row stops being counted as a live defect it no longer is."
+   "last_replayed_at": "4e4ca5b",
+   "replay_verdict": "SUBJECT-ABSENT-AT-HEAD",
+   "replay_note": "Replayed BY CONTENT at 4e4ca5b by the reviewer, not accepted from the implementing agent's report. same subject as :1393 and the same evidence closes both. The label ROUND-1 FINDING NOT CLOSED was inherited across two rounds and never replayed; it was already false at 0851761. Every named ratchet was itself re-proved by the reviewer: red against the pre-fix tree via git checkout <sha> -- <path> then rebuild, green after, no git stash.",
+   "prior_last_replayed_at": "0851761b637c46e524cd354abca3fa04acde3681"
   },
   {
    "severity": "HIGH",
@@ -1984,14 +1986,16 @@
    "fingerprint": "bin/arch_mutants/arch_mutants.ml:451:correctness",
    "specialist": "reviewer",
    "fid": "bin/arch_mutants/arch_mutants.ml:451:correctness#afb94c14",
-   "status": "OPEN",
+   "status": "RESOLVED",
    "first_seen_round": 3,
-   "resolved_round": null,
-   "check": null,
-   "pre_fix_sha": "618acb97afc069dc24acb3e5ae354f08a12143cd",
-   "red_verified": null,
-   "last_replayed_at": "618acb9",
-   "replay_verdict": "CONFIRMED-AT-ROUND-3"
+   "resolved_round": 4,
+   "check": "join-independent-of-id-shape.js",
+   "pre_fix_sha": "0851761b637c46e524cd354abca3fa04acde3681",
+   "red_verified": true,
+   "last_replayed_at": "4e4ca5b",
+   "replay_verdict": "SUBJECT-ABSENT-AT-HEAD",
+   "prior_last_replayed_at": "618acb9",
+   "replay_note": "Replayed BY CONTENT at 4e4ca5b by the reviewer, not accepted from the implementing agent's report. the second route to :450, closed by the same structural change. Distinct route kept below rather than dropped. Every named ratchet was itself re-proved by the reviewer: red against the pre-fix tree via git checkout <sha> -- <path> then rebuild, green after, no git stash."
   },
   {
    "severity": "HIGH",
@@ -2005,14 +2009,16 @@
    "fingerprint": "bin/arch_mutants/arch_mutants.ml:2202:correctness",
    "specialist": "reviewer",
    "fid": "bin/arch_mutants/arch_mutants.ml:2202:correctness#19ceed94",
-   "status": "OPEN",
+   "status": "RESOLVED",
    "first_seen_round": 3,
-   "resolved_round": null,
-   "check": null,
-   "pre_fix_sha": "618acb97afc069dc24acb3e5ae354f08a12143cd",
-   "red_verified": null,
-   "last_replayed_at": "618acb9",
-   "replay_verdict": "CONFIRMED-AT-ROUND-3"
+   "resolved_round": 4,
+   "check": "site-key-collision-is-refused.js + completed-requires-persisted-runs.js",
+   "pre_fix_sha": "0851761b637c46e524cd354abca3fa04acde3681",
+   "red_verified": true,
+   "last_replayed_at": "4e4ca5b",
+   "replay_verdict": "SUBJECT-ABSENT-AT-HEAD",
+   "prior_last_replayed_at": "618acb9",
+   "replay_note": "Replayed BY CONTENT at 4e4ca5b by the reviewer, not accepted from the implementing agent's report. MDb.count_runs asks the database and completed_at is withheld unless rows equal mutants_attempted; attempts_reconciled_with_rows reaches the JSON. A collision now refuses BEFORE the campaign row exists. Every named ratchet was itself re-proved by the reviewer: red against the pre-fix tree via git checkout <sha> -- <path> then rebuild, green after, no git stash."
   },
   {
    "severity": "HIGH",
@@ -2048,14 +2054,16 @@
    "fingerprint": "checks/run-ratchet.js:81:correctness",
    "specialist": "reviewer",
    "fid": "checks/run-ratchet.js:81:correctness#fd1ac442",
-   "status": "OPEN",
+   "status": "RESOLVED",
    "first_seen_round": 3,
-   "resolved_round": null,
-   "check": null,
-   "pre_fix_sha": "618acb97afc069dc24acb3e5ae354f08a12143cd",
-   "red_verified": null,
-   "last_replayed_at": "618acb9",
-   "replay_verdict": "CONFIRMED-AT-ROUND-3"
+   "resolved_round": 4,
+   "check": "campaign-checks-receive-their-required-argument.js",
+   "pre_fix_sha": "0851761b637c46e524cd354abca3fa04acde3681",
+   "red_verified": true,
+   "last_replayed_at": "4e4ca5b",
+   "replay_verdict": "SUBJECT-ABSENT-AT-HEAD",
+   "prior_last_replayed_at": "618acb9",
+   "replay_note": "Replayed BY CONTENT at 4e4ca5b by the reviewer, not accepted from the implementing agent's report. the campaign tier now reads briefs/ACTIVE_TASK and passes each script the argument it documents needing. NOTE: this finding's THIRD clause -- a concealed red on ci.yml -- was RETRACTED; check-scope-diff exits 0, ci.yml having been added to the manifest by ac08d1a before the clause was written. Every named ratchet was itself re-proved by the reviewer: red against the pre-fix tree via git checkout <sha> -- <path> then rebuild, green after, no git stash."
   },
   {
    "severity": "LOW",
@@ -2075,8 +2083,8 @@
    "check": null,
    "pre_fix_sha": "618acb97afc069dc24acb3e5ae354f08a12143cd",
    "red_verified": null,
-   "last_replayed_at": "618acb9",
-   "replay_verdict": "CONFIRMED-AT-ROUND-3"
+   "last_replayed_at": "4e4ca5b",
+   "replay_verdict": "STILL-OPEN-AT-HEAD"
   },
   {
    "severity": "INFO",
@@ -2096,8 +2104,8 @@
    "check": null,
    "pre_fix_sha": "618acb97afc069dc24acb3e5ae354f08a12143cd",
    "red_verified": null,
-   "last_replayed_at": "618acb9",
-   "replay_verdict": "CONFIRMED-AT-ROUND-3"
+   "last_replayed_at": "4e4ca5b",
+   "replay_verdict": "STILL-OPEN-AT-HEAD"
   },
   {
    "severity": "CRITICAL",
@@ -2111,14 +2119,16 @@
    "fingerprint": "bin/arch_mutants/arch_mutants.ml:450:architecture",
    "specialist": "architect",
    "fid": "bin/arch_mutants/arch_mutants.ml:450:architecture#86f640a4",
-   "status": "OPEN",
+   "status": "RESOLVED",
    "first_seen_round": 3,
-   "resolved_round": null,
-   "check": null,
-   "pre_fix_sha": "618acb97afc069dc24acb3e5ae354f08a12143cd",
-   "red_verified": null,
-   "last_replayed_at": "618acb9",
-   "replay_verdict": "CONFIRMED-AT-ROUND-3"
+   "resolved_round": 4,
+   "check": "join-independent-of-id-shape.js",
+   "pre_fix_sha": "0851761b637c46e524cd354abca3fa04acde3681",
+   "red_verified": true,
+   "last_replayed_at": "4e4ca5b",
+   "replay_verdict": "SUBJECT-ABSENT-AT-HEAD",
+   "prior_last_replayed_at": "618acb9",
+   "replay_note": "Replayed BY CONTENT at 4e4ca5b by the reviewer, not accepted from the implementing agent's report. by_id is at ZERO occurrences -- the id join arm is deleted, not deprecated. string_of_int !n survives only in the comment at :532 documenting its own removal. engine_name splits Engine_declared of string from Report_ordinal of int, so the type-checker refuses the conflation. Every named ratchet was itself re-proved by the reviewer: red against the pre-fix tree via git checkout <sha> -- <path> then rebuild, green after, no git stash."
   },
   {
    "severity": "HIGH",
@@ -2132,14 +2142,16 @@
    "fingerprint": "bin/arch_mutants/arch_mutants.ml:2024:architecture",
    "specialist": "architect",
    "fid": "bin/arch_mutants/arch_mutants.ml:2024:architecture#15827d23",
-   "status": "OPEN",
+   "status": "RESOLVED",
    "first_seen_round": 3,
-   "resolved_round": null,
-   "check": null,
-   "pre_fix_sha": "618acb97afc069dc24acb3e5ae354f08a12143cd",
-   "red_verified": null,
-   "last_replayed_at": "618acb9",
-   "replay_verdict": "CONFIRMED-AT-ROUND-3"
+   "resolved_round": 4,
+   "check": "identity-doctrine-is-resolved.sh (DOCUMENTATION GATE -- see its narrowed claim)",
+   "pre_fix_sha": "0851761b637c46e524cd354abca3fa04acde3681",
+   "red_verified": true,
+   "last_replayed_at": "4e4ca5b",
+   "replay_verdict": "SUBJECT-ABSENT-AT-HEAD",
+   "prior_last_replayed_at": "618acb9",
+   "replay_note": "Replayed BY CONTENT at 4e4ca5b by the reviewer, not accepted from the implementing agent's report. the resolution is written in all three files: arch_mutant_db.ml:315-318 states engine_mutant_id is RUN-SCOPED, is not an identity, nothing joins on it, and cross-references the doctrine in arch_mutants.ml AND in mutants-schema-migration.sql. The migration prevails, because a document asserting a checkable property outranks one describing a mechanism. Every named ratchet was itself re-proved by the reviewer: red against the pre-fix tree via git checkout <sha> -- <path> then rebuild, green after, no git stash."
   },
   {
    "severity": "HIGH",
@@ -2153,14 +2165,16 @@
    "fingerprint": "bin/arch_mutants/arch_mutants.ml:1020:architecture",
    "specialist": "architect",
    "fid": "bin/arch_mutants/arch_mutants.ml:1020:architecture#62043c44",
-   "status": "OPEN",
+   "status": "RESOLVED",
    "first_seen_round": 3,
-   "resolved_round": null,
-   "check": null,
-   "pre_fix_sha": "618acb97afc069dc24acb3e5ae354f08a12143cd",
-   "red_verified": null,
-   "last_replayed_at": "618acb9",
-   "replay_verdict": "CONFIRMED-AT-ROUND-3"
+   "resolved_round": 4,
+   "check": "source-hash-declares-its-derivation.js",
+   "pre_fix_sha": "0851761b637c46e524cd354abca3fa04acde3681",
+   "red_verified": true,
+   "last_replayed_at": "4e4ca5b",
+   "replay_verdict": "SUBJECT-ABSENT-AT-HEAD",
+   "prior_last_replayed_at": "618acb9",
+   "replay_note": "Replayed BY CONTENT at 4e4ca5b by the reviewer, not accepted from the implementing agent's report. source_hash at :1231-1279 stamps its derivation INTO the stored value as 'line:' or 'site:', and both arms hash in the occurrence ordinal -- without which the DB's UNIQUE key would re-merge the pair the site key had just separated. Every named ratchet was itself re-proved by the reviewer: red against the pre-fix tree via git checkout <sha> -- <path> then rebuild, green after, no git stash."
   },
   {
    "severity": "HIGH",
@@ -2174,14 +2188,16 @@
    "fingerprint": "lib/arch_index/arch_index_db.ml:103:architecture",
    "specialist": "architect",
    "fid": "lib/arch_index/arch_index_db.ml:103:architecture#bcf23df0",
-   "status": "OPEN",
+   "status": "RESOLVED",
    "first_seen_round": 3,
-   "resolved_round": null,
-   "check": null,
-   "pre_fix_sha": "618acb97afc069dc24acb3e5ae354f08a12143cd",
-   "red_verified": null,
-   "last_replayed_at": "618acb9",
-   "replay_verdict": "CONFIRMED-AT-ROUND-3"
+   "resolved_round": 4,
+   "check": "mutant-tables-declare-their-version.js",
+   "pre_fix_sha": "0851761b637c46e524cd354abca3fa04acde3681",
+   "red_verified": true,
+   "last_replayed_at": "4e4ca5b",
+   "replay_verdict": "SUBJECT-ABSENT-AT-HEAD",
+   "prior_last_replayed_at": "618acb9",
+   "replay_note": "Replayed BY CONTENT at 4e4ca5b by the reviewer, not accepted from the implementing agent's report. mutants_schema_version is written in the migration SQL itself, so the hand-applied path stamps it too, and separately from the index-wide value. Every named ratchet was itself re-proved by the reviewer: red against the pre-fix tree via git checkout <sha> -- <path> then rebuild, green after, no git stash."
   },
   {
    "severity": "HIGH",
@@ -2195,14 +2211,16 @@
    "fingerprint": "checks/run-ratchet.js:130:architecture",
    "specialist": "architect",
    "fid": "checks/run-ratchet.js:130:architecture#18b75b3d",
-   "status": "OPEN",
+   "status": "RESOLVED",
    "first_seen_round": 3,
-   "resolved_round": null,
-   "check": null,
-   "pre_fix_sha": "618acb97afc069dc24acb3e5ae354f08a12143cd",
-   "red_verified": null,
-   "last_replayed_at": "618acb9",
-   "replay_verdict": "CONFIRMED-AT-ROUND-3"
+   "resolved_round": 4,
+   "check": "ratchet-tier-fatality-is-enforced.js",
+   "pre_fix_sha": "0851761b637c46e524cd354abca3fa04acde3681",
+   "red_verified": true,
+   "last_replayed_at": "4e4ca5b",
+   "replay_verdict": "SUBJECT-ABSENT-AT-HEAD",
+   "prior_last_replayed_at": "618acb9",
+   "replay_note": "Replayed BY CONTENT at 4e4ca5b by the reviewer, not accepted from the implementing agent's report. the code===3 short-circuit is gone; only !fatalUnrun (the campaign tier) still treats 3 as non-fatal. The check fires on exit 3 AND on exit 5, the latter already fatal beforehand -- which is what makes it a rule. Every named ratchet was itself re-proved by the reviewer: red against the pre-fix tree via git checkout <sha> -- <path> then rebuild, green after, no git stash."
   },
   {
    "severity": "MEDIUM",
@@ -2222,8 +2240,8 @@
    "check": null,
    "pre_fix_sha": "618acb97afc069dc24acb3e5ae354f08a12143cd",
    "red_verified": null,
-   "last_replayed_at": "618acb9",
-   "replay_verdict": "CONFIRMED-AT-ROUND-3"
+   "last_replayed_at": "4e4ca5b",
+   "replay_verdict": "STILL-OPEN-AT-HEAD"
   },
   {
    "severity": "MEDIUM",
@@ -2237,14 +2255,16 @@
    "fingerprint": "bin/arch_mutants/arch_mutants.ml:76:architecture",
    "specialist": "architect",
    "fid": "bin/arch_mutants/arch_mutants.ml:76:architecture#c32ef9b6",
-   "status": "OPEN",
+   "status": "RESOLVED",
    "first_seen_round": 3,
-   "resolved_round": null,
-   "check": null,
-   "pre_fix_sha": "618acb97afc069dc24acb3e5ae354f08a12143cd",
-   "red_verified": null,
-   "last_replayed_at": "618acb9",
-   "replay_verdict": "CONFIRMED-AT-ROUND-3"
+   "resolved_round": 4,
+   "check": "none (MEDIUM: the ratchet rule binds HIGH and above)",
+   "pre_fix_sha": "0851761b637c46e524cd354abca3fa04acde3681",
+   "red_verified": true,
+   "last_replayed_at": "4e4ca5b",
+   "replay_verdict": "SUBJECT-ABSENT-AT-HEAD",
+   "prior_last_replayed_at": "618acb9",
+   "replay_note": "Replayed BY CONTENT at 4e4ca5b by the reviewer, not accepted from the implementing agent's report. the contract is now stated BY KIND at :70-91, enumerating all four exit-1 refusals, and names the earlier narrowness as its own reason. Every named ratchet was itself re-proved by the reviewer: red against the pre-fix tree via git checkout <sha> -- <path> then rebuild, green after, no git stash."
   },
   {
    "severity": "MEDIUM",
@@ -2264,8 +2284,8 @@
    "check": null,
    "pre_fix_sha": "618acb97afc069dc24acb3e5ae354f08a12143cd",
    "red_verified": null,
-   "last_replayed_at": "618acb9",
-   "replay_verdict": "CONFIRMED-AT-ROUND-3"
+   "last_replayed_at": "4e4ca5b",
+   "replay_verdict": "STILL-OPEN-AT-HEAD"
   },
   {
    "severity": "MEDIUM",
@@ -2285,8 +2305,8 @@
    "check": null,
    "pre_fix_sha": "618acb97afc069dc24acb3e5ae354f08a12143cd",
    "red_verified": null,
-   "last_replayed_at": "618acb9",
-   "replay_verdict": "CONFIRMED-AT-ROUND-3"
+   "last_replayed_at": "4e4ca5b",
+   "replay_verdict": "STILL-OPEN-AT-HEAD"
   },
   {
    "severity": "MEDIUM",
@@ -2306,8 +2326,8 @@
    "check": null,
    "pre_fix_sha": "618acb97afc069dc24acb3e5ae354f08a12143cd",
    "red_verified": null,
-   "last_replayed_at": "618acb9",
-   "replay_verdict": "CONFIRMED-AT-ROUND-3"
+   "last_replayed_at": "4e4ca5b",
+   "replay_verdict": "STILL-OPEN-AT-HEAD"
   },
   {
    "severity": "LOW",
@@ -2327,8 +2347,8 @@
    "check": null,
    "pre_fix_sha": "618acb97afc069dc24acb3e5ae354f08a12143cd",
    "red_verified": null,
-   "last_replayed_at": "618acb9",
-   "replay_verdict": "CONFIRMED-AT-ROUND-3"
+   "last_replayed_at": "4e4ca5b",
+   "replay_verdict": "STILL-OPEN-AT-HEAD"
   },
   {
    "severity": "INFO",
@@ -2348,8 +2368,8 @@
    "check": null,
    "pre_fix_sha": "618acb97afc069dc24acb3e5ae354f08a12143cd",
    "red_verified": null,
-   "last_replayed_at": "618acb9",
-   "replay_verdict": "CONFIRMED-AT-ROUND-3"
+   "last_replayed_at": "4e4ca5b",
+   "replay_verdict": "STILL-OPEN-AT-HEAD"
   },
   {
    "severity": "MEDIUM",
@@ -2574,8 +2594,8 @@
    "check": null,
    "pre_fix_sha": "618acb97afc069dc24acb3e5ae354f08a12143cd",
    "red_verified": null,
-   "last_replayed_at": "618acb9",
-   "replay_verdict": "CONFIRMED-AT-ROUND-3"
+   "last_replayed_at": "4e4ca5b",
+   "replay_verdict": "STILL-OPEN-AT-HEAD"
   },
   {
    "severity": "MEDIUM",
@@ -2599,8 +2619,8 @@
    "check": null,
    "pre_fix_sha": "618acb97afc069dc24acb3e5ae354f08a12143cd",
    "red_verified": null,
-   "last_replayed_at": "618acb9",
-   "replay_verdict": "CONFIRMED-AT-ROUND-3"
+   "last_replayed_at": "4e4ca5b",
+   "replay_verdict": "STILL-OPEN-AT-HEAD"
   },
   {
    "severity": "LOW",
@@ -2624,8 +2644,120 @@
    "check": null,
    "pre_fix_sha": "618acb97afc069dc24acb3e5ae354f08a12143cd",
    "red_verified": null,
-   "last_replayed_at": "618acb9",
-   "replay_verdict": "CONFIRMED-AT-ROUND-3"
+   "last_replayed_at": "4e4ca5b",
+   "replay_verdict": "STILL-OPEN-AT-HEAD"
+  },
+  {
+   "severity": "MEDIUM",
+   "path": "checks/tree-boundary-non-git-checkout.js",
+   "line": 153,
+   "category": "gate-vacuous",
+   "status": "OPEN",
+   "specialist": "reviewer",
+   "first_seen_round": 4,
+   "last_replayed_at": "4e4ca5b",
+   "replay_verdict": "FOUND-AT-HEAD",
+   "fingerprint": "checks/tree-boundary-non-git-checkout.js:153:gate-vacuous",
+   "summary": "A NEGATIVE ASSERTION IS GREEN FOR A TYPOGRAPHIC REASON. It forbids a phrase the honest message contains IN ORDER TO DENY IT, and passes only because the OCaml literal's continuation fill lands between `inside` and `another`, breaking adjacency.",
+   "evidence": "VALIDATED BY EXECUTION, not carried forward as a sentence, and run on an IDLE WORKTREE (r4-ratchet at bcd835e) so no writer was disturbed. Baseline exit 0. Collapsing runs of spaces to one space in that single literal -- 4 fills, message semantically identical, it still denies the nesting -- gives exit 1, the failing assertion being 'it does NOT claim the checkout is nested inside another one -- expected false, got true'. Restored: exit 0, tree clean. NO DEFECT WAS INTRODUCED. The gate measures the source formatting of the thing it tests. Remedy: assert on PARSED STRUCTURE, never on raw text -- an absence over raw output is satisfied by any reflow, wrap or colour code, and no pattern-widening changes that.",
+   "confidence": 5,
+   "fix": "Assert on PARSED STRUCTURE, not raw text: match on an affirmative-wording vocabulary over whitespace-collapsed output, the way CHECK-51's probe 3 already does. Widening the pattern does not help -- any reflow satisfies an absence."
+  },
+  {
+   "severity": "MEDIUM",
+   "path": "checks/tree-boundary-non-git-checkout.js",
+   "line": 138,
+   "category": "gate-vacuous",
+   "status": "OPEN",
+   "specialist": "reviewer",
+   "first_seen_round": 4,
+   "last_replayed_at": "4e4ca5b",
+   "replay_verdict": "FOUND-AT-HEAD",
+   "fingerprint": "checks/tree-boundary-non-git-checkout.js:138:gate-vacuous",
+   "summary": "THE SAME REGEX AT A SECOND SITE CANNOT BE RED AT ALL -- a third category, not a weaker version of the first. It forbids a refusal-only phrase on an ACCEPTANCE path.",
+   "evidence": "MEASURED, not inferred from a failure to make it red: the check was instrumented to print what probe 3 actually examines, then restored. r.out is 1524 chars, exit 0, and it is the output of a SUCCEEDING campaign ('== Mutation campaign 1 ...'). The phrase appears only inside `refuse`. So the probe forbids something its path cannot emit; its green never weighed anything. 'I could not make it red' would have been weaker -- this is the CAUSE. THE ENUMERATION IS THREE, NOT TWO: green because the property holds; green for a reason unrelated to the property; CANNOT BE RED AT ALL. Collapsing the third into the first is the easy error because both look sound. Remedy differs from :153's: give it an assertion that bears, or remove it with the reason written. Keeping it is worse than one fewer green, because it counts.",
+   "confidence": 5,
+   "fix": "Give it an assertion that bears -- that a SUCCESS path emits no boundary diagnosis at all, over a structured vocabulary -- or delete it with the reason written. Do not keep it: a green that never weighed anything is worse than one fewer green, because it counts."
+  },
+  {
+   "severity": "MEDIUM",
+   "path": "checks/run-ratchet.js",
+   "line": 1,
+   "category": "gate-vacuous",
+   "status": "OPEN",
+   "specialist": "reviewer",
+   "first_seen_round": 4,
+   "last_replayed_at": "4e4ca5b",
+   "replay_verdict": "FOUND-AT-HEAD",
+   "fingerprint": "checks/run-ratchet.js:1:gate-vacuous",
+   "summary": "THE RATCHET'S STEADY STATE DURING WORK IS ONE EXPECTED RED, and a second red differs from it only arithmetically. dispatched-groups-were-executed asserts whenever a group is in flight -- that is, throughout every campaign.",
+   "evidence": "Measured across this round: 25 PASS / 1 ASSERTED at 664e0d8 with R4-D in flight, then 38 passed / 0 asserted at 4e4ca5b once its outcome section existed. A gate with a permanently expected failure trains the reader to see '1 asserted' and move on. Two options, neither taken here: separate the PROCESS gate from the CODE ratchet into its own sweep, or have the runner state the expectation -- '1 asserted, expected: R4-D in flight' -- so that 2 asserted is VISIBLY and not arithmetically different. Same shape as the objection already open at dispatched-groups-were-executed.js:30, one layer in.",
+   "confidence": 5,
+   "fix": "Either split the PROCESS gate out of the CODE ratchet into its own sweep, or have the runner print the expectation ('1 asserted, expected: <group> in flight') so a second red is perceptually and not merely arithmetically different."
+  },
+  {
+   "severity": "MEDIUM",
+   "path": "briefs/mutation-campaign-313-review.json",
+   "line": 0,
+   "category": "evidence",
+   "status": "OPEN",
+   "specialist": "reviewer",
+   "first_seen_round": 4,
+   "last_replayed_at": "4e4ca5b",
+   "replay_verdict": "FOUND-AT-HEAD",
+   "fingerprint": "briefs/mutation-campaign-313-review.json:0:evidence",
+   "summary": "THE CONVERGENCE GATE'S INCONCLUSIVE COUNT IS ANTI-CORRELATED WITH THE WORK: every ratchet added makes the unexamined population larger while the published zero looks unchanged.",
+   "evidence": "Measured: 41 inconclusive at round 3, 54 at 4e4ca5b. The gate resolves a check as a node-runnable PATH, and a spec-level CHECK-N id is not one, so each CHECK-N this branch adds is one more entry it cannot run. '0 violations, 54 inconclusive' and '0 violations, 41 inconclusive' read identically at a glance and are different states. A metric that DEGRADES AS THE WORK IMPROVES. The figure must never appear again without its degradation beside it -- which is why this verdict carries inconclusive_checks, checks_total, gate_exit_status and degradation_note as siblings of the count.",
+   "confidence": 5,
+   "fix": "Never publish the violation count without inconclusive_checks, checks_total, gate_exit_status and degradation_note beside it -- as this verdict does. The structural fix is for the gate to accept an arbitrary executable, or for spec-level CHECK-N ids to become node-runnable paths."
+  },
+  {
+   "severity": "INFO",
+   "path": "briefs/mutation-campaign-313-review.json",
+   "line": 1,
+   "category": "evidence",
+   "status": "OPEN",
+   "specialist": "reviewer",
+   "first_seen_round": 4,
+   "last_replayed_at": "4e4ca5b",
+   "replay_verdict": "FOUND-AT-HEAD",
+   "fingerprint": "briefs/mutation-campaign-313-review.json:1:evidence",
+   "summary": "PROBE-LEVEL LIVENESS IS NOT ESTABLISHED BY CHECK-LEVEL RED-VERIFICATION, and this verdict states the two as separate sentences rather than adjacent ones.",
+   "evidence": "A RETRACTION OF THE REVIEWER'S OWN CLAIM. CHECK-51's red run left six assertions green, and that was reported as proof it tests a property rather than a permutation. That reading remains available -- but so does 'some of those greens cannot fail', and NOTHING IN THE RUN SEPARATES THEM. What IS established: CHECK-51 discriminates two trees and its failures concentrate on one polarity. What is NOT established: that each of its green assertions bears something. '18 checks made red on demand' is true and does not mean 'no vacuous probe remains'; a reader who was not present reads them as one sentence. Proof that the concern is real rather than theoretical: this file's :138, found vacuous inside a check that DOES discriminate. Discriminator for a later sweep, cheap per probe: instrument the check to print what the probe examines, then ask whether that output can ever contain what it forbids.",
+   "confidence": 5,
+   "fix": "State the two claims as separate sentences in every verdict, and run the probe-level sweep before any future round asserts probe liveness. The sweep is mandated to this round's falsification read precisely because its author cannot self-administer it."
+  },
+  {
+   "severity": "LOW",
+   "path": "bin/arch_mutants/arch_mutants.ml",
+   "line": 1152,
+   "category": "architecture",
+   "status": "OPEN",
+   "specialist": "reviewer",
+   "first_seen_round": 4,
+   "last_replayed_at": "4e4ca5b",
+   "replay_verdict": "FOUND-AT-HEAD",
+   "fingerprint": "bin/arch_mutants/arch_mutants.ml:1152:architecture",
+   "summary": "A JUDGEMENT, NOT A DEFECT, AND DELIBERATELY NOT TESTED: a nested dune-project that IS tracked by git but genuinely belongs to another checkout -- a committed vendored subtree -- now widens FR-030's boundary to the enclosing repository.",
+   "evidence": "The reviewer CONFIRMS the polarity R4-B chose. The rule 'the campaign belongs to the repository that owns the files' is the right one, because the failure it prevents is issue #77 -- an outer tree's unmutated binary making every mutant survive, which reads exactly like a real finding -- and the failure it admits is a vendored subtree mutated as part of its host, which is wrong but LOUD. Simulating this judgement with a green check would have been inventing a gate to satisfy a process rule, which is the defect this round spent itself removing. STATED PLAINLY: this is where a future defect will come from. It is a watch item, not a fix item, and it must not inherit the urgency of the two probe defects filed above it.",
+   "confidence": 4,
+   "fix": "None. This is a watch item, not a fix item: the polarity is confirmed as correct. Revisit if a vendored subtree is ever mutated as part of its host."
+  },
+  {
+   "severity": "MEDIUM",
+   "path": "scripts/lib/review/finding-schema.js",
+   "line": 1,
+   "category": "schema-drift",
+   "status": "OPEN",
+   "specialist": "reviewer",
+   "first_seen_round": 4,
+   "confidence": 5,
+   "last_replayed_at": "4e4ca5b",
+   "replay_verdict": "FOUND-AT-HEAD",
+   "fingerprint": "scripts/lib/review/finding-schema.js:1:schema-drift",
+   "summary": "THE REPLAY-PROVENANCE FIELDS ARE NOT IN THE FINDING SCHEMA, so the whole staleness apparatus built this round survives only because the verdict is hand-edited. Passed through the normalizer, last_replayed_at and replay_verdict are rejected as unexpected additional properties.",
+   "evidence": "FOUND BY RUNNING THE NORMALIZER, not by reading it -- and it was run only because the convergence gate refused an unattested normalized_by claim. Measured at 4e4ca5b: feeding this round's six findings to scripts/review-normalize.js rejects all six with '$: unexpected additional property \"last_replayed_at\"; $: unexpected additional property \"replay_verdict\"'. So a finding cannot carry the commit it was last replayed at THROUGH the pipeline's own tool. The fields exist in this verdict because it is written by hand; the first round to normalize properly would silently drop them, and the census would go back to being a count of claims about past trees. Two lesser drifts found in the same run: `confidence` is a REQUIRED INTEGER (1-5) and `fix` is REQUIRED, neither documented where a reviewer authoring a finding would look.",
+   "fix": "Add last_replayed_at (string, a commit sha) and replay_verdict (enum: CONFIRMED-AT-HEAD | SUBJECT-ABSENT-AT-HEAD | STILL-OPEN-AT-HEAD | FOUND-AT-HEAD) to the finding schema, so a status can carry the commit it was measured at rather than being a value someone set in the past. This is the schema half of the roadmap item that tracks finding identity and status re-validation."
   }
  ],
  "cross_runtime_findings": [],
@@ -2652,7 +2784,7 @@
  "escalation_needed": false,
  "escalation_reason": null,
  "normalized_by": "2.0.0",
- "open_findings_recorded": 25,
+ "open_findings_recorded": 17,
  "rounds_audit": [
   {
    "round": 1,
@@ -2721,13 +2853,47 @@
    ],
    "strike": true,
    "trace_schema_version": "1.0"
+  },
+  {
+   "round": 4,
+   "cycle": 1,
+   "reviewed_sha": "4e4ca5b",
+   "fix_sha": "4e4ca5b",
+   "fix_sha_reason": "the four R4 groups landed on this branch; the review reads the tree they produced",
+   "specialists_run": [
+    {
+     "name": "falsifier",
+     "selection_reason": "RAN, and replaces the fan-out rather than supplementing it. A single contradictor defined by its TARGET, not its coverage: mandated to BREAK the drafted GO's eight claims, in an isolated worktree at 4e4ca5b. Briefed on the diff and the claims ONLY -- deliberately not on the orchestrator's reasoning, and not on the six findings this round produced, since a reviewer briefed on the framing inherits exactly what is missing. Two mechanical mandates its author cannot self-administer: a PROBE-level liveness sweep across the 38 passing checks, and an independent replay of the eleven closures."
+    }
+   ],
+   "strike": true,
+   "trace_schema_version": "1.0",
+   "specialists_skipped": [
+    {
+     "name": "reviewer",
+     "selection_reason": "SKIPPED AS AN INDEPENDENT READ. The verification was performed by the orchestrator directly -- content replays, red re-proofs of all ten new ratchets, suite and full ratchet re-run. That work is real and is not repeated. It is NOT INDEPENDENT: the same agent wrote the briefs, dispatched the four groups and arbitrated their design rulings, then assessed the result."
+    },
+    {
+     "name": "architect",
+     "selection_reason": "SKIPPED. Rounds 1-3 each had one. Its absence here was surfaced by the convergence gate as missing-trace / missing-loopback-audit -- two missing artefacts covering one missing contradictor."
+    },
+    {
+     "name": "spec-compliance",
+     "selection_reason": "SKIPPED. CHECK-51 and CHECK-52 were written into specs/mutation-campaign-313.md by the implementing groups themselves and were not independently audited."
+    }
+   ]
   }
  ],
- "summary": "Round 3 NO-GO. THE CRITICAL IS NOT CLOSED AND IS NOW DIAGNOSED AT THE DESIGN LEVEL. Two specialists reproduced the original verdict inversion independently, by different routes, on this HEAD. PUT THE CONTRADICTION FIRST, NOT THE MECHANISM: the migration states that engine identifiers are NOT TRUSTED FOR IDENTITY and marks the column storing them as no part of any identity; the driver makes the engine id the FIRST join key. Two documents in one repository, each internally coherent, disagreeing about a load-bearing property, with nothing marking either as superseding the other. A reader who consults one is confirmed; a reader who consults both must decide which is stale with nothing to go on. That absent third statement is why a synthesised id can do damage at all. THE MECHANISM: load_generic writes the report's physical line counter into the same field that carries a real engine id, and the highest-priority join arm cross-checks on file and line only. So the join is decided by the LEXICAL FORM of the catalogue's identifiers \u2014 a catalogue numbered 1,2 misjoins and silently commits inverted verdicts, while the IDENTICAL report against m1,m2 refuses. No fixture using named ids can see this, and every reasonable fixture uses named ids, which is why two rewrites shrank the defect without removing it: both corrected the symptom, and the symptom is the only thing visible from inside a well-named fixture. The fix is architectural \u2014 split the field so a synthesised ordinal cannot inhabit the engine-id slot, make the site key the sole discriminator, and let a present engine id corroborate and refuse rather than select. THREE SIBLING HIGHS ARE THE SAME FAMILY, and it is worth naming as one: a claim and an implementation disagreeing, with the claim being what people read. source_hash stores two incomparable derivations in one column with nothing recording which, and its real branch is exercised nowhere. Schema 1.13 is INERT \u2014 a database carrying a completed campaign reports 1.2. run-ratchet states a fatality rule it does not implement, so a self-contained check can be permanently neutered by exiting 3 while the runner prints PASS. FOUR MORE HIGH, each executed: a duplicate site key silently ERASES a SURVIVED verdict while the campaign publishes complete, because a caught UNIQUE violation leaves the counters incremented and completed_at stamped; the repaired tree boundary refuses a legitimate invocation INSIDE THIS REPOSITORY, from a git-tracked nested dune-project, with a diagnosis that is false; and run-ratchet reports PASS while skipping checks it declined to feed, one of which asserts when given its input \u2014 concealing a real red for several commits. THE COST OF THE DISPATCH DEFECT IS NOT WHAT EITHER OF US ASSUMED. Group C was not ten deferred traceability findings; the group that went undispatched contained the architecture pass that DIAGNOSED THE ROUND'S CRITICAL, delayed by two rounds of symptom-fixing. An undispatched group is not a deferred increment of value: its value is unknown until it runs, and here it was the largest in the round. That is the argument for the dispatched-to-executed assertion, and a reader who sees 'group C was dispatched late' will otherwise assume the cost was proportional to its size. Four dispatch failures occurred in this task by four distinct mechanisms, one of them committed in the message announcing the previous one. WHAT HELD, and it is substantial. Eighteen ratchet checks were independently red-verified this round, each failure attributable, where rounds 1 and 2 found five vacuous \u2014 no check failed to go red. The traceability graph now matches the document exactly in both directions, 34/46/50, zero dangling references, where it covered two thirds with four. AC-20 is verified against a real mutaml 0.3: the wrapper is invoked twice, once per mutant and not once per engine run, so the per-mutant selection this whole design rests on is OBSERVED rather than argued. FR-003 moved from no criterion, no check and no code to enforced before the engine starts. A COUNT CAVEAT THAT REPEATS THE ROUND-2 ONE: the two CRITICAL entries are ONE defect, found independently by two specialists at two line numbers, and the normalizer did not merge them because it fingerprints on path:line:category. Roadmap 4.10 already carries that; this verdict is its second instance. The cross-runtime pass is DEGRADED on both runtimes since round 1 and the breaker forbids a re-probe absent a digest change, so this review is again one notch weaker than the two-model guarantee and does not claim otherwise. NO CAMPAIGN HAS EVER RUN: no database carries a mutants table, so what a GO here could support is that the machinery is correct, never that it produces attributable kills. Gates at 618acb9: dune build exit 0; 255 of 255 executed with --keep-going, 0 failures; ratchet 407 against a ceiling of 432; run-ratchet PASS. GATE: exit 2, DEGRADED, zero violations \u2014 51 of 51 links inconclusive for the reason recorded as its own finding since round 2, the ratchet checks not being node-runnable paths. Per the skill, exit 2 fails closed and is surfaced to the human rather than routed. The verdict is NO-GO on its own merits regardless. A MEASURED COST, NOT A TIDINESS PROBLEM: the three CRITICALs are ONE defect found by three routes and two HIGHs are ONE boundary, because the normalizer fingerprints on path:line:category and a coordinate does not identify an object across a rebase. The duplicate count INFLATED A SEVERITY CENSUS THAT DRIVES TRIAGE \u2014 the same class as the ceiling metric's fun:LINE:COL and a citation's file:line, and in each the remedy is the one already written here: anchor on content, keep the coordinate as a hint.",
+ "summary": "ROUND 4 GO. THE CRITICAL IS CLOSED, VERIFIED BY THE REVIEWER RATHER THAN ACCEPTED FROM THE AGENT THAT CLOSED IT, AND NO CRITICAL OR HIGH REMAINS OPEN. Three rounds had failed on one defect; this one removed the possibility rather than the symptom. by_id is at ZERO occurrences -- the id join arm is deleted, not deprecated; the synthesised ordinal survives only in a comment documenting its own removal; and engine_name splits Engine_declared of string from Report_ordinal of int so the type-checker refuses a conflation that two previous rewrites could only discourage. site_key is a distinct record with NO identifier field, so an identity cannot carry an engine id by construction. The engine id is KEPT, stored beside the row and labelled run-scoped, because the failure was never that it existed -- only that it was promoted.\n\nTHE MEASUREMENTS ARE THE REVIEWER'S OWN, each re-run rather than quoted. At 4e4ca5b: dune build exit 0; the tezt suite 255 SUCCESS / 0 FAILURE exit 0 via main.exe --keep-going, never dune test --force, which stops at the first failure and under-reports; the full ratchet 38 passed, 0 asserted, 0 harness errors, 4 not run. All ten new ratchets were re-proved RED by the reviewer against the pre-fix tree with git checkout <sha> -- <path> plus a rebuild, never git stash, and green after.\n\nREPLAY RAN BEFORE DEDUPE, AND THE ORDER WAS LOAD-BEARING. Merging first would have made one record inherit a single status for differently-aged claims, and NOT CLOSED -- the more alarming label -- is what survives a merge. Replayed first, :1726 was marked closed on its OWN evidence. Two defects had been counted as five rows, inflating the CRITICAL count from one to three: a severity census that DRIVES TRIAGE, not a tidiness problem. Every open finding now carries last_replayed_at, because OPEN was a value someone set at a past commit and not a measurement against HEAD -- four inherited findings, replayed for the first time, all described code that was no longer there.\n\nWHAT A GO HERE DOES AND DOES NOT MEAN, in the words that bound it. NO CAMPAIGN HAS EVER RUN ON REAL CODE. The per-mutant selection mechanism is observed -- AC-20 passes against a real mutaml 0.3, the wrapper invoked once per mutant -- but the machinery's intended output, attributable kills over a real corpus, has never been seen by anyone. A reader who sees a passing verdict on a mutation-campaign branch will assume kills have been observed. They have not. The claim is that the machinery is correct, not that it produces attributable kills.\n\nTHE RATCHET'S STEADY STATE DURING WORK IS ONE EXPECTED RED -- dispatched-groups-were-executed, red whenever a group is in flight. It read 25 PASS / 1 ASSERTED at 664e0d8 and 38 passed / 0 asserted here. Name it, or the next reader learns to expect '1 asserted' and a genuine second red becomes arithmetically visible without being perceptually different.\n\nAND TWO SENTENCES THAT MUST NOT BE READ AS ONE. Established: the ratchets discriminate two trees, and CHECK-51's failures concentrate on a single polarity. NOT established: that every green assertion inside them bears something. Check-level red-verification says nothing at PROBE granularity, and this round proved the concern real rather than theoretical by finding a probe that CANNOT BE RED inside a check that does discriminate. '18 checks made red on demand' is true and does not mean 'no vacuous probe remains'.\n\nSEVENTEEN FINDINGS REMAIN OPEN -- 10 MEDIUM, 4 LOW, 3 INFO -- and six were produced BY this round: two vacuous probes in one check file, both reproduced by execution rather than carried forward as sentences; the expected-red indistinguishability; the convergence gate's inconclusive count, which is ANTI-CORRELATED with the work at 41 then 54; the reviewer's own retracted claim about probe-level liveness; and one JUDGEMENT deliberately not tested -- the vendored tracked dune-project widening the boundary, confirmed as the right polarity and recorded plainly as where a future defect will come from. Simulating that judgement with a green check would have been inventing a gate to satisfy a process rule, which is the defect this round spent itself removing.",
  "gate_exit_status": 2,
  "gate_inconclusive_checks": 51,
  "gate_checks_total": 51,
  "replay_provenance_note": "Every OPEN finding now carries `last_replayed_at`. A finding is a statement ABOUT A COMMIT; OPEN is a value someone set at a past commit, not a measurement against HEAD. Of 25 open, 21 were seen by a specialist reading 618acb9 during round 3; 4 were INHERITED from rounds 1-2 and had never been replayed. Replaying those 4 found ALL 4 describing code that is no longer there -- including one of the three CRITICALs. The open-findings census is a count of claims about past trees.",
  "merge_order_rule": "REPLAY BEFORE YOU MERGE, AND THE ORDER IS NOT A PREFERENCE. Two inflations compose here -- duplicates keyed on a coordinate, and statuses never re-measured -- and collapsing them in the wrong order destroys evidence irreversibly. Replay first: :1726 is marked closed on its OWN evidence, and the surviving CRITICAL routes then dedupe into one live finding that keeps its own status. Dedupe first: :1726 merges into the live CRITICAL BEFORE anyone replays it, and the merged record inherits ONE status for two differently-aged claims -- and 'NOT CLOSED' is the label most likely to survive a merge, being the more alarming one. That launders a stale status into a live record and cannot be undone afterwards. When routes do merge, KEEP EACH ROUTE'S last_replayed_at rather than collapsing to one: the merged finding's age is the age of its OLDEST unreplayed route, not of its freshest.",
- "census_shrank_defect_did_not": "READ THE CORRECTED CENSUS AS BOOKKEEPING, NOT AS PROGRESS. Four stale findings does NOT mean the defect is smaller. The round-3 architect diagnosed the CRITICAL at DESIGN level against 618acb9 -- that finding is live and recently measured. :1726 describing a symptom that is now closed is fully compatible with the underlying defect being entirely live by another route, and it is: load_generic still writes a synthesised ordinal into the field carrying a real engine id, and join arm 1 still trusts it. The count went down. The defect did not. Anyone reading the smaller number as movement on the thing rather than on the ledger has read it backwards."
+ "census_shrank_defect_did_not": "READ THE CORRECTED CENSUS AS BOOKKEEPING, NOT AS PROGRESS. Four stale findings does NOT mean the defect is smaller. The round-3 architect diagnosed the CRITICAL at DESIGN level against 618acb9 -- that finding is live and recently measured. :1726 describing a symptom that is now closed is fully compatible with the underlying defect being entirely live by another route, and it is: load_generic still writes a synthesised ordinal into the field carrying a real engine id, and join arm 1 still trusts it. The count went down. The defect did not. Anyone reading the smaller number as movement on the thing rather than on the ledger has read it backwards.",
+ "dedupe_note": "REPLAY RAN FIRST, THEN THIS. The order is not a preference: merging first would have made one record inherit ONE status for differently-aged claims, and 'ROUND-1 FINDING NOT CLOSED' -- the more alarming label -- is the one that survives a merge. :1726 was marked closed on ITS OWN evidence before any merge. Each route keeps its own prior_last_replayed_at: a merged finding's age is that of its OLDEST unreplayed route, not its freshest.\nTWO DEFECTS WERE COUNTED AS FIVE ROWS. Routes {450,451} are one defect (a synthesised ordinal reaching the first join arm, found by a reviewer and an architect independently); routes {1393,1726} are one defect (the basename join). The normalizer fingerprints on path:line:category, and a coordinate does not identify an object across a rebase. That inflated the CRITICAL count from 1 to 3 -- a severity census that DRIVES TRIAGE, not a tidiness problem.",
+ "head": "4e4ca5b",
+ "independence_note": "THE GO WAS DRAFTED AND NOT PERSISTED. The convergence gate reported a procedural absence; what the absence covered was a missing contradictor. Filling the fields would have produced a compliant record of an uncontradicted GO -- and this is an item whose every previous round found a defect the round before believed closed. The verdict waits on the falsification read.",
+ "drafted_status": "GO",
+ "status_note": "The GO is DRAFTED, NOT RENDERED. Round 4 had no independent read: the same agent wrote the briefs, dispatched the four groups, arbitrated their design rulings and then assessed the result. The convergence gate reported that as missing-trace and missing-loopback-audit -- two missing artefacts covering one missing contradictor. A falsification read is running against the eight claims this verdict makes; the status becomes GO or NO-GO on what it returns, and not before."
 }
