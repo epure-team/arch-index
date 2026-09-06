@@ -1683,3 +1683,177 @@ the finding population is byte-identical on both sides: 144 findings, 29 OPEN no
 `10f51bf` and at `639353f`. Every number in this section is therefore unaffected. Recording it
 because a reader re-deriving these figures will find a commit between the stated HEAD and the
 first commit of this group, and should not have to work out for themselves whether it mattered.
+
+## Group R5-C — outcome
+
+One finding: `bin/arch_mutants/arch_mutants.ml:1378:correctness`, HIGH, `first_seen_round` 4,
+`replay_verdict` FOUND-AT-HEAD. Nothing else was claimed and nothing else was touched.
+
+OWNER bin/arch_mutants/arch_mutants.ml:1378:correctness | status=dispatched | commit=093f8ad | check=checks/tree-boundary-git-cannot-answer.js
+
+### The defect, restated in the terms that decide the fix
+
+`tracked_by` was `Sys.command "... git ls-files --error-unmatch ..." = 0`. `--error-unmatch`
+buys a THIRD exit code from git and the boolean threw it away: 0 is "in the index", 1 is "not
+in the index", and everything else is git declining to answer. Collapsing the third into the
+second is not a lossy simplification, it is an INVERSION, because the second is the arm that
+ACTS — it narrows the boundary. A failure therefore made the guard fire rather than fall
+silent.
+
+The reachability is the half that makes it a defect and not a note, and it is a property of
+which git plumbing reads which file. `git ls-files` reads `.git/index`. `git rev-parse
+--show-toplevel` does not. So the branch's precondition (a toplevel was found) SURVIVES the
+exact failure that breaks the question asked inside it.
+
+### What was measured, on what, and with what still running
+
+Terrain `/mnt/ssd-external-2to/arch-index-mutation-313`, branch `feat/mutation-campaign-313`,
+base `a1e60a9`, git 2.55.0, uid 1000, opam switch `/home/mathias/dev/arch-index`. Every
+figure below was produced after the producing command RETURNED and its exit status was
+captured in the same shell; no count was read off a log whose writer was still open.
+
+Reproduced independently of the review, by two causes rather than one, in a scratch repository:
+
+| index state | `git ls-files --error-unmatch` | `git rev-parse --show-toplevel` |
+| --- | --- | --- |
+| healthy | 0 | 0 |
+| 14 bytes of garbage written over it | 128 | 0 |
+| `chmod 000` | 128 | 0 |
+
+git's fatal is localised — on this machine it read `fichier d'index plus petit qu'attendu` —
+which is why nothing in the fix or the check keys on git's message text. The exit code is the
+part of the interface that does not move under `LANG`.
+
+### The fix, and the choice inside it that is a judgement rather than a deduction
+
+`tracked_by` returns `Tracked | Untracked | Undetermined of int`, and the call site in
+`working_tree_root` has three arms mapped to three outcomes:
+
+- `Tracked` — the marker is the repository's own; the boundary stays the git toplevel.
+- `Untracked` — a different checkout; the boundary narrows to the marker. Issue #77, untouched.
+- `Undetermined code` — the boundary narrows to the marker under a NEW anchor,
+  `Anchor_undetermined`, whose diagnosis names the indeterminacy and quotes git's exit code.
+
+The judgement is the third arm's DIRECTION, and the alternative was live: keeping the git
+toplevel would let the repository accept its own wrapper under a broken index, which is the
+outcome an operator would prefer. It was rejected because it is only right when the marker
+really is tracked, and that is precisely the thing nobody knows on this path — on an untracked
+inner checkout with a broken index it hands the OUTER tree's artefact to the engine, which is
+issue #77 restored on the very failure mode this fix exists for. Narrowing is refusal, and a
+refusal is recoverable by `ARCH_MUTANTS_WRAPPER`; the other direction is a silent page of
+false test gaps. So the verdict is unchanged from the old code and only the REASON moves, and
+this section does not claim otherwise: what was wrong was a true-shaped refusal carrying a
+false diagnosis, and what is fixed is the diagnosis plus the type that makes the third case
+representable at all.
+
+### A THIRD VALUE IS WORTH NOTHING IF NO CALLER ACTS ON IT — the collapse experiment
+
+The acceptance question is not "does `Undetermined` exist" but "is there an executed call site
+where it produces different behaviour". It was answered by EXECUTION, not by reading:
+
+The `Undetermined` arm was rewritten to `(m, Anchor_marker)` — byte-for-byte the `Untracked`
+arm's action, the third value still present in `tracked_answer` and simply not acted on. The
+first attempt at this did not compile (`Anchor_undetermined` then built no values, warning 37
+as an error), and THE CHECK STILL RAN AND STILL WENT RED — off the previous successful build's
+binary. That result was discarded as worthless: a failed build leaves the last good executable
+in place and nothing in the check's output says which binary it spoke to. The experiment was
+redone with the anchor and its diagnosis removed so the collapse compiles: `dune build` exit 0,
+`_build/default/bin/arch_mutants/arch_mutants.exe` mtime moved 1788671652 -> 1788671682, check
+exit 1, 6 assertions fired. The check therefore asserts the third value's EFFECT.
+
+### The check, and the falsifiable claim
+
+`checks/tree-boundary-git-cannot-answer.js`, new file, exit 0 pass / 1 assertion / >=2 setup,
+picked up by `checks/run-ratchet.js` discovery with no wiring. Four probes, 18 assertions.
+
+- probe 1 — healthy index, TRACKED nested marker: accept (exit 0), no undetermined diagnosis.
+- probe 2 — CORRUPT index, same fixture: refuse, diagnosis names the indeterminacy AND carries
+  `exited 128`, and asserts NEITHER a foreign tree NOR a fallback.
+- probe 3 — UNREADABLE index (`chmod 000`), same fixture, same assertions. This is the one
+  cause that cannot be established as uid 0; it reports SKIPPED loudly rather than passing, and
+  probe 2 carries the property uid-independently.
+- probe 4 — healthy index, UNTRACKED nested marker: refuse, foreign-tree diagnosis, NOT the
+  undetermined one.
+
+Both vocabularies are asserted PRESENT and ABSENT. Probes 1 and 4 are 2/3's negative controls
+in both directions: answer "could not tell" to everything and 1 and 4 go red; never answer it
+and 2 and 3 go red.
+
+THE FALSIFIABLE CLAIM. This check goes RED when a `git ls-files --error-unmatch` exit that is
+neither 0 nor 1 is read as "not tracked" — concretely, when `arch-mutants run` is invoked from
+a tracked nested `dune-project` in a repository whose `.git/index` has been overwritten with
+14 bytes of garbage (probe 2) or `chmod 000`-ed (probe 3). That is a case the old code PASSED,
+in the strong sense that no check in the tree had a probe where git fails otherwise than by
+"untracked". Verified by restoring `bin/arch_mutants/arch_mutants.ml` from `a1e60a9` with
+`git checkout a1e60a9 -- <path>` (never `git stash`; the tree was restored with
+`git checkout HEAD -- <path>` and `git status --short` was confirmed empty, index included):
+build exit 0, binary mtime moved, check exit 1, 6 assertions fired — and probes 1 and 4 stayed
+GREEN, so the red isolates the defect rather than reporting a different binary.
+
+### The error paths this fix introduces or touches, answered by execution
+
+The acceptance criterion is per-invocation, so here is every external call on the path, with
+what it does when the thing it calls fails and whether a probe exercises that:
+
+- `git ls-files --error-unmatch` (the one this group changed) — three answers distinguished,
+  the third exercised by probes 2 and 3 through two independent causes.
+- `git rev-parse --show-toplevel > tmpfile` in `working_tree_root` — non-zero is NOT a negative
+  answer conflated with a failure, because rev-parse has no "1 means no" answer to conflate
+  with: any non-zero means no toplevel was obtained, and the code falls to the marker or to
+  `Anchor_cwd`, whose diagnoses already say what they do and do not know. Exercised today by
+  `checks/tree-boundary-non-git-checkout.js` probes 3 and 4. NOT re-probed here.
+- reading that temp file — `open_in` raising `Sys_error` and `input_line` raising `End_of_file`
+  are both caught and yield `""`, which is treated as "no toplevel", the same conservative
+  direction. NOT probed: no input was found that makes the file unreadable while `Sys.command`
+  still reports 0, so the claim here is a READ, not a run, and is stated as one.
+- `Filename.temp_file` — can raise `Sys_error` (no writable TMPDIR) and nothing catches it, so
+  the driver dies with an uncaught exception. That is LOUD and never a false verdict, which is
+  why it was left alone; it is named rather than fixed because an unnamed known gap is the
+  thing this criterion exists to stop.
+
+### What I looked for and did not find
+
+A second undetermined cause that is not "the index cannot be read" was searched for and only
+partly found. Tried and rejected: removing `git` from `PATH` (exit 127) — real, but it also
+takes out `rev-parse`, so the marker branch is never reached and the probe would exercise a
+different path while claiming this one; a `git` shim on `PATH` that succeeds for `rev-parse`
+and fails for `ls-files` — reachable, but the failing artefact is then a fixture I wrote, which
+is the part of any test most likely to be fiction; a pathspec outside the repository (128) —
+unreachable here, since the marker is by construction a descendant of the toplevel. What was
+found instead is two independent CAUSES of the same class, corruption and permissions, which
+is weaker than two classes and is claimed as such.
+
+### Numbers, each with its corpus and its build state
+
+At `093f8ad`, `dune build` exit 0, tree clean:
+
+- suite — `./_build/default/tezt/tests/main.exe --keep-going`, producer returned, exit 0:
+  255 SUCCESS, 0 FAILURE. Unchanged from the `e1bd9b5` reference, remeasured not cited.
+- ratchet — `node checks/run-ratchet.js .`, producer returned, exit 1: 39 passed, 1 asserted,
+  0 harness errors, 4 not run. The reference was 38/1/0/4; the +1 is this group's check. The
+  single assertion is `checks/dispatch-covers-open-findings.js`, the property gate, which is
+  expected red while findings remain unowned and is NOT a zero here.
+- property gate BEFORE this section — `node checks/dispatch-covers-open-findings.js
+  mutation-campaign-313 .`, exit 1, convention `record-v1`: 29 OPEN, 1 closed, 0 deferred,
+  0 accepted, 28 unowned, of which HIGH 2 — this group's finding among them.
+- property gate AFTER this section — same command, exit 1 (unchanged, and it SHOULD be:
+  27 other findings are still unowned): 29 OPEN, 2 closed, 0 deferred, 0 accepted, 27 unowned,
+  HIGH 1 remaining. The delta is exactly one finding, this group's, closed by
+  `093f8ad` / `checks/tree-boundary-git-cannot-answer.js` — both references resolved against
+  git by the gate itself, not asserted here.
+
+What would have made a zero here non-zero: a FAILURE line in the suite log would have made the
+suite count non-zero; a check exiting >=2 would have made the harness-error count non-zero. The
+0 harness errors is a real 0, not an absence of measurement — 43 files were dispatched and 39
+of them returned 0.
+
+### The step where this fix was its own first test
+
+The acceptance criterion was applied to this group's own output and caught something. The
+first run of `checks/tree-boundary-git-cannot-answer.js` against the FIXED binary went RED on
+two assertions, because the new `Anchor_undetermined` diagnosis contained the phrase "belongs
+to a different tree" inside the sentence DENYING it — which is, exactly, the typographic
+false-positive already recorded in this round against a sibling check
+(`checks/tree-boundary-non-git-checkout.js:153`). The wording was changed and the matcher was
+left alone, which is the correct direction: widening the matcher to tolerate the denial would
+have moved the boundary rather than removed it.
