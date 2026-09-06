@@ -71,7 +71,23 @@ echo "probe 3 — and in the write layer, where engine_mutant_id is actually bou
 must_match "the write layer carries the heading" "$DB" 'IDENTITY DOCTRINE'
 must_match "and marks the engine id RUN-scoped where it is bound" "$DB" 'RUN.?scope'
 
-echo "probe 4 — the losing theory's SHAPE is gone from the code, not merely disavowed"
+# PROBE 4 IS A GREP, AND A GREP CANNOT ENFORCE A DOCTRINE. It asserts that ONE known
+# shape -- the identifier `by_id` -- is absent. The same join arm reintroduced under any
+# other name passes it. That is a scope narrower than the word "resolved" in this file's
+# name, so the claim is narrowed here rather than dressed up with a cleverer pattern.
+#
+# WHAT ACTUALLY ENFORCES THE DOCTRINE, and it is not this file:
+#   * the TYPE. `site_key` is a distinct record with no id field, so an identity cannot
+#     carry an engine id by construction; and `engine_name` splits Engine_declared from
+#     Report_ordinal so a synthesised ordinal cannot inhabit a name's slot. A property the
+#     compiler enforces needs no check and cannot have a scope narrower than its title,
+#     because it has no title.
+#   * the BEHAVIOUR. checks/join-independent-of-id-shape.js runs one report against a
+#     numbered, a named, a mixed and a degenerate catalogue and asserts the joins AGREE.
+#     Any residual id-sensitivity diverges there, under whatever name it is written.
+# This file documents that the resolution is WRITTEN in all three places. It does not
+# prove it is obeyed. Read it as a documentation gate, not as an enforcement one.
+echo "probe 4 — one known shape of the losing theory is absent (a NAME grep: see the header)"
 # The join arm itself. A doctrine that survives only in comments is one the next author
 # contradicts without noticing, so the assertion is on the code.
 must_not_match "no engine-id join arm remains in the driver" "$DRV" '(^|[^_[:alnum:]])by_id([^_[:alnum:]]|$)'
@@ -88,7 +104,7 @@ if [ "$fails" -gt 0 ]; then
   echo "  following the project — which is how this defect survived three reviews." >&2
   exit 1
 fi
-echo "$name: PASS — 4 probes, 11 assertions."
+echo "$name: PASS — 4 probes, 11 assertions. Probes 1-3 are documentation gates; probe 4\n  greps ONE name. Enforcement lives in the type and in join-independent-of-id-shape.js."
 echo "  What would have made this non-zero: writing the resolution in one file only, stating"
 echo "  it without saying which document prevails, or leaving the engine-id join arm in place"
 echo "  under a comment that disowns it."
