@@ -550,3 +550,42 @@ weakened.
 - `1.13` is documented rather than made to gate. Making it gate needs a version identity of
   the migration's own, stamped by `Arch_mutant_db.open_and_migrate` — a schema change, which
   is not on this branch.
+
+## Round 3 — outcome, and one property a reader will not infer
+
+`dune build` exit 0 · `./_build/default/tezt/tests/main.exe --keep-going` → **255 of 255 executed,
+255 SUCCESS, 0 FAILURE** (248 baseline plus seven new cases) · ratchet 407 against a ceiling of 432,
+published although it passes · `checks/dispatch-covers-open-findings.js` → 33 of 33 named.
+
+**`node checks/run-ratchet.js` reports PASS, and the property that makes that mean something is
+that it cannot pass by running nothing.** Its two tiers are self-contained checks under `checks/`
+and population-dependent ones under `scripts/`; an **empty tier exits 2**, so a runner that
+discovered no checks fails rather than reporting success over an empty set. A reader seeing "PASS —
+every check that could run, ran, and none asserted" would otherwise have no way to tell that from a
+PASS with nothing to check. Five checks report UNRUN, each naming the precondition it lacks — a
+population, a campaign database — rather than being counted as passes.
+
+**AC-20 is verified, and the reason matters more than the result.** The unverified state was a
+missing `--build-context` flag, not a limit of the fixture. Those two diagnoses send the next
+person in opposite directions — build a better fixture, or pass the flag — and they had been
+indistinguishable since this task began. Against real mutaml 0.3 the check now exits 0 with the
+wrapper invoked **twice, once per mutant and not once per engine run**, `lib/x:1` resolving to
+`t_alpha` and `lib/x:2` to `t_beta,t_gamma`. The per-mutant selection this whole design rests on is
+observed rather than argued. Without a runner on PATH the check still returns 3, so it can still
+say *I could not look*.
+
+**Two decisions recorded rather than smoothed.**
+
+The driver agent **refused a fix the review proposed**, having measured that placing the empty-array
+refusal at the arch-impact boundary turned three existing tezt cases red: the deleted-test
+re-verification rule legitimately runs on an empty `touched` set. The refusal sits where the union
+of the three diff rules is known and names the empty array as the cause. A reviewer's suggested
+remedy is a hypothesis, not a finding.
+
+The ratchet's two halves are now **equal** — 12 inert `Sqlite3.*` and 12 signal-carrying
+`Arch_tezt.Temp.*`, where an earlier round split 12/8. The growing half is test-helper calls
+leaving the library, which resolve to no `callee_id` and are exactly what the metric counts. **So a
+branch can improve its testing and degrade this metric in the same commit**, and the gate cannot
+tell that from a regression. It arrives as headroom silently consumed rather than as a red, which
+is worse: a red gets argued about, and twenty of twenty-five spent is noticed only by the branch
+that finds five left.
