@@ -143,10 +143,19 @@ console.log('probe 3 — the source-line derivation still discriminates on the l
   const r = campaign('rewritten', ONE, ONE_REP, ['h1'], 'let f x = x - 1  (* a DIFFERENT line, same span *)');
   if (r.code !== 0) { console.log(`  ✗ the campaign did not run (exit ${r.code})`); fails++; }
   const h = sql(r.db, 'SELECT source_hash FROM mutants');
+  const tag = tagOf(h);
   // Asserted BEFORE the equality: comparing two absent declarations to each other is a
   // gate that cannot fail, and probe 3 must not read green on a hash that declares nothing.
-  assertEq('a declaration is present at all', 'true', String(tagOf(h) !== null));
-  assertEq('the same declaration as probe 1', String(lineTag), String(tagOf(h)));
+  assertEq('a declaration is present at all', 'true', String(tag !== null));
+  // AND THE EQUALITY ITSELF CARRIES THE NON-NULLNESS, rather than leaning on the assertion
+  // above to do it. `String(lineTag) === String(tagOf(h))` was green by `String(null) ===
+  // String(null)`: with a driver storing bare digests, BOTH sides are null and the two
+  // absences compare equal. The neighbouring assertion going red does not make this one
+  // weigh anything -- it stayed green in exactly the tree the file was written against.
+  // MEASURED: with the two `Digest.to_hex` arms of `source_hash ~repo s` returning bare
+  // digests, the old line printed `the same declaration as probe 1 -- null` and PASSED.
+  assertEq('the same declaration as probe 1, with both sides actually present', 'true',
+    String(lineTag !== null && tag !== null && tag === lineTag));
   assertEq('a different digest, because the line\'s text changed', 'true',
     String(lineDigestA !== null && digestOf(h) !== lineDigestA));
 }
