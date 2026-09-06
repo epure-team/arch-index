@@ -1,0 +1,92 @@
+{
+ "task": "mutation-campaign-313",
+ "mode": "full",
+ "current_phase": "review",
+ "events": [
+  {
+   "phase": "question",
+   "outcome": "COMPLETED",
+   "at": "2026-09-05T12:08:00+02:00",
+   "by": "roster-question"
+  },
+  {
+   "phase": "research",
+   "outcome": "COMPLETED",
+   "at": "2026-09-05T12:38:00+02:00",
+   "by": "roster-research"
+  },
+  {
+   "phase": "intake",
+   "outcome": "VALIDATED",
+   "at": "2026-09-05T12:50:00+02:00",
+   "by": "human-gate"
+  },
+  {
+   "phase": "spec",
+   "outcome": "VALIDATED",
+   "at": "2026-09-05T13:05:00+02:00",
+   "by": "human-gate"
+  },
+  {
+   "phase": "plan",
+   "outcome": "COMPLETED",
+   "at": "2026-09-05T14:55:00+02:00",
+   "by": "roster-plan"
+  },
+  {
+   "phase": "implement",
+   "outcome": "PARTIAL",
+   "reason": "slice 1 code complete and verified (193/193, guards green), but the slice's exit criterion \u2014 a measured campaign on ~/dev/miaou \u2014 needs a real engine, which needs a dedicated opam switch only Mathias can authorise",
+   "at": "2026-09-05T16:45:00+02:00",
+   "by": "roster-implement"
+  },
+  {
+   "phase": "implement",
+   "outcome": "COMPLETED",
+   "at": "2026-09-05T22:00:00+02:00",
+   "by": "roster-implement"
+  },
+  {
+   "phase": "review",
+   "outcome": "NO-GO",
+   "at": "2026-09-05T21:55:26+02:00",
+   "by": "roster-review"
+  },
+  {
+   "phase": "implement",
+   "outcome": "COMPLETED",
+   "at": "2026-09-06T00:17:38+02:00",
+   "by": "roster-implement"
+  },
+  {
+   "phase": "review",
+   "outcome": "NO-GO",
+   "at": "2026-09-06T01:00:45+02:00",
+   "by": "roster-review"
+  },
+  {
+   "phase": "review",
+   "outcome": "NO-GO",
+   "at": "2026-09-06T03:21:31+02:00",
+   "by": "roster-review"
+  },
+  {
+   "phase": "review",
+   "outcome": "NO-GO",
+   "at": "2026-09-06T05:08:57+02:00",
+   "by": "roster-review"
+  },
+  {
+   "phase": "review",
+   "outcome": "NO-GO",
+   "at": "2026-09-06T07:31:41+02:00",
+   "by": "roster-review"
+  },
+  {
+   "phase": "review",
+   "outcome": "NO-GO",
+   "at": "2026-09-06T09:18:07+02:00",
+   "by": "roster-review"
+  }
+ ]
+}

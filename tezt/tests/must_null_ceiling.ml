@@ -289,7 +289,65 @@ let must_null_composition_query =
    Arch_tezt.Temp.file] — is present in this branch's own measurement. The
    difference between the two files is mechanical, not lucky: #87's helper reaches
    a cross-library [Temp.file], this branch's fixture never leaves [Stdlib]. *)
-let clean_measured = 383
+
+(* Recalibrated 2026-09-06: 383 -> 403. UNLIKE THE THREE ENTRIES ABOVE, ALL OF
+   THIS IS THIS BRANCH'S OWN, and none of it is undeclared main drift. The
+   split is measured, not apportioned, and it closes to the unit.
+
+   +12 in the new bin/arch_mutants/arch_mutant_db.ml, every one a Sqlite3.*
+   call. This is the INERT class the re-scope note above names alongside
+   Stdlib: Sqlite3 is never part of this index, so such a row carries no signal
+   about a resolver miss. The module makes those calls because Arch_db.open_ro
+   is read-only and a campaign has to write.
+
+   +8 in tezt/tests/mutants.ml, every one an Arch_tezt.Temp.file or
+   Arch_tezt.Temp.dir. THESE ARE NOT THE INERT CLASS and are deliberately not
+   filed with the twelve. Arch_tezt is in this repository, so they are exactly
+   the signal-carrying residue this ratchet exists to notice. They grow a shape
+   main already carries — it holds 5 rows of the same two callees in this very
+   file — so this is an addition to a live class, not a new defect, and saying
+   so is the point of separating them.
+
+   Measured by indexing both trees with the same arch_callgraph_ocaml this test
+   uses, not by counting a diff: main at 4e74c72 reads 383, this branch reads
+   403, and the two modules above hold 20 more rows here than there. Counting
+   the diff would have been wrong for a reason worth recording — a lambda's
+   identity encodes its line, so an insertion higher in a file renames every
+   position-named edge below it, and those renames would have netted against
+   real additions to produce a plausible total nobody could attribute.
+
+   403 is what main will measure once this PR lands, per the rule the 2026-09-05
+   entry states. It does NOT account for arch-index-0e's in-flight #88, which
+   moves the same constant: whichever of the two lands second must RE-DERIVE on
+   the tree that exists rather than add its delta to a remembered number. Two
+   branches editing one baseline is the read-then-bump trap, and it merges
+   without a conflict. *)
+(* RE-DERIVED after #88 merged, not carried: 403 again, and the sameness is exactly why
+   it was measured. #88 inserted 37 comment lines directly above this constant, in the
+   one file whose lambdas encode their own positions, so every [<fun:LINE:COL>] below
+   the insertion was renamed. A count subtracted from a remembered 403 would have netted
+   those renames against real rows and produced a plausible total nobody could
+   attribute. Measured instead on the rebased tree with the same arch_callgraph_ocaml
+   the test itself uses: [calls] moved 18743 -> 18915 with #88's code present, and the
+   MUST-with-NULL-callee figure held at 403. An expected number is the one nobody
+   re-derives, which is the reason to re-derive it. *)
+(* Round 3: 403 -> 407, and the whole movement is this branch's again. Measured on the
+   round-3 tree with the same arch_callgraph_ocaml the test uses, main still reading
+   383 at its own tip:
+
+     +12  bin/arch_mutants/arch_mutant_db.ml, unchanged since the last entry, every
+          row a Sqlite3.* call. The inert class: Sqlite3 is never in this index.
+     +12  tezt/tests/mutants.ml, every row an Arch_tezt.Temp.file or .dir. NOT inert
+          -- Arch_tezt is in this repository, so these are the signal-carrying
+          residue. They were 8; round 3's seven new tezt cases added four.
+
+   407 - 383 = 24 = 12 + 12, closing to the unit. The signal-carrying half now equals
+   the inert half, which is worth noticing rather than smoothing: every round that
+   adds tezt coverage grows the class this ratchet exists to see, and a branch can
+   improve its own testing while making this metric worse. That is not a reason to
+   stop adding cases; it is a reason to keep the two halves named separately, because
+   a single 24 would hide which one moved. *)
+let clean_measured = 407
 
 let headroom = 25
 

@@ -12,6 +12,8 @@ _opam/
 # Locally-built 23 MB artifact; never commit (CI cannot run a foreign-glibc binary)
 /bin/arch-callgraph-ocaml
 
+# Apalache model-checker scratch output
+_apalache-out/
 # Roster pipeline control files — session state, never committed
 briefs/ACTIVE_TASK
 briefs/*-manifest.txt

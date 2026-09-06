@@ -1,0 +1,344 @@
+(** Persisting an executed mutation campaign.
+
+    Split out for the same reason [arch_cov_write.ml] is: it is the only part of
+    arch-mutants that opens the database read-WRITE. {!Arch_tools.Arch_db.open_ro} is
+    read-only by design, so a query tool cannot mutate the index it reports on.
+
+    The DDL is not retyped here. It is the migration file itself, embedded at compile time
+    through ppx_blob — the same mechanism [Arch_index_db.schema_sql] uses for
+    [architecture-schema.sql]. A second, hand-copied CREATE TABLE in OCaml is how a schema
+    file and the code that writes it drift apart: the copy keeps working while the
+    migration is edited, and nobody finds out until a database built by one is read by the
+    other. There is one text. *)
+
+let ddl : string = [%blob "../../mutants-schema-migration.sql"]
+
+(* -------------------------------------------------------------------------- *)
+(* The two closed vocabularies a schema CHECK declares.                        *)
+(*                                                                            *)
+(* They are OCaml variants, not strings, and every consumer matches on them    *)
+(* TOTALLY — no [| _ ->] arm anywhere. A value added to a CHECK-declared       *)
+(* vocabulary without updating its consumer is dropped with no error at all:   *)
+(* no crash, no log, only a smaller answer. Measured precedents in this        *)
+(* repository: calls.top_reason gained 'ambiguous_unit' at schema 1.9 and      *)
+(* exn_origins.form gained 'inferred_bind' at 1.8. A variant makes the         *)
+(* compiler fail on the next addition instead.                                 *)
+(* -------------------------------------------------------------------------- *)
+
+type provenance =
+  | Proved_superset  (** closed test cone AND a soundness contract *)
+  | Top_bounded  (** a ⊤ edge inside the test cone: the selection may have missed a test *)
+  | No_contract  (** the index carries no soundness contract at all (EC-5) *)
+
+let provenance_to_string = function
+  | Proved_superset -> "proved_superset"
+  | Top_bounded -> "top_bounded"
+  | No_contract -> "no_contract"
+
+(** [None] rather than a default, for exactly the reason [status_of_string] returns one: a
+    fourth member added to the CHECK without updating this function must ABORT at the call
+    site rather than be silently relabelled. The value it would most plausibly be
+    defaulted to, [Proved_superset], is the one that turns a survivor into an accusation
+    against a test that may never have run. *)
+let provenance_of_string s =
+  match String.trim s with
+  | "proved_superset" -> Some Proved_superset
+  | "top_bounded" -> Some Top_bounded
+  | "no_contract" -> Some No_contract
+  | _ -> None
+
+(** How a survivor found under [p] must be described in words. The published VERDICT is
+    below; this is only the shortfall, named. *)
+let provenance_caveat = function
+  | Proved_superset ->
+      "the executed set is provably a superset of every test that reaches the mutant"
+  | Top_bounded ->
+      "a ⊤ edge inside the test cone: the selection MAY have missed a covering test"
+  | No_contract ->
+      "this index carries no soundness contract, so no claim can be made about the selection"
+
+type status = Killed | Survived | Timeout | Errored
+
+let status_to_string = function
+  | Killed -> "KILLED"
+  | Survived -> "SURVIVED"
+  | Timeout -> "TIMEOUT"
+  | Errored -> "ERROR"
+
+(** [None] rather than a default: an unrecognised engine status must ABORT at the call
+    site, because guessing one inverts a verdict — a survived mutant read as killed is a
+    defect silently deleted, which is exactly the refusal [load_mutaml] already makes. *)
+let status_of_string s =
+  match String.uppercase_ascii (String.trim s) with
+  | "KILLED" -> Some Killed
+  | "SURVIVED" -> Some Survived
+  | "TIMEOUT" -> Some Timeout
+  | "ERROR" -> Some Errored
+  | _ -> None
+
+type attribution = Singleton_executed_set | Engine_named
+
+let attribution_to_string = function
+  | Singleton_executed_set -> "singleton_executed_set"
+  | Engine_named -> "engine_named"
+
+(* -------------------------------------------------------------------------- *)
+(* The PUBLISHED VERDICT — derived, never stored (FR-011).                     *)
+(*                                                                            *)
+(* There is no column for this and there must never be one. The engine-status  *)
+(* vocabulary is closed to four values and the bucketing in arch_mutants.ml's  *)
+(* `report` reads any fifth value as an error, so storing a verdict would      *)
+(* widen a vocabulary the rest of the codebase depends on being closed. It is  *)
+(* computed from the run row's OWN status and the run row's OWN provenance,    *)
+(* both read from the same row — see [published_verdict]'s single argument.    *)
+(* -------------------------------------------------------------------------- *)
+
+type verdict =
+  | V_killed  (** a kill is a PROOF: the selection cannot weaken it *)
+  | V_survived  (** SURVIVED under a provably-superset selection: a real test gap *)
+  | V_unknown  (** SURVIVED under a ⊤-bounded selection: the tests may never have run *)
+  | V_unknown_no_contract  (** SURVIVED on an index carrying no soundness contract (EC-5) *)
+  | V_error  (** the engine could not build or run this mutant: inconclusive *)
+  | V_pending
+      (** no run row at all, inside a campaign whose completed_at is NULL. Derived from
+          the ABSENCE of the row, which is why it has no (status, provenance) pair and
+          cannot be produced by [published_verdict]. *)
+
+let verdict_to_string = function
+  | V_killed -> "KILLED"
+  | V_survived -> "SURVIVED"
+  | V_unknown -> "UNKNOWN"
+  | V_unknown_no_contract -> "UNKNOWN_NO_CONTRACT"
+  | V_error -> "ERROR"
+  | V_pending -> "PENDING"
+
+(** One run row's outcome, carried as ONE value so a verdict cannot be computed from a
+    status belonging to one row and a provenance belonging to another.
+
+    That pairing is the whole point of the type. FR-033 exists because a peer's reviewer
+    found [match producers with p :: _] labelling every finding with the FIRST run's
+    class; a heuristic finding then carried the sound class merely because the sound run
+    sorted first, and no single-element fixture could tell the two apart. Making the pair
+    the unit of computation removes the shape that bug needs. *)
+type outcome = { o_status : status; o_provenance : provenance }
+
+(** FR-011, and every arm is spelled out because the compiler is the enforcement.
+
+    A kill published as KILLED {i regardless of provenance} is not an oversight: the mutant
+    died, and a wider selection could only have killed it too, so nothing about how the
+    selection was obtained weakens the proof (EC-6). The asymmetry is the point — only the
+    NEGATIVE claim, "no test caught this", depends on having run every test that could
+    have. *)
+let published_verdict o =
+  match o.o_status with
+  | Killed | Timeout -> V_killed
+  | Errored -> V_error
+  | Survived -> (
+      match o.o_provenance with
+      | Proved_superset -> V_survived
+      | Top_bounded -> V_unknown
+      | No_contract -> V_unknown_no_contract)
+
+(** Why the verdict is what it is, in words, so a reader never has to reconstruct the
+    rule. Split from [published_verdict] so a test can assert the VERDICT — a computed
+    value — rather than search prose for a word that may be present for other reasons. *)
+let verdict_basis o =
+  match o.o_status with
+  | Killed | Timeout ->
+      "the mutant died; a wider selection could only have killed it too, so the \
+       selection provenance does not weaken this"
+  | Errored -> "the engine could not build or run this mutant, so nothing was tested"
+  | Survived -> (
+      match o.o_provenance with
+      | Proved_superset ->
+          "every test that reaches this mutant was executed and none killed it — a real \
+           test gap"
+      | Top_bounded ->
+          "a ⊤ edge inside the test cone: a test that would have killed this mutant may \
+           never have been run, so this is NOT a test gap"
+      | No_contract ->
+          "this index carries no soundness contract, so no claim can be made about which \
+           tests reach the mutant")
+
+(* -------------------------------------------------------------------------- *)
+(* Connection                                                                  *)
+(* -------------------------------------------------------------------------- *)
+
+exception Write_failed of string
+
+let fail fmt = Printf.ksprintf (fun s -> raise (Write_failed s)) fmt
+
+let exec db sql =
+  match Sqlite3.exec db sql with
+  | Sqlite3.Rc.OK -> ()
+  | rc -> fail "%s: %s\n%s" (Sqlite3.Rc.to_string rc) (Sqlite3.errmsg db) sql
+
+let step_done db ~what stmt =
+  let rc = Sqlite3.step stmt in
+  ignore (Sqlite3.reset stmt : Sqlite3.Rc.t) ;
+  match rc with
+  | Sqlite3.Rc.DONE -> ()
+  | rc -> fail "writing to %s: %s: %s" what (Sqlite3.Rc.to_string rc) (Sqlite3.errmsg db)
+
+let text v = Sqlite3.Data.TEXT v
+let int v = Sqlite3.Data.INT (Int64.of_int v)
+let opt_text = function None -> Sqlite3.Data.NULL | Some v -> text v
+
+let bind_all db stmt values =
+  List.iteri
+    (fun i v ->
+      match Sqlite3.bind stmt (i + 1) v with
+      | Sqlite3.Rc.OK -> ()
+      | rc -> fail "bind %d: %s: %s" (i + 1) (Sqlite3.Rc.to_string rc) (Sqlite3.errmsg db))
+    values
+
+let run db ~what sql values =
+  let stmt = Sqlite3.prepare db sql in
+  Fun.protect
+    ~finally:(fun () -> ignore (Sqlite3.finalize stmt : Sqlite3.Rc.t))
+    (fun () ->
+      bind_all db stmt values ;
+      step_done db ~what stmt)
+
+let query_int db sql values =
+  let stmt = Sqlite3.prepare db sql in
+  Fun.protect
+    ~finally:(fun () -> ignore (Sqlite3.finalize stmt : Sqlite3.Rc.t))
+    (fun () ->
+      bind_all db stmt values ;
+      match Sqlite3.step stmt with
+      | Sqlite3.Rc.ROW -> (
+          match Sqlite3.column stmt 0 with
+          | Sqlite3.Data.INT i -> Some (Int64.to_int i)
+          | _ -> None)
+      | _ -> None)
+
+(** Open the index read-write and apply the additive migration.
+
+    The migration is applied on every run, not once: it is [IF NOT EXISTS] throughout, so
+    re-applying is a no-op, and a database that predates it would otherwise fail with
+    "no such table" — which reads as a bug in the driver rather than as a missing
+    migration. *)
+(** The version of the four mutant tables, declared by the code that CREATES them.
+
+    It is NOT the index's [schema_version], and that separation is the fix rather than an
+    aesthetic. Both directions of the old arrangement were measured and both were inert:
+    [Arch_index_db.current_schema_version = "1.13"] is stamped by the main indexer, whose
+    architecture-schema.sql creates none of these tables — so 1.13 does not imply they exist;
+    and [open_and_migrate] created all four while writing no version at all — so a database
+    carrying a FINISHED campaign reported whatever its indexer happened to stamp (measured at
+    1.2, arch-load's flat-schema version). Between the two there was no value, in either
+    direction, on which a consumer could refuse.
+
+    The declaration below means exactly "these four tables exist at this version", and its
+    ABSENCE means exactly "they may not". The write itself lives in the migration SQL, so a
+    database migrated by hand (`sqlite3 <db> < mutants-schema-migration.sql`, which the file's
+    own header documents) carries it too. This constant is what a consumer compares against.
+    checks/mutant-tables-declare-their-version.js executes both directions. *)
+let mutants_schema_version = "1.0"
+
+let mutants_schema_version_key = "mutants_schema_version"
+
+let open_and_migrate db_path =
+  if not (Sys.file_exists db_path) then fail "no such db: %s" db_path ;
+  let db = Sqlite3.db_open db_path in
+  (* OFF by default, and PER CONNECTION: without this line not one of the migration's
+     declared referential actions ever fires on the connection that does the writing, and
+     `ON DELETE CASCADE` is a comment. Issued BEFORE the DDL because the pragma is a no-op
+     inside a transaction, and it is safe on every schema only because no foreign key in
+     that DDL leaves the four tables it creates — see the migration's header for the
+     measurement that forced that. *)
+  exec db "PRAGMA foreign_keys = ON" ;
+  exec db ddl ;
+  db
+
+let close db = ignore (Sqlite3.db_close db : bool)
+
+(* -------------------------------------------------------------------------- *)
+(* Writes                                                                      *)
+(* -------------------------------------------------------------------------- *)
+
+(** The campaign row, written with [completed_at] NULL and left that way until the
+    campaign genuinely finishes. An interrupted campaign is a VALID, readable record: its
+    completed mutants keep their rows and the rest are PENDING by the absence of theirs.
+
+    Called only AFTER the engine has been resolved: an unresolvable engine writes no
+    campaign row at all, because an empty campaign must never read as "no survivors". *)
+let insert_campaign db ~engine ~engine_version ~seed ~engine_path ~test_runner_path
+    ~profile ~granularity ~producer_run_id =
+  run db ~what:"mutant_campaigns"
+    "INSERT INTO mutant_campaigns(engine, engine_version, seed, engine_path, \
+     test_runner_path, profile, granularity, producer_run_id) VALUES (?,?,?,?,?,?,?,?)"
+    [ text engine; opt_text engine_version; opt_text seed; text engine_path;
+      text test_runner_path; opt_text profile; text granularity;
+      (match producer_run_id with Some i -> int i | None -> Sqlite3.Data.NULL) ] ;
+  Int64.to_int (Sqlite3.last_insert_rowid db)
+
+(** The site row. [INSERT OR IGNORE] then read the id back, so a re-run over unchanged
+    code adds no [mutants] rows (C-5, AC-5) while still resolving every id.
+
+    Reading the id back with a SELECT rather than [last_insert_rowid] is deliberate:
+    [last_insert_rowid] is per-CONNECTION and is NOT cleared by an ignored insert, so on
+    the second campaign it would hand back whatever unrelated row was last written — the
+    silent-misattribution failure [Arch_index_db.exec_stmt_rowid] exists to prevent. *)
+let insert_mutant db ~file_path ~line ~col_start ~col_end ~replacement ~source_hash
+    ~function_name =
+  let key =
+    [ text file_path; int line; int col_start; int col_end; text replacement;
+      text source_hash ]
+  in
+  run db ~what:"mutants"
+    "INSERT OR IGNORE INTO mutants(file_path, line, col_start, col_end, replacement, \
+     source_hash, function_name) VALUES (?,?,?,?,?,?,?)"
+    (key @ [ opt_text function_name ]) ;
+  match
+    query_int db
+      "SELECT id FROM mutants WHERE file_path=? AND line=? AND col_start=? AND col_end=? \
+       AND replacement=? AND source_hash=?"
+      key
+  with
+  | Some id -> id
+  | None -> fail "the mutant site row for %s:%d could not be read back" file_path line
+
+(** How many run rows this campaign has ACTUALLY persisted.
+
+    The campaign's completeness used to be decided from the driver's own in-memory counters
+    and never once from the database. Those counters are incremented before the write, so a
+    rejected insert published a verdict that reached no table — and the caught-and-printed
+    exception left `completed_at` stamped anyway. This is the question the reconciliation
+    asks; see [run]'s completeness gate. *)
+let count_runs db ~campaign_id =
+  match query_int db "SELECT count(*) FROM mutant_runs WHERE campaign_id = ?" [ int campaign_id ] with
+  | Some n -> n
+  | None -> fail "the run count for campaign %d could not be read back" campaign_id
+
+(** [engine_mutant_id] is RUN-SCOPED and is stored for exactly one purpose: reading this
+    campaign's rows back against the engine's own output. It is NOT an identity, nothing joins
+    on it, and it must never become a key — see the IDENTITY DOCTRINE in arch_mutants.ml and
+    the same paragraph in mutants-schema-migration.sql. An engine id is a coordinate handed
+    out by one run of one engine over one catalogue; re-run the engine or reorder the
+    catalogue and the same mutant gets a different one. *)
+let insert_run db ~campaign_id ~mutant_id ~engine_mutant_id ~status ~provenance ~intended
+    ~executed ~superset =
+  run db ~what:"mutant_runs"
+    "INSERT INTO mutant_runs(campaign_id, mutant_id, engine_mutant_id, engine_status, \
+     selection_provenance, intended_tests, executed_tests, executed_superset) VALUES \
+     (?,?,?,?,?,?,?,?)"
+    [ int campaign_id; int mutant_id; opt_text engine_mutant_id;
+      text (status_to_string status); text (provenance_to_string provenance);
+      int intended; int executed; int (if superset then 1 else 0) ]
+
+let insert_kill db ~campaign_id ~mutant_id ~test_name ~attribution =
+  run db ~what:"mutant_kills"
+    "INSERT OR IGNORE INTO mutant_kills(campaign_id, mutant_id, test_name, attribution) \
+     VALUES (?,?,?,?)"
+    [ int campaign_id; int mutant_id; text test_name;
+      text (attribution_to_string attribution) ]
+
+(** Stamp [completed_at]. Called ONLY when every catalogued mutant got a run row and the
+    engine exited cleanly — anything less leaves it NULL, which is what makes the campaign
+    readable as partial rather than as a clean sheet. *)
+let complete_campaign db ~campaign_id =
+  run db ~what:"mutant_campaigns"
+    "UPDATE mutant_campaigns SET completed_at = CURRENT_TIMESTAMP WHERE id = ?"
+    [ int campaign_id ]

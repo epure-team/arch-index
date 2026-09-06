@@ -2,4 +2,11 @@
  (name arch_mutants)
  (public_name arch_mutants)
  (flags (:standard -w +8+11+26+27 -warn-error +8+11))
- (libraries arch_tools yojson))
+ ; sqlite3/unix: `run` is the only subcommand that opens the index read-WRITE
+ ; (Arch_db.open_ro is read-only by design), and it drives a subprocess.
+ (libraries arch_tools yojson sqlite3 unix)
+ ; The campaign DDL is the migration FILE, embedded at compile time rather than
+ ; retyped in OCaml — one text, so the schema and the code that writes it cannot
+ ; drift. Same mechanism Arch_index_db uses for architecture-schema.sql.
+ (preprocessor_deps (file ../../mutants-schema-migration.sql))
+ (preprocess (pps ppx_blob)))
