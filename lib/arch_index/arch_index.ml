@@ -560,6 +560,16 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ~build_dir () =
        db
        ~cb:(fun row _h -> n_types := int_of_string row.(0))
        "SELECT COUNT(*) FROM types") ;
+  (* [insert_type_usage] deliberately tolerates a rejected row so that one
+     malformed usage does not discard the rest of the index.  Consequently
+     the number of insertion attempts is not the result count: report the
+     rows which actually committed, just as modules/functions/types above do.
+     This makes the public result self-consistent with the SQLite database. *)
+  ignore
+    (Sqlite3.exec_not_null
+       db
+       ~cb:(fun row _h -> n_type_usages := int_of_string row.(0))
+       "SELECT COUNT(*) FROM type_usage") ;
 
   (* Restore intents *)
   Arch_index_support.restore_intents db backup ;
