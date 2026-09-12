@@ -105,6 +105,7 @@ let () =
   Module_alias_heads.register () ;
   Report.register () ;
   Actionable_review_reports.register () ;
+  Origin_recurring_consumer.register () ;
 
   Sarif_in.register () ;
   Exported_selector.register () ;

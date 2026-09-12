@@ -295,6 +295,29 @@ jobs:
           # split), it turns green forever and looks like coverage. That must break the build.
           ./arch-rules "$RUNNER_TEMP/self.db" arch-rules.txt --on-vacuous fail
 
+      - name: Escaping origin regression consumer
+        id: origin_consumer
+        run: node scripts/origin-consumer.js --out "$RUNNER_TEMP/origin-consumer"
+
+      - name: Validate escaping origin evidence package
+        if: ${{ always() && steps.origin_consumer.outcome != 'skipped' }}
+        run: node scripts/origin-consumer-artifacts.js "$RUNNER_TEMP/origin-consumer"
+
+      - name: Retain escaping origin evidence
+        if: ${{ always() && steps.origin_consumer.outcome != 'skipped' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: origin-consumer-evidence
+          retention-days: 14
+          if-no-files-found: error
+          path: |
+            ${{ runner.temp }}/origin-consumer/gate.json
+            ${{ runner.temp }}/origin-consumer/report.json
+            ${{ runner.temp }}/origin-consumer/report.sarif
+            ${{ runner.temp }}/origin-consumer/report.html
+            ${{ runner.temp }}/origin-consumer/diagnostics.txt
+            ${{ runner.temp }}/origin-consumer/run.json
+
       - name: Change-impact briefing (self)
         run: |
           # Not a gate — but running it on every build is how a broken briefing gets noticed
