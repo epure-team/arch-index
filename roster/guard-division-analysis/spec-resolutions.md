@@ -1,0 +1,36 @@
+# Resolved clarifications — guard-division-analysis
+
+All eight OPEN rows resolved by root within the authorized bounded experiment, before story drafting.
+No fresh human approval or mathematical proof claimed. These choices deliberately keep unsupported regions visible.
+
+| ID | Resolution |
+|---|---|
+| Q-1 | Support Tfunction_body functions whose parameters are ordinary Nolabel/Labelled and Tparam_pat variable, wildcard or unit pattern. Bound scalar identifiers start top; unit/wildcard adds no numeric fact. Optional labels/defaults, refutable/compound params and Tfunction_cases make the entire function subtree UNSUPPORTED, including defaults and nested functions. No pattern-derived numeric refinements. |
+| Q-2 | Each function outside an unsupported subtree starts a fresh environment: all parameters/captures top, no outer facts. Locals created inside that fresh entry may be tracked. Unsupported lexical-region flag is sticky across nested functions within that subtree; fresh-entry separation does not override it. Ordinary nested functions outside unsupported regions remain analyzable even in an outer branch known dead; no inherited reachability guarantee. |
+| Q-3 | Local nonrecursive let supports variable/wildcard patterns only (variable aliases are RHS identifier reads, not alias-pattern projection). Simultaneous and-group RHSs evaluate in the pre-group environment; all bindings become visible only in the body. Compound, alias-pattern, refutable, or-pattern and recursive value groups mark the entire local-let subtree UNSUPPORTED. At structure level recursive groups also mark their RHS subtrees unsupported; independent later declarations start fresh. No cross-top-level numeric environment. |
+| Q-4 | Closed numeric primitive transfer set: %negint, %addint, %subint, %mulint, %divint, %modint, fully supplied correct-arity native int operands. Neg/add/sub/mul must retain exact singleton/no-overflow cases; detected possible overflow may widen to top. Div/mod result value may always be top, but divisor classification still runs. Zero restrictions accept direct native-int identifier vs Const_int0 in either order, under %equal/%notequal/%eq/%noteq at int operand type. Pure boolean literals true/false also restrict branch reachability. Other predicates do not refine (both branches retained); not/ordering normalization is not promised. if-without-else joins then with unknown unit value, still inventories then-sites. UNREACHABLE only from false literal branch or contradictory zero restrictions. |
+| Q-5 | Supported expression backbone: constants, identifiers, supported functions-as-values, supported local lets, sequence, if and application. Unknown ordinary applications (including indirect primitive aliases) return top, do not expand callees and preserve only existing immutable scalar bindings. Argument expressions are interpreted independently in the same incoming env; no claimed evaluation order/termination/exception reachability. Every other structural expression constructor (match,try,loops,letop,lazy,object,record/array/field mutation,local modules,extensions) is an unsupported subtree; its result to surrounding supported expressions is top. Unsupported marker is lexical, not a global poison of later independent scalar statements. Short-circuit boolean primitive applications %sequand/%sequor are unsupported subtrees. Generic pure-looking but unlisted primitives return top; their arguments retain independent evaluation. No heap, exception, ordinary-call termination or interprocedural effects used to prove unreachable. |
+| Q-6 | Inventory only a Texp_apply whose immediate head is Texp_ident Val_prim from the eight closed div/mod identities. Do not reconstruct nested later saturation or aliases. One such application is one syntactic occurrence, not necessarily execution. Exactly two Nolabel, Some operands is numerically eligible for native int; all other arity/labels/options unsupported. Original second argument absent or None maps to category missing, not to a shifted slot. Other integer families unsupported at the operation; their argument expressions still visited. Location is whole Texp_apply; only syntactically immediate primitive heads count. |
+| Q-7 | Artifact identity canonical physical path +SHA256; module/source metadata retained, duplicate module+source pair across distinct inputs refused. Public site ID is per-artifact one-based preorder occurrence ordinal (not cross-build stable), scoped by artifact path/digest. Sort artifacts by physical path and sites by artifact then start byte offset,end byte offset,primitive,ordinal. No compiler Ident/Uid/stamp in public IDs. Location carries source filename,start/end line,one-based byte column,absolute byte offset and ghost flag, with null for invalid/missing coordinates; retain site despite ghost/line0, never fabricate a valid source location. Missing location affects navigation, not numeric interpretation. |
+| Q-8 | CLI arch_guard / root arch-guard, repeatable --cmt FILE (at least1), --format text/json default text, --help and --version. Unknown/bad args exit2; help/version0. Schema version1; exact field shape frozen in final spec. Diagnostic stderr, successful complete report stdout only; no --out/DB edits/build execution. Input limits128unique artifacts,32MiB each,256MiB aggregate; traversal100000expression nodes per invocation,10000sites and recursion-depth512. Count before semantic work and fail2 rather than truncate. JSON serialization max16MiB before any stdout. These are deterministic limits, not a hard OS memory/time sandbox; CMT files are trusted same-compiler/same-target build artifacts. External checker subprocess120s/16MiB cap. Input hash before/after read, no atomic source freshness or hostile-concurrency certificate. |
+
+## Status and report definitions
+
+NONZERO: modeled divisor excludes zero whenever reached.
+ZERO: modeled divisor is exactly zero whenever reached; no guaranteed execution claim.
+MAY_ZERO: model includes zero and at least one nonzero value (top included).
+UNREACHABLE: supported entry context has bottom under the closed branch causes above.
+UNSUPPORTED: syntax occurrence has no numeric interpretation under the closed fragment (takes precedence over reachability).
+Successful CLI exit0 is report production, never a safety gate; failure2 emits no complete report.
+An empty site list must explicitly say no matching immediate primitive occurrences in supplied artifacts, not no division in a program.
+
+## Accepted measurable minimum
+
+Alias means copying the current abstract value at the let binding. Refining d later need not
+retroactively refine a previously copied alias a; this is a nonrelational fragment. An alias
+created inside d's refined branch must copy that refinement. A guard directly on a can refine a.
+
+Native fixtures must show nonzero literal/local alias/guard, zero literal, possible parameter,
+branch0/2 join, shadowing, contradictory-guard unreachable, closed-entry captures, unsupported loops/try/defaults/cases and other integer families, partial primitive and shadowed source operator.
+Small-width exhaustive containment tests plus31/63 extrema check transfers and join; they do not prove soundness for all programs.
+No numeric domain representation dictated here; plan must select one meeting zero exclusion/joins/overflow conservatism.
