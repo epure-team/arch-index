@@ -54,3 +54,23 @@
 ## Scope/debt
 
 The implementation is limited to runner diagnostic visibility, actual-CLI regression coverage, usage documentation, and required pipeline artifacts. No schema, enrichment, merge-path, or bundled review-tooling changes were made.
+
+## CI portability repair — 2026-09-12T14:41:46Z
+
+PR #98 CI run `34699363906` on head `38070e20b842f3b0467c16e3ed1a448dc4540ca2`
+provided an actual RED: the suite exited non-zero with 230/231 Tezt tests passing.
+The unexpected-exception CLI test retained the correct stderr label, exit 0, and
+empty stdout, but rejected CI's concrete reason
+`Eio.Io Process Permission_denied <path>` because it expected the local rendering
+`Permission denied`.
+
+The local switch has `eio`/`eio_posix` 1.3 while that CI run installed 1.5. The
+test now accepts precisely the two observed permission-denial representations;
+it includes positive controls for both and a negative control proving that an
+unrelated Eio process error is rejected. Production code and dependency versions
+are unchanged.
+
+- [x] Build: `rtk proxy opam exec --switch=/home/mathias/dev/arch-index -- dune build --root . @install` — exit 0.
+- [x] Focused tests: `rtk proxy opam exec --switch=/home/mathias/dev/arch-index -- dune exec --root . tezt/tests/main.exe -- --file lsp_runner_diagnostics.ml` — exit 0; 4/4.
+- [x] Full tests: `rtk proxy opam exec --switch=/home/mathias/dev/arch-index -- dune test --root . --force` — exit 0; 231/231 Tezt plus all Alcotest groups.
+- [x] Format/style: `rtk git diff --check` — exit 0.
