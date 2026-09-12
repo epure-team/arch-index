@@ -1,7 +1,7 @@
 # Ship gate — lsp-runner-diagnostics
 
 **Mode:** fast
-**Status:** READY TO UPDATE PR #98; not yet shipped
+**Status:** SHIPPED — PR #98 merged
 
 ## Scope and authorization
 
@@ -55,3 +55,18 @@ and dependency files are unchanged by the repair.
   reports and GitHub retain the useful evidence. No extra worktree was created.
 
 Push this reviewed/QA'd correction, then require green CI on its exact new PR head.
+
+## Confirmed landing
+
+- PR https://github.com/epure-team/arch-index/pull/98 merged by rebase at
+  `2026-09-12T15:04:49Z`; merge commit `932211be1ecd2b950d7cee6ef8dbbdd7bbed0460`.
+- Exact approved head `4dcc831a71f347b1f1bf1ca367298f6416601fe9` had required `build`
+  SUCCESS and merge state CLEAN. CI run `34700676526` passed in 8m50s, including tests,
+  self-index, recalibration, architecture rules and change-impact.
+- Issue #23 closed at `2026-09-12T15:04:50Z`; remote feature branch deleted. Local main
+  fast-forwarded to the merge commit, preserving its six pre-existing untracked entries.
+- Preserve this post-merge ledger record in a local Git commit and carry it in the next
+  delivery before removing the inactive worktree/build; no separate bookkeeping PR.
+- Advisory ccusage day-window query succeeded, but its cross-project day total is not
+  isolated to this task. Do not publish unrelated aggregate usage as task spend.
+- No KB, harness metabolism counter or skill hooks are installed.
