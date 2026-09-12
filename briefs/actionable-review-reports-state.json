@@ -1,9 +1,10 @@
 {
   "task": "actionable-review-reports",
   "mode": "full",
-  "current_phase": "research",
+  "current_phase": "intake",
   "events": [
     {"phase": "question", "outcome": "COMPLETED", "at": "2026-09-12T15:15:26Z", "by": "roster-question"},
-    {"phase": "research", "outcome": "COMPLETED", "at": "2026-09-12T17:21:58+02:00", "by": "roster-research"}
+    {"phase": "research", "outcome": "COMPLETED", "at": "2026-09-12T17:21:58+02:00", "by": "roster-research"},
+    {"phase": "intake", "outcome": "VALIDATED", "by": "roster-intake"}
   ]
 }
