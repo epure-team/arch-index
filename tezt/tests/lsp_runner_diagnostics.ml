@@ -42,13 +42,16 @@ let run ~path ~timeout_s ?(verbose = false) project =
     (arch_index_cli ())
     args
 
-let check_quiet_failure b ~label ~needle ~reason stderr =
+let retains_any_reason ~reasons stderr =
+  List.exists (fun reason -> contains ~needle:reason stderr) reasons
+
+let check_quiet_failure b ~label ~needle ~reasons stderr =
   Batch.check b
     ~msg:(Printf.sprintf "%s was silent on stderr:\n%s" label stderr)
     (contains ~needle stderr) ;
   Batch.check b
     ~msg:(Printf.sprintf "%s dropped its reason from stderr:\n%s" label stderr)
-    (contains ~needle:reason stderr) ;
+    (retains_any_reason ~reasons stderr) ;
   Batch.check b
     ~msg:(Printf.sprintf "%s leaked verbose progress narration:\n%s" label stderr)
     (not (contains ~needle:"extracting symbols" stderr))
@@ -67,7 +70,7 @@ let register_lookup_failure () =
       Batch.eq_int b ~msg:"lookup failure keeps the current success exit code" code 0 ;
       Batch.eq_string b ~msg:"quiet lookup failure writes no stdout" stdout "" ;
       check_quiet_failure b ~label:"LSP lookup failure"
-        ~needle:"LSP lookup failed" ~reason:"gopls" stderr ;
+        ~needle:"LSP lookup failed" ~reasons:["gopls"] stderr ;
       Batch.eq_int b
         ~msg:"--verbose must not duplicate the lookup diagnostic"
         (count_occurrences ~needle:"LSP lookup failed" verbose_stderr)
@@ -95,7 +98,7 @@ printf 'Content-Length: %s\r\n\r\n%s' "${#BODY}" "$BODY"
       Batch.eq_int b ~msg:"start failure keeps the current success exit code" code 0 ;
       Batch.eq_string b ~msg:"quiet start failure writes no stdout" stdout "" ;
       check_quiet_failure b ~label:"LSP start failure"
-        ~needle:"LSP start failed" ~reason:"STARTUP_SENTINEL" stderr) ;
+        ~needle:"LSP start failed" ~reasons:["STARTUP_SENTINEL"] stderr) ;
   Lwt.return_unit
 
 let register_timeout () =
@@ -111,7 +114,7 @@ let register_timeout () =
       Batch.eq_int b ~msg:"timeout keeps the current success exit code" code 0 ;
       Batch.eq_string b ~msg:"quiet timeout writes no stdout" stdout "" ;
       check_quiet_failure b ~label:"LSP timeout"
-        ~needle:"timeout after 1s" ~reason:"using partial results" stderr) ;
+        ~needle:"timeout after 1s" ~reasons:["using partial results"] stderr) ;
   Lwt.return_unit
 
 let register_unexpected_exception () =
@@ -124,11 +127,24 @@ let register_unexpected_exception () =
   let server = Filename.concat dir "gopls" in
   write_file server "not executable\n" ;
   let code, stdout, stderr = run ~path:dir ~timeout_s:"2" project in
+  let permission_reasons =
+    ["Permission denied"; "Eio.Io Process Permission_denied"]
+  in
   Batch.run (fun b ->
       Batch.eq_int b ~msg:"unexpected error keeps the current success exit code" code 0 ;
       Batch.eq_string b ~msg:"quiet unexpected error writes no stdout" stdout "" ;
       check_quiet_failure b ~label:"unexpected LSP error"
-        ~needle:"unexpected error" ~reason:"Permission denied" stderr) ;
+        ~needle:"unexpected error" ~reasons:permission_reasons stderr ;
+      Batch.check b ~msg:"POSIX permission wording is recognized"
+        (retains_any_reason ~reasons:permission_reasons
+           "Unix error: Permission denied") ;
+      Batch.check b ~msg:"Eio permission wording is recognized"
+        (retains_any_reason ~reasons:permission_reasons
+           "Eio.Io Process Permission_denied /tmp/gopls") ;
+      Batch.check b ~msg:"an unrelated process failure is not a permission reason"
+        (not
+           (retains_any_reason ~reasons:permission_reasons
+              "Eio.Io Process Not_found /tmp/gopls"))) ;
   Lwt.return_unit
 
 let register () =
