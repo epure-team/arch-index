@@ -72,6 +72,41 @@ let run_report db =
 
 let str k j = match Json.member k j with Some (`String s) -> Some s | _ -> None
 
+let check_verdict_absence b (json, sarif, html) =
+  let parse what raw =
+    match Json.strict_object ~what raw with
+    | Ok j -> j
+    | Error e -> Test.fail "%s" e
+  in
+  let report = parse "report.json" json in
+  let sarif = parse "report.sarif" sarif in
+  let properties =
+    match Json.member "properties" sarif with Some p -> p | None -> `Null
+  in
+  List.iter
+    (fun (channel, header) ->
+      Batch.eq_string b ~msg:(channel ^ ": verdict totals are explicitly unavailable")
+        (Option.value ~default:"<absent>" (str "verdicts_status" header)) "NOT_COMPUTED" ;
+      Batch.check b ~msg:(channel ^ ": placeholder counts are explained")
+        (match str "verdicts_reason" header with
+         | Some reason -> Arch_tezt.contains ~needle:"placeholders" reason
+         | None -> false) ;
+      let counts =
+        match Json.member "verdicts" header with Some (`Assoc counts) -> counts | _ -> []
+      in
+      List.iter
+        (fun verdict ->
+          Batch.check b ~msg:(channel ^ ": compatible count key " ^ verdict)
+            (List.assoc_opt verdict counts = Some (`Int 0)))
+        ["PASS"; "VIOLATION"; "POSSIBLE"; "UNKNOWN"; "UNKNOWN_NO_CONTRACT";
+         "NO_SOURCE"; "NO_TARGET"; "NOT_COMPUTED"])
+    ["JSON", report; "SARIF", properties] ;
+  Batch.check b ~msg:"HTML explains why verdict totals are unavailable"
+    (Arch_tezt.contains ~needle:"Verdict totals: NOT_COMPUTED" html
+    && Arch_tezt.contains ~needle:"placeholders" html) ;
+  Batch.check b ~msg:"HTML does not display placeholder counts as measured zeros"
+    (not (Arch_tezt.contains ~needle:"<td>0</td>" html))
+
 (* Read through the same accessor the other suites use, so a shape change in the report shows up
    here as a missing field rather than as a silently-empty list. *)
 let json_findings raw =
@@ -116,6 +151,7 @@ let register_round_trip () =
         ]) ;
   let json, sarif, html = run_report db in
   Batch.run (fun b ->
+      check_verdict_absence b (json, sarif, html) ;
       let fs = json_findings json in
       (* The provenance a SARIF finding cannot carry itself: it lives on the RUN, so the producer
          reaches that channel only if runs are grouped by (producer, analysis). It was one run per
@@ -217,7 +253,8 @@ let register_not_analysed () =
          absent one are the same picture to a reader who only sees "no findings", and telling
          them apart is what FR-003 asks for. *)
       let status () =
-        let json, _, html = run_report db in
+        let json, sarif, html = run_report db in
+        check_verdict_absence b (json, sarif, html) ;
         (* Scoped to the section under test rather than concatenating every status. The first
            version joined them all, so adding a SECOND analysis broke three assertions that had
            nothing to do with it — an assertion coupled to the section LIST rather than to the
