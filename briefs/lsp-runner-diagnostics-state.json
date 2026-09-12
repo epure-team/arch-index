@@ -1,7 +1,7 @@
 {
   "task": "lsp-runner-diagnostics",
   "mode": "fast",
-  "current_phase": "review",
+  "current_phase": "qa",
   "events": [
     {
       "phase": "implement",
@@ -32,6 +32,12 @@
       "outcome": "GO",
       "at": "2026-09-12T16:47:10+02:00",
       "by": "roster-review"
+    },
+    {
+      "phase": "qa",
+      "outcome": "GO",
+      "at": "2026-09-12T16:52:10+02:00",
+      "by": "roster-qa"
     }
   ]
 }
