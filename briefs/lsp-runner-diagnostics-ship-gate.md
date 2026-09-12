@@ -1,7 +1,7 @@
 # Ship gate — lsp-runner-diagnostics
 
 **Mode:** fast
-**Status:** READY FOR PR; not yet shipped
+**Status:** READY TO UPDATE PR #98; not yet shipped
 
 ## Scope and authorization
 
@@ -32,3 +32,26 @@ Fetch/rebase onto current `origin/main`; require `build` success on the exact PR
 an up-to-date, mergeable branch. Rebase merge only. Append ship COMPLETED only after GitHub
 confirms merge. Preserve the post-merge roster record in Git, then remove the inactive
 delivery worktree and generated build outputs without force or loss of unrelated files.
+
+## CI repair and fresh gates
+
+PR #98 run `34699363906` failed at `38070e20b842f3b0467c16e3ed1a448dc4540ca2`:
+230/231 tests passed; our new permission-denial assertion did not recognize Eio 1.5's
+`Eio.Io Process Permission_denied` wording (local Eio 1.3 says `Permission denied`).
+No infrastructure retry was used to conceal this test defect.
+
+Test-only repair `738e313f93df8cee3430a2adfc0a367553a7cdcd` accepts both concrete reasons,
+positive-controls both, and negative-controls an unrelated `Not_found` error. Production
+and dependency files are unchanged by the repair.
+
+- Fresh review GO `2b34579395de6bb4b74e7065dc6b0c5d929372f3` (cycle 2, round 1):
+  owner/architect gates passed, no findings; full/static convergence exit 0.
+- Fresh QA GO `4f638fb8e7639720da377b9fc707144dcbcac296`: build, full 231/231 plus
+  Alcotest, focused 4/4, whitespace, unchanged 23/820/5193 golden and architecture rules.
+- Root independently rechecked review static and QA convergence: exit 0.
+- Fresh-cycle OpenCode probe was allowed by the helper, but its non-conforming output
+  was discarded as degraded. QA honored that breaker; no cross-runtime pass is claimed.
+- QA scratch databases and the initial temporary PR body have been removed; committed
+  reports and GitHub retain the useful evidence. No extra worktree was created.
+
+Push this reviewed/QA'd correction, then require green CI on its exact new PR head.
