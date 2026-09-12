@@ -91,6 +91,16 @@ and `arch-mcp` (stdio JSON-RPC for agents). Ingest is `arch-load` / `arch-covera
   vocabulary the tools actually emit** — `PASS`, `VIOLATION`, `POSSIBLE`, `UNKNOWN`,
   `UNKNOWN_NO_CONTRACT`, `NO_SOURCE`, `NO_TARGET`, `NOT_COMPUTED`.
 
+  **Amended 2026-09-12 (#84):** `arch-report` cannot currently compute rule-verdict totals:
+  `arch-rules` evaluates in memory and does not persist its results. JSON retains the eight
+  numeric `verdicts` keys for compatibility, but MUST also carry
+  `verdicts_status: "NOT_COMPUTED"` and `verdicts_reason` explaining that these zeros are
+  placeholders, not measured counts. SARIF carries the identical three fields in its
+  top-level `properties` bag, because they describe the whole report rather than one run.
+  HTML MUST display the status and explanation, with unavailable cells instead of zero totals.
+  This availability status is distinct from the `NOT_COMPUTED` verdict-count bucket; imported
+  findings and covered analysis sections MUST NOT make rule-verdict totals appear computed.
+
   **Amended 2026-09-05, and the original was wrong in two directions.** It named four buckets:
   `PASS` / `PASS_UNDER_HYP` / `UNKNOWN` / `VIOLATION`.
 
@@ -165,6 +175,10 @@ reader is not the one who discovers it at review time.
 - **CHECK-4** `report.sarif` validates against the published 2.1.0 schema.
 - **CHECK-5** Round-trip: every finding in `report.json` appears in `report.sarif` and in the
   rendered HTML, with identical provenance.
+- **CHECK-6** Generate reports with empty findings, populated native findings, and imported
+  heuristic findings. In each case JSON and SARIF explicitly mark verdict totals `NOT_COMPUTED`
+  and explain the placeholder numeric keys; HTML displays unavailable totals. Findings and
+  per-analysis coverage remain visible independently of verdict-total availability.
 
 ## Out of scope
 

@@ -1,0 +1,8 @@
+{
+  "task": "report-verdict-absence",
+  "mode": "fast",
+  "current_phase": "implement",
+  "events": [
+    {"phase": "implement", "outcome": "COMPLETED", "by": "roster-implement", "at": "2026-09-12"}
+  ]
+}

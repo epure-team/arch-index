@@ -35,9 +35,8 @@
     [NOT_COMPUTED] (an analysis that never ran) with [NO_SOURCE] (one that ran over nothing).
     Distinguishing those pairs is most of what this toolchain is for. *)
 
-(** A verdict count. Every member is present on every report, zero included: a consumer must never
-    have to decide whether a missing key means "none" or "this producer does not use that
-    verdict". *)
+(** Verdict vocabulary. Report counts retain every member for compatibility; consumers must
+    inspect [verdicts_status] before interpreting them as measurements. *)
 type verdict =
   | Pass
   | Violation
@@ -167,7 +166,8 @@ type t = {
   top_frontier : int option;
       (** A COUNT, never a result list: 286 356 edges on Octez against GitHub's 25 000-result
           cap. Per-rule witnesses belong in [codeFlows], not here. *)
-  verdicts : (string * int) list;  (** every member of {!verdict_vocabulary}, zero included *)
+  verdicts : (string * int) list;
+      (** Compatibility placeholders until verdict evaluation is persisted; see [verdicts_status]. *)
   sections : section list;
 }
 
@@ -240,10 +240,9 @@ let collect ~db_path (t : Arch_db.t) : t =
       | _ -> None
     else None
   in
-  (* Verdict counts are ZERO here and that is honest, not a stub: no verdict-producing analysis
-     writes its results into the database today — [arch-rules] evaluates in memory and prints. The
-     header carries the full vocabulary at zero rather than omitting the section, so a reader sees
-     "no verdicts recorded" instead of a report that looks like it has no rules to report on. *)
+  (* No verdict-producing analysis persists results today: arch-rules evaluates in memory.
+     Keep the numeric vocabulary for compatibility, but all renderers MUST label these zeros
+     as unavailable placeholders, not measured counts. Imported findings do not change this. *)
   let verdicts = List.map (fun v -> (v, 0)) verdict_vocabulary in
   let dead_code =
     if not (Arch_db.has_table t "dead_code_sites") then []
@@ -415,6 +414,18 @@ let collect ~db_path (t : Arch_db.t) : t =
 (* rather than something three assertions try to establish after the fact.      *)
 (* -------------------------------------------------------------------------- *)
 
+let verdicts_status = "NOT_COMPUTED"
+
+let verdicts_reason =
+  "arch-rules results are not persisted in this index. Verdict totals have not been computed; \
+   numeric zeros are compatibility placeholders, not measured counts. Imported findings do not \
+   determine rule verdicts."
+
+let verdicts_json (r : t) =
+  [ ("verdicts_status", `String verdicts_status);
+    ("verdicts_reason", `String verdicts_reason);
+    ("verdicts", `Assoc (List.map (fun (k, n) -> (k, `Int n)) r.verdicts)) ]
+
 let header_json (r : t) =
   [ ("db_path", `String r.db_path);
     ( "schema_version",
@@ -439,8 +450,8 @@ let header_json (r : t) =
                  ("analysis", `String c.c_analysis); ("status", `String c.c_status);
                  ("detail", match c.c_detail with Some d -> `String d | None -> `Null) ])
            r.coverage) );
-    ("top_frontier", match r.top_frontier with Some n -> `Int n | None -> `Null);
-    ("verdicts", `Assoc (List.map (fun (k, n) -> (k, `Int n)) r.verdicts)) ]
+    ("top_frontier", match r.top_frontier with Some n -> `Int n | None -> `Null) ]
+  @ verdicts_json r
 
 let finding_json (f : finding) =
   `Assoc
@@ -518,7 +529,7 @@ let to_sarif (r : t) : Yojson.Safe.t =
           producers)
       r.sections
   in
-  Arch_sarif.log
+  let log = Arch_sarif.log
     (List.map
        (fun (s, prod, fs) ->
          { Arch_sarif.producer = Option.value ~default:"arch-report" prod;
@@ -548,6 +559,10 @@ let to_sarif (r : t) : Yojson.Safe.t =
            contract_ok = None; computed = Some (s.s_status = "covered");
            proved = None })
        groups)
+  in
+  (* These totals belong to the whole report, not to one producer's analysis run.
+     Preserve the per-run computed flags: available findings do not imply rule evaluation. *)
+  `Assoc (("properties", `Assoc (verdicts_json r)) :: Yojson.Safe.Util.to_assoc log)
 
 let esc s =
   String.to_seq s
@@ -587,10 +602,11 @@ let to_html (r : t) : string =
           (esc pr.p_soundness_class))
       r.producers ;
     p "</table>\n") ;
-  p "<h2>Verdicts</h2>\n<table><tr>" ;
+  p "<h2>Verdicts</h2>\n<p class=\"notrun\">Verdict totals: %s. %s</p>\n<table><tr>"
+    (esc verdicts_status) (esc verdicts_reason) ;
   List.iter (fun (k, _) -> p "<th>%s</th>" (esc k)) r.verdicts ;
   p "</tr><tr>" ;
-  List.iter (fun (_, n) -> p "<td>%d</td>" n) r.verdicts ;
+  List.iter (fun _ -> p "<td>unavailable</td>") r.verdicts ;
   p "</tr></table>\n" ;
   (* The coverage matrix, which the HTML channel did not render at all — so the one artifact a
      human opens was missing the per-(language, analysis) statuses the other two carry. FR-021
