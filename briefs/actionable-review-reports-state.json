@@ -1,7 +1,7 @@
 {
   "task": "actionable-review-reports",
   "mode": "full",
-  "current_phase": "review",
+  "current_phase": "qa",
   "events": [
     {"phase": "question", "outcome": "COMPLETED", "at": "2026-09-12T15:15:26Z", "by": "roster-question"},
     {"phase": "research", "outcome": "COMPLETED", "at": "2026-09-12T17:21:58+02:00", "by": "roster-research"},
@@ -10,6 +10,7 @@
     {"phase": "spec", "outcome": "VALIDATED", "by": "roster-spec"},
     {"phase": "plan", "outcome": "COMPLETED", "by": "roster-plan"},
     {"phase": "implement", "outcome": "COMPLETED", "at": "2026-09-12T19:02:18+02:00", "by": "roster-implement", "reason": "Full feature, tests, standalone checks, self-analysis and source-attributed golden recalibration completed"},
-    {"phase": "review", "outcome": "GO", "at": "2026-09-12T19:21:45+02:00", "by": "roster-review"}
+    {"phase": "review", "outcome": "GO", "at": "2026-09-12T19:21:45+02:00", "by": "roster-review"},
+    {"phase": "qa", "outcome": "GO", "at": "2026-09-12T17:38:59.745Z", "by": "roster-qa"}
   ]
 }
