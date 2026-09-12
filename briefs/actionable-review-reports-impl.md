@@ -45,10 +45,12 @@ binding was introduced.
 - Final `dune build --root . @install` exit 0.
 - Final `dune test --root . --force` exit 0: 240/240 Tezt plus Alcotest.
 - Final focused report 6/6, origin 8/8, exception extraction 2/2, checker 6/6.
-- Self-index produced the pinned 23 modules / 828 functions / 5223 calls and the golden diff
-  exited 0. Self architecture rules exited 0. `recalibrate.sh --check` correctly refused exit 2
-  before commit because the feature worktree was dirty; rerun after the implementation commit is
-  required and recorded below.
+- Self-index produced 23 modules / 828 functions / 5223 calls. Self architecture rules exited 0.
+  `recalibrate.sh --check` first correctly refused exit 2 while the feature worktree was dirty;
+  post-commit measurement then returned stale exit 1 and attributed the full 820→828 function and
+  5193→5223 call movement to source changes (base and new binaries agreed on both corpora).
+  `recalibrate.sh --write` updated and byte-verified the descriptive golden; the ratchet remained
+  current within its documented headroom.
 
 ## Review attention
 
@@ -73,4 +75,3 @@ caps, provenance and publication failure semantics.
 No abstract-value inference, source freshness certificate, concurrent-writer support, persisted
 rule runs, imported rule JSON binding, gate-policy change, general operand extraction, MCP change,
 vendor harness change, push, PR or merge.
-
