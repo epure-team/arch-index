@@ -1,0 +1,3 @@
+# split_last is reached only after collect_calls_from_expr has established a nonempty segment list;
+# its recursive multi-item case reaches a singleton. This is reviewed evidence, not a proof.
+collect_calls_from_expr.<fun:1374:21>.<fun:1385:36> | lib/arch_index/arch_index_cmt.ml:1388 | assert | Assert_failure | x1

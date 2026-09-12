@@ -1,0 +1,2 @@
+rule "self escaping assertion and division origins"
+  forbid origin from file:lib/arch_index/** form:assert,division channel:exception allow-file:test/fixtures/origin-consumer/self.allow

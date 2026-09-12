@@ -128,4 +128,11 @@
   %{exe:../../bin/arch_mutants/arch_mutants.exe}
   %{exe:../../poc/decision-lint/bin/decision_lint.exe}
   ../../architecture-schema.sql
+  ../../checks/origin-recurring-consumer.js
+  ../../scripts/origin-consumer.js
+  ../../scripts/origin-consumer-artifacts.js
+  ../../test/fixtures/origin-consumer/consumer.ml
+  ../../test/fixtures/origin-consumer/self.rules
+  ../../test/fixtures/origin-consumer/self.allow
+  ../../test/fixtures/origin-consumer/reference.json
   servers.version))

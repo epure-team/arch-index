@@ -3,6 +3,13 @@
 ## [Unreleased]
 
 ### Added
+
+- **Recurring origin checks on the built arch-index library.** A repository-local consumer
+  reuses `forbid origin` for escaping assertions/divisions, a reviewed counted allowance and
+  explicit population-reference drift checks. Native controls exercise new sites and increased
+  counts; CI retains compact gate/report evidence for 14 days. A held `UNKNOWN` remains unproved,
+  not a completeness or source-freshness certificate. See [origin consumer](docs/origin-consumer.md).
+
 - **Optional evaluated rules in `arch-report`.** `arch-report <db> --out <dir> --rules <file>`
   now carries the existing rule verdict evidence, ordered witnesses, declaration ordinals and
   reviewer-oriented alert order into JSON, SARIF, and self-contained HTML. It remains a report,

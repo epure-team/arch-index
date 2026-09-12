@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "revision": "d7112964df679fb44bc033e878059537208f58da",
+  "modules": [
+    "lib/arch_index/arch_errors_config.ml", "lib/arch_index/arch_index.ml",
+    "lib/arch_index/arch_index_cfg.ml", "lib/arch_index/arch_index_cmt.ml",
+    "lib/arch_index/arch_index_comment_parser.ml", "lib/arch_index/arch_index_compare.ml",
+    "lib/arch_index/arch_index_db.ml", "lib/arch_index/arch_index_errch.ml",
+    "lib/arch_index/arch_index_exn.ml", "lib/arch_index/arch_index_git.ml",
+    "lib/arch_index/arch_index_line_counter.ml", "lib/arch_index/arch_index_support.ml",
+    "lib/arch_index/call_graph_extractor.ml", "lib/arch_index/comment_parser.ml",
+    "lib/arch_index/coverage_matrix.ml", "lib/arch_index/doc_extractor.ml",
+    "lib/arch_index/language_registry.ml", "lib/arch_index/lsp_client.ml",
+    "lib/arch_index/lsp_extractor.ml", "lib/arch_index/lsp_types.ml",
+    "lib/arch_index/ocaml_enricher.ml", "lib/arch_index/runner.ml",
+    "lib/arch_index/ts_enricher.ml"
+  ],
+  "totals": {"modules": 23, "functions": 828, "calls": 5223, "origins": 491},
+  "origin_groups": [
+    {"channel":"exception","form":"assert","escapes":1,"count":1},
+    {"channel":"exception","form":"compare","escapes":1,"count":34},
+    {"channel":"exception","form":"failwith","escapes":1,"count":18},
+    {"channel":"exception","form":"index","escapes":1,"count":106},
+    {"channel":"exception","form":"invalid_arg","escapes":1,"count":1},
+    {"channel":"exception","form":"reraise","escapes":1,"count":4},
+    {"channel":"option","form":"raise","escapes":1,"count":282},
+    {"channel":"result","form":"raise","escapes":1,"count":4},
+    {"channel":"result","form":"unknown","escapes":1,"count":41}
+  ]
+}
