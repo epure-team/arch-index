@@ -1,0 +1,7 @@
+{"schema_version":"1.0","ts":"2026-09-12T13:05:04.257Z","task":"report-verdict-absence","round":1,"cycle":1,"event":"specialist","actor":"reviewer","outcome":"ran"}
+{"schema_version":"1.0","ts":"2026-09-12T13:05:04.359Z","task":"report-verdict-absence","round":1,"cycle":1,"event":"specialist","actor":"architect","outcome":"ran"}
+{"schema_version":"1.0","ts":"2026-09-12T13:05:04.453Z","task":"report-verdict-absence","round":1,"cycle":1,"event":"specialist","actor":"spec-compliance","outcome":"skipped","detail":"no-task-spec-or-kb-spec"}
+{"schema_version":"1.0","ts":"2026-09-12T13:05:04.547Z","task":"report-verdict-absence","round":1,"cycle":1,"event":"specialist","actor":"code-quality-auditor","outcome":"skipped","detail":"no-kb-properties"}
+{"schema_version":"1.0","ts":"2026-09-12T13:05:04.641Z","task":"report-verdict-absence","round":1,"cycle":1,"event":"specialist","actor":"reviewer-tui","outcome":"skipped","detail":"no-tui-scope"}
+{"schema_version":"1.0","ts":"2026-09-12T13:05:04.735Z","task":"report-verdict-absence","round":1,"cycle":1,"event":"cross-runtime","actor":"opencode","outcome":"ran","digest":"opencode:fd1dbeaa7d0c6431"}
+{"schema_version":"1.0","ts":"2026-09-12T13:05:16.715Z","task":"report-verdict-absence","round":1,"cycle":1,"event":"normalizer","actor":"review-normalize.js","outcome":"ran"}
