@@ -299,5 +299,3 @@ on ambiguous test-runner exit codes. New tests must demonstrate RED then GREEN.
 
 None. Implementation choices within these boundaries are delegated; unresolved specification
 contradictions or quality-gate failures are not auto-approved.
-
-

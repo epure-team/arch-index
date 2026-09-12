@@ -73,4 +73,3 @@ Implementation may choose additive field/module names and serializers within the
 intake contract, documenting the machine interface and testing it. It must first read relevant
 files and verify dependencies/Typedtree representation rather than assuming a helper exists.
 No new runtime package is needed. The existing project switch and schema validator are ready.
-

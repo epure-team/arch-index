@@ -242,4 +242,3 @@ approval is claimed. No unresolved direction change or authentic-path exclusion 
 Existing reporting FR-021 must be amended to scope placeholder counts to absence of --rules.
 Its no-rules regression stays intact. Cross-spec entity search found no competing definitions
 for the two new names; existing raise-set and reach verdict names were checked explicitly.
-

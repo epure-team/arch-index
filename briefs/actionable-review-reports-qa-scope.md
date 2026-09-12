@@ -41,4 +41,3 @@ permits it; respect persisted degraded breaker. DRAFT convergence before state/r
 round/cycle audit. Sole shared worktree; no simultaneous Dune and no unnecessary worktrees.
 Retain small proof logs separately; clean exact owned temporary DBs/build fixtures. Root handles
 PR, green CI, merge, roadmap and removal of delivery worktree/build after completion.
-
