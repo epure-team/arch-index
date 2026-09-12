@@ -1,0 +1,8 @@
+{
+  "task": "origin-recurring-consumer",
+  "mode": "full",
+  "current_phase": "question",
+  "events": [
+    {"phase": "question", "outcome": "COMPLETED", "at": "2026-09-12T17:55:12.344Z", "by": "roster-question"}
+  ]
+}
