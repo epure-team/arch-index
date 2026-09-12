@@ -1,1 +1,8 @@
 {"schema_version":"1.0","ts":"2026-09-12T17:05:24.622Z","task":"actionable-review-reports","round":1,"cycle":1,"event":"scope-gate","actor":"check-scope-diff.sh","outcome":"ran"}
+{"schema_version":"1.0","ts":"2026-09-12T17:18:57.881Z","task":"actionable-review-reports","round":1,"cycle":1,"event":"specialist","actor":"reviewer","outcome":"ran"}
+{"schema_version":"1.0","ts":"2026-09-12T17:18:57.977Z","task":"actionable-review-reports","round":1,"cycle":1,"event":"specialist","actor":"architect","outcome":"ran"}
+{"schema_version":"1.0","ts":"2026-09-12T17:18:58.073Z","task":"actionable-review-reports","round":1,"cycle":1,"event":"specialist","actor":"spec-compliance","outcome":"ran"}
+{"schema_version":"1.0","ts":"2026-09-12T17:18:58.171Z","task":"actionable-review-reports","round":1,"cycle":1,"event":"specialist","actor":"code-quality-auditor","outcome":"skipped","detail":"kb/properties.md absent"}
+{"schema_version":"1.0","ts":"2026-09-12T17:18:58.270Z","task":"actionable-review-reports","round":1,"cycle":1,"event":"specialist","actor":"reviewer-tui","outcome":"skipped","detail":"no TUI scope in diff or brief"}
+{"schema_version":"1.0","ts":"2026-09-12T17:19:13.709Z","task":"actionable-review-reports","round":1,"cycle":1,"event":"normalizer","actor":"review-normalize.js","outcome":"ran"}
+{"schema_version":"1.0","ts":"2026-09-12T17:21:17.140Z","task":"actionable-review-reports","round":1,"cycle":1,"event":"specialist","actor":"cross-runtime-reviewer","outcome":"skipped","detail":"OpenCode actual helper degraded (timeout then overlapping tree-mutation); no conforming findings retained"}
