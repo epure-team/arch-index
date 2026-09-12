@@ -1,0 +1,15 @@
+{
+  "digests": {
+    "questions": "a317903403970cac6b1ee7014cbac7c5bba3a05c55fee280a580e82b84532927"
+  },
+  "questions": [
+    "Where are review reports assembled and rendered, and which data structures, serializers, templates, or formatters define their current contents?",
+    "How are witness paths represented, produced, propagated, and displayed across the existing analysis and reporting pipeline?",
+    "Where are origin operands captured or discarded, and what existing provenance metadata is retained from analysis results through report generation?",
+    "What ordering rules currently govern findings and supporting evidence in review reports, and where are those rules implemented or documented?",
+    "How does the codebase represent unavailable, incomplete, uncertain, and successful analyses, and how are those distinctions exposed in reports and tests?",
+    "Which existing explanation or diagnostic capabilities can report why an item has a given order, confidence, or availability state, and what interfaces expose them?",
+    "[ecosystem] How do established static-analysis and code-review reporting formats represent witness paths, source provenance, result ordering, uncertainty, and unavailable analyses?"
+  ],
+  "technical_ids": []
+}
