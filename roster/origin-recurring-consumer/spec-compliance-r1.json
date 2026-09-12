@@ -1,0 +1,67 @@
+[
+  {
+    "severity": "MEDIUM",
+    "confidence": 5,
+    "path": "scripts/origin-consumer.js",
+    "line": 63,
+    "category": "spec",
+    "summary": "Reference and gate validation variants are not specifically tested",
+    "evidence": "Validation is implemented, but the adverse suite only injects an empty malformed gate and does not directly cover duplicate reference groups, invalid totals, extra results, inconsistent census/exit, POSSIBLE, or each rejected verdict.",
+    "fix": "Add table-driven consumer tests for the unresolved validation branches.",
+    "fingerprint": "origin-recurring-consumer:spec:validation-variants-untested",
+    "specialist": "spec-compliance",
+    "acs": ["FR-002", "FR-007", "FR-008", "AC-5"]
+  },
+  {
+    "severity": "MEDIUM",
+    "confidence": 5,
+    "path": "scripts/origin-consumer.js",
+    "line": 25,
+    "category": "spec",
+    "summary": "Inventory and provenance edge branches have incomplete direct coverage",
+    "evidence": "Escape, symlink, detach, outside-Git and mutation are tested, but duplicate canonical CMTs, generated CMT recording, dirty/untracked inputs and compiler/build-path variation are not specifically asserted.",
+    "fix": "Add focused owned-fixture cases for the remaining inventory and provenance branches.",
+    "fingerprint": "origin-recurring-consumer:spec:inventory-provenance-untested",
+    "specialist": "spec-compliance",
+    "acs": ["FR-010", "FR-022", "AC-6", "AC-7", "AC-17"]
+  },
+  {
+    "severity": "MEDIUM",
+    "confidence": 5,
+    "path": "scripts/origin-consumer.js",
+    "line": 18,
+    "category": "spec",
+    "summary": "Subprocess and publication failure families are only partially exercised",
+    "evidence": "Timeout, overflow, staging cleanup, DB cleanup and final-record faults are tested; signal, abnormal exit, promotion/write-permission, diagnostics-write and report-cleanup failures are not individually tested.",
+    "fix": "Add labeled deterministic fault cases for the remaining shared branches.",
+    "fingerprint": "origin-recurring-consumer:spec:failure-families-untested",
+    "specialist": "spec-compliance",
+    "acs": ["FR-017", "FR-021", "AC-14", "AC-16"]
+  },
+  {
+    "severity": "MEDIUM",
+    "confidence": 5,
+    "path": "scripts/origin-consumer.js",
+    "line": 123,
+    "category": "spec",
+    "summary": "Cross-artifact validation lacks SARIF-specific corruption coverage",
+    "evidence": "Report JSON tampering and missing HTML fail closed, but SARIF census/alert divergence and wrong HTML identity/verdict are not directly injected.",
+    "fix": "Add a SARIF census/alert tamper and a wrong-HTML-content case.",
+    "fingerprint": "origin-recurring-consumer:spec:artifact-parity-untested",
+    "specialist": "spec-compliance",
+    "acs": ["FR-018", "AC-15"]
+  },
+  {
+    "severity": "MEDIUM",
+    "confidence": 5,
+    "path": ".github/workflows/ci.yml",
+    "line": 302,
+    "category": "spec",
+    "summary": "CI retention is statically checked, not behaviorally executed",
+    "evidence": "Workflow text and local validator behavior are tested, but local checks cannot establish actual GitHub upload execution, early-no-output handling, or 14-day artifact delivery.",
+    "fix": "Use exact-head CI execution and its artifact/upload result as the premerge evidence gate.",
+    "fingerprint": "origin-recurring-consumer:spec:ci-retention-untested",
+    "specialist": "spec-compliance",
+    "acs": ["FR-024", "AC-18", "AC-19"]
+  }
+]

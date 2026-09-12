@@ -1,0 +1,151 @@
+{
+  "findings": [
+    {
+      "severity": "LOW",
+      "confidence": 5,
+      "path": "scripts/origin-consumer.js",
+      "line": 68,
+      "category": "correctness",
+      "summary": "Reference validation accepts empty and non-normalized module paths instead of classifying them as input errors",
+      "evidence": "validateReference explicitly rejects absolute paths, literal '..' slash-components, and duplicates, but accepts identities such as '', '.', 'lib//x.ml', and 'lib/./x.ml'. A direct probe against HEAD printed ACCEPTED for these values. Empty, dot, and noncanonical spellings are ambiguous reference identities; they ordinarily cause a later module-population mismatch and coverage-drift1, so behavior remains fail-closed, but the resulting complete drift package describes invalid-looking configuration as measured drift rather than an input error.",
+      "fix": "Clarify the intended reference-path grammar. If empty, dot, or noncanonical spellings are not valid module identities, reject those forms during reference validation and add failures-mode controls asserting error2 and the error artifact shape; otherwise document their drift classification explicitly.",
+      "fingerprint": "scripts/origin-consumer.js:68:correctness",
+      "specialist": "reviewer",
+      "fid": "scripts/origin-consumer.js:68:correctness#4b24a092",
+      "status": "OPEN"
+    },
+    {
+      "severity": "MEDIUM",
+      "confidence": 5,
+      "path": "scripts/origin-consumer.js",
+      "line": 147,
+      "category": "architecture",
+      "summary": "The complete consumer lifecycle is concentrated in one oversized stateful orchestration function",
+      "evidence": "runConsumer spans lines 147-277 (about 131 lines), exceeding the architect role's 50-line function threshold. It owns output admission, configuration resolution, Git and inventory provenance, indexing, census computation, policy/report execution, evidence parity, publication, rollback, transient cleanup, diagnostics, final-record emission, and terminal precedence through shared mutable variables. AC-10, AC-14, and AC-16 require subtle ordering among policy evidence, error precedence, cleanup, rollback, and final publication; concentrating those transitions in one function makes future changes unusually likely to disturb a distant invariant. checks/origin-recurring-consumer.js:94-236 mirrors the concentration in a roughly 143-line failures function, making phase-level regression intent harder to locate. Current gates pass, so this is maintainability risk rather than a demonstrated behavioral failure.",
+      "fix": "Keep runConsumer as the single public orchestration boundary, but extract cohesive private phases with explicit inputs/results: output/config admission, immutable input snapshot, indexing/measurement, policy/report evaluation, publication validation, and finalization/rollback. Model the terminal outcome as a small explicit result object passed into finalization instead of mutating exit/status/complete across try/catch/finally. Split adverse controls by the same lifecycle phases while retaining the three contractual checker modes.",
+      "fingerprint": "scripts/origin-consumer.js:147:architecture",
+      "specialist": "architect",
+      "fid": "scripts/origin-consumer.js:147:architecture#c763a72c",
+      "status": "OPEN"
+    },
+    {
+      "severity": "MEDIUM",
+      "confidence": 5,
+      "path": "scripts/origin-consumer.js",
+      "line": 63,
+      "category": "spec",
+      "summary": "Reference and gate validation variants are not specifically tested",
+      "evidence": "Validation is implemented, but the adverse suite only injects an empty malformed gate and does not directly cover duplicate reference groups, invalid totals, extra results, inconsistent census/exit, POSSIBLE, or each rejected verdict.",
+      "fix": "Add table-driven consumer tests for the unresolved validation branches.",
+      "fingerprint": "scripts/origin-consumer.js:63:spec",
+      "specialist": "spec-compliance",
+      "acs": [
+        "FR-002",
+        "FR-007",
+        "FR-008",
+        "AC-5"
+      ],
+      "fid": "scripts/origin-consumer.js:63:spec#d055aaa8",
+      "status": "OPEN"
+    },
+    {
+      "severity": "MEDIUM",
+      "confidence": 5,
+      "path": "scripts/origin-consumer.js",
+      "line": 25,
+      "category": "spec",
+      "summary": "Inventory and provenance edge branches have incomplete direct coverage",
+      "evidence": "Escape, symlink, detach, outside-Git and mutation are tested, but duplicate canonical CMTs, generated CMT recording, dirty/untracked inputs and compiler/build-path variation are not specifically asserted.",
+      "fix": "Add focused owned-fixture cases for the remaining inventory and provenance branches.",
+      "fingerprint": "scripts/origin-consumer.js:25:spec",
+      "specialist": "spec-compliance",
+      "acs": [
+        "FR-010",
+        "FR-022",
+        "AC-6",
+        "AC-7",
+        "AC-17"
+      ],
+      "fid": "scripts/origin-consumer.js:25:spec#31ec1dbf",
+      "status": "OPEN"
+    },
+    {
+      "severity": "MEDIUM",
+      "confidence": 5,
+      "path": "scripts/origin-consumer.js",
+      "line": 18,
+      "category": "spec",
+      "summary": "Subprocess and publication failure families are only partially exercised",
+      "evidence": "Timeout, overflow, staging cleanup, DB cleanup and final-record faults are tested; signal, abnormal exit, promotion/write-permission, diagnostics-write and report-cleanup failures are not individually tested.",
+      "fix": "Add labeled deterministic fault cases for the remaining shared branches.",
+      "fingerprint": "scripts/origin-consumer.js:18:spec",
+      "specialist": "spec-compliance",
+      "acs": [
+        "FR-017",
+        "FR-021",
+        "AC-14",
+        "AC-16"
+      ],
+      "fid": "scripts/origin-consumer.js:18:spec#a4d416e7",
+      "status": "OPEN"
+    },
+    {
+      "severity": "MEDIUM",
+      "confidence": 5,
+      "path": "scripts/origin-consumer.js",
+      "line": 123,
+      "category": "spec",
+      "summary": "Cross-artifact validation lacks SARIF-specific corruption coverage",
+      "evidence": "Report JSON tampering and missing HTML fail closed, but SARIF census/alert divergence and wrong HTML identity/verdict are not directly injected.",
+      "fix": "Add a SARIF census/alert tamper and a wrong-HTML-content case.",
+      "fingerprint": "scripts/origin-consumer.js:123:spec",
+      "specialist": "spec-compliance",
+      "acs": [
+        "FR-018",
+        "AC-15"
+      ],
+      "fid": "scripts/origin-consumer.js:123:spec#7042747f",
+      "status": "OPEN"
+    },
+    {
+      "severity": "MEDIUM",
+      "confidence": 5,
+      "path": ".github/workflows/ci.yml",
+      "line": 302,
+      "category": "spec",
+      "summary": "CI retention is statically checked, not behaviorally executed",
+      "evidence": "Workflow text and local validator behavior are tested, but local checks cannot establish actual GitHub upload execution, early-no-output handling, or 14-day artifact delivery.",
+      "fix": "Use exact-head CI execution and its artifact/upload result as the premerge evidence gate.",
+      "fingerprint": ".github/workflows/ci.yml:302:spec",
+      "specialist": "spec-compliance",
+      "acs": [
+        "FR-024",
+        "AC-18",
+        "AC-19"
+      ],
+      "fid": ".github/workflows/ci.yml:302:spec#f412e53e",
+      "status": "OPEN"
+    }
+  ],
+  "cross_runtime_findings": [],
+  "probable_duplicates": [],
+  "rejected": [],
+  "reobservations": [],
+  "dispositions": {
+    "reopened": [],
+    "pending_check": []
+  },
+  "warnings": [],
+  "stats": {
+    "input": 7,
+    "rejected": 0,
+    "cross_runtime": 0,
+    "reobservations": 0,
+    "reopened": 0,
+    "pending_check": 0,
+    "merged": 7,
+    "carried_forward": 0,
+    "probable_duplicates": 0
+  },
+  "normalizer_version": "2.0.0"
+}

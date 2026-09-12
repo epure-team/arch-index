@@ -1,0 +1,60 @@
+{
+  "task": "origin-recurring-consumer",
+  "date": "2026-09-12T19:26:30Z",
+  "status": "GO",
+  "auto_fixes_applied": [],
+  "findings": [],
+  "cross_runtime_findings": [],
+  "summary": {
+    "critical": 0,
+    "high": 0,
+    "medium": 6,
+    "low": 1,
+    "auto_fixed": 0
+  },
+  "no_go_reason": {
+    "type": null,
+    "cause": null,
+    "failed_acs": []
+  },
+  "no_go_round": 0,
+  "round": 1,
+  "cycle": 1,
+  "rounds_audit": [
+    {
+      "round": 1,
+      "reviewed_sha": null,
+      "fix_sha": null,
+      "fix_sha_reason": "dirty-tree",
+      "specialists_run": [
+        {
+          "name": "reviewer",
+          "selection_reason": "Owner always runs; fresh Sol executed build/full suite/all three modes and production package."
+        },
+        {
+          "name": "architect",
+          "selection_reason": "More than three modified files; reused prior-plan context disclosed; executed own full gates."
+        },
+        {
+          "name": "spec-compliance",
+          "selection_reason": "Feature spec exists; reused formalizer context disclosed; own matrix and executed full gates."
+        }
+      ],
+      "strike": false,
+      "trace_schema_version": "1.0"
+    }
+  ],
+  "cross_runtime": {
+    "opencode": {
+      "status": "degraded",
+      "reason": "non-conforming-output",
+      "config_digest": "opencode:76f897c73342fdbf",
+      "round": 1
+    }
+  },
+  "streak_override": null,
+  "mode": "full",
+  "escalation_needed": false,
+  "escalation_reason": null,
+  "normalized_by": "2.0.0"
+}
