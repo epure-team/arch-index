@@ -3,6 +3,19 @@
 ## [Unreleased]
 
 ### Added
+- **Optional evaluated rules in `arch-report`.** `arch-report <db> --out <dir> --rules <file>`
+  now carries the existing rule verdict evidence, ordered witnesses, declaration ordinals and
+  reviewer-oriented alert order into JSON, SARIF, and self-contained HTML. It remains a report,
+  not a policy gate: successfully written artifacts exit 0 regardless of rule verdicts. Omitting
+  `--rules` retains the documented eight unavailable compatibility counts; invalid supplied rule
+  input exits 2 before artifact writes. See [unified architecture reports](docs/reporting.md).
+
+- **Bounded divisor syntax context for native CMT integer division/remainder origins.** Supporting
+  context records typed-AST slot 2 without value inference and without changing origin
+  allow-list identity/counts or nonzero-origin handling. Context availability, independent
+  site/context limits, omission totals, and representation limits are documented in
+  [unified architecture reports](docs/reporting.md).
+
 - **`exported:` is now tested against a FLAT-schema index** (roadmap 4.4). The two schemas spell
   the API-surface flag differently — MAIN's column is `functions.exposed`, FLAT's is
   `functions.exported` — and `Arch_graph.load_nodes` has one query per schema reading both into

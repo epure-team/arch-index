@@ -36,6 +36,16 @@ type origin = {
   o_escapes : bool;
   o_line : int;
   o_col : int;
+  o_operand : operand_context option;
+}
+
+and operand_context = {
+  primitive : string;
+  slot : int;
+  category : string;
+  representation : string option;
+  integer_kind : string;
+  unavailable_reason : string option;
 }
 
 type scope = {
@@ -167,4 +177,3 @@ val finalize : acc -> scope list * origin list
     deletes a reachable failure from the answer. Shared with the value
     channels so the two cannot drift apart. *)
 val pat_is_irrefutable : Typedtree.value Typedtree.general_pattern -> bool
-

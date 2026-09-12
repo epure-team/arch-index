@@ -40,7 +40,8 @@ let fixture_files =
     ( "rep_a.ml",
       {|exception Boom
 let leaf n = if n > 0 then raise Boom else n
-let caller n = leaf n
+let divide n d = n / d
+let caller n = divide (leaf n) n
 |} );
   ]
 
@@ -69,6 +70,14 @@ let run_report db =
     close_in ic ; s
   in
   (read "report.json", read "report.sarif", read "report.html")
+
+let run_report_with_rules db rules =
+  let dir = Temp.dir "arch_report_rules_out" in
+  let code, out =
+    Arch_tezt.run_command (Arch_tezt.arch_report ())
+      [db; "--out"; dir; "--rules"; rules]
+  in
+  (code, out, dir)
 
 let str k j = match Json.member k j with Some (`String s) -> Some s | _ -> None
 
@@ -510,4 +519,50 @@ let register () =
   register_coverage_matrix () ;
   register_sarif_validates () ;
   register_not_analysed () ;
-  register_imported_section ()
+  register_imported_section () ;
+  Test.register ~__FILE__
+    ~title:"arch-report: --rules evaluates rules in the unified report"
+    ~tags:["report"; "rules"; "witness"]
+  @@ fun () ->
+  with_fixture ~name:"rep_rules" ~files:fixture_files @@ fun fixture ->
+  let db = Arch_tezt.temp_db "rep_rules" in
+  let code, output = Arch_tezt.index_raw_into ~db fixture in
+  if code <> 0 then Test.fail "index failed (exit %d):\n%s" code output ;
+  let rules = Temp.file "rep_rules.txt" in
+  let oc = open_out rules in
+  output_string oc
+    (Printf.sprintf
+       "rule \"caller reaches leaf\"\n  forbid reach from fn:caller to fn:leaf\n\
+        rule \"division context\"\n  forbid origin from file:**/rep_a.ml form:division allow-file:%s\n"
+       (let allow = Temp.file "rep_rules.allow" in write_file allow "" ; allow)) ;
+  close_out oc ;
+  let code, output, dir = run_report_with_rules db rules in
+  Batch.run (fun b ->
+      Batch.eq_int b ~msg:("--rules report succeeds:\n" ^ output) code 0 ;
+      if code = 0 then (
+        Batch.check b ~msg:"CLI summary counts rule alerts separately from historical findings"
+          (Arch_tezt.contains ~needle:"2 rule alert(s)" output) ;
+        let json = read_file (Filename.concat dir "report.json") in
+        Batch.check b ~msg:"report marks the rule census computed"
+          (Arch_tezt.contains ~needle:"\"verdicts_status\": \"COMPUTED\"" json) ;
+        Batch.check b ~msg:"report carries the evaluated rule and witness"
+          (Arch_tezt.contains ~needle:"caller reaches leaf" json
+          && Arch_tezt.contains ~needle:"\"witness\"" json
+          && Arch_tezt.contains ~needle:"\"evaluator\": \"arch-rules\"" json) ;
+        let sarif = read_file (Filename.concat dir "report.sarif") in
+        let html = read_file (Filename.concat dir "report.html") in
+        let valid, validation = Sarif_out.validate_sarif ~what:"arch-report --rules" sarif in
+        Batch.check b ~msg:("rule-bearing SARIF validates:\n" ^ validation) valid ;
+        List.iter (fun (channel, body) ->
+            Batch.check b ~msg:(channel ^ " carries structured divisor context")
+              (Arch_tezt.contains ~needle:"identifier" body))
+          ["JSON", json; "SARIF", sarif; "HTML", html] ;
+        Batch.check b ~msg:"HTML names arch-rules without borrowing producer rigor"
+          (Arch_tezt.contains ~needle:"evaluator: <code>arch-rules</code>" html
+          && Arch_tezt.contains ~needle:"not inferred from index producers" html) ;
+        Batch.check b ~msg:"HTML exposes complete evidence, totals and declaration order"
+          (Arch_tezt.contains ~needle:"Complete rule results (declaration order)" html
+          && Arch_tezt.contains ~needle:"detail total:" html
+          && Arch_tezt.contains ~needle:"exact:" html
+          && Arch_tezt.contains ~needle:"Displayed detail" html)) ) ;
+  Lwt.return_unit

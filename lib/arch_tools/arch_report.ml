@@ -37,15 +37,9 @@
 
 (** Verdict vocabulary. Report counts retain every member for compatibility; consumers must
     inspect [verdicts_status] before interpreting them as measurements. *)
-type verdict =
-  | Pass
-  | Violation
-  | Possible
-  | Unknown
-  | Unknown_no_contract
-  | No_source
-  | No_target
-  | Not_computed
+type verdict = Arch_rule_eval.verdict =
+  | Pass | Violation | Possible | Unknown | Unknown_no_contract
+  | No_source | No_target | Not_computed
 
 (* The vocabulary is DERIVED from the type, not written beside it. Before
    2026-09-06 it was a hand-written string list and [arch_rules]'s [failing]
@@ -70,17 +64,9 @@ type verdict =
    [all] itself is hand-written and OCaml cannot enumerate a variant without a
    ppx, so that last arm is a runtime failure rather than a compile one. Stated
    rather than glossed: this makes the omission LOUD, not impossible. *)
-let all = [ Pass; Violation; Possible; Unknown; Unknown_no_contract; No_source; No_target; Not_computed ]
+let all = Arch_rule_eval.all_verdicts
 
-let string_of_verdict = function
-  | Pass -> "PASS"
-  | Violation -> "VIOLATION"
-  | Possible -> "POSSIBLE"
-  | Unknown -> "UNKNOWN"
-  | Unknown_no_contract -> "UNKNOWN_NO_CONTRACT"
-  | No_source -> "NO_SOURCE"
-  | No_target -> "NO_TARGET"
-  | Not_computed -> "NOT_COMPUTED"
+let string_of_verdict = Arch_rule_eval.string_of_verdict
 
 (* Inverse of [string_of_verdict] by SEARCH over [all], not a second hand-written
    match. A parallel match would need its own arm per constructor and would carry a
@@ -88,9 +74,9 @@ let string_of_verdict = function
    [string_of_verdict] and to [all] but forgotten HERE would compile clean and die
    only at runtime. Deriving it removes that case rather than documenting it --
    there is no longer a place to forget. *)
-let verdict_of_string s = List.find_opt (fun v -> string_of_verdict v = s) all
+let verdict_of_string = Arch_rule_eval.verdict_of_string
 
-let verdict_vocabulary = List.map string_of_verdict all
+let verdict_vocabulary = Arch_rule_eval.verdict_vocabulary
 
 type producer = {
   p_name : string;
@@ -169,6 +155,10 @@ type t = {
   verdicts : (string * int) list;
       (** Compatibility placeholders until verdict evaluation is persisted; see [verdicts_status]. *)
   sections : section list;
+  rules_path : string option;
+  rules_contract_ok : bool option;
+  rule_results : (int * Arch_rule_eval.result) list;
+  rule_contexts : (int * Yojson.Safe.t * int * int) list;
 }
 
 let findings (r : t) = List.concat_map (fun s -> s.s_findings) r.sections
@@ -202,7 +192,7 @@ let opt = function "" -> None | s -> Some s
    visible finding rather than a silent `covered`. *)
 let known_analyses = [ ("dead_code", "dead_code_sites"); ("sarif_import", "imported_findings") ]
 
-let collect ~db_path (t : Arch_db.t) : t =
+let collect ?rule_evaluation ~db_path (t : Arch_db.t) : t =
   let schema_version =
     if Arch_db.has_table t "comment_db_meta" then
       match q1 t "SELECT value FROM comment_db_meta WHERE key='schema_version'" with
@@ -243,7 +233,25 @@ let collect ~db_path (t : Arch_db.t) : t =
   (* No verdict-producing analysis persists results today: arch-rules evaluates in memory.
      Keep the numeric vocabulary for compatibility, but all renderers MUST label these zeros
      as unavailable placeholders, not measured counts. Imported findings do not change this. *)
-  let verdicts = List.map (fun v -> (v, 0)) verdict_vocabulary in
+  let rules_path, rules_contract_ok, rule_results =
+    match rule_evaluation with
+    | None -> (None, None, [])
+    | Some (path, contract_ok, results) ->
+        (Some path, Some contract_ok, List.mapi (fun i r -> (i + 1, r)) results)
+  in
+  let verdicts =
+    List.map
+      (fun v ->
+        let name = string_of_verdict v in
+        (name, List.length (List.filter (fun (_, r) -> r.Arch_rule_eval.verdict = name) rule_results)))
+      all
+  in
+  let rule_contexts =
+    List.map
+      (fun (ordinal, (r : Arch_rule_eval.result)) ->
+        (ordinal, `List r.origin_contexts, r.context_total, r.context_omitted))
+      rule_results
+  in
   let dead_code =
     if not (Arch_db.has_table t "dead_code_sites") then []
     else
@@ -406,7 +414,8 @@ let collect ~db_path (t : Arch_db.t) : t =
     else
       [ { s_analysis = "unknown_analysis"; s_status = "failed"; s_findings = unmatched_coverage } ]
   in
-  { db_path; schema_version; producers; coverage; top_frontier; verdicts; sections }
+  { db_path; schema_version; producers; coverage; top_frontier; verdicts; sections;
+    rules_path; rules_contract_ok; rule_results; rule_contexts }
 
 (* -------------------------------------------------------------------------- *)
 (* The three renderings. Each is a TOTAL function of one [t] and issues no      *)
@@ -414,16 +423,19 @@ let collect ~db_path (t : Arch_db.t) : t =
 (* rather than something three assertions try to establish after the fact.      *)
 (* -------------------------------------------------------------------------- *)
 
-let verdicts_status = "NOT_COMPUTED"
-
-let verdicts_reason =
+let unavailable_verdicts_reason =
   "arch-rules results are not persisted in this index. Verdict totals have not been computed; \
    numeric zeros are compatibility placeholders, not measured counts. Imported findings do not \
    determine rule verdicts."
 
 let verdicts_json (r : t) =
-  [ ("verdicts_status", `String verdicts_status);
-    ("verdicts_reason", `String verdicts_reason);
+  let status, reason =
+    match r.rules_path with
+    | Some _ -> ("COMPUTED", "Rules were evaluated in this report invocation against its open read-only database handle.")
+    | None -> ("NOT_COMPUTED", unavailable_verdicts_reason)
+  in
+  [ ("verdicts_status", `String status);
+    ("verdicts_reason", `String reason);
     ("verdicts", `Assoc (List.map (fun (k, n) -> (k, `Int n)) r.verdicts)) ]
 
 let header_json (r : t) =
@@ -463,10 +475,51 @@ let finding_json (f : finding) =
         match f.f_soundness_class with Some c -> `String c | None -> `Null );
       ("verdict", match f.f_verdict with Some v -> `String v | None -> `Null) ]
 
+let rule_result_json r (ordinal, (x : Arch_rule_eval.result)) =
+  let contexts, context_total, context_omitted =
+    match List.find_opt (fun (n, _, _, _) -> n = ordinal) r.rule_contexts with
+    | Some (_, j, total, omitted) -> (j, total, omitted)
+    | None -> (`List [], 0, 0)
+  in
+  `Assoc
+    ([ ("ordinal", `Int ordinal); ("evaluator", `String "arch-rules");
+       ("rule", `String x.rule); ("kind", `String x.kind);
+       ("verdict", `String x.verdict); ("exact", `Bool x.exact);
+       ("detail", `List (List.map (fun s -> `String s) x.detail));
+       ("detail_total", `Int x.detail_total);
+       ("witness", `List (List.map (fun s -> `String s) x.witness));
+       ("top_reasons", `List (List.map (fun s -> `String s) x.top_reasons));
+       ("origin_contexts", contexts); ("context_total", `Int context_total);
+       ("context_omitted", `Int context_omitted);
+       ("note", match x.note with Some s -> `String s | None -> `Null) ]
+    @ match x.sizes with
+      | Some (source, target) -> [("source_size", `Int source); ("target_size", `Int target)]
+      | None -> [])
+
+let alert_rank (_, (x : Arch_rule_eval.result)) =
+  match x.verdict with
+  | "VIOLATION" -> 0 | "POSSIBLE" -> 1
+  | "UNKNOWN" | "UNKNOWN_NO_CONTRACT" | "NOT_COMPUTED" -> 2
+  | "NO_SOURCE" | "NO_TARGET" -> 3 | _ -> 4
+
+let rule_alerts r =
+  List.filter (fun (_, x) -> x.Arch_rule_eval.verdict <> "PASS") r.rule_results
+  |> List.stable_sort (fun (oa, _ as a) (ob, _ as b) ->
+         match compare (alert_rank a) (alert_rank b) with 0 -> compare oa ob | n -> n)
+
+let ordering_json =
+  `Assoc
+    [("policy", `String "actionability_then_declaration");
+     ("explanation", `String "Serialized alerts are ordered VIOLATION, POSSIBLE, uncertainty, then vacuity; declaration ordinal is the sole tie-breaker within a tier. Viewers may reorder them.")]
+
 let to_json (r : t) : Yojson.Safe.t =
   `Assoc
     (header_json r
-    @ [ ( "sections",
+    @ [ ("rule_ordering", ordering_json);
+        ("rules_path", match r.rules_path with Some p -> `String p | None -> `Null);
+        ("rule_results", `List (List.map (rule_result_json r) r.rule_results));
+        ("rule_alerts", `List (List.map (rule_result_json r) (rule_alerts r)));
+        ( "sections",
           `List
             (List.map
                (fun s ->
@@ -529,8 +582,7 @@ let to_sarif (r : t) : Yojson.Safe.t =
           producers)
       r.sections
   in
-  let log = Arch_sarif.log
-    (List.map
+  let ordinary_runs = List.map
        (fun (s, prod, fs) ->
          { Arch_sarif.producer = Option.value ~default:"arch-report" prod;
            producer_version = None;
@@ -558,11 +610,51 @@ let to_sarif (r : t) : Yojson.Safe.t =
                         s.s_status } ]);
            contract_ok = None; computed = Some (s.s_status = "covered");
            proved = None })
-       groups)
+       groups
+  in
+  let rule_runs =
+    match r.rules_path with
+    | None -> []
+    | Some _ ->
+        let finding (ordinal, (x : Arch_rule_eval.result)) : Arch_sarif.finding =
+          { rule_id = Printf.sprintf "%s#%d" x.rule ordinal;
+            level = (match x.verdict with "VIOLATION" -> Arch_sarif.Error | "POSSIBLE" -> Arch_sarif.Warning | _ -> Arch_sarif.Note);
+            message = Printf.sprintf "#%d %s [%s]: %s%s" ordinal x.rule x.kind x.verdict
+                (match x.note with Some n -> " — " ^ n | None -> "");
+            verdict = Some x.verdict; soundness_class = None;
+            soundness = (match x.verdict with "UNKNOWN" -> Some "unknown_top" | "UNKNOWN_NO_CONTRACT" -> Some "no_contract" | _ -> None);
+            top_reasons = x.top_reasons;
+            locations = (match x.kind with "reach" | "exported" -> x.detail | _ -> []);
+            detail_total = x.detail_total; code_flow = x.witness }
+        in
+        [{ Arch_sarif.producer = "arch-rules"; producer_version = None;
+           category = "arch-report/rules";
+           findings = List.map finding (rule_alerts r);
+           coverage = []; top_frontier = r.top_frontier; notifications = [];
+           contract_ok = r.rules_contract_ok; computed = Some true;
+           proved = Some (Option.value ~default:0 (List.assoc_opt "PASS" r.verdicts)) }]
+  in
+  let log = Arch_sarif.log (ordinary_runs @ rule_runs)
   in
   (* These totals belong to the whole report, not to one producer's analysis run.
      Preserve the per-run computed flags: available findings do not imply rule evaluation. *)
-  `Assoc (("properties", `Assoc (verdicts_json r)) :: Yojson.Safe.Util.to_assoc log)
+  `Assoc
+    (("properties",
+      `Assoc
+        (verdicts_json r
+        @ [("rule_ordering", ordering_json);
+           ("index_producers",
+            `List
+              (List.map
+                 (fun p ->
+                   `Assoc
+                     [("producer", `String p.p_name);
+                      ("producer_version",
+                       match p.p_version with Some v -> `String v | None -> `Null);
+                      ("soundness_class", `String p.p_soundness_class)])
+                 r.producers));
+           ("rule_results", `List (List.map (rule_result_json r) r.rule_results))]))
+     :: Yojson.Safe.Util.to_assoc log)
 
 let esc s =
   String.to_seq s
@@ -602,12 +694,55 @@ let to_html (r : t) : string =
           (esc pr.p_soundness_class))
       r.producers ;
     p "</table>\n") ;
-  p "<h2>Verdicts</h2>\n<p class=\"notrun\">Verdict totals: %s. %s</p>\n<table><tr>"
+  let verdicts_status, verdicts_reason =
+    match r.rules_path with Some _ -> ("COMPUTED", "Rules were evaluated in this report invocation against its open read-only database handle.")
+    | None -> ("NOT_COMPUTED", unavailable_verdicts_reason)
+  in
+  p "<h2>Verdicts</h2>\n<p%s>Verdict totals: %s. %s</p>\n<table><tr>"
+    (if r.rules_path = None then " class=\"notrun\"" else "")
     (esc verdicts_status) (esc verdicts_reason) ;
   List.iter (fun (k, _) -> p "<th>%s</th>" (esc k)) r.verdicts ;
   p "</tr><tr>" ;
-  List.iter (fun _ -> p "<td>unavailable</td>") r.verdicts ;
+  List.iter (fun (_, n) -> if r.rules_path = None then p "<td>unavailable</td>" else p "<td>%d</td>" n) r.verdicts ;
   p "</tr></table>\n" ;
+  (match r.rules_path with
+  | None -> ()
+  | Some path ->
+      p "<h2>Architecture rules</h2><p>rules: <code>%s</code>; evaluator: <code>arch-rules</code> (version and soundness class are not inferred from index producers)</p>\n" (esc path) ;
+      p "<p>Serialized alerts are ordered VIOLATION, POSSIBLE, uncertainty, then vacuity; declaration ordinal is the sole tie-breaker within a tier. Viewers may reorder them.</p>\n" ;
+      p "<h3>Alert review order</h3><ol>" ;
+      List.iter
+        (fun (ordinal, (x : Arch_rule_eval.result)) ->
+          p "<li>#%d %s — %s</li>" ordinal (esc x.rule) (esc x.verdict))
+        (rule_alerts r) ;
+      p "</ol><h3>Complete rule results (declaration order)</h3>\n" ;
+      List.iter
+        (fun (ordinal, (x : Arch_rule_eval.result)) ->
+          p "<article><h3>#%d %s <small>%s</small></h3><p>%s</p>" ordinal (esc x.rule) (esc x.verdict)
+            (esc (Option.value ~default:"" x.note)) ;
+          p "<p>kind: <code>%s</code>; exact: <code>%b</code>; detail total: %d</p>" (esc x.kind)
+            x.exact x.detail_total ;
+          (match x.sizes with
+          | Some (source, target) -> p "<p>source size: %d; target size: %d</p>" source target
+          | None -> ()) ;
+          if x.detail <> [] then (
+            p "<h4>Displayed detail</h4><ul>" ;
+            List.iter (fun detail -> p "<li>%s</li>" (esc detail)) x.detail ;
+            p "</ul>") ;
+          if x.top_reasons <> [] then (
+            p "<h4>Uncertainty reasons</h4><ul>" ;
+            List.iter (fun reason -> p "<li>%s</li>" (esc reason)) x.top_reasons ;
+            p "</ul>") ;
+          if x.witness <> [] then (
+            p "<ol class=\"witness\">" ; List.iter (fun w -> p "<li>%s</li>" (esc w)) x.witness ; p "</ol>") ;
+          (match List.find_opt (fun (n, _, _, _) -> n = ordinal) r.rule_contexts with
+          | Some (_, `List contexts, total, omitted) when total > 0 ->
+              p "<h4>Divisor contexts (%d total, %d omitted)</h4><ul>" total omitted ;
+              List.iter (fun j -> p "<li><code>%s</code></li>" (esc (Yojson.Safe.to_string j))) contexts ;
+              p "</ul>"
+          | _ -> ()) ;
+          p "</article>\n")
+        r.rule_results) ;
   (* The coverage matrix, which the HTML channel did not render at all — so the one artifact a
      human opens was missing the per-(language, analysis) statuses the other two carry. FR-021
      asks for the SAME header on all three; a channel that silently drops part of it is the

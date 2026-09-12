@@ -17,7 +17,7 @@ open Arch_tools
 let usage =
   {|arch-report — one report, three renderings, from a single query pass.
 
-Usage: arch-report <db> --out <dir>
+Usage: arch-report <db> --out <dir> [--rules <rules-file>]
 
 Writes into <dir>:
   report.json   the machine contract
@@ -37,12 +37,21 @@ let write_file path contents =
     try open_out path
     with Sys_error e -> die 2 (Printf.sprintf "arch-report: cannot write %s: %s" path e)
   in
-  output_string oc contents ;
-  close_out oc
+  try
+    output_string oc contents ;
+    close_out oc
+  with Sys_error e ->
+    close_out_noerr oc ;
+    die 2 (Printf.sprintf "arch-report: cannot write %s: %s" path e)
 
 let () =
-  match Array.to_list Sys.argv with
-  | _ :: db_path :: "--out" :: dir :: _ ->
+  try
+    let db_path, dir, rules_path =
+      match Array.to_list Sys.argv with
+      | [_; db_path; "--out"; dir] -> (db_path, dir, None)
+      | [_; db_path; "--out"; dir; "--rules"; rules] -> (db_path, dir, Some rules)
+      | _ -> die 2 usage
+    in
       if not (Sys.file_exists dir && Sys.is_directory dir) then
         die 2 (Printf.sprintf "arch-report: --out %s is not a directory" dir) ;
       let t =
@@ -55,17 +64,37 @@ let () =
         | Arch_db.Refused m -> die 3 ("arch-report: " ^ m)
         | Arch_db.Broken m -> die 2 ("arch-report: " ^ m)
       in
+      let rule_evaluation =
+        match rules_path with
+        | None -> None
+        | Some path ->
+            let contract_ok, results = Arch_rule_eval.evaluate_file t path in
+            Some (path, contract_ok, results)
+      in
       let r =
-        try Arch_report.collect ~db_path t
+        try Arch_report.collect ?rule_evaluation ~db_path t
         with Arch_db.Refused m -> die 3 ("arch-report: " ^ m)
       in
+      let json = Yojson.Safe.pretty_to_string (Arch_report.to_json r) ^ "\n" in
+      let sarif = Yojson.Safe.pretty_to_string (Arch_report.to_sarif r) ^ "\n" in
+      let html = Arch_report.to_html r in
       write_file (Filename.concat dir "report.json")
-        (Yojson.Safe.pretty_to_string (Arch_report.to_json r) ^ "\n") ;
+        json ;
       write_file (Filename.concat dir "report.sarif")
-        (Yojson.Safe.pretty_to_string (Arch_report.to_sarif r) ^ "\n") ;
-      write_file (Filename.concat dir "report.html") (Arch_report.to_html r) ;
-      Printf.printf "arch-report: %d finding(s) across %d section(s) -> %s\n"
-        (List.length (Arch_report.findings r))
-        (List.length r.Arch_report.sections)
-        dir
-  | _ -> die 2 usage
+        sarif ;
+      write_file (Filename.concat dir "report.html") html ;
+      let historical = List.length (Arch_report.findings r) in
+      let rule_alerts =
+        List.length
+          (List.filter
+             (fun (_, result) -> result.Arch_rule_eval.verdict <> "PASS")
+             r.Arch_report.rule_results)
+      in
+      Printf.printf
+        "arch-report: %d historical finding(s) across %d section(s), %d rule alert(s) -> %s\n"
+        historical (List.length r.Arch_report.sections) rule_alerts dir
+  with
+  | Arch_db.Refused m -> die 3 ("arch-report: " ^ m)
+  | Arch_db.Broken m -> die 2 ("arch-report: " ^ m)
+  | Invalid_argument m -> die 2 ("arch-report: " ^ m)
+  | Arch_rule_eval.Error m -> die 2 ("arch-report: " ^ m)

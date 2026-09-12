@@ -565,7 +565,9 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
     Sqlite3.prepare
       db
       "INSERT INTO exn_origins (function_id, scope_id, form, exn_path, escapes, \
-       line, col, channel) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+       line, col, channel, operand_primitive, operand_slot, operand_category, operand_repr, \
+       operand_integer_kind, operand_unavailable_reason) \
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
   in
   let stmt_rebind =
     Sqlite3.prepare

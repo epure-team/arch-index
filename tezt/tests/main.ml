@@ -104,6 +104,7 @@ let () =
   Phantom_option_origins.register () ;
   Module_alias_heads.register () ;
   Report.register () ;
+  Actionable_review_reports.register () ;
 
   Sarif_in.register () ;
   Exported_selector.register () ;

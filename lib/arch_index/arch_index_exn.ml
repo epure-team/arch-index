@@ -55,6 +55,16 @@ type origin = {
   o_escapes : bool;
   o_line : int;
   o_col : int;
+  o_operand : operand_context option;
+}
+
+and operand_context = {
+  primitive : string;
+  slot : int;
+  category : string;
+  representation : string option;
+  integer_kind : string;
+  unavailable_reason : string option;
 }
 
 type scope = {
@@ -76,7 +86,7 @@ type arm = {
 
 type acc = {
   mutable scopes : scope list; (* reversed *)
-  mutable raw_origins : (form * string option * int option * int * int) list;
+  mutable raw_origins : (form * string option * int option * int * int * operand_context option) list;
   mutable stack : int list; (* innermost first *)
   mutable next_id : int;
 }
@@ -378,9 +388,18 @@ let with_cleared_scopes acc f =
   acc.stack <- [] ;
   Fun.protect ~finally:(fun () -> acc.stack <- saved) f
 
-let add acc form path scope (loc : Location.t) =
+(* Typedtree keeps omitted optional arguments in their original slots.  Preserve that positional
+   evidence: looking for the second present value would silently relabel a later argument as the
+   divisor.  Kept polymorphic so the negative control can exercise the slot rule without
+   manufacturing a Typedtree node. *)
+let second_original_slot = function _ :: slot :: _ -> slot | _ -> None
+
+let%test "original slot 2 missing is not replaced by a later present argument" =
+  second_original_slot [Some "lhs"; None; Some "later"] = None
+
+let add ?operand acc form path scope (loc : Location.t) =
   let line, col = pos loc in
-  acc.raw_origins <- (form, path, scope, line, col) :: acc.raw_origins
+  acc.raw_origins <- (form, path, scope, line, col, operand) :: acc.raw_origins
 
 (** [raise e] where [e] was bound by a handler arm of THIS node: informational
     re-raise. The non-closing rule already keeps what such an arm forwards. *)
@@ -456,7 +475,35 @@ let record_prim_head acc ~(fn : Typedtree.expression) ~args ~(loc : Location.t) 
               args
           in
           if unsafe then add acc Compare (Some "Invalid_argument") (current_scope acc) loc
-      | Some P_division -> add acc Division (Some "Division_by_zero") (current_scope acc) loc
+      | Some P_division ->
+          let integer_kind =
+            match prim_name with
+            | "%int32_div" | "%int32_mod" -> "int32"
+            | "%int64_div" | "%int64_mod" -> "int64"
+            | "%nativeint_div" | "%nativeint_mod" -> "nativeint"
+            | _ -> "int"
+          in
+          let category, representation, unavailable_reason =
+            match second_original_slot (List.map snd args) with
+            | None -> ("missing", None, Some "original argument slot 2 is absent")
+            | Some arg -> (
+                match arg.exp_desc with
+                | Texp_constant c -> (
+                    match c with
+                    | Asttypes.Const_int n -> ("integer_literal", Some (string_of_int n), None)
+                    | Const_int32 n -> ("integer_literal", Some (Int32.to_string n), None)
+                    | Const_int64 n -> ("integer_literal", Some (Int64.to_string n), None)
+                    | Const_nativeint n -> ("integer_literal", Some (Nativeint.to_string n), None)
+                    | _ -> ("other", None, Some "slot 2 is not an integer literal or identifier"))
+                | Texp_ident (_, lid, _) ->
+                    let s = Longident.last lid.txt in
+                    if String.length s <= 256 then ("identifier", Some s, None)
+                    else ("identifier", None, Some "representation exceeds 256 UTF-8 bytes")
+                | _ -> ("other", None, Some "slot 2 is not an integer literal or identifier"))
+          in
+          add ~operand:{primitive = prim_name; slot = 2; category; representation; integer_kind;
+                        unavailable_reason}
+            acc Division (Some "Division_by_zero") (current_scope acc) loc
       | Some P_index -> add acc Index (Some "Invalid_argument") (current_scope acc) loc
       | None -> ())
   | _ -> ()
@@ -486,13 +533,14 @@ let finalize acc =
   in
   let origins =
     List.rev_map
-      (fun (form, path, scope, line, col) ->
+      (fun (form, path, scope, line, col, o_operand) ->
         let escapes =
           match form with
           | Reraise -> true
           | _ -> not (closed_by scope path)
         in
-        {o_form = form; o_path = path; o_scope = scope; o_escapes = escapes; o_line = line; o_col = col})
+        {o_form = form; o_path = path; o_scope = scope; o_escapes = escapes; o_line = line; o_col = col;
+         o_operand})
       acc.raw_origins
   in
   (scopes, origins)
