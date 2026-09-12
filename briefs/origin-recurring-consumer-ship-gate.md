@@ -25,7 +25,8 @@ Consumer/validator/upload all success. Artifact10304467961 (11105bytes), expires
 Downloaded and independently validated exit0: six known files only, held UNKNOWN0,
 23/828/5223/491 and zero deltas. CI provenance uses GitHub's tested merge checkout
 316f4f31b05afe673ec911784c5bc289a92542c8 (not the PR head); dirty list empty.
-Main postmerge CI34715366482 started; pending at this emission, not claimed green.
+Main postmerge CI34715366482 also passed, build9m01s (19:51:11Z→20:00:12Z).
+MCP skipped explicitly. No postmerge correction or retry needed.
 Owned clean worktree removed including597MiBbuild; six owned evidence directories removed.
 Remote branch deleted; local -d refused rebase ancestry, tree equality to main verified0
 before explicit -D. Unrelated untracked main files and other worktrees preserved.
