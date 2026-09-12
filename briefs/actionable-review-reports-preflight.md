@@ -26,3 +26,10 @@ Do not run Dune concurrently. Every Dune call must name `--root .` and use
 `opam exec --switch=/home/mathias/dev/arch-index -- ...`. Capture real final process exit
 codes. Retain compact audit evidence; remove disposable scratch DBs and the delivery
 worktree/build after landing.
+
+## Fresh baseline before implementation — 2026-09-12
+
+Root ran `rtk proxy opam exec --switch=/home/mathias/dev/arch-index -- dune test --root . --force`
+in this worktree, before any code/test edit. Actual process session 36741 completed with explicit
+exit 0: all 231 Tezt tests and Alcotest suites passed. Expected negative-fixture SQL constraint
+diagnostics were present, not terminal failures. No Dune process from this baseline remains.

@@ -94,9 +94,16 @@ When rules were supplied and parsed/evaluated, verdict census availability is CO
 if individual rules returned NOT_COMPUTED. Without rules, preserve the eight compatibility
 zeros with NOT_COMPUTED and an explanation. Coverage, rule verdict, verdict-census availability,
 syntactic operand category and producer soundness are separate facts. Never map one into another.
-An empty supplied rules file is evaluated with zero rules; expose that scope explicitly and
-never describe it as proving the project clean. Malformed/unreadable rules fail before artifact
-writes, with nonzero diagnostic; no fallback to an apparently successful no-rules report.
+An empty supplied rules file is rejected with exit 2 and an explicit diagnostic, matching the
+existing shared parser contract. Malformed/unreadable rules also fail before artifact writes;
+no fallback to an apparently successful no-rules report. On successfully rendered reports,
+exit 0 means artifacts written, even when rules contain VIOLATION or UNKNOWN; arch-rules remains
+the separate CI gate. Existing report usage/broken-DB exit 2 and refused-read exit 3 remain.
+
+Research correction during specification: the initial intake assumed the parser accepted an
+empty file. Fresh source research found its explicit `defines no rules` rejection. Preserving
+that behavior removes an unnecessary parser divergence; this bounded correction is recorded
+under standing autonomy, not described as a new human approval.
 
 The report's artifact ordering is a reviewer convenience, not a probability of correctness or
 severity conversion. SARIF viewers may reorder alerts. Preserve witness order and use existing
@@ -117,6 +124,32 @@ worktree. README and the reporting contract were read. The deterministic trust a
 keyword checks on the canonical task sentence both returned false. Type and Trust boundary
 are confirmed under the user's standing autonomous execution instruction; no new interactive
 approval or comprehension quiz is claimed. Material scope changes still require escalation.
+
+### Resolved specification details (part of this intake's planning contract)
+
+- Rule ordinal is one-based in the parsed rule list (comments/blank lines do not count).
+  Duplicate display names remain distinct via ordinal in all formats; no across-edit identity
+  guarantee. Full rule results retain declaration order; alert entries use tier then ordinal.
+- New rule findings identify the evaluator as arch-rules, not whichever producer_runs row
+  sorts last. Do not inherit foreign importer soundness/version. Preserve exact, contract_ok,
+  verdict and reasons separately; index producer metadata and imported attribution stay intact.
+- Origin supporting contexts use existing site identity plus occurrence position, preserving
+  row multiplicity. Keep 200 offender sites; separately cap contexts at 200 per result, emitted
+  only for displayed offender sites. context_total counts all matching offender-origin rows;
+  context_omitted is that total minus emitted contexts, independent of detail_total. Order by
+  site identity, source line/column, then row id for ties. No context contributes to an exemption.
+- Literal/identifier text is limited to 256 UTF-8 bytes. Omit an oversized representation whole
+  with a limit reason; preserve its category/primitive/slot. No invalid UTF-8 truncation.
+- Old absent column/SQL NULL means unavailable. Malformed non-NULL operand metadata or unknown
+  category/type refuses diagnostically (report 3, arch-rules 2); no fabricated normalization.
+- Preserve witness labels/repetitions verbatim as ordered data; logical-only labels remain
+  logical SARIF locations. Operand context is a structured property, never a flow or fake URI.
+- All report strings are escaped in HTML. Write failures return 2 without a success summary;
+  pre-write input rejection preserves preexisting outputs. Atomic three-file publication is
+  not promised; document partial I/O output as unusable.
+- New self-contained checker cases are rules, ordering, operands, compatibility. Include
+  non-vacuous mixed verdicts/importer controls, duplicate rule names, both context/site limits,
+  malformed/old metadata and authentic compiler fixtures. Wire through normal Tezt CI.
 
 ## Quality Gates
 
