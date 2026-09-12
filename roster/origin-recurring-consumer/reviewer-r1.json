@@ -1,0 +1,14 @@
+[
+  {
+    "severity": "LOW",
+    "confidence": 5,
+    "path": "scripts/origin-consumer.js",
+    "line": 68,
+    "category": "correctness",
+    "summary": "Reference validation accepts empty and non-normalized module paths instead of classifying them as input errors",
+    "evidence": "validateReference explicitly rejects absolute paths, literal '..' slash-components, and duplicates, but accepts identities such as '', '.', 'lib//x.ml', and 'lib/./x.ml'. A direct probe against HEAD printed ACCEPTED for these values. Empty, dot, and noncanonical spellings are ambiguous reference identities; they ordinarily cause a later module-population mismatch and coverage-drift1, so behavior remains fail-closed, but the resulting complete drift package describes invalid-looking configuration as measured drift rather than an input error.",
+    "fix": "Clarify the intended reference-path grammar. If empty, dot, or noncanonical spellings are not valid module identities, reject those forms during reference validation and add failures-mode controls asserting error2 and the error artifact shape; otherwise document their drift classification explicitly.",
+    "fingerprint": "origin-reference-path-canonical-validation",
+    "specialist": "reviewer"
+  }
+]

@@ -1,0 +1,14 @@
+[
+  {
+    "severity": "MEDIUM",
+    "confidence": 5,
+    "path": "scripts/origin-consumer.js",
+    "line": 147,
+    "category": "architecture",
+    "summary": "The complete consumer lifecycle is concentrated in one oversized stateful orchestration function",
+    "evidence": "runConsumer spans lines 147-277 (about 131 lines), exceeding the architect role's 50-line function threshold. It owns output admission, configuration resolution, Git and inventory provenance, indexing, census computation, policy/report execution, evidence parity, publication, rollback, transient cleanup, diagnostics, final-record emission, and terminal precedence through shared mutable variables. AC-10, AC-14, and AC-16 require subtle ordering among policy evidence, error precedence, cleanup, rollback, and final publication; concentrating those transitions in one function makes future changes unusually likely to disturb a distant invariant. checks/origin-recurring-consumer.js:94-236 mirrors the concentration in a roughly 143-line failures function, making phase-level regression intent harder to locate. Current gates pass, so this is maintainability risk rather than a demonstrated behavioral failure.",
+    "fix": "Keep runConsumer as the single public orchestration boundary, but extract cohesive private phases with explicit inputs/results: output/config admission, immutable input snapshot, indexing/measurement, policy/report evaluation, publication validation, and finalization/rollback. Model the terminal outcome as a small explicit result object passed into finalization instead of mutating exit/status/complete across try/catch/finally. Split adverse controls by the same lifecycle phases while retaining the three contractual checker modes.",
+    "fingerprint": "origin-consumer-monolithic-lifecycle-orchestrator",
+    "specialist": "architect"
+  }
+]

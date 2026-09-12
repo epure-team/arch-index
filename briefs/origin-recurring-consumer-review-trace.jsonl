@@ -1,0 +1,8 @@
+{"schema_version":"1.0","ts":"2026-09-12T19:11:45.444Z","task":"origin-recurring-consumer","round":1,"cycle":1,"event":"scope-gate","actor":"check-scope-diff.sh","outcome":"ran"}
+{"schema_version":"1.0","ts":"2026-09-12T19:14:43.999Z","task":"origin-recurring-consumer","round":1,"cycle":1,"event":"specialist","actor":"reviewer","outcome":"ran"}
+{"schema_version":"1.0","ts":"2026-09-12T19:14:44.183Z","task":"origin-recurring-consumer","round":1,"cycle":1,"event":"specialist","actor":"code-quality-auditor","outcome":"skipped","detail":"kb/properties.md absent; no KB invariant audit applicable"}
+{"schema_version":"1.0","ts":"2026-09-12T19:14:44.371Z","task":"origin-recurring-consumer","round":1,"cycle":1,"event":"specialist","actor":"reviewer-tui","outcome":"skipped","detail":"No TUI interface in this slice"}
+{"schema_version":"1.0","ts":"2026-09-12T19:17:34.874Z","task":"origin-recurring-consumer","round":1,"cycle":1,"event":"specialist","actor":"architect","outcome":"ran"}
+{"schema_version":"1.0","ts":"2026-09-12T19:22:48.019Z","task":"origin-recurring-consumer","round":1,"cycle":1,"event":"specialist","actor":"spec-compliance","outcome":"ran"}
+{"schema_version":"1.0","ts":"2026-09-12T19:26:01.502Z","task":"origin-recurring-consumer","round":1,"cycle":1,"event":"cross-runtime","actor":"opencode","outcome":"ran","detail":"One probe executed; output non-conforming and discarded; no independent external verdict accepted","digest":"opencode:76f897c73342fdbf"}
+{"schema_version":"1.0","ts":"2026-09-12T19:26:01.691Z","task":"origin-recurring-consumer","round":1,"cycle":1,"event":"normalizer","actor":"review-normalize.js","outcome":"ran"}
