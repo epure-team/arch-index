@@ -1201,5 +1201,3 @@ let evaluate_file t rules_path =
   let g = Arch_graph.load t in
   let contract_ok = Arch_db.contract_ok t "rules" in
   (contract_ok, List.map (eval t g ~sound:contract_ok) rules)
-
-

@@ -47,4 +47,3 @@ controls; derive any new findings from actual source/commands. Root baseline231 
 before implementation; reverify final tree. Check self-index movement is measured, no gate
 weakened. Same worktree, no concurrent Dune, no extra builds/worktrees for read-only specialists.
 Record degraded cross-runtime honestly. Leave review artifacts conforming to installed bundle.
-
