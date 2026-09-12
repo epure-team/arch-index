@@ -1,7 +1,7 @@
 # Ship gate — actionable-review-reports
 
 **Date:** 2026-09-12
-**State:** ready to push; not yet merged
+**State:** MERGED — PR #99
 **Branch:** `feat/actionable-review-reports`
 **Target:** `main`, rebase merge only
 
@@ -24,7 +24,7 @@
 - [x] Self-index golden exact: 23 modules, 828 functions, 5223 calls; 2x2 recalibration current.
 - [x] Architecture policy passes: 1 proved, 3 UNKNOWN, no failures or vacuous rules.
 - [x] Committed-range whitespace, bundle/convergence and repaired friction schema checks.
-- [ ] Required remote `build` green on exact PR head, up-to-date base, then guarded rebase merge.
+- [x] Required remote `build` green on exact PR head, up-to-date base, then guarded rebase merge.
 
 ## Limits and authority
 
@@ -42,3 +42,24 @@ Only the active delivery worktree is owned by this slice. QA DB removed, recalib
 cleaned. After actual merge, root will sync main preserving unrelated untracked files, delete
 the remote feature branch and remove the clean delivery worktree/build; durable evidence stays
 in Git. No release or deploy action is included.
+
+## Actual ship evidence
+
+PR https://github.com/epure-team/arch-index/pull/99 merged at `2026-09-12T17:49:31Z`
+as `d7112964df679fb44bc033e878059537208f58da`. Exact-head guard used
+`121fd12c1df134b0757d2cef0fe1f2e9a8ae275b`; pre-merge state CLEAN, base `932211b`.
+CI https://github.com/epure-team/arch-index/actions/runs/34708914566 passed first attempt:
+required build 8m50s, all tests/self-index/recalibration/rules/impact steps successful.
+No gate bypass or CI rerun. MCP and release explicitly skipped.
+
+Local main fast-forwarded to the actual merge, preserving six unrelated untracked entries.
+Remote feature branch deleted. `git cherry origin/main HEAD` marked every delivery commit
+patch-equivalent to main. Post-ship metadata commit is retained locally for the next delivery;
+the clean worktree/build can then be removed without force. Main CI `34709378209` is running.
+
+ccusage was available: day-bounded offline aggregate captured locally in main's untracked
+`skills-meta/cost.jsonl`, not posted to GitHub because it includes unrelated concurrent work.
+Its actual totalCost field was used rather than treating missing totalCostUSD as zero.
+No harness metabolism file or KB exists. All eight completed pre-ship phases had friction
+entries (no reconstruction needed). Nine old Tezt temporary directories were examined read-only:
+none had proven ownership by this delivery, so none was removed.
