@@ -30,6 +30,13 @@ arch-index uses the language server to extract call graphs. Install the server f
 | Python | `pip install pyright` or `pip install python-lsp-server` |
 | OCaml | `opam install ocaml-lsp-server` |
 
+LSP lookup, startup, timeout/partial-result, and unexpected-error diagnostics are
+always written to stderr. They do not require `--verbose`; that flag only adds
+progress narration. These conditions retain the current best-effort contract:
+the command still writes an empty or partial database and exits successfully, so
+automation that needs a complete index must inspect stderr or validate the
+resulting database rather than treating exit code 0 as a completeness signal.
+
 ## Notes
 
 **Go**: point `arch-index` at the **module root** (the directory containing `go.mod`). gopls needs a warm-up period before `workspace/symbol` returns results; if you get 0 functions on a large module, the LSP warm-up timeout in the binary may need tuning.

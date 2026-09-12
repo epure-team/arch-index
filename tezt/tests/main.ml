@@ -92,6 +92,7 @@ let () =
   Effects.register_endpoint_ambiguity () ;
   Lsp_error_diagnostics.register () ;
   Lsp_call_diagnostics.register () ;
+  Lsp_runner_diagnostics.register () ;
   Lsp_readiness.register_indexing_token_is_authoritative () ;
   Lsp_readiness.register_interphase_gap_is_not_completion () ;
   Lsp_readiness.register_silent_server () ;
