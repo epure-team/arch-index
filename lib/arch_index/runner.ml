@@ -275,10 +275,9 @@ let run ~sw ~env ~project_dir ~language ~output ?(no_enrich = false)
     match Language_registry.lookup registry ~language ~project_dir with
     | Ok cfg -> Some cfg
     | Error msg ->
-        if verbose then
-          Arch_io.eprintf
-            "arch_index_lsp: LSP lookup failed: %s\n%!"
-            msg ;
+        Arch_io.eprintf
+          "arch_index_lsp: LSP lookup failed: %s\n%!"
+          msg ;
         None
   in
   (* Temporary output path *)
@@ -311,8 +310,7 @@ let run ~sw ~env ~project_dir ~language ~output ?(no_enrich = false)
                 ()
             with
             | Error msg ->
-                if verbose then
-                  Arch_io.eprintf "arch_index_lsp: LSP start failed: %s\n%!" msg
+                Arch_io.eprintf "arch_index_lsp: LSP start failed: %s\n%!" msg
             | Ok client ->
                 let readiness = Lsp_client.readiness client in
                 if verbose then
@@ -344,18 +342,16 @@ let run ~sw ~env ~project_dir ~language ~output ?(no_enrich = false)
                 Lsp_client.shutdown client)
       with
       | Eio.Time.Timeout ->
-          if verbose then
-            Arch_io.eprintf
-              "arch_index_lsp: timeout after %.0fs — using partial results \
-               (%d functions, %d calls)\n%!"
-              timeout_s
-              (List.length !fn_rows_ref)
-              (List.length !call_rows_ref)
+          Arch_io.eprintf
+            "arch_index_lsp: timeout after %.0fs — using partial results \
+             (%d functions, %d calls)\n%!"
+            timeout_s
+            (List.length !fn_rows_ref)
+            (List.length !call_rows_ref)
       | exn ->
-          if verbose then
-            Arch_io.eprintf
-              "arch_index_lsp: unexpected error: %s\n%!"
-              (Printexc.to_string exn))) ;
+          Arch_io.eprintf
+            "arch_index_lsp: unexpected error: %s\n%!"
+            (Printexc.to_string exn))) ;
   let fn_rows, call_rows = !fn_rows_ref, !call_rows_ref in
   (* Step 8: Write SQLite DB atomically *)
   (try Sys.remove tmp_output with _ -> ()) ;
