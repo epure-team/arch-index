@@ -1,0 +1,17 @@
+{
+  "digests": {
+    "questions": "0b8d18a290addfb1e82bd647004ea23177032762febdbf6c0e17aa6706a687f0"
+  },
+  "questions": [
+    "Quelles interfaces existantes exécutent `forbid origin`, et quels formats de sortie, codes de retour et champs de résultat exposent-elles aujourd’hui ?",
+    "Comment le codebase représente-t-il actuellement la couverture, l’indisponibilité, l’incertitude, les témoins, les totaux et les omissions pour les règles d’origine ?",
+    "Quels invariants existants gouvernent l’identité des sites, les décomptes, les allow-lists, les verdicts et les limites d’évidence de `forbid origin` ?",
+    "Quels corpus, fixtures et scénarios positifs ou négatifs possédés par le projet exercent déjà les origines, leurs canaux, leurs formes et leurs cas d’absence ou de données malformées ?",
+    "Quels workflows CI, scripts de contrôle et mécanismes de recalibration existants exécutent des analyses récurrentes sur des entrées bornées ou épinglées, et quelles preuves durables produisent-ils ?",
+    "[ecosystem] Comment les outils établis de policy gating mesurent-ils la couverture et la stabilité de règles récurrentes sur un corpus de référence versionné ?",
+    "[ecosystem] Quels formats ou pratiques existants distinguent-ils un contrôle réussi, une violation détectée, une analyse indisponible et une dérive du corpus ou de sa baseline ?"
+  ],
+  "technical_ids": [
+    "forbid origin"
+  ]
+}
