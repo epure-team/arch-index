@@ -1,0 +1,2 @@
+{"ts":"2026-09-12T17:09:10.554Z","task":"actionable-review-reports","cycle_round":1,"cycle":1,"runtime":"opencode","digest":"opencode:fd1dbeaa7d0c6431","outcome":"degraded","reason":"timeout","duration_s":120.071,"runtime_exit":124,"prompt_digest":"523c3734b69ae330"}
+{"ts":"2026-09-12T17:10:00.040Z","task":"actionable-review-reports","cycle_round":1,"cycle":1,"runtime":"opencode","digest":"opencode:fd1dbeaa7d0c6431","outcome":"degraded","reason":"tree-mutation","duration_s":120.077,"runtime_exit":3,"prompt_digest":"523c3734b69ae330"}
