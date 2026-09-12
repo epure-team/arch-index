@@ -1,6 +1,6 @@
 # Spec Brief — guard-division-analysis
 
-**Date:** 2026-09-12T22:12:00Z
+**Date:** 2026-09-13 (Europe/Paris)
 **Status: VALIDATED**
 **Spec file:** specs/guard-division-analysis.md
 **User stories:** 3
