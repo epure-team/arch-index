@@ -76,6 +76,7 @@ arch-index makes call-graph reachability answerable as a SQL query:
 - [Browsing the index with arch-serve](docs/arch-serve.md)
 - [Change impact for reviewers and agents](docs/change-impact.md)
 - [Architecture fitness functions](docs/fitness-functions.md)
+- [Unified architecture reports](docs/reporting.md)
 - [Error channels: how can this function fail?](docs/error-channels.md)
 - [Exception raise-sets](docs/exception-raise-sets.md)
 - [Porting the error analysis to another language](docs/error-channels-porting.md)

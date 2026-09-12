@@ -115,6 +115,9 @@ let with_bt () = Printexc.raise_with_backtrace E (Printexc.get_raw_backtrace ())
 
 (* US-1.12 : raising primitives *)
 let div x y = x / y
+let div_literal x = x / 42
+let div_expr x y = x / (y + 1)
+let div_partial = ( / ) 1
 
 let idx (arr : int array) i = arr.(i)
 
@@ -290,6 +293,22 @@ let register () =
           Batch.contains b ~msg:"US-1.12 unknown value origin" ~haystack:(String.concat "," (origins conn "unknown_raiser")) "unknown:NULL:1" ;
           Batch.contains b ~msg:"US-1.12 literal origin kept next to the unknown one" ~haystack:(String.concat "," (origins conn "unknown_raiser")) "raise:Exn_a.E:1" ;
           Batch.eq_string b ~msg:"US-1.12 division origin" (String.concat "," (origins conn "div")) "division:Division_by_zero:1" ;
+          Batch.eq_string_opt b ~msg:"division identifier records typed slot-2 syntax"
+            (Db.string_opt conn
+               "SELECT operand_category || ':' || operand_repr || ':' || operand_slot || ':' || operand_integer_kind FROM exn_origins o JOIN functions f ON f.id=o.function_id WHERE f.name='div'")
+            (Some "identifier:y:2:int") ;
+          Batch.eq_string_opt b ~msg:"division literal records compiler text without evaluating it"
+            (Db.string_opt conn
+               "SELECT operand_category || ':' || operand_repr FROM exn_origins o JOIN functions f ON f.id=o.function_id WHERE f.name='div_literal'")
+            (Some "integer_literal:42") ;
+          Batch.eq_string_opt b ~msg:"complex divisor is explicit other with no fabricated text"
+            (Db.string_opt conn
+               "SELECT operand_category || ':' || COALESCE(operand_repr,'NULL') FROM exn_origins o JOIN functions f ON f.id=o.function_id WHERE f.name='div_expr'")
+            (Some "other:NULL") ;
+          Batch.eq_string_opt b ~msg:"partial primitive preserves missing original slot 2"
+            (Db.string_opt conn
+               "SELECT operand_category || ':' || COALESCE(operand_repr,'NULL') || ':' || operand_slot FROM exn_origins o JOIN functions f ON f.id=o.function_id WHERE f.name='div_partial'")
+            (Some "missing:NULL:2") ;
           Batch.eq_string b ~msg:"US-1.12 index origin" (String.concat "," (origins conn "idx")) "index:Invalid_argument:1" ;
           Batch.eq_string b ~msg:"US-1.12 comparison at int records nothing" (String.concat "," (origins conn "cmp_int")) "" ;
           Batch.eq_string b ~msg:"US-1.12 comparison at a type variable is an origin" (String.concat "," (origins conn "cmp_poly")) "compare:Invalid_argument:1" ;

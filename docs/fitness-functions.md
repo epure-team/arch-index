@@ -9,6 +9,18 @@ deptrac (PHP), import-linter (Python) and go-arch-lint (Go) established.
 ./arch-rules /tmp/repo.db arch-rules.txt --on-unknown fail
 ```
 
+## Read rule results in a unified report
+
+`arch-report /tmp/repo.db --out report-dir --rules arch-rules.txt` evaluates the same rules for
+inspection in JSON, SARIF, and HTML. It is not a replacement for this command as a gate: completed
+report artifacts exit 0 for every rule verdict, while `arch-rules` retains the policy and exit
+behavior documented below. See [unified architecture reports](reporting.md) for report ordering,
+availability, operand context, and publication semantics.
+
+The report's evaluator is `arch-rules`, not an arbitrary producer recorded in the index. Its rule
+census being `COMPUTED` means supplied rules were evaluated; it does not make each rule computed,
+upgrade index coverage, or attach producer soundness to a rule verdict.
+
 ## What is different here
 
 **Every tool in that category checks declared imports.** That is a syntactic over-approximation:

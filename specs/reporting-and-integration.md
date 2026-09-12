@@ -101,6 +101,10 @@ and `arch-mcp` (stdio JSON-RPC for agents). Ingest is `arch-load` / `arch-covera
   This availability status is distinct from the `NOT_COMPUTED` verdict-count bucket; imported
   findings and covered analysis sections MUST NOT make rule-verdict totals appear computed.
 
+  **Amended 2026-09-12:** with `arch-report --rules FILE`, a successfully parsed non-empty file
+  is evaluated in-process and the census is `COMPUTED`; the placeholder rule applies when the
+  option is absent. Ordering and freshness limits are documented in `docs/reporting.md`.
+
   **Amended 2026-09-05, and the original was wrong in two directions.** It named four buckets:
   `PASS` / `PASS_UNDER_HYP` / `UNKNOWN` / `VIOLATION`.
 

@@ -3328,7 +3328,7 @@ let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
                                                     ~form:(Arch_index_exn.form_to_string o.o_form)
                                                     ~exn_path:o.o_path ~escapes:o.o_escapes
                                                     ~line:o.o_line ~col:o.o_col
-                                                    ~channel:"exception")
+                                                    ~channel:"exception" ?operand:o.o_operand ())
                                                 origins)
                                         exn_by_node ;
                                       (* Value-channel facts (specs/error-channels.md
@@ -3381,7 +3381,7 @@ let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
                                                     ~scope_id:None
                                                     ~form:o.o_form
                                                     ~exn_path:o.o_path ~escapes:true
-                                                    ~line:o.o_line ~col:o.o_col ~channel:o.o_channel)
+                                                    ~line:o.o_line ~col:o.o_col ~channel:o.o_channel ())
                                                 origins)
                                         errch_by_node ;
                                       (* Calls carry the walker's LOCAL scope

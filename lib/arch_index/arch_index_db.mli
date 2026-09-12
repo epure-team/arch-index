@@ -620,6 +620,8 @@ val insert_exn_scope_catch : Sqlite3.db -> Sqlite3.stmt -> scope_id:int -> exn_p
     [exn_origins.form] CHECK values; [channel] names the error channel this
     origin belongs to (specs/error-channels.md — the producer writes only
     ["exception"] as of schema 1.3, FR-029's byte-identical requirement).
+    [operand] is syntax-only metadata for a native integer division/remainder
+    origin; absence leaves every nullable operand column unavailable.
 
     {post}
     One [exn_origins] row, or a counted rejection.
@@ -640,6 +642,8 @@ val insert_exn_origin :
   line:int ->
   col:int ->
   channel:string ->
+  ?operand:Arch_index_exn.operand_context ->
+  unit ->
   unit
 
 (** [exception Alias = Target], both canonical.

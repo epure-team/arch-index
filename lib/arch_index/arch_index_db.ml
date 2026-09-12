@@ -87,7 +87,7 @@ let schema_path =
    twice in two hours. The fix is to assign the version AT MERGE, not at write;
    until then, a number taken from a grep is a guess, and the roadmap owner
    assigns. *)
-let current_schema_version = "1.12"
+let current_schema_version = "1.13"
 
 (* The flat schema (runner.ml's own inline 3-table [schema_sql]) — distinct
    version identity from [current_schema_version] above: the two schemas are
@@ -504,7 +504,8 @@ let insert_exn_scope_catch db stmt ~scope_id ~exn_path =
   bind_text stmt 2 exn_path ;
   exec_stmt db ~what:"exn_scope_catches" stmt
 
-let insert_exn_origin db stmt ~function_id ~scope_id ~form ~exn_path ~escapes ~line ~col ~channel =
+let insert_exn_origin db stmt ~function_id ~scope_id ~form ~exn_path ~escapes ~line ~col ~channel
+    ?operand () =
   bind_int stmt 1 function_id ;
   bind_int_opt stmt 2 scope_id ;
   bind_text stmt 3 form ;
@@ -513,6 +514,13 @@ let insert_exn_origin db stmt ~function_id ~scope_id ~form ~exn_path ~escapes ~l
   bind_int stmt 6 line ;
   bind_int stmt 7 col ;
   bind_text stmt 8 channel ;
+  let field f = Option.bind operand f in
+  bind_text_opt stmt 9 (field (fun (o : Arch_index_exn.operand_context) -> Some o.primitive)) ;
+  bind_int_opt stmt 10 (field (fun o -> Some o.slot)) ;
+  bind_text_opt stmt 11 (field (fun o -> Some o.category)) ;
+  bind_text_opt stmt 12 (field (fun o -> o.representation)) ;
+  bind_text_opt stmt 13 (field (fun o -> Some o.integer_kind)) ;
+  bind_text_opt stmt 14 (field (fun o -> o.unavailable_reason)) ;
   exec_stmt db ~what:"exn_origins" stmt
 
 let insert_exn_rebind db stmt ~alias_path ~target_path =

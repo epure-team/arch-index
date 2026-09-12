@@ -169,6 +169,50 @@ let origin_rule ~forms ~allow =
   Printf.sprintf "rule \"no new fatal origin\"\n  forbid origin from file:**/ro_main.ml form:%s allow-file:%s\n"
     forms allow
 
+let result_field name json =
+  match Json.strict_object ~what:"arch-rules JSON" json with
+  | Error e -> Test.fail "%s" e
+  | Ok root ->
+      (match Json.member "results" root with Some (`List (result :: _)) -> Json.member name result
+       | _ -> None)
+
+let context_cap_case ~name ~distinct_sites =
+  Test.register ~__FILE__
+    ~title:("rules origin: context and site caps stay independent (" ^ name ^ ")")
+    ~tags:["rules"; "origin"; "context"; "cap"]
+  @@ fun () ->
+  with_indexed ("ro_cap_" ^ name) @@ fun db ->
+  Db.with_db_rw db (fun c ->
+      List.iter (fun sql -> ignore (Db.exec_result c sql))
+        [ "DELETE FROM exn_origins WHERE id <> (SELECT min(o.id) FROM exn_origins o JOIN \
+           functions f ON f.id=o.function_id WHERE f.name='two_on_one_line' AND \
+           o.form='division')";
+          (if distinct_sites then "UPDATE exn_origins SET line=1000, col=1" else
+             "UPDATE exn_origins SET line=1000, col=1");
+          (Printf.sprintf
+             "WITH RECURSIVE seq(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM seq WHERE n<200) \
+              INSERT INTO exn_origins (function_id,scope_id,form,exn_path,escapes,line,col,channel,\
+              operand_primitive,operand_slot,operand_category,operand_repr,operand_integer_kind,\
+              operand_unavailable_reason) SELECT function_id,scope_id,form,exn_path,escapes,%s,col,\
+              channel,operand_primitive,operand_slot,operand_category,operand_repr,\
+              operand_integer_kind,operand_unavailable_reason FROM exn_origins CROSS JOIN seq \
+              WHERE id=(SELECT min(id) FROM exn_origins)"
+             (if distinct_sites then "1000+n" else "line")) ]) ;
+  let rule = rule_file ("ro_cap_" ^ name)
+      (origin_rule ~forms:"division" ~allow:(allow_file ("ro_cap_" ^ name) "")) in
+  let code, json = rules [db; rule; "--format"; "json"] in
+  Batch.run (fun b ->
+      Batch.eq_int b ~msg:("cap fixture evaluates:\n" ^ json) code 1 ;
+      let int_field field = match result_field field json with Some (`Int n) -> n | _ -> -1 in
+      let contexts = match result_field "origin_contexts" json with Some (`List xs) -> xs | _ -> [] in
+      Batch.eq_int b ~msg:"all 201 offender rows contribute to context_total"
+        (int_field "context_total") 201 ;
+      Batch.eq_int b ~msg:"only 200 contexts are emitted" (List.length contexts) 200 ;
+      Batch.eq_int b ~msg:"the omitted context is explicit" (int_field "context_omitted") 1 ;
+      Batch.eq_int b ~msg:"site cap is independent from context cap"
+        (int_field "detail_total") (if distinct_sites then 201 else 1)) ;
+  Lwt.return_unit
+
 (* THE ASSERTION THE DESIGN CORRECTION EXISTS FOR. *)
 let register_count () =
   Test.register ~__FILE__
@@ -236,6 +280,40 @@ let register_count () =
           Batch.check b
             ~msg:("the same entry with \xc3\x972 covers the site (output:\n" ^ out_e ^ ")")
             (not (Arch_tezt.contains ~needle:"two_on_one_line" out_e))) ;
+      Batch.run (fun b ->
+          (* Force row-id order to disagree with source-column order for the colliding site.
+             This pins FR-016's typed site/line/column/row-id ordering rather than accidentally
+             passing because SQLite allocated ids in source order. *)
+          Db.with_db_rw db (fun c ->
+              ignore
+                (Db.exec_result c
+                   "UPDATE exn_origins SET col = CASE WHEN id=(SELECT min(o2.id) FROM \
+                    exn_origins o2 JOIN functions f2 ON f2.id=o2.function_id WHERE \
+                    f2.name='two_on_one_line' AND o2.form='division') THEN 99 ELSE 1 END \
+                    WHERE id IN (SELECT o3.id FROM exn_origins o3 JOIN functions f3 ON \
+                    f3.id=o3.function_id WHERE f3.name='two_on_one_line' AND \
+                    o3.form='division')")) ;
+          let json_rules = rule_file "roc_context_json" (origin_rule ~forms:"division" ~allow:(allow_file "roc_context_json" "")) in
+          let _, json = rules [db; json_rules; "--format"; "json"] in
+          Batch.check b ~msg:"origin JSON carries structured divisor contexts"
+            (Arch_tezt.contains ~needle:"\"origin_contexts\"" json
+            && Arch_tezt.contains ~needle:"\"category\": \"identifier\"" json
+            && Arch_tezt.contains ~needle:"\"slot\": 2" json) ;
+          let columns =
+            match Json.strict_object ~what:"arch-rules JSON" json with
+            | Error e -> Test.fail "%s" e
+            | Ok root ->
+                (match Json.member "results" root with Some (`List (result :: _)) -> result | _ -> `Null)
+                |> Json.member "origin_contexts"
+                |> (function Some (`List contexts) -> contexts | _ -> [])
+                |> List.filter (fun context ->
+                       match Json.member "site" context with
+                       | Some (`String site) -> Arch_tezt.contains ~needle:"two_on_one_line" site
+                       | _ -> false)
+                |> List.filter_map (fun context ->
+                       match Json.member "column" context with Some (`Int n) -> Some n | _ -> None)
+          in
+          Batch.check b ~msg:"contexts sort by source column before row id" (columns = [1; 99])) ;
   Lwt.return_unit
 
 (* The two parser properties that bite a FILE PATH specifically, and the selector
@@ -767,6 +845,8 @@ let register_pre_channel_schema () =
   Lwt.return_unit
 
 let register () =
+  context_cap_case ~name:"one_site" ~distinct_sites:false ;
+  context_cap_case ~name:"distinct_sites" ~distinct_sites:true ;
   register_count () ;
   register_refusals () ;
   register_not_computed () ;

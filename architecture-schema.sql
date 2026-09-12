@@ -467,7 +467,13 @@ CREATE TABLE IF NOT EXISTS exn_origins (
     escapes BOOLEAN NOT NULL DEFAULT 1,
     line INTEGER NOT NULL,
     col INTEGER NOT NULL,
-    channel TEXT NOT NULL DEFAULT 'exception'
+    channel TEXT NOT NULL DEFAULT 'exception',
+    operand_primitive TEXT,
+    operand_slot INTEGER,
+    operand_category TEXT CHECK(operand_category IN ('integer_literal','identifier','other','missing')),
+    operand_repr TEXT,
+    operand_integer_kind TEXT CHECK(operand_integer_kind IN ('int','int32','int64','nativeint')),
+    operand_unavailable_reason TEXT
 );
 -- The innermost scope enclosing a call site, PER CHANNEL (absent = no scope).
 -- This table carries no channel column of its own — the scope it points at
