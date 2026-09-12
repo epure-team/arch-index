@@ -1,0 +1,56 @@
+{
+  "task": "origin-recurring-consumer",
+  "mode": "full",
+  "schema_version": "1.0",
+  "steps": [
+    {
+      "id": "step-1",
+      "skill": "roster-implement",
+      "inputs": [
+        "briefs/origin-recurring-consumer-implementer.md"
+      ],
+      "outputs": [
+        "briefs/origin-recurring-consumer-impl.md"
+      ],
+      "hook": false
+    },
+    {
+      "id": "step-2",
+      "skill": "roster-review",
+      "inputs": [
+        "briefs/origin-recurring-consumer-impl.md"
+      ],
+      "outputs": [
+        "briefs/origin-recurring-consumer-review.json"
+      ],
+      "hook": false
+    },
+    {
+      "id": "step-3",
+      "skill": "roster-qa",
+      "inputs": [
+        "briefs/origin-recurring-consumer-review.json"
+      ],
+      "outputs": [
+        "briefs/origin-recurring-consumer-qa.md"
+      ],
+      "hook": false
+    },
+    {
+      "id": "step-4",
+      "skill": "roster-ship",
+      "inputs": [
+        "briefs/origin-recurring-consumer-qa.md"
+      ],
+      "outputs": [
+        "briefs/origin-recurring-consumer-ship-gate.md"
+      ],
+      "hook": false
+    }
+  ],
+  "quality_gates": {
+    "build": "rtk proxy opam exec --switch=/home/mathias/dev/arch-index -- dune build --root . @install",
+    "test": "rtk proxy opam exec --switch=/home/mathias/dev/arch-index -- dune test --root . --force",
+    "lint": "rtk proxy git diff --check"
+  }
+}
