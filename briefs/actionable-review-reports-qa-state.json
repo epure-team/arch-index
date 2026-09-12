@@ -1,0 +1,20 @@
+{
+  "task": "actionable-review-reports",
+  "date": "2026-09-12T17:36:08.296Z",
+  "status": "GO",
+  "round": 1,
+  "cycle": 1,
+  "qa_no_go_round": 0,
+  "rounds_audit": [
+    {
+      "round": 1,
+      "date": "2026-09-12T17:36:08.296Z",
+      "verdict": "GO",
+      "causes": [],
+      "qualifying": false
+    }
+  ],
+  "cross_runtime": {},
+  "max_qa_rounds_at_emission": 5,
+  "escalation": null
+}
