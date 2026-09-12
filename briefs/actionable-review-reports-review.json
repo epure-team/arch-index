@@ -1,0 +1,48 @@
+{
+  "task": "actionable-review-reports",
+  "date": "2026-09-12T19:19:20+02:00",
+  "status": "GO",
+  "auto_fixes_applied": [
+    {"path":"briefs/actionable-review-reports-implementer.md","line":302,"category":"style","description":"removed trailing blank line at EOF"},
+    {"path":"briefs/actionable-review-reports-plan.md","line":76,"category":"style","description":"removed trailing blank line at EOF"},
+    {"path":"briefs/actionable-review-reports-qa-scope.md","line":44,"category":"style","description":"removed trailing blank line at EOF"},
+    {"path":"briefs/actionable-review-reports-reviewer.md","line":50,"category":"style","description":"removed trailing blank line at EOF"},
+    {"path":"lib/arch_tools/arch_rule_eval.ml","line":1204,"category":"style","description":"removed trailing blank line at EOF"},
+    {"path":"specs/actionable-review-reports.md","line":245,"category":"style","description":"removed trailing blank line at EOF"}
+  ],
+  "findings": [],
+  "cross_runtime_findings": [],
+  "summary": {"critical":0,"high":0,"medium":0,"low":0,"auto_fixed":6},
+  "no_go_reason": {"type":null,"cause":null,"failed_acs":[]},
+  "no_go_round": 0,
+  "round": 1,
+  "cycle": 1,
+  "rounds_audit": [
+    {
+      "round": 1,
+      "reviewed_sha": null,
+      "fix_sha": null,
+      "fix_sha_reason": "dirty-tree",
+      "specialists_run": [
+        {"name":"reviewer","selection_reason":"owner reviewer always runs and executed the full owner gate set"},
+        {"name":"architect","selection_reason":"public OCaml modules and more than three modified files require architecture review"},
+        {"name":"spec-compliance","selection_reason":"per-feature specification exists and Full mode requires the compliance matrix"}
+      ],
+      "strike": false,
+      "trace_schema_version": "1.0"
+    }
+  ],
+  "cross_runtime": {
+    "opencode": {
+      "status": "degraded",
+      "reason": "tree-mutation",
+      "config_digest": "opencode:fd1dbeaa7d0c6431",
+      "round": 1
+    }
+  },
+  "streak_override": null,
+  "mode": "full",
+  "escalation_needed": false,
+  "escalation_reason": null,
+  "normalized_by": "2.0.0"
+}
