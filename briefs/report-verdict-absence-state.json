@@ -1,10 +1,11 @@
 {
   "task": "report-verdict-absence",
   "mode": "fast",
-  "current_phase": "qa",
+  "current_phase": "ship",
   "events": [
     {"phase": "implement", "outcome": "COMPLETED", "by": "roster-implement", "at": "2026-09-12"},
     {"phase": "review", "outcome": "GO", "by": "roster-review", "at": "2026-09-12T15:06:52+02:00"},
-    {"phase": "qa", "outcome": "GO", "by": "roster-qa", "at": "2026-09-12T15:32:27+02:00"}
+    {"phase": "qa", "outcome": "GO", "by": "roster-qa", "at": "2026-09-12T15:32:27+02:00"},
+    {"phase": "ship", "outcome": "COMPLETED", "by": "roster-ship", "at": "2026-09-12T13:51:15Z"}
   ]
 }
