@@ -1,0 +1,56 @@
+{
+  "task": "actionable-review-reports",
+  "mode": "full",
+  "schema_version": "1.0",
+  "steps": [
+    {
+      "id": "step-1",
+      "skill": "roster-implement",
+      "inputs": [
+        "briefs/actionable-review-reports-implementer.md"
+      ],
+      "outputs": [
+        "briefs/actionable-review-reports-impl.md"
+      ],
+      "hook": false
+    },
+    {
+      "id": "step-2",
+      "skill": "roster-review",
+      "inputs": [
+        "briefs/actionable-review-reports-reviewer.md"
+      ],
+      "outputs": [
+        "briefs/actionable-review-reports-review.json"
+      ],
+      "hook": false
+    },
+    {
+      "id": "step-3",
+      "skill": "roster-qa",
+      "inputs": [
+        "briefs/actionable-review-reports-qa-scope.md"
+      ],
+      "outputs": [
+        "briefs/actionable-review-reports-qa.md"
+      ],
+      "hook": false
+    },
+    {
+      "id": "step-4",
+      "skill": "roster-ship",
+      "inputs": [
+        "briefs/actionable-review-reports-qa.md"
+      ],
+      "outputs": [
+        "briefs/actionable-review-reports-ship-gate.md"
+      ],
+      "hook": false
+    }
+  ],
+  "quality_gates": {
+    "build": "rtk proxy opam exec --switch=/home/mathias/dev/arch-index -- dune build --root . @install",
+    "test": "rtk proxy opam exec --switch=/home/mathias/dev/arch-index -- dune test --root . --force",
+    "lint": "rtk proxy git diff --check"
+  }
+}
