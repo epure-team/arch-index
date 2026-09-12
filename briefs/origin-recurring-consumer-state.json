@@ -1,7 +1,7 @@
 {
   "task": "origin-recurring-consumer",
   "mode": "full",
-  "current_phase": "qa",
+  "current_phase": "ship",
   "events": [
     {"phase": "question", "outcome": "COMPLETED", "at": "2026-09-12T17:55:12.344Z", "by": "roster-question"}
     ,{"phase": "research", "outcome": "COMPLETED", "at": "2026-09-12T18:00:43.254Z", "by": "roster-research"}
@@ -11,5 +11,6 @@
     ,{"phase":"implement","outcome":"COMPLETED","at":"2026-09-12T19:08:35Z","by":"roster-implement"}
     ,{"phase":"review","outcome":"GO","at":"2026-09-12T19:27:30Z","by":"roster-review"}
     ,{"phase":"qa","outcome":"GO","at":"2026-09-12T19:37:14.516Z","by":"roster-qa"}
+    ,{"phase":"ship","outcome":"COMPLETED","at":"2026-09-12T19:52:34.795Z","by":"roster-ship"}
   ]
 }
