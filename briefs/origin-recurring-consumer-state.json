@@ -1,10 +1,11 @@
 {
   "task": "origin-recurring-consumer",
   "mode": "full",
-  "current_phase": "intake",
+  "current_phase": "spec",
   "events": [
     {"phase": "question", "outcome": "COMPLETED", "at": "2026-09-12T17:55:12.344Z", "by": "roster-question"}
     ,{"phase": "research", "outcome": "COMPLETED", "at": "2026-09-12T18:00:43.254Z", "by": "roster-research"}
     ,{"phase": "intake", "outcome": "VALIDATED", "at": "2026-09-12T18:05:40.590Z", "by": "roster-intake"}
+    ,{"phase":"spec","outcome":"VALIDATED","at":"2026-09-12T18:23:21.778Z","by":"roster-spec"}
   ]
 }
