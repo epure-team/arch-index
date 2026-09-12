@@ -1,0 +1,18 @@
+{
+  "digests": {
+    "questions": "8056e06cda5882b53effb1218c03e2c6922a8e6f25a6356b58528048c721b5a0"
+  },
+  "questions": [
+    "Where are the repository’s OCaml CLI components defined, and how are their binaries, libraries, commands, fixtures, and tests organized?",
+    "How does the existing code classify OCaml syntax and operands, and where does it consume Typedtree or CMT data, including compiler primitive identities?",
+    "What integer semantics are currently encoded or assumed, including machine-integer width, overflow behavior, division behavior, and representation of unknown or unsupported expressions?",
+    "Where are control-flow states represented, and how do existing analyses handle branches, joins, unreachable states, top/bottom values, and unsupported constructs?",
+    "How are deterministic diagnostics, provenance, coverage scope, rule verdicts, allowances, and coverage references currently produced and tested?",
+    "[ecosystem] How do existing OCaml compiler APIs expose Typedtree/CMT primitive identities and machine-integer operations across supported compiler versions?",
+    "[ecosystem] How do established intraprocedural abstract interpreters represent integer division, overflow, branches, joins, top/bottom, and conservative unknown results?"
+  ],
+  "technical_ids": [
+    "CMT",
+    "Typedtree"
+  ]
+}
