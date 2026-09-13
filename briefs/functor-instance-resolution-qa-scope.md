@@ -39,4 +39,3 @@ branches, invalid data beyond limit0, exact two-table output across formats,
 strict decimal/overflow/extra args, valid empty and byte-unchanged read-only DB.
 Compatibility compares fixed graph/effect/query fixtures, not only counts that
 could stay equal while identities drift. No TUI/web/MCP/third-party tests in scope.
-

@@ -4,6 +4,8 @@
   "post_run_source_checkpoint": "c2a8add5e394c162eeef4d204a73e1058a436df2",
   "tezos_tree_state": "dirty (46 porcelain entries at inventory time; not relabelled clean)",
   "ocaml_compiler": "5.3.0",
+  "manifest_sha256": "9e38880a52f855c58081b1a171af5879058cbaa2697aaa5694827cbd16f8ecd1",
+  "digest_method": "each manifest row hashes the original CMT bytes with sha256sum; input_content_sha256 is sha256 over sorted sha256sum output lines (digest, two spaces, original absolute path)",
   "input_content_sha256": "5eb82c1b042df623688e4310c36b43dfed3282491d586044e79724f7e9953e4c",
   "slices": [
     {"name":"irmin-core","cmts":66,"content_sha256":"22605cfba120c0ed512bf63d2f9841e74cff8ccadcc5dba84c29cb7d754cd875"},
