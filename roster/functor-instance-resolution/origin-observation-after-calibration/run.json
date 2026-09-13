@@ -1,0 +1,564 @@
+{
+  "version": 1,
+  "complete": true,
+  "status": "held",
+  "policy": {
+    "verdict": "UNKNOWN",
+    "failed": false,
+    "gate_exit": 0
+  },
+  "coverage": {
+    "reference_revision": "c2a8add5e394c162eeef4d204a73e1058a436df2",
+    "current": {
+      "totals": {
+        "modules": 24,
+        "functions": 859,
+        "calls": 5440,
+        "origins": 495
+      },
+      "origin_groups": [
+        {
+          "channel": "exception",
+          "form": "assert",
+          "escapes": 1,
+          "count": 1
+        },
+        {
+          "channel": "exception",
+          "form": "compare",
+          "escapes": 1,
+          "count": 34
+        },
+        {
+          "channel": "exception",
+          "form": "failwith",
+          "escapes": 1,
+          "count": 19
+        },
+        {
+          "channel": "exception",
+          "form": "index",
+          "escapes": 1,
+          "count": 106
+        },
+        {
+          "channel": "exception",
+          "form": "invalid_arg",
+          "escapes": 1,
+          "count": 1
+        },
+        {
+          "channel": "exception",
+          "form": "reraise",
+          "escapes": 1,
+          "count": 6
+        },
+        {
+          "channel": "option",
+          "form": "raise",
+          "escapes": 1,
+          "count": 283
+        },
+        {
+          "channel": "result",
+          "form": "raise",
+          "escapes": 1,
+          "count": 4
+        },
+        {
+          "channel": "result",
+          "form": "unknown",
+          "escapes": 1,
+          "count": 41
+        }
+      ]
+    },
+    "deltas": [],
+    "indexed_modules": [
+      "lib/arch_index/arch_errors_config.ml",
+      "lib/arch_index/arch_index.ml",
+      "lib/arch_index/arch_index_cfg.ml",
+      "lib/arch_index/arch_index_cmt.ml",
+      "lib/arch_index/arch_index_comment_parser.ml",
+      "lib/arch_index/arch_index_compare.ml",
+      "lib/arch_index/arch_index_db.ml",
+      "lib/arch_index/arch_index_errch.ml",
+      "lib/arch_index/arch_index_exn.ml",
+      "lib/arch_index/arch_index_functors.ml",
+      "lib/arch_index/arch_index_git.ml",
+      "lib/arch_index/arch_index_line_counter.ml",
+      "lib/arch_index/arch_index_support.ml",
+      "lib/arch_index/call_graph_extractor.ml",
+      "lib/arch_index/comment_parser.ml",
+      "lib/arch_index/coverage_matrix.ml",
+      "lib/arch_index/doc_extractor.ml",
+      "lib/arch_index/language_registry.ml",
+      "lib/arch_index/lsp_client.ml",
+      "lib/arch_index/lsp_extractor.ml",
+      "lib/arch_index/lsp_types.ml",
+      "lib/arch_index/ocaml_enricher.ml",
+      "lib/arch_index/runner.ml",
+      "lib/arch_index/ts_enricher.ml"
+    ]
+  },
+  "provenance": {
+    "revision": "c2a8add5e394c162eeef4d204a73e1058a436df2",
+    "git_root": "/home/mathias/dev/arch-index-worktrees/functor-instance-resolution",
+    "detached": false,
+    "dirty": [
+      " M briefs/functor-instance-resolution-implementer.md",
+      " M briefs/functor-instance-resolution-plan.md",
+      " M briefs/functor-instance-resolution-state.json",
+      " M docs/origin-consumer.md",
+      " M roster/functor-instance-resolution/calibration.log",
+      " M skills-meta/friction.jsonl",
+      " M test/fixtures/origin-consumer/reference.json",
+      "?? briefs/functor-instance-resolution-impl.md",
+      "?? roster/functor-instance-resolution/calibration-scope-amendment.md",
+      "?? roster/functor-instance-resolution/checker-design.md",
+      "?? roster/functor-instance-resolution/checker-implementation.md",
+      "?? roster/functor-instance-resolution/final-suite-after-calibration.log",
+      "?? roster/functor-instance-resolution/final-suite-before-calibration.log",
+      "?? roster/functor-instance-resolution/implementation-baseline.md",
+      "?? roster/functor-instance-resolution/integration-checkpoint.md",
+      "?? roster/functor-instance-resolution/native-probes.md",
+      "?? roster/functor-instance-resolution/origin-observation-before-calibration/diagnostics.txt",
+      "?? roster/functor-instance-resolution/origin-observation-before-calibration/gate.json",
+      "?? roster/functor-instance-resolution/origin-observation-before-calibration/report.html",
+      "?? roster/functor-instance-resolution/origin-observation-before-calibration/report.json",
+      "?? roster/functor-instance-resolution/origin-observation-before-calibration/report.sarif",
+      "?? roster/functor-instance-resolution/origin-observation-before-calibration/run.json",
+      "?? roster/functor-instance-resolution/query-hardening.md",
+      "?? roster/functor-instance-resolution/resume-approval.md",
+      "?? roster/functor-instance-resolution/tezos-irmin-benchmark-inventory.md"
+    ],
+    "output": "/home/mathias/dev/arch-index-worktrees/functor-instance-resolution/roster/functor-instance-resolution/origin-observation-after-calibration",
+    "trusted_build_assumption": "CMT inputs are trusted local build artifacts; this record does not certify source-to-CMT freshness.",
+    "sources": [
+      {
+        "path": "lib/arch_index/arch_errors_config.ml",
+        "sha256": "9266e568fc73814eb17dd34f98b4e1daccf870125556f7e8fdade4128dd94d8b"
+      },
+      {
+        "path": "lib/arch_index/arch_errors_config.mli",
+        "sha256": "9891d6ed6d8376be4b5ac1a8852b5f3a5e5d068cd01cb9cbfe71cdae5c4c6efc"
+      },
+      {
+        "path": "lib/arch_index/arch_index_cfg.ml",
+        "sha256": "d8f17977dd3e2149c38442d116b2c512bb3e613aa2402f6793dcc3ebb852247a"
+      },
+      {
+        "path": "lib/arch_index/arch_index_cfg.mli",
+        "sha256": "4664c3d540216cdcb1d946aacff998855ecb466c1a38e0e2089a248a7f797b41"
+      },
+      {
+        "path": "lib/arch_index/arch_index_cmt.ml",
+        "sha256": "b985af14d991b5bfe6ff315dd1f4dfa3ef8ec53cf7d6e798171d8c7eba8c4bb7"
+      },
+      {
+        "path": "lib/arch_index/arch_index_cmt.mli",
+        "sha256": "61db3df7fa1ca608abc82a4e7d22ec73dcd3f4f21a44f94224e4af1543b140ac"
+      },
+      {
+        "path": "lib/arch_index/arch_index_comment_parser.ml",
+        "sha256": "36156def46de881663d83dfcc3e782f74a43e3531f458a81d991d0c2cf2ef5b0"
+      },
+      {
+        "path": "lib/arch_index/arch_index_comment_parser.mli",
+        "sha256": "743d7b2109ef6bf927a04af5b0d8083edf860b2d432be740f6209355ce81e9ab"
+      },
+      {
+        "path": "lib/arch_index/arch_index_compare.ml",
+        "sha256": "f6bee8b52526594156973a889410bd4fc9b78d82feea7e0d575980d930ca6e0b"
+      },
+      {
+        "path": "lib/arch_index/arch_index_compare.mli",
+        "sha256": "f9df8a706c9a6393c87b9a3bdd58f85ce3094105ce014303b0507ad3528166d2"
+      },
+      {
+        "path": "lib/arch_index/arch_index_db.ml",
+        "sha256": "9ab507e43784be7dbadcd6dbe232d0b9ddd6f20e459c9ee4cd300c5daad8acef"
+      },
+      {
+        "path": "lib/arch_index/arch_index_db.mli",
+        "sha256": "2b163be266f889a358f91c5135dec84082ff5d0c39deac627aed84d72830ec77"
+      },
+      {
+        "path": "lib/arch_index/arch_index_errch.ml",
+        "sha256": "94862cfa400e15373782d189258bf5616d9cf938ad7c68556a1c0ce3ecea9817"
+      },
+      {
+        "path": "lib/arch_index/arch_index_errch.mli",
+        "sha256": "172cdb3c0376f6dcfe149a24560db1179affe6863630dceaa07861814740fd86"
+      },
+      {
+        "path": "lib/arch_index/arch_index_exn.ml",
+        "sha256": "2e1c7079fd3a98fe0d4a3185167386fbfe0cec354d70be9ad4c0e0f3d9cead8d"
+      },
+      {
+        "path": "lib/arch_index/arch_index_exn.mli",
+        "sha256": "941c4b9c4f1829ce1eb41800d3d46aec45b5dd5fa49db9233452e00d3323c771"
+      },
+      {
+        "path": "lib/arch_index/arch_index_functors.ml",
+        "sha256": "25e3c07da349795ba8ab00b14d3d5e14b6c39df7313772c04152661500f8589b"
+      },
+      {
+        "path": "lib/arch_index/arch_index_functors.mli",
+        "sha256": "a9ebea7fca697f128878c1704561c5d5cf8c6e3bdec59fdc76e8e152f7ddc7d0"
+      },
+      {
+        "path": "lib/arch_index/arch_index_git.ml",
+        "sha256": "93db1b4df3fe9cf2a1f723aee756bc52e5eac1f898e038e1d3f05263db349f6f"
+      },
+      {
+        "path": "lib/arch_index/arch_index_git.mli",
+        "sha256": "9d113a3c8f9edee9a0ac06212019919bd7aac93145bb79869c8bd99f6010f10d"
+      },
+      {
+        "path": "lib/arch_index/arch_index_line_counter.ml",
+        "sha256": "d918f93f2a9a5559d608a6eb75f9f5e5af6582a1985a066b21c75806598a5b8c"
+      },
+      {
+        "path": "lib/arch_index/arch_index_line_counter.mli",
+        "sha256": "56ab30e99f4aafc8e1b1484bd5b752b03bf03e00f832b0ce371dbb2312fa4cfa"
+      },
+      {
+        "path": "lib/arch_index/arch_index_support.ml",
+        "sha256": "b0aa46d6831f094ffc6ecfa8385143bab593b258c0507068cd7127f4f309ce57"
+      },
+      {
+        "path": "lib/arch_index/arch_index_support.mli",
+        "sha256": "e2ea8fa91eb18debb6792652e417b1fe2957f401bae87de7cd29454ccb5d6c2d"
+      },
+      {
+        "path": "lib/arch_index/arch_index.ml",
+        "sha256": "28c14f9b45ad5b4f56d6bd72a84eef7a9e20e9fd6a443e51a6dba5ce2fdae281"
+      },
+      {
+        "path": "lib/arch_index/arch_index.mli",
+        "sha256": "d2582de0f4931871b7c34ea404f671659c99ff9e17ba94df75ea2f9d7f412f2d"
+      },
+      {
+        "path": "lib/arch_index/call_graph_extractor.ml",
+        "sha256": "a130e008a7abb3731971a75d57c86a459392421b983355b0ff1bffa261eb51f3"
+      },
+      {
+        "path": "lib/arch_index/call_graph_extractor.mli",
+        "sha256": "e1f43045cec5b5585ea53e502a8a2182edd7968c3d147da3ee9e56228dd2b6a2"
+      },
+      {
+        "path": "lib/arch_index/comment_parser.ml",
+        "sha256": "3cf0892e3e91e91629a4a24cfcf220b121c2eb0ae6ad1214a576b9ad991d35b0"
+      },
+      {
+        "path": "lib/arch_index/comment_parser.mli",
+        "sha256": "acee58b88164c38ef70cd263e07dc95727709a0303519530da2543288e32f116"
+      },
+      {
+        "path": "lib/arch_index/coverage_matrix.ml",
+        "sha256": "dbd4c2bc960613869fcb6e9ccff166796393158059b88964fd05fd554faba25b"
+      },
+      {
+        "path": "lib/arch_index/coverage_matrix.mli",
+        "sha256": "18df29e4ab27df4bbda367dd50e60bdb20ff2ac9056fbb06ed07bdec16360df2"
+      },
+      {
+        "path": "lib/arch_index/doc_extractor.ml",
+        "sha256": "5e9e0fdfe93744a2c4988c2a28fd9c5b9651b9ef6eacfb7572b9415dcc2e3370"
+      },
+      {
+        "path": "lib/arch_index/doc_extractor.mli",
+        "sha256": "14f5fe9f42d52b3acba1a29ffff0778cc04bbc06761b1d15e37799988e1aaf5f"
+      },
+      {
+        "path": "lib/arch_index/language_registry.ml",
+        "sha256": "2955f275919540a66282b58f07d0c784239672565f1c93b33a8b41e1fefa8485"
+      },
+      {
+        "path": "lib/arch_index/language_registry.mli",
+        "sha256": "c4082f701be4234d8fc84ae236db7cd371f22c2bc770532d0d597675871e8486"
+      },
+      {
+        "path": "lib/arch_index/lsp_client.ml",
+        "sha256": "576b273bf2647ef0a557f43d77c211f618485bcb124109c03795f7ca38c0370f"
+      },
+      {
+        "path": "lib/arch_index/lsp_client.mli",
+        "sha256": "c14c23423cc8fee06c32cae037831b8565df85cb6188e7a15d9f133c2bae59e4"
+      },
+      {
+        "path": "lib/arch_index/lsp_extractor.ml",
+        "sha256": "7281896e71c8b27ed1af05f516557619f364e7fe8e4d13636e720ead5dab77fc"
+      },
+      {
+        "path": "lib/arch_index/lsp_extractor.mli",
+        "sha256": "c8ee14e6cb38ed0202b44a83cd29b9250d3b767de50d2936005c8f22ec0895c9"
+      },
+      {
+        "path": "lib/arch_index/lsp_types.ml",
+        "sha256": "6fd4cc4cf8351c133b92f2804de531949354fe0f5552f87926e14ee80395f117"
+      },
+      {
+        "path": "lib/arch_index/lsp_types.mli",
+        "sha256": "54d2c87edd17ca9fe652327f03f1e2ebe1fd13eeff167918ec32e7ce802006b2"
+      },
+      {
+        "path": "lib/arch_index/ocaml_enricher.ml",
+        "sha256": "83b5b68c745223e1e8430a87c581412793b59cdac2e6d9c0e4d34173f33c83c1"
+      },
+      {
+        "path": "lib/arch_index/ocaml_enricher.mli",
+        "sha256": "98af6ff93e5e70995530480c4a00be7c573e570e6884136d87203cd75ce741da"
+      },
+      {
+        "path": "lib/arch_index/runner.ml",
+        "sha256": "b35f76d6a0a2b836ca5706b98f03401a135e0fe8643f5f0c84873332704bc1ee"
+      },
+      {
+        "path": "lib/arch_index/runner.mli",
+        "sha256": "60e2c65516fdebf98d3ea0a557852e2ac68eaa1e0b107fd70a4aea1b9fa44c30"
+      },
+      {
+        "path": "lib/arch_index/ts_enricher.ml",
+        "sha256": "b0236dafdd3d12a063a86aa11c4fce5d04a65bcfc2113699756f8141c3889651"
+      },
+      {
+        "path": "lib/arch_index/ts_enricher.mli",
+        "sha256": "01dd764c6f013b6eaa013e52fabc0cb8ccba68f7f4ebd7e141cdf501740d511e"
+      }
+    ],
+    "cmts": [
+      {
+        "path": ".arch_index.inline-tests/.t.eobjs/byte/dune__exe__Main.cmt",
+        "sha256": "f99c07d4bdda3873fb34d713d255d0bc86de438c0a39a0e9a9fd60ecbf19ffea"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__.cmt",
+        "sha256": "25315d1ebed7a863df307e78e7e233ad3ba189e6f22f41f6ff405ac57da3aa69"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Arch_errors_config.cmt",
+        "sha256": "c8f44975c128d2dafdf7c5339afe86258be688a21a060a8c170d9da6e29f8786"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Arch_errors_config.cmti",
+        "sha256": "3902814984065ff50521868b624aeffcd290569779083961c10e72949812c9b2"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Arch_index_cfg.cmt",
+        "sha256": "c7b31d470f5eda760561feb3a9b920bb9465a0f21656e290437d48cef02dc31b"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Arch_index_cfg.cmti",
+        "sha256": "4b94ecf3b36434be84a85e1107ea504341eadee43298815cf8350523eee2815c"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Arch_index_cmt.cmt",
+        "sha256": "ee0260d9a60ddc1d1935f7c4f84119606447230de808b6145aee700ea110d042"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Arch_index_cmt.cmti",
+        "sha256": "c23bcc9cda5fef7f4bf3988c5804b5f035875f8c9ddbdfa7cd98b3442fb22871"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Arch_index_comment_parser.cmt",
+        "sha256": "4ad736ddfc5a6583b7826d7b99b6734b559f9b90d6f9b3c633a0286e2af929c5"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Arch_index_comment_parser.cmti",
+        "sha256": "56cdc20fa607e04b1943511befa7e3818bfef28de17dc4797d1ae0389a757639"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Arch_index_compare.cmt",
+        "sha256": "a20600452a634c6e85737ef68fd0f3d0c32ccab11ec0d3c2fad40bad2120af00"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Arch_index_compare.cmti",
+        "sha256": "2aa7d3416300bbd93a3f3ebedf489953f7a9c6b888cb95ece734d071a6c6258a"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Arch_index_db.cmt",
+        "sha256": "aaf0b2879a0ca3874f0c432ed876c3940f06d569c6104168ef4f7652d42923ca"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Arch_index_db.cmti",
+        "sha256": "d930573149ce44739e0d9633d6fe7b73e3d689c32686957021203a607eeed210"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Arch_index_errch.cmt",
+        "sha256": "02b489bbc91b2aab11d7f5d12cb6e61942fc9dc5db4edf4fd4a89ab135d8249d"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Arch_index_errch.cmti",
+        "sha256": "6534e9edd6432aaa08b342319a355044699f25fcb4936813faef0d42f07fddcd"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Arch_index_exn.cmt",
+        "sha256": "db182d1b4d5eee9045473b2d407de000dbc9f459994f1d07937787a7fb357d56"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Arch_index_exn.cmti",
+        "sha256": "3e5d3d0bb10f3e0c1d37a87ad5057965c5007abb2b9c74e1ada7e49604fce51d"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Arch_index_functors.cmt",
+        "sha256": "214517edc1388bb5b4332352e8fad9110b51fc2331362f6579284a6e7fe19e97"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Arch_index_functors.cmti",
+        "sha256": "8c17a1155cb5c2f52d7d485e92f1296d544b786d8d3368249a5489859ea2556e"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Arch_index_git.cmt",
+        "sha256": "78f4021c1a19c754da0c5a7709572d016f7db40ca38d949e15087326a684fce3"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Arch_index_git.cmti",
+        "sha256": "0dfe8779685ed7cb400dbe9150e3270387333ded1805ccb22459a90b89364206"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Arch_index_line_counter.cmt",
+        "sha256": "f802094abd710afc36ed0c23de1df03daec2f02c5716bc7764220b816acb33af"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Arch_index_line_counter.cmti",
+        "sha256": "56fa02078a9372977ac5352d000e5ac770a4974bfe9c0786a4fecaf30c669b5c"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Arch_index_support.cmt",
+        "sha256": "857ccd1504d29ffb901365ec5bcb006c4fc39a71fb8235b477922432c389df32"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Arch_index_support.cmti",
+        "sha256": "774bcc0144aeb449dac469e46c94f23858996295de36dab54691207e56c15040"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Call_graph_extractor.cmt",
+        "sha256": "8b3855213ced44ef85bfba7b04f8ee86625560f4f93125bbb9869ef26ae7fd88"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Call_graph_extractor.cmti",
+        "sha256": "0fbad886c54b7c902c4b5ac57e247de2471c50ba69c177b07433f755f13b59b0"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Comment_parser.cmt",
+        "sha256": "af689f83a29f807fe44993b603347551c77c5f0b9fe8f81a3bec4f00b4d12665"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Comment_parser.cmti",
+        "sha256": "98aabf018d1e57e3cd30b266f186bc1b0c56e19dc7398a15b260448db6fd6758"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Coverage_matrix.cmt",
+        "sha256": "54380bcf8e7080add7f1659a649a3e39f9cbd53c266bf933b28de38f74b024e4"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Coverage_matrix.cmti",
+        "sha256": "bbf65e1151e9ce2547f6afc8ec3eb45c2ba4e4955f3a57e3510810994857e117"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Doc_extractor.cmt",
+        "sha256": "e855db68cedd14de55c5d3dad219edbf33ab821a225ad304e7560946087b930c"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Doc_extractor.cmti",
+        "sha256": "3bba1a51f4d8a90b127e309fd3f9212494a35697faa115309e5040a699be3b46"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Language_registry.cmt",
+        "sha256": "790c172782750853d666e56ff328bcfdf12360515b70e899f1817524f796b3bc"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Language_registry.cmti",
+        "sha256": "e4d8cf78238917a9b133170de88f2f2378aa71805d26650b758698da7337a9aa"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Lsp_client.cmt",
+        "sha256": "975f517429554b2d3e2b096153e63628a09a354d619e7b5185a698d3833e589b"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Lsp_client.cmti",
+        "sha256": "b898b3e3f0ab899db329f12cf8d3f81c3498fa5300184a36ed6205a3e748a533"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Lsp_extractor.cmt",
+        "sha256": "3e85a8139e594adc55a67f0ed09740a6ef7d92e33cf8e4020536f14a67dc8309"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Lsp_extractor.cmti",
+        "sha256": "c038f22eb353a7e843542b062598b914f0bc994a38b5df02ab9f2f1605221414"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Lsp_types.cmt",
+        "sha256": "cd83e0abfdc60bb1f2d748061d70ed7ab13f229be1020842178c0a7521cd1a9b"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Lsp_types.cmti",
+        "sha256": "0a4f204e69b23abe7747e1870b976f73922b902a761cbf4871fe3bd8fa3c783f"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Ocaml_enricher.cmt",
+        "sha256": "b298214307aefa932c6a8139e50923acfb04ed7f5420b4d432533634855504b7"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Ocaml_enricher.cmti",
+        "sha256": "31215f245a1ffa40088fe3a46e7504f2ef6a6ebc64d1d684da71b0a0b87a123e"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Runner.cmt",
+        "sha256": "6d296463ed38bde8053613e86b9fa15fd5498d60b9c9190e58b1a0212ceb5c87"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Runner.cmti",
+        "sha256": "45a8120791f694ecbbacedf95f315155ca3c394905e79c64fc4c6c3437bfac55"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Ts_enricher.cmt",
+        "sha256": "c40a3819d42f69cca30e6a747ed838d31d1c1de73f38019db5b17ae813b01297"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Ts_enricher.cmti",
+        "sha256": "ff06701528b79df15acc0e8b7cc6da7cccda79da91e0ebd63038da5598e68ded"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index.cmt",
+        "sha256": "3ec15e820e9776e217646708505df178ec9e6ae7674bef6dc7563b9e254d1c0d"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index.cmti",
+        "sha256": "21c008cbcd5d8fa50bb19debf8f7bf005a0a507f21611df6053cd18527c18570"
+      }
+    ],
+    "inputs": {
+      "architecture-schema.sql": "9414287d133760d855a67fe18d07ba06c4ce10bc6981edd17a3166729e056513",
+      "test/fixtures/origin-consumer/self.rules": "47cf0f58fc432bdf60535ce5b5c83e0ce5862f9982d49e6f2010ffcbdf8d9a5e",
+      "test/fixtures/origin-consumer/self.allow": "304579792941cbe1a2eb270f6d6b61694569ea3c69c7488fe6b5dfa16d1877ef",
+      "test/fixtures/origin-consumer/reference.json": "2ef2a9f7abeec7e50f06bef24f562f87c38c12714cb4ada01c0e308cebdf8a00",
+      "_build/default/bin/arch_callgraph_ocaml/arch_callgraph_ocaml.exe": "d97c2bfcd7cb082c3614196735e84f9114b83528155d5b55341dd30f02fa4128",
+      "_build/default/bin/arch_rules/arch_rules.exe": "04deacc57504e956e29cc7c605c1e436ce91d130f3a2e5e0ba3cc6410ba20e28",
+      "_build/default/bin/arch_report/arch_report.exe": "a897a96d00337a255d82ac85ac87a283f32996fb20da5a1d4235f3ac4eeae91c"
+    },
+    "errors_config": {
+      "path": null,
+      "sha256": null
+    },
+    "database": {
+      "schema_version": "1.14",
+      "producers": [
+        {
+          "producer": "arch_index_cmt",
+          "producer_version": null,
+          "soundness_class": "sound_with_top",
+          "invocation_digest": "8c1d3bcd8271ca1a692d467093292ae8"
+        }
+      ]
+    }
+  },
+  "artifacts": {
+    "gate.json": "88b0bc6ec8f0b36e355644dc83cecb97512af482036f97a125eb5893839f89be",
+    "report.json": "804982e4c5e560d0fd05a503bdb09439c0a86a5663b42138e63fa6ae2a3c9a9a",
+    "report.sarif": "a84e1fe901f1b88a1f77561198cbfad73bbec331ae7b3e546df2253cbe39974e",
+    "report.html": "de7487c6708aa0c6a4669b569af3509f898f0dadca64ebf53ab4025fe3710d8b"
+  }
+}

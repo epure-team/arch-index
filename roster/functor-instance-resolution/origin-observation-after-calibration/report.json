@@ -1,0 +1,81 @@
+{
+  "db_path": "/home/mathias/dev/arch-index-worktrees/functor-instance-resolution/roster/functor-instance-resolution/.origin-consumer-2104075-4d3a1d71d3.db",
+  "schema_version": "1.14",
+  "producers": [
+    {
+      "producer": "arch_index_cmt",
+      "producer_version": null,
+      "soundness_class": "sound_with_top",
+      "invocation_digest": "8c1d3bcd8271ca1a692d467093292ae8"
+    }
+  ],
+  "analysis_coverage": [],
+  "top_frontier": 321,
+  "verdicts_status": "COMPUTED",
+  "verdicts_reason": "Rules were evaluated in this report invocation against its open read-only database handle.",
+  "verdicts": {
+    "PASS": 0,
+    "VIOLATION": 0,
+    "POSSIBLE": 0,
+    "UNKNOWN": 1,
+    "UNKNOWN_NO_CONTRACT": 0,
+    "NO_SOURCE": 0,
+    "NO_TARGET": 0,
+    "NOT_COMPUTED": 0
+  },
+  "rule_ordering": {
+    "policy": "actionability_then_declaration",
+    "explanation": "Serialized alerts are ordered VIOLATION, POSSIBLE, uncertainty, then vacuity; declaration ordinal is the sole tie-breaker within a tier. Viewers may reorder them."
+  },
+  "rules_path": "/home/mathias/dev/arch-index-worktrees/functor-instance-resolution/test/fixtures/origin-consumer/self.rules",
+  "rule_results": [
+    {
+      "ordinal": 1,
+      "evaluator": "arch-rules",
+      "rule": "self escaping assertion and division origins",
+      "kind": "origin",
+      "verdict": "UNKNOWN",
+      "exact": false,
+      "detail": [],
+      "detail_total": 0,
+      "witness": [],
+      "top_reasons": [],
+      "origin_contexts": [],
+      "context_total": 0,
+      "context_omitted": 0,
+      "note": "coverage: 1079 node(s) in cone, 1 origin(s) of form assert,division on channel 'exception', 1 site(s); allow-file test/fixtures/origin-consumer/self.allow has 1 entry (0 matching nothing). GATE HELD: every site in view is covered by the allow-file, so no new fatal origin appeared among the ones this run could see. It is NOT a proof that none exists: the cone still escapes through 147 ⊤ edge(s) and an origin could sit behind one. This verdict is the expected outcome on a real index, not a failure of the check — a VIOLATION fails the gate regardless of ⊤, which is what makes the rule useful while completeness is out of reach"
+    }
+  ],
+  "rule_alerts": [
+    {
+      "ordinal": 1,
+      "evaluator": "arch-rules",
+      "rule": "self escaping assertion and division origins",
+      "kind": "origin",
+      "verdict": "UNKNOWN",
+      "exact": false,
+      "detail": [],
+      "detail_total": 0,
+      "witness": [],
+      "top_reasons": [],
+      "origin_contexts": [],
+      "context_total": 0,
+      "context_omitted": 0,
+      "note": "coverage: 1079 node(s) in cone, 1 origin(s) of form assert,division on channel 'exception', 1 site(s); allow-file test/fixtures/origin-consumer/self.allow has 1 entry (0 matching nothing). GATE HELD: every site in view is covered by the allow-file, so no new fatal origin appeared among the ones this run could see. It is NOT a proof that none exists: the cone still escapes through 147 ⊤ edge(s) and an origin could sit behind one. This verdict is the expected outcome on a real index, not a failure of the check — a VIOLATION fails the gate regardless of ⊤, which is what makes the rule useful while completeness is out of reach"
+    }
+  ],
+  "sections": [
+    {
+      "analysis": "dead_code",
+      "status": "unknown",
+      "finding_count": 0,
+      "findings": []
+    },
+    {
+      "analysis": "sarif_import",
+      "status": "unknown",
+      "finding_count": 0,
+      "findings": []
+    }
+  ]
+}

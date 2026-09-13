@@ -1,0 +1,27 @@
+<!doctype html><html><head><meta charset="utf-8"><title>arch-report</title><style>
+body{font:14px/1.5 system-ui,sans-serif;margin:2rem;max-width:60rem}
+table{border-collapse:collapse;margin:.5rem 0}td,th{border:1px solid #ccc;padding:.25rem .5rem;text-align:left}
+.empty{color:#666;font-style:italic}.notrun{background:#fff3cd}
+code{background:#f4f4f4;padding:0 .2rem}</style></head><body>
+<h1>arch-report</h1><p><code>/tmp/functor-origin-audit.RkSH1e/.origin-consumer-1811043-df01e78335.db</code> &middot; schema 1.14</p>
+<h2>Producers</h2>
+<table><tr><th>producer</th><th>version</th><th>soundness</th></tr>
+<tr><td>arch_index_cmt</td><td>—</td><td>sound_with_top</td></tr>
+</table>
+<h2>Verdicts</h2>
+<p>Verdict totals: COMPUTED. Rules were evaluated in this report invocation against its open read-only database handle.</p>
+<table><tr><th>PASS</th><th>VIOLATION</th><th>POSSIBLE</th><th>UNKNOWN</th><th>UNKNOWN_NO_CONTRACT</th><th>NO_SOURCE</th><th>NO_TARGET</th><th>NOT_COMPUTED</th></tr><tr><td>0</td><td>0</td><td>0</td><td>1</td><td>0</td><td>0</td><td>0</td><td>0</td></tr></table>
+<h2>Architecture rules</h2><p>rules: <code>/home/mathias/dev/arch-index-worktrees/functor-instance-resolution/test/fixtures/origin-consumer/self.rules</code>; evaluator: <code>arch-rules</code> (version and soundness class are not inferred from index producers)</p>
+<p>Serialized alerts are ordered VIOLATION, POSSIBLE, uncertainty, then vacuity; declaration ordinal is the sole tie-breaker within a tier. Viewers may reorder them.</p>
+<h3>Alert review order</h3><ol><li>#1 self escaping assertion and division origins — UNKNOWN</li></ol><h3>Complete rule results (declaration order)</h3>
+<article><h3>#1 self escaping assertion and division origins <small>UNKNOWN</small></h3><p>coverage: 1079 node(s) in cone, 1 origin(s) of form assert,division on channel 'exception', 1 site(s); allow-file test/fixtures/origin-consumer/self.allow has 1 entry (0 matching nothing). GATE HELD: every site in view is covered by the allow-file, so no new fatal origin appeared among the ones this run could see. It is NOT a proof that none exists: the cone still escapes through 147 ⊤ edge(s) and an origin could sit behind one. This verdict is the expected outcome on a real index, not a failure of the check — a VIOLATION fails the gate regardless of ⊤, which is what makes the rule useful while completeness is out of reach</p><p>kind: <code>origin</code>; exact: <code>false</code>; detail total: 0</p></article>
+<h2>Coverage</h2>
+<p class="empty">no <code>analysis_coverage</code> rows — coverage is unrecorded, which is not the same as complete</p>
+<h2>⊤ frontier</h2><p>321 MAY_TOP edge(s)</p>
+<h2 id="dead_code" class="notrun">dead_code <small>(unknown)</small></h2>
+<p class="notrun">status <code>unknown</code> — this is NOT a clean result. An empty list here means the analysis did not run, not that it found nothing.</p>
+<p class="empty">no findings</p>
+<h2 id="sarif_import" class="notrun">sarif_import <small>(unknown)</small></h2>
+<p class="notrun">status <code>unknown</code> — this is NOT a clean result. An empty list here means the analysis did not run, not that it found nothing.</p>
+<p class="empty">no findings</p>
+</body></html>

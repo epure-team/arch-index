@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "revision": "89a15afb51fa89eb0da209a3f611b08b2df31ff3+functor-instance-resolution-source-patch",
+  "revision": "c2a8add5e394c162eeef4d204a73e1058a436df2",
   "modules": [
     "lib/arch_index/arch_errors_config.ml", "lib/arch_index/arch_index.ml",
     "lib/arch_index/arch_index_cfg.ml", "lib/arch_index/arch_index_cmt.ml",

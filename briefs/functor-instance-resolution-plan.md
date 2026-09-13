@@ -91,6 +91,7 @@ indexing redesign is assumed.
 - `scripts/check-functor-catalogue.js` (new)
 - `README.md`, `docs/schema.md`, `docs/functor-catalogue.md` (new)
 - `test/fixtures/self-index-stats.txt`, `tezt/tests/must_null_ceiling.ml` (only measured, attributed source-growth calibration if required)
+- `test/fixtures/origin-consumer/reference.json`, `checks/origin-recurring-consumer.js`, `docs/origin-consumer.md` (only independently attributed source-population observation, matching exact-total assertion, and separate review rationale; no evaluator, policy, allowance or checker-semantics change)
 
 Pipeline artifacts are added by the manifest lifecycle, not broad source prefixes.
 No unrelated worktree, cost telemetry, CI bypass or held issue publication is in scope.
