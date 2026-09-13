@@ -80,6 +80,10 @@
   %{exe:../../bin/arch_curate/arch_curate.exe}
   %{exe:../../bin/arch_effects_load/main.exe}
   %{exe:../../bin/arch_effects_ocaml/arch_effects_ocaml.exe}
+  %{exe:../../bin/arch_guard/arch_guard.exe}
+  %{exe:../fixtures/arch_guard/domain_probe.exe}
+  %{exe:../fixtures/arch_guard/fixture_probe.exe}
+  %{exe:../fixtures/arch_guard/changed_read_probe.exe}
   %{exe:../../bin/arch_impact/arch_impact.exe}
   %{exe:../../bin/arch_index_cli/arch_index_cli.exe}
   %{exe:../../bin/arch_load/arch_load.exe}

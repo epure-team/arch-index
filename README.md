@@ -35,6 +35,10 @@ graph LR
 
 ## Quick start
 
+Experimental companion: [arch-guard](docs/arch-guard.md) reports conditional divisor
+facts from explicit OCaml CMT artifacts. It is separate from the call graph and
+existing rule verdicts; it does not establish whole-program safety.
+
 ```sh
 # Index a Go repo (point at the module root — the dir with go.mod)
 ./arch-index /path/to/repo /tmp/repo.db go

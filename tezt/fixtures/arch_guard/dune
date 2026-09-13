@@ -1,0 +1,15 @@
+(executable
+ (name domain_probe)
+ (libraries arch_guard yojson))
+
+; Test-only CMT mutation/generation seam consumed by scripts/check-arch-guard.js.
+; It is deliberately not installed.
+(executable
+ (name fixture_probe)
+ (libraries compiler-libs.common yojson unix))
+
+; Deterministic test-only seam for a before/after digest mismatch. It links
+; against the wrapped library's internal module and is not installed.
+(executable
+ (name changed_read_probe)
+ (libraries arch_guard compiler-libs.common digestif))

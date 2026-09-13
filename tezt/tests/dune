@@ -131,6 +131,8 @@
   ../../checks/origin-recurring-consumer.js
   ../../scripts/origin-consumer.js
   ../../scripts/origin-consumer-artifacts.js
+  ../../scripts/check-arch-guard.js
+  ../../tezt/fixtures/arch_guard/inventory.ml
   ../../test/fixtures/origin-consumer/consumer.ml
   ../../test/fixtures/origin-consumer/self.rules
   ../../test/fixtures/origin-consumer/self.allow
