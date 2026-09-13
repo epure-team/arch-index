@@ -1,0 +1,17 @@
+# exact fixture census (exit 0; exact assertions passed)
+slice	fixture	ordinary	4
+slice	fixture	unit	0
+head/fixture	path:bound_rhs_functor	4
+argument/fixture	path:bound_rhs_alias	1
+argument/fixture	path:bound_rhs_structure	2
+argument/fixture	path:named_functor_parameter	1
+# temporary name-key mutant (exit 0; differs from the asserted identity census)
+slice	fixture	ordinary	4
+slice	fixture	unit	0
+head/fixture	path:bound_rhs_functor	4
+argument/fixture	path:bound_rhs_alias	1
+argument/fixture	path:bound_rhs_structure	1
+argument/fixture	path:named_functor_parameter	1
+argument/fixture	path:unknown_nonpersistent	1
+# identity census assertions: ordinary=4, structure=2, alias=1, parameter=1
+# mutant difference assertions: structure=1, unknown_nonpersistent=1

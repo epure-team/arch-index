@@ -1,0 +1,75 @@
+manifest	roster/functor-instance-resolution/tezos-irmin-candidate/manifest-410.tsv
+manifest_sha256	9e38880a52f855c58081b1a171af5879058cbaa2697aaa5694827cbd16f8ecd1
+inputs	410
+slice	irmin-core	ordinary	228
+slice	irmin-core	unit	0
+head/irmin-core	application	100
+head/irmin-core	path:bound_rhs_alias	17
+head/irmin-core	path:bound_rhs_application	5
+head/irmin-core	path:bound_rhs_functor	35
+head/irmin-core	path:bound_rhs_structure	1
+head/irmin-core	path:named_functor_parameter	14
+head/irmin-core	path:persistent_unit	55
+head/irmin-core	path:unknown_nonpersistent	1
+argument/irmin-core	application	5
+argument/irmin-core	path:bound_rhs_alias	18
+argument/irmin-core	path:bound_rhs_application	26
+argument/irmin-core	path:bound_rhs_structure	25
+argument/irmin-core	path:named_functor_parameter	126
+argument/irmin-core	path:persistent_unit	11
+argument/irmin-core	structure	17
+slice	irmin-pack	ordinary	13
+slice	irmin-pack	unit	0
+head/irmin-pack	application	5
+head/irmin-pack	path:persistent_unit	8
+argument/irmin-pack	path:named_functor_parameter	10
+argument/irmin-pack	structure	3
+slice	irmin-pack-unix	ordinary	143
+slice	irmin-pack-unix	unit	0
+head/irmin-pack-unix	application	72
+head/irmin-pack-unix	path:bound_rhs_alias	1
+head/irmin-pack-unix	path:bound_rhs_application	1
+head/irmin-pack-unix	path:bound_rhs_functor	7
+head/irmin-pack-unix	path:bound_rhs_structure	2
+head/irmin-pack-unix	path:named_functor_parameter	1
+head/irmin-pack-unix	path:persistent_unit	58
+head/irmin-pack-unix	path:unknown_nonpersistent	1
+argument/irmin-pack-unix	application	1
+argument/irmin-pack-unix	path:bound_rhs_alias	37
+argument/irmin-pack-unix	path:bound_rhs_application	44
+argument/irmin-pack-unix	path:bound_rhs_structure	22
+argument/irmin-pack-unix	path:named_functor_parameter	24
+argument/irmin-pack-unix	path:persistent_unit	3
+argument/irmin-pack-unix	path:unknown_nonpersistent	5
+argument/irmin-pack-unix	structure	7
+slice	proto-alpha	ordinary	891
+slice	proto-alpha	unit	0
+head/proto-alpha	application	481
+head/proto-alpha	path:bound_rhs_application	48
+head/proto-alpha	path:bound_rhs_functor	107
+head/proto-alpha	path:persistent_unit	255
+argument/proto-alpha	application	118
+argument/proto-alpha	path:bound_rhs_alias	5
+argument/proto-alpha	path:bound_rhs_application	89
+argument/proto-alpha	path:bound_rhs_structure	51
+argument/proto-alpha	path:named_functor_parameter	20
+argument/proto-alpha	path:persistent_unit	322
+argument/proto-alpha	structure	286
+slice	TOTAL	ordinary	1275
+slice	TOTAL	unit	0
+head/TOTAL	application	658
+head/TOTAL	path:bound_rhs_alias	18
+head/TOTAL	path:bound_rhs_application	54
+head/TOTAL	path:bound_rhs_functor	149
+head/TOTAL	path:bound_rhs_structure	3
+head/TOTAL	path:named_functor_parameter	15
+head/TOTAL	path:persistent_unit	376
+head/TOTAL	path:unknown_nonpersistent	2
+argument/TOTAL	application	124
+argument/TOTAL	path:bound_rhs_alias	60
+argument/TOTAL	path:bound_rhs_application	159
+argument/TOTAL	path:bound_rhs_structure	98
+argument/TOTAL	path:named_functor_parameter	180
+argument/TOTAL	path:persistent_unit	336
+argument/TOTAL	path:unknown_nonpersistent	5
+argument/TOTAL	structure	313
