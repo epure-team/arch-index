@@ -29,7 +29,8 @@ type intent_backup = {
    would fail. [tezt/tests/completion_markers.ml] pins that mechanically: every
    comment_db_meta key a producer writes is either in this list or explicitly
    declared non-load-bearing. *)
-let completion_marker_keys = ["error_contract"; "exn_contract"; "callgraph_contract"]
+let completion_marker_keys =
+  ["error_contract"; "exn_contract"; "callgraph_contract"; "functor_catalogue_contract"]
 
 let schema_views_to_drop =
   [
@@ -55,6 +56,9 @@ let schema_views_to_drop =
 
 let schema_tables_to_drop =
   [
+    "functor_applications";
+    "functor_catalogue_inputs";
+    "functor_catalogue_runs";
     (* Exception / error-channel tables (specs/error-channels.md). FIX
        (review round 1, HIGH): none of these were listed, so re-indexing an
        EXISTING database left every previous run's rows in place. The

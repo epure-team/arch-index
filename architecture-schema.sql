@@ -58,6 +58,35 @@ CREATE TABLE IF NOT EXISTS producer_runs (
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS functor_catalogue_runs (
+    producer_run_id INTEGER PRIMARY KEY REFERENCES producer_runs(id) ON DELETE CASCADE,
+    selected_inputs INTEGER NOT NULL CHECK(selected_inputs > 0)
+);
+
+CREATE TABLE IF NOT EXISTS functor_catalogue_inputs (
+    producer_run_id INTEGER NOT NULL REFERENCES functor_catalogue_runs(producer_run_id) ON DELETE CASCADE,
+    artifact TEXT NOT NULL,
+    source TEXT,
+    compiler_unit TEXT,
+    module_id INTEGER REFERENCES modules(id) ON DELETE CASCADE,
+    outcome TEXT NOT NULL CHECK(outcome IN ('unreadable','unsupported_annotation','missing_source','dropped_module','collection_failed','collected')),
+    expected_applications INTEGER NOT NULL DEFAULT 0 CHECK(expected_applications >= 0),
+    PRIMARY KEY(producer_run_id, artifact)
+);
+
+CREATE TABLE IF NOT EXISTS functor_applications (
+    producer_run_id INTEGER NOT NULL,
+    artifact TEXT NOT NULL,
+    ordinal INTEGER NOT NULL CHECK(ordinal > 0),
+    application_kind TEXT NOT NULL CHECK(application_kind IN ('apply','apply_unit')),
+    location TEXT NOT NULL,
+    head TEXT NOT NULL,
+    argument TEXT NOT NULL,
+    diagnostics TEXT NOT NULL,
+    PRIMARY KEY(producer_run_id, artifact, ordinal),
+    FOREIGN KEY(producer_run_id, artifact) REFERENCES functor_catalogue_inputs(producer_run_id, artifact) ON DELETE CASCADE
+);
+
 -- Modules (source files)
 CREATE TABLE IF NOT EXISTS modules (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

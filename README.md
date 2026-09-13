@@ -88,5 +88,6 @@ arch-index makes call-graph reachability answerable as a SQL query:
 - [Porting the error analysis to another language](docs/error-channels-porting.md)
 - [Edge-kind contract & soundness](docs/edge-kind-contract.md)
 - [DB schema reference](docs/schema.md)
+- [OCaml functor application catalogue](docs/functor-catalogue.md)
 - [Curation workflow: measure → decide → ledger](docs/curation-workflow.md)
 - [Formal soundness spec](SPEC-sound-callgraph.md)

@@ -137,6 +137,15 @@
   %{exe:../fixtures/arch_guard/fixture_probe.exe}
   %{exe:../fixtures/arch_guard/effect_fixture_probe.exe}
   %{exe:../fixtures/arch_guard/changed_read_probe.exe}
+  %{exe:../fixtures/functor_catalogue/typedtree_probe.exe}
+  %{exe:../fixtures/functor_catalogue/storage_probe.exe}
+  %{exe:../fixtures/functor_catalogue/lifecycle_probe.exe}
+  %{exe:../fixtures/functor_catalogue/selection_probe.exe}
+  ../fixtures/functor_catalogue/.catalogue.objs/byte/catalogue.cmt
+  ../fixtures/functor_catalogue/query_checks.js
+  ../fixtures/functor_catalogue/lifecycle_checks.js
+  ../../scripts/check-functor-catalogue.js
+  ../../roster/functor-instance-resolution/compatibility-rich-baseline.json
   ../../tezt/fixtures/arch_guard/inventory.ml
   ../../tezt/fixtures/arch_guard/r1_cases.ml
   ../../tezt/fixtures/arch_guard/effect_fixture.ml

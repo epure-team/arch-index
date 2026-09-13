@@ -2751,16 +2751,26 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels
 let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
     ~exposed_tbl ~doc_tbl ~module_quint_tbl ~stmt_mod ~stmt_fn ~stmt_ty
     ~stmt_fld ~stmt_ctor ~stmt_scope ~stmt_catch ~stmt_origin ~stmt_rebind
-    ?(value_channels = []) ?stmt_carrier ?(producer_run_id = None) path =
-  match Cmt_format.read path with
-  | _, None -> ([], [], [])
+    ?(value_channels = []) ?stmt_carrier ?(producer_run_id = None) ?on_implementation
+    ?on_catalogue_outcome path =
+  let notify outcome =
+    match on_catalogue_outcome with
+    | None -> ()
+    | Some callback -> (try callback ~artifact:path ~outcome with _ -> ())
+  in
+  let read =
+    try Cmt_format.read path
+    with exn -> notify "unreadable" ; raise exn
+  in
+  match read with
+  | _, None -> notify "unreadable" ; ([], [], [])
   | _, Some info -> (
       (* Only process Implementation (not Interface -- we use .cmti for
        exposed-name detection only) *)
       match info.cmt_annots with
       | Implementation structure -> (
           match source_path_of_cmt info with
-          | None -> ([], [], [])
+          | None -> notify "missing_source" ; ([], [], [])
           | Some src_path ->
               let modname = info.cmt_modname in
               (* Store path relative to project root if possible *)
@@ -2832,8 +2842,16 @@ let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
                      unit" and be emitted as a proven external leaf. Registering
                      it here is what keeps those two outcomes distinguishable. *)
                   record_unit ~unit_name:modname ~rel_path ;
+                  notify "dropped_module" ;
                   ([], [], [])
               | Some module_id ->
+                  (match on_implementation with
+                  | None -> ()
+                  | Some callback ->
+                      (try callback ~artifact:path ~source:rel_path ~compiler_unit:modname ~module_id structure
+                       with exn ->
+                         notify "collection_failed" ;
+                         Arch_io.eprintf "Warning: functor catalogue collection failed for %s: %s\n" path (Printexc.to_string exn))) ;
                   record_unit ~unit_name:modname ~rel_path ;
                   (* Collect calls, module deps, and type usages from value bindings *)
                   let pending_calls = ref [] in
@@ -3531,4 +3549,4 @@ let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
                   in
                   iter_structure_items structure ~f:process_item ;
                   (!pending_calls, !pending_deps, !pending_type_usages))
-      | _ -> ([], [], []))
+      | _ -> notify "unsupported_annotation" ; ([], [], []))

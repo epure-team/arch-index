@@ -305,6 +305,7 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
   let cmt_files =
     List.filter (fun f -> Filename.check_suffix f ".cmt") all_files
   in
+  let selected_catalogue_inputs = Arch_index_functors.selected_inputs cmt_files in
   let cmti_files =
     List.filter (fun f -> Filename.check_suffix f ".cmti") all_files
   in
@@ -387,6 +388,7 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
      exists is still fatal — this call is the early half of a belt-and-braces
      pair, not the only one. *)
   ignore (Sqlite3.exec db (delete_completion_markers_sql ())) ;
+  Arch_index_functors.clear_contract db ;
 
   exec_exn db "PRAGMA foreign_keys = OFF" ;
   (* Drop views first (they reference the tables), then tables. *)
@@ -489,7 +491,19 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
   if producer_run_id = None then
     Arch_io.eprintf
       "arch_index: warning: producer_runs insert failed — every row this run \
-       writes will have NULL provenance\n" ;
+      writes will have NULL provenance\n" ;
+
+  let catalogue_collected = ref 0 in
+  (match producer_run_id, selected_catalogue_inputs with
+  | Some run_id, _ :: _ ->
+      let sql = Printf.sprintf
+           "INSERT INTO functor_catalogue_runs(producer_run_id,selected_inputs) VALUES(%d,%d)"
+           run_id (List.length selected_catalogue_inputs) in
+      (match Sqlite3.exec db sql with
+      | Sqlite3.Rc.OK -> ()
+      | rc -> Arch_io.eprintf "Warning: functor catalogue header failed: %s\n"
+                  (Sqlite3.Rc.to_string rc))
+  | _ -> ()) ;
 
   (* Prepare statements *)
   let stmt_mod =
@@ -604,6 +618,23 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
   let all_pending_type_usages = ref [] in
   List.iter
     (fun path ->
+      let record_missing_outcome default =
+        match producer_run_id with
+        | None -> ()
+        | Some producer_run_id ->
+            let present =
+              let stmt = Sqlite3.prepare db "SELECT count(*) FROM functor_catalogue_inputs WHERE producer_run_id=? AND artifact=?" in
+              Fun.protect ~finally:(fun () -> ignore (Sqlite3.finalize stmt)) (fun () ->
+                ignore (Sqlite3.bind stmt 1 (Sqlite3.Data.INT (Int64.of_int producer_run_id))) ;
+                ignore (Sqlite3.bind stmt 2 (Sqlite3.Data.TEXT path)) ;
+                match Sqlite3.step stmt with Sqlite3.Rc.ROW -> Sqlite3.column_int stmt 0 > 0 | _ -> false)
+            in
+            if not present then
+              (try Arch_index_functors.store_outcome db ~producer_run_id ~artifact:path ~outcome:default
+               with exn ->
+                 Arch_io.eprintf "Warning: functor catalogue outcome failed for %s: %s\n"
+                   path (Printexc.to_string exn))
+      in
       try
         let calls, deps, type_usages =
           process_cmt
@@ -628,19 +659,42 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
             ~value_channels
             ~stmt_carrier
             ~producer_run_id
+            ~on_implementation:(fun ~artifact ~source ~compiler_unit ~module_id structure ->
+              match producer_run_id with
+              | None -> ()
+              | Some producer_run_id ->
+                  let occurrences = Arch_index_functors.collect structure in
+                  Arch_index_functors.store_collected db ~producer_run_id ~artifact ~source
+                    ~compiler_unit ~module_id occurrences ;
+                  incr catalogue_collected)
+            ~on_catalogue_outcome:(fun ~artifact ~outcome ->
+              match producer_run_id with
+              | None -> ()
+              | Some producer_run_id ->
+                  Arch_index_functors.store_outcome db ~producer_run_id ~artifact ~outcome)
             path
         in
         all_pending_calls := List.rev_append calls !all_pending_calls ;
         all_pending_deps := List.rev_append deps !all_pending_deps ;
         all_pending_type_usages :=
-          List.rev_append type_usages !all_pending_type_usages
+          List.rev_append type_usages !all_pending_type_usages ;
+        record_missing_outcome "collection_failed"
       with exn ->
+        (* CMT read failures notify [unreadable] at the read boundary. An
+           exception elsewhere is not evidence that the artifact was unreadable. *)
+        record_missing_outcome "collection_failed" ;
         Arch_io.eprintf
           "Warning: failed to process %s: %s\n"
           path
           (Printexc.to_string exn))
     cmt_files ;
   exec_exn db "COMMIT" ;
+
+  let selected_catalogue_count = List.length selected_catalogue_inputs in
+  if !catalogue_collected = selected_catalogue_count then
+    (try ignore (Arch_index_functors.finalize_contract db ~selected_inputs:selected_catalogue_count)
+     with exn -> Arch_io.eprintf "Warning: functor catalogue finalization failed: %s\n"
+                   (Printexc.to_string exn)) ;
 
   (* The walk is over: stop feeding [errors_seen] (a run-scoped collector;
      nothing else must mutate it after this point) and check every declared

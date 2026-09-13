@@ -295,7 +295,11 @@ let must_null_composition_query =
    Tezt.Temp.dir re-export. No pre-existing path/callee group changes.
    Query, floor and headroom remain unchanged; this is not improved resolution.
    Evidence: roster/guard-division-analysis/ratchet-source-growth.md. *)
-let clean_measured = 430
+(* User-approved 2026-09-13, functor catalogue: pristine A=B437,C=D468.
+   +31 source rows (persistence4, collector8, reader14, tests5) and +7 already
+   present at base; no same-corpus graph change. See the task's
+   roster/functor-instance-resolution/calibration-attribution.md. *)
+let clean_measured = 468
 
 let headroom = 25
 

@@ -1,0 +1,508 @@
+{
+  "modules": [
+    {
+      "id": 1,
+      "path": "fixture.ml",
+      "lines": 10,
+      "intent": null,
+      "has_mli": 0,
+      "quint_module_raw": null,
+      "language": "ocaml"
+    },
+    {
+      "id": 2,
+      "path": "helper.ml",
+      "lines": 2,
+      "intent": null,
+      "has_mli": 0,
+      "quint_module_raw": null,
+      "language": "ocaml"
+    }
+  ],
+  "functions": [
+    {
+      "id": 1,
+      "module_id": 1,
+      "name": "A.run",
+      "signature": "int -> int",
+      "line_start": 3,
+      "line_end": 3,
+      "line_count": 1,
+      "exposed": 0,
+      "intent": null,
+      "comment_quality_score": null,
+      "has_pre": 0,
+      "has_post": 0,
+      "has_violators": 0,
+      "has_violates": 0,
+      "violators_raw": null,
+      "violates_raw": null,
+      "tests_raw": null,
+      "quint_raw": null,
+      "mutation_sites": 0,
+      "deref_sites": 0,
+      "language": "ocaml",
+      "universe": "internal"
+    },
+    {
+      "id": 2,
+      "module_id": 1,
+      "name": "F.run",
+      "signature": "int -> int",
+      "line_start": 4,
+      "line_end": 4,
+      "line_count": 1,
+      "exposed": 0,
+      "intent": null,
+      "comment_quality_score": null,
+      "has_pre": 0,
+      "has_post": 0,
+      "has_violators": 0,
+      "has_violates": 0,
+      "violators_raw": null,
+      "violates_raw": null,
+      "tests_raw": null,
+      "quint_raw": null,
+      "mutation_sites": 0,
+      "deref_sites": 0,
+      "language": "ocaml",
+      "universe": "internal"
+    },
+    {
+      "id": 3,
+      "module_id": 1,
+      "name": "check",
+      "signature": "int -> int",
+      "line_start": 7,
+      "line_end": 7,
+      "line_count": 1,
+      "exposed": 0,
+      "intent": null,
+      "comment_quality_score": null,
+      "has_pre": 0,
+      "has_post": 0,
+      "has_violators": 0,
+      "has_violates": 0,
+      "violators_raw": null,
+      "violates_raw": null,
+      "tests_raw": null,
+      "quint_raw": null,
+      "mutation_sites": 0,
+      "deref_sites": 0,
+      "language": "ocaml",
+      "universe": "internal"
+    },
+    {
+      "id": 4,
+      "module_id": 1,
+      "name": "execute",
+      "signature": "int -> int",
+      "line_start": 8,
+      "line_end": 8,
+      "line_count": 1,
+      "exposed": 0,
+      "intent": null,
+      "comment_quality_score": null,
+      "has_pre": 0,
+      "has_post": 0,
+      "has_violators": 0,
+      "has_violates": 0,
+      "violators_raw": null,
+      "violates_raw": null,
+      "tests_raw": null,
+      "quint_raw": null,
+      "mutation_sites": 0,
+      "deref_sites": 0,
+      "language": "ocaml",
+      "universe": "internal"
+    },
+    {
+      "id": 5,
+      "module_id": 1,
+      "name": "dead",
+      "signature": "int -> int",
+      "line_start": 9,
+      "line_end": 9,
+      "line_count": 1,
+      "exposed": 0,
+      "intent": null,
+      "comment_quality_score": null,
+      "has_pre": 0,
+      "has_post": 0,
+      "has_violators": 0,
+      "has_violates": 0,
+      "violators_raw": null,
+      "violates_raw": null,
+      "tests_raw": null,
+      "quint_raw": null,
+      "mutation_sites": 0,
+      "deref_sites": 0,
+      "language": "ocaml",
+      "universe": "internal"
+    },
+    {
+      "id": 6,
+      "module_id": 1,
+      "name": "division",
+      "signature": "int -> int",
+      "line_start": 10,
+      "line_end": 10,
+      "line_count": 1,
+      "exposed": 0,
+      "intent": null,
+      "comment_quality_score": null,
+      "has_pre": 0,
+      "has_post": 0,
+      "has_violators": 0,
+      "has_violates": 0,
+      "violators_raw": null,
+      "violates_raw": null,
+      "tests_raw": null,
+      "quint_raw": null,
+      "mutation_sites": 0,
+      "deref_sites": 0,
+      "language": "ocaml",
+      "universe": "internal"
+    },
+    {
+      "id": 7,
+      "module_id": 2,
+      "name": "identity",
+      "signature": "'a -> 'a",
+      "line_start": 1,
+      "line_end": 1,
+      "line_count": 1,
+      "exposed": 0,
+      "intent": null,
+      "comment_quality_score": null,
+      "has_pre": 0,
+      "has_post": 0,
+      "has_violators": 0,
+      "has_violates": 0,
+      "violators_raw": null,
+      "violates_raw": null,
+      "tests_raw": null,
+      "quint_raw": null,
+      "mutation_sites": 0,
+      "deref_sites": 0,
+      "language": "ocaml",
+      "universe": "internal"
+    }
+  ],
+  "calls": [
+    {
+      "id": 1,
+      "caller_id": 1,
+      "callee_id": 7,
+      "callee_name": "Helper.identity",
+      "call_site": "fixture.ml:3",
+      "kind": "MUST",
+      "top_reason": null,
+      "top_anchor": null,
+      "edge_form": null
+    },
+    {
+      "id": 2,
+      "caller_id": 1,
+      "callee_id": null,
+      "callee_name": "Stdlib.+",
+      "call_site": "fixture.ml:3",
+      "kind": "MUST",
+      "top_reason": null,
+      "top_anchor": null,
+      "edge_form": null
+    },
+    {
+      "id": 3,
+      "caller_id": 2,
+      "callee_id": null,
+      "callee_name": "X.run",
+      "call_site": "fixture.ml:4",
+      "kind": "MAY_TOP",
+      "top_reason": "module_param",
+      "top_anchor": "fixture.ml:4",
+      "edge_form": null
+    },
+    {
+      "id": 4,
+      "caller_id": 3,
+      "callee_id": null,
+      "callee_name": "Stdlib.<",
+      "call_site": "fixture.ml:7",
+      "kind": "MUST",
+      "top_reason": null,
+      "top_anchor": null,
+      "edge_form": null
+    },
+    {
+      "id": 5,
+      "caller_id": 3,
+      "callee_id": null,
+      "callee_name": "Stdlib.raise",
+      "call_site": "fixture.ml:7",
+      "kind": "MAY_ENUMERATED",
+      "top_reason": null,
+      "top_anchor": null,
+      "edge_form": null
+    },
+    {
+      "id": 6,
+      "caller_id": 3,
+      "callee_id": null,
+      "callee_name": "A.run",
+      "call_site": "fixture.ml:7",
+      "kind": "MAY_TOP",
+      "top_reason": "module_param",
+      "top_anchor": "fixture.ml:7",
+      "edge_form": null
+    },
+    {
+      "id": 7,
+      "caller_id": 4,
+      "callee_id": 3,
+      "callee_name": "check",
+      "call_site": "fixture.ml:8",
+      "kind": "MUST",
+      "top_reason": null,
+      "top_anchor": null,
+      "edge_form": null
+    },
+    {
+      "id": 8,
+      "caller_id": 4,
+      "callee_id": null,
+      "callee_name": "M.run",
+      "call_site": "fixture.ml:8",
+      "kind": "MAY_TOP",
+      "top_reason": "module_param",
+      "top_anchor": "fixture.ml:8",
+      "edge_form": null
+    },
+    {
+      "id": 9,
+      "caller_id": 5,
+      "callee_id": null,
+      "callee_name": "A.run",
+      "call_site": "fixture.ml:9",
+      "kind": "MAY_TOP",
+      "top_reason": "module_param",
+      "top_anchor": "fixture.ml:9",
+      "edge_form": null
+    },
+    {
+      "id": 10,
+      "caller_id": 5,
+      "callee_id": 7,
+      "callee_name": "Helper.identity",
+      "call_site": "fixture.ml:9",
+      "kind": "MAY_ENUMERATED",
+      "top_reason": null,
+      "top_anchor": null,
+      "edge_form": null
+    },
+    {
+      "id": 11,
+      "caller_id": 6,
+      "callee_id": null,
+      "callee_name": "Stdlib./",
+      "call_site": "fixture.ml:10",
+      "kind": "MUST",
+      "top_reason": null,
+      "top_anchor": null,
+      "edge_form": null
+    }
+  ],
+  "module_deps": [
+    {
+      "id": 1,
+      "source_module": 1,
+      "target_module": 2,
+      "target_path": "Helper",
+      "dep_kind": "open",
+      "alias_name": null,
+      "line_number": 1
+    }
+  ],
+  "type_usage": [
+    {
+      "id": 1,
+      "function_id": 1,
+      "type_id": null,
+      "type_name": "int",
+      "usage_role": "param",
+      "position": 0
+    },
+    {
+      "id": 2,
+      "function_id": 1,
+      "type_id": null,
+      "type_name": "int",
+      "usage_role": "return",
+      "position": null
+    },
+    {
+      "id": 3,
+      "function_id": 2,
+      "type_id": null,
+      "type_name": "int",
+      "usage_role": "param",
+      "position": 0
+    },
+    {
+      "id": 4,
+      "function_id": 2,
+      "type_id": null,
+      "type_name": "int",
+      "usage_role": "return",
+      "position": null
+    },
+    {
+      "id": 5,
+      "function_id": 3,
+      "type_id": null,
+      "type_name": "int",
+      "usage_role": "param",
+      "position": 0
+    },
+    {
+      "id": 6,
+      "function_id": 3,
+      "type_id": null,
+      "type_name": "int",
+      "usage_role": "return",
+      "position": null
+    },
+    {
+      "id": 7,
+      "function_id": 4,
+      "type_id": null,
+      "type_name": "int",
+      "usage_role": "param",
+      "position": 0
+    },
+    {
+      "id": 8,
+      "function_id": 4,
+      "type_id": null,
+      "type_name": "int",
+      "usage_role": "return",
+      "position": null
+    },
+    {
+      "id": 9,
+      "function_id": 5,
+      "type_id": null,
+      "type_name": "int",
+      "usage_role": "param",
+      "position": 0
+    },
+    {
+      "id": 10,
+      "function_id": 5,
+      "type_id": null,
+      "type_name": "int",
+      "usage_role": "return",
+      "position": null
+    },
+    {
+      "id": 11,
+      "function_id": 6,
+      "type_id": null,
+      "type_name": "int",
+      "usage_role": "param",
+      "position": 0
+    },
+    {
+      "id": 12,
+      "function_id": 6,
+      "type_id": null,
+      "type_name": "int",
+      "usage_role": "return",
+      "position": null
+    }
+  ],
+  "conditions": [],
+  "decisions": [],
+  "dead_code_sites": [],
+  "call_exn_scopes": [
+    {
+      "call_id": 7,
+      "scope_id": 1
+    },
+    {
+      "call_id": 8,
+      "scope_id": 1
+    }
+  ],
+  "exn_edges": [],
+  "exn_origins": [
+    {
+      "id": 1,
+      "function_id": 3,
+      "scope_id": null,
+      "form": "raise",
+      "exn_path": "Helper.Failure",
+      "escapes": 1,
+      "line": 7,
+      "col": 29,
+      "channel": "exception",
+      "operand_primitive": null,
+      "operand_slot": null,
+      "operand_category": null,
+      "operand_repr": null,
+      "operand_integer_kind": null,
+      "operand_unavailable_reason": null
+    },
+    {
+      "id": 2,
+      "function_id": 6,
+      "scope_id": null,
+      "form": "division",
+      "exn_path": "Division_by_zero",
+      "escapes": 1,
+      "line": 10,
+      "col": 18,
+      "channel": "exception",
+      "operand_primitive": "%divint",
+      "operand_slot": 2,
+      "operand_category": "identifier",
+      "operand_repr": "d",
+      "operand_integer_kind": "int",
+      "operand_unavailable_reason": null
+    }
+  ],
+  "exn_rebinds": [],
+  "exn_scope_catches": [
+    {
+      "scope_id": 1,
+      "exn_path": "Helper.Failure"
+    }
+  ],
+  "exn_scopes": [
+    {
+      "id": 1,
+      "function_id": 4,
+      "parent_id": null,
+      "form": "try",
+      "line": 8,
+      "col": 17,
+      "catch_all": 0,
+      "channel": "exception"
+    }
+  ],
+  "channel_carriers": [],
+  "contracts": [
+    {
+      "key": "callgraph_contract",
+      "value": "v1"
+    },
+    {
+      "key": "error_contract",
+      "value": "v1:exception"
+    },
+    {
+      "key": "exn_contract",
+      "value": "v1"
+    }
+  ]
+}

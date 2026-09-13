@@ -130,6 +130,18 @@ not fabricate consumer `baselineState` or successful invocation status: consult 
 
 ## Review a deliberate change
 
+The functor catalogue calibration (2026-09-13) observes24 modules,859 functions,
+5440 calls and495 origins. The added module is `arch_index_functors.ml`; origin
+groups add one exception/failwith, two exception/reraise and one option/raise.
+The pristine old/new-producer comparisons agree on both old and new corpora,
+including all common graph/error tables. Evidence and separate rationale:
+`roster/functor-instance-resolution/calibration-attribution.md`. This descriptive
+reference changes no allowance: `self.allow` is unchanged, and the evaluator
+continues to distinguish UNKNOWN from PASS. During implementation the revision
+label explicitly identifies the base plus source patch; it is anchored to the
+source commit before review. The separately approved MUST/NULL ratchet adjustment
+is not an origin exemption or a claim of improved target resolution.
+
 1. Rebuild and inspect the actual outcome and directional coverage deltas. First rule out a
    wrong/stale build, configuration drift or an incomplete measurement.
 2. For legitimate population evolution, edit `reference.json` explicitly, recording the new

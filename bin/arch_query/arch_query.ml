@@ -102,6 +102,7 @@ Subcommands:
   low-coverage     [N]         least-covered functions, latest snapshot per function, top-N
   gardening        [open|log]  open gardening tasks, or the append-only log (default: open)
   unsafe-params    [unfixed|fixed|all]  string-typed params tracked for a proper type (default: unfixed)
+  functor-applications [limit] selected-CMT syntactic applications (default limit: 50)
 
 A "MEASURE" command reports an exact number and sorts by it. It never fails the build and never
 takes a --fail-on-... threshold: "is this too big" is a human judgement, not something these
@@ -138,6 +139,21 @@ let () =
   let argv = Array.to_list Sys.argv in
   match argv with
   | _ :: db_path :: cmd :: rest -> (
+      let functor_limit =
+        if cmd <> "functor-applications" then None
+        else
+          let parse s =
+            if s = "" || not (String.for_all (fun c -> c >= '0' && c <= '9') s) then
+              die 2 "arch-query: functor-applications limit must be a nonnegative decimal integer" ;
+            match int_of_string_opt s with
+            | Some n when n >= 0 -> n
+            | _ -> die 2 "arch-query: functor-applications limit is out of range"
+          in
+          match rest with
+          | [] -> Some 50
+          | [s] -> Some (parse s)
+          | _ -> die 2 "arch-query: functor-applications accepts at most one limit"
+      in
       let fmt = mode () in
       let t =
         try Arch_db.open_ro db_path
@@ -241,6 +257,20 @@ let () =
       in
       try
         (match cmd with
+        | "functor-applications" ->
+            let summary, applications =
+              Arch_functor_catalogue.read t ~limit:(Option.get functor_limit)
+            in
+            Arch_fmt.print fmt
+              ["contract"; "selected_inputs"; "collected_inputs"; "total"; "returned";
+               "truncated"; "scope"; "limitations"] summary ;
+            (* Existing commands intentionally omit empty tables. This command's
+               JSON contract requires a second array even for limit zero. *)
+            if fmt = Arch_fmt.Json && applications = [] then print_endline "[]"
+            else
+              Arch_fmt.print fmt
+                ["artifact"; "source"; "compiler_unit"; "ordinal"; "application_kind";
+                 "location"; "head"; "argument"; "diagnostics"] applications
         (* PORT FIX. These four read `calls.caller_name`, which exists only on the FLAT
            schema, so on arch-index's own CMT-produced schema the bash version died with a
            raw sqlite error and exit 1 — including `callers-of`, which the README advertises
