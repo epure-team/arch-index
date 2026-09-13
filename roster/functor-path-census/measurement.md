@@ -1,6 +1,8 @@
 # Fixed410 path census — 2026-09-13
 
-Status: measured twice with identical semantic payload; not yet reviewed or shipped.
+Status: measured twice with identical semantic payload, independently reviewed
+and QA-verified (including another fixed410 replay), shipped in PR104 on2026-09-13.
+Exact-head CI34780257512 SUCCESS before rebase merge0ca025b.
 Both runs used `run.js` and the committed fixed410 manifest; all input hashes
 were checked before and after each run. Tezos revision remained
 `1727d7e192f2374edda7ad7adceef6f4ec51f71a`; the same 47 porcelain entries
