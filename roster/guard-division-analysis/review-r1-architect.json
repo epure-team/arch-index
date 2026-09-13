@@ -1,0 +1,20 @@
+[
+  {
+    "severity": "MEDIUM",
+    "confidence": 5,
+    "path": "lib/arch_guard/guard_interpreter.ml",
+    "line": 111,
+    "category": "architecture",
+    "summary": "Public analysis resets compiler-global load-path state without restoring the caller's configuration",
+    "evidence": "Arch_guard.render_json/render_text are installed public entry points and call Guard_interpreter.analyze. analyze invokes Load_path.init with only Config.standard_library and Envaux.reset_cache. Compiler-libs documents Load_path.init as reset followed by adding only supplied paths. A compiler-only owned client initialized a fresh marker path, called render_json on the already-built owned arch_index.cmt, and printed before_marker=true after_marker=false (compile exit 0, run exit 0).",
+    "fix": "Prefer keeping the analyzer process-isolated behind the CLI unless in-process composability is explicitly required. If it is required, define the contract, encapsulate and serialize all compiler-global mutation, and test success/exception restoration. Restoring get_paths plus resetting Envaux caches is incomplete by itself because the auto-include callback and Envaux cache state are separate mutable globals.",
+    "fingerprint": "lib/arch_guard/guard_interpreter.ml:111:architecture",
+    "specialist": "architect",
+    "status": "OPEN",
+    "boundary": "installed arch-index.guard render API to host compiler-libs process",
+    "invariant": "A public library call must not silently destroy compiler-global lookup configuration owned by its caller.",
+    "failure_mode": "Subsequent host environment reconstruction or compiler lookup fails or resolves differently because only the standard-library path remains.",
+    "acs": ["AC-3", "AC-18"],
+    "convergence": ["public-surface", "compiler-global-state"]
+  }
+]

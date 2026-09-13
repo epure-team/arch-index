@@ -1,0 +1,101 @@
+[
+  {
+    "severity": "CRITICAL",
+    "confidence": 5,
+    "path": "lib/arch_guard/arch_guard.ml",
+    "line": 213,
+    "category": "spec",
+    "summary": "Text reports omit mandatory compiler and trusted-build assumptions",
+    "evidence": "FR-036 requires every successful report to record linked compiler version, trusted same-compiler/target and no-source-freshness assumptions, and interprocedural/heap limitations. render_text prints only input count/int_bits, sites, census and a shorter global warning (lines 213-228); these required fields remain only in analysis_json/tool JSON. C-5 also requires an explicit indirect-operations/omitted-artifacts limitation in both formats; neither renderer includes it.",
+    "fix": "Project compiler metadata and all required assumptions/limitations from the shared result into text; include the explicit C-5 exclusions in shared limitations and assert them in both renderers.",
+    "fingerprint": "lib/arch_guard/arch_guard.ml:213:spec",
+    "specialist": "spec-compliance",
+    "acs": [
+      "FR-036",
+      "FR-033",
+      "AC-3",
+      "AC-8",
+      "AC-10",
+      "AC-18"
+    ]
+  },
+  {
+    "severity": "MEDIUM",
+    "confidence": 5,
+    "path": "scripts/check-arch-guard.js",
+    "line": 206,
+    "category": "spec",
+    "summary": "Immediate-application shape and operand-type obligations are only partially tested",
+    "evidence": "Inventory tests cover a partial primitive with absent slot 2, native fixtures, aliases and shadow spelling. They do not exercise a later-saturated immediate application, explicit None second slot with further arguments, labelled/over-applied known primitives, accumulated eligibility defects, or unresolved/non-native operands of native primitives/zero guards. The fixture probe rewrites only annotation/location/spelling, not these shapes. These are explicit AC-4/AC-5 obligations, not inferred extra precision.",
+    "fix": "Extend the private trusted fixture seam for inaccessible application/type shapes and invoke the actual CLI, asserting exact inventory, original slot, eligibility reasons and conservative guard behavior.",
+    "fingerprint": "scripts/check-arch-guard.js:206:spec",
+    "specialist": "spec-compliance",
+    "acs": [
+      "FR-002",
+      "FR-003",
+      "FR-004",
+      "FR-006",
+      "FR-030",
+      "AC-4",
+      "AC-5",
+      "AC-14"
+    ]
+  },
+  {
+    "severity": "MEDIUM",
+    "confidence": 5,
+    "path": "scripts/check-arch-guard.js",
+    "line": 152,
+    "category": "spec",
+    "summary": "Scope, fresh-entry and accumulated unsupported-reason criteria lack required cases",
+    "evidence": "The 26 numeric cases and twelve-site fixture do not exercise alpha-renaming or aliases before/inside a refined guard; sticky unsupported ancestry through nested/curried/immediately applied functions; defaults containing target sites; multiple unsupported causes; later supported siblings; targets in loop conditions/bounds; or the full application dispatch categories. numeric() asserts statuses and census but never exact semantic/unsupported reason arrays. AC-11 through AC-16 explicitly require these cases.",
+    "fix": "Add bounded owned native fixtures for binding-time alias values, function entry/reset and lexical ancestry, all loop expression positions, effect/method/unlisted dispatch, and assert exact closed reasons with precedence and unaffected siblings.",
+    "fingerprint": "scripts/check-arch-guard.js:152:spec",
+    "specialist": "spec-compliance",
+    "acs": [
+      "FR-016",
+      "FR-019",
+      "FR-020",
+      "FR-025",
+      "FR-026",
+      "FR-027",
+      "FR-028",
+      "FR-029",
+      "FR-031",
+      "FR-041",
+      "AC-10",
+      "AC-11",
+      "AC-12",
+      "AC-13",
+      "AC-14",
+      "AC-15",
+      "AC-16"
+    ]
+  },
+  {
+    "severity": "MEDIUM",
+    "confidence": 5,
+    "path": "scripts/check-arch-guard.js",
+    "line": 280,
+    "category": "spec",
+    "summary": "Report and boundary checks omit explicit acceptance obligations",
+    "evidence": "reportMode checks census substrings and a single MAY_ZERO primitive/location, not every site's artifact/id/status/primitive/reasons against text. It lacks duplicate coordinates and 256-byte/257-byte UTF-8 spelling cases; inventory compares parsed objects for a repeat of one path, not reversed distinct accepted input bytes. Help/version and root wrapper behavior have no regression test. AC-1/AC-3/AC-7/AC-19 require these behaviors.",
+    "fix": "Add byte-level reversed multi-input checks, full same-fixture semantic text/JSON comparisons, duplicate-coordinate and UTF-8 boundary fixtures, CLI/wrapper contract controls.",
+    "fingerprint": "scripts/check-arch-guard.js:280:spec",
+    "specialist": "spec-compliance",
+    "acs": [
+      "FR-007",
+      "FR-013",
+      "FR-014",
+      "FR-033",
+      "FR-034",
+      "FR-035",
+      "FR-039",
+      "FR-040",
+      "FR-043",
+      "AC-1",
+      "AC-3",
+      "AC-19"
+    ]
+  }
+]
