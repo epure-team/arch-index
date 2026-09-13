@@ -1,0 +1,66 @@
+[
+  {
+    "cmd": "rtk proxy git diff --check",
+    "chunk_id": "16147b",
+    "wall_time_seconds": 0.000004078,
+    "exit_code": 0,
+    "original_token_count": 0,
+    "output": ""
+  },
+  {
+    "cmd": "rtk proxy opam exec --switch=/home/mathias/dev/arch-index -- node scripts/check-functor-bindings.js inventory",
+    "chunk_id": "29e9bb",
+    "wall_time_seconds": 1.042922916,
+    "exit_code": 0,
+    "original_token_count": 334,
+    "output": "{\"mode\":\"inventory\",\"result\":{\"native_fixture\":true,\"occurrences\":13,\"declarations\":6,\"matched_cases\":9,\"native_refusal_reasons\":[\"unsupported_path\",\"parameter_supplied_head\",\"unsupported_alias_rhs\",\"unsupported_head_shape\"],\"collection_failure\":{\"synthetic_not_source_valid\":true,\"duplicate_identity_premise\":true,\"catalogue_occurrences_preserved\":1,\"binding_outcome\":\"collection_failed\",\"expected_declarations\":0,\"expected_bindings\":0,\"partial_rows\":0,\"binding_marker_absent\":true},\"synthetic\":{\"ok\":true,\"evidence\":\"premise-checked-synthetic-not-source-valid\",\"identity\":{\"identity_conflicts\":true,\"alias_cycle\":true},\"heads\":{\"missing_local\":true,\"persistent\":true,\"named_unit_mismatch\":true},\"nested\":{\"overapplication\":true,\"inner_refusal_precedence\":true},\"roots\":{\"pident_pdot\":true,\"papply_pextra_persistent_null\":true},\"formals\":{\"named_nullable_combinations\":4},\"catalogue_unchanged\":{\"occurrences\":1,\"byte_identical\":true}},\"traversal_and_identity\":{\"declarations\":[\"BodyF\",\"DeferredF\",\"DirectF\",\"InitF\",\"LocalF\",\"MethodF\",\"NestedF\",\"ObjectF\",\"OuterFunctor\",\"RecF\",\"TypeofF\"],\"matched_contexts\":11,\"ignored_untyped_payload_declarations\":0,\"unpack_application_refusals\":1,\"cross_cmt_lookalikes\":2,\"artifact_local_joins\":true,\"key_collision_policy\":\"keys compared only within artifact; equality across artifacts allowed\"}}}\n"
+  },
+  {
+    "cmd": "rtk proxy opam exec --switch=/home/mathias/dev/arch-index -- node scripts/check-functor-bindings.js lifecycle",
+    "chunk_id": "c622ba",
+    "wall_time_seconds": 0.698224259,
+    "exit_code": 0,
+    "original_token_count": 258,
+    "output": "{\"mode\":\"lifecycle\",\"result\":{\"direct_api\":{\"ok\":true,\"evidence\":\"direct-api-not-full-cli-orchestration\",\"storage\":{\"partial_failure_raised\":true,\"binding_rows_after_rollback\":0,\"catalogue_rows_preserved\":2,\"graph_sentinel_preserved\":true,\"failed_row_success\":true,\"failed_row_rejection_raised\":true},\"rollback_uncertainty\":{\"raised_rollback_uncertainty\":true,\"binding_input_absent\":true,\"old_facts_preserved\":true},\"marker_lifecycle\":{\"zero_result_finalized\":true,\"marker_absent_before_finalize\":true,\"marker_write_failure_raised\":true,\"marker_absent_after_write_failure\":true,\"empty_selection_ineligible\":true}},\"producer_cli\":{\"evidence\":\"real-producer-cli-owned-schema-faults\",\"healthy_bindings\":2,\"partial_failure\":{\"failed_row_recorded\":true,\"old_facts_match_baseline\":true,\"marker_absent\":true},\"failed_row_failure\":{\"input_absent\":true,\"old_facts_match_baseline\":true,\"marker_absent\":true},\"reindex_sequence\":[\"valid\",\"failed\",\"valid\"],\"zero_and_unreadable\":{\"applications\":0,\"bindings\":0,\"unreadable_binding_inputs\":0}}}}\n"
+  },
+  {
+    "cmd": "rtk proxy opam exec --switch=/home/mathias/dev/arch-index -- node scripts/check-functor-bindings.js query",
+    "chunk_id": "8b146a",
+    "wall_time_seconds": 2.404820841,
+    "exit_code": 0,
+    "original_token_count": 78,
+    "output": "{\"mode\":\"query\",\"result\":{\"valid_results\":3,\"matched\":2,\"unresolved\":1,\"renderer_oracles\":18,\"zero_result_oracles\":18,\"default_limit_rows\":50,\"formats\":6,\"limit_zero_corruptions\":57,\"schema_refusals\":10,\"marker_refusals\":7,\"unrelated_old_table_ignored\":true,\"accessed_operation_failure\":true,\"readonly\":true}}\n"
+  },
+  {
+    "cmd": "rtk proxy opam exec --switch=/home/mathias/dev/arch-index -- node scripts/check-functor-bindings.js compatibility",
+    "chunk_id": "d11ba0",
+    "wall_time_seconds": 0.248676471,
+    "exit_code": 0,
+    "original_token_count": 108,
+    "output": "{\"mode\":\"compatibility\",\"result\":{\"prior_catalogue_checker\":{\"oracle\":\"versioned rich baseline\",\"semantic_tables_and_contracts\":16,\"legacy_queries\":3,\"indexing_passes\":2},\"readonly\":{\"catalogue_bytes_unchanged\":true,\"database_bytes_unchanged\":true,\"binding_results_observed\":3},\"flat\":{\"schema\":\"flat-1.3\",\"historical_oracles\":3,\"alias_exclusion_premise\":true,\"before_after_binding_refusal\":true,\"database_bytes_unchanged\":true}}}\n"
+  },
+  {
+    "cmd": "rtk proxy opam exec --switch=/home/mathias/dev/arch-index -- node roster/functor-binding-resolution/check-global-rollback.js",
+    "chunk_id": "66d0c0",
+    "wall_time_seconds": 0.948194048,
+    "exit_code": 0,
+    "original_token_count": 77,
+    "output": "{\"ok\":true,\"two_input\":{\"applications_per_input\":2,\"earlier_binding_input_preserved\":true},\"continuation\":{\"inputs\":3,\"failed\":1,\"collected\":2,\"later_input_preserved\":true},\"trigger\":\"ordinal_2_after_distinct_artifact_once\",\"old_graph_and_catalogue_semantics\":\"equal\",\"binding_marker_after_fault\":\"absent\"}\n"
+  },
+  {
+    "cmd": "rtk proxy node scripts/review-bundle-verify.js",
+    "chunk_id": "09f07b",
+    "wall_time_seconds": 0.000003867,
+    "exit_code": 0,
+    "original_token_count": 20,
+    "output": "review-bundle-verify: OK — 22 file(s) present and sha-matched (bundle 1.6.0).\n"
+  },
+  {
+    "cmd": "rtk proxy bash scripts/check-scope-diff.sh briefs/functor-binding-resolution-manifest.txt",
+    "chunk_id": "8a08fd",
+    "wall_time_seconds": 0.000003947,
+    "exit_code": 0,
+    "original_token_count": 0,
+    "output": ""
+  }
+]
