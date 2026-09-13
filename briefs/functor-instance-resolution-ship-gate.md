@@ -34,8 +34,8 @@ worktree /home/mathias/dev/arch-index-worktrees/functor-instance-resolution
 and its regenerable builds removed (~802MiB); unrelated worktrees untouched.
 Remote branch deleted. Normal local branch deletion refused rewritten ancestry;
 exact tree equality and verified PR merge justified scoped branch -D, now removed.
-Main untracked user files preserved. Post-merge CI34756657988 is running;
-pre-merge exact-head success is verified, post-merge success is not yet claimed.
+Main untracked user files preserved. Post-merge CI34756657988 subsequently
+confirmed successful on a232eac; both pre-merge and post-merge CI are verified.
 
 Ship housekeeping: KB/harness/projection sync/canonical friction checker absent;
 local JSON shape and phase-coverage checks used, not a canonical checker claim.
