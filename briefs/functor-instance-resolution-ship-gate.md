@@ -23,6 +23,22 @@ bundle22SHA1.6.0; scope0; branch hygiene0; review/QA convergence0.
 Review retains three MEDIUM architecture advisories (function size and repeated
 per-input scans). OpenCode timeout120s is degraded; QA shared breaker skips it.
 
-Pending: push/PR, exact-head CI including self-index/recalibration/rules/origin
-package/impact, rebase merge, local synchronization and exact owned worktree cleanup.
-MCP credentials-dependent job is not inferred passed from overall CI green.
+Shipped: PR https://github.com/epure-team/arch-index/pull/102 rebase-merged
+2026-09-13T12:16:49Z as a232eac2bb39eb8d8197095fde0cf88b23a20ee7.
+CI34756126234 completed successfully on exact head
+b0c86071600e7ab1c29ec42b93c7b27298821cb7; build and credentials check passed.
+MCP was skipped for absent credentials, release skipped on PR; neither is a test pass.
+Main synchronized by rebase, dropping already-applied bookkeeping1d21487.
+Exact task-branch/main tree comparison returned0 before cleanup. Clean owned
+worktree /home/mathias/dev/arch-index-worktrees/functor-instance-resolution
+and its regenerable builds removed (~802MiB); unrelated worktrees untouched.
+Remote branch deleted. Normal local branch deletion refused rewritten ancestry;
+exact tree equality and verified PR merge justified scoped branch -D, now removed.
+Main untracked user files preserved. Post-merge CI34756657988 is running;
+pre-merge exact-head success is verified, post-merge success is not yet claimed.
+
+Ship housekeeping: KB/harness/projection sync/canonical friction checker absent;
+local JSON shape and phase-coverage checks used, not a canonical checker claim.
+Cost telemetry skipped (advisory); existing untracked cost log not staged.
+Post-merge ledger bookkeeping stays local for a subsequent reviewed PR, not a
+direct unreviewed push to main. Roadmap updated with actual merge and benchmark limits.
