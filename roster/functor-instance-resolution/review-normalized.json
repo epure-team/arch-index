@@ -1,0 +1,67 @@
+{
+  "findings": [
+    {
+      "severity": "MEDIUM",
+      "confidence": 5,
+      "path": "lib/arch_tools/arch_functor_catalogue.ml",
+      "line": 116,
+      "category": "architecture",
+      "summary": "The new read function is approximately 134 lines, exceeding the architect role's configured 50-line function threshold.",
+      "evidence": "lib/arch_tools/arch_functor_catalogue.ml:116 begins read; its schema/marker checks, header and provenance validation, JSON grammar validation, reference validation, and rendering preparation continue through line 249. This is the sole consumer-side contract boundary for FR-023 through FR-029 (specs/functor-instance-resolution.md:190-199).",
+      "fix": "Extract private, side-effect-free stages for marker/header validation, input validation, and application validation; preserve the existing one snapshot transaction in read and the current refusal precedence.",
+      "fingerprint": "lib/arch_tools/arch_functor_catalogue.ml:116:architecture",
+      "specialist": "architect",
+      "fid": "lib/arch_tools/arch_functor_catalogue.ml:116:architecture#f2c5969c",
+      "status": "OPEN"
+    },
+    {
+      "severity": "MEDIUM",
+      "confidence": 5,
+      "path": "lib/arch_index/arch_index_functors.ml",
+      "line": 56,
+      "category": "architecture",
+      "summary": "The new collect function is approximately 68 lines, exceeding the configured 50-line function threshold and combining traversal, descriptor construction, location normalization, and diagnostics policy.",
+      "evidence": "lib/arch_index/arch_index_functors.ml:56-123 contains the full Typedtree traversal and nested helper policy. The same function owns preorder identity (lines 75-85), shallow descriptor construction (lines 62-72), and diagnostics derivation (lines 102-115), which are distinct frozen contracts in specs/functor-instance-resolution.md:205-220.",
+      "fix": "Split pure descriptor/location/diagnostics construction from the traversal driver while retaining parent-first allocation and head-before-argument traversal order exactly.",
+      "fingerprint": "lib/arch_index/arch_index_functors.ml:56:architecture",
+      "specialist": "architect",
+      "fid": "lib/arch_index/arch_index_functors.ml:56:architecture#c78d0158",
+      "status": "OPEN"
+    },
+    {
+      "severity": "MEDIUM",
+      "confidence": 5,
+      "path": "lib/arch_tools/arch_functor_catalogue.ml",
+      "line": 232,
+      "category": "architecture",
+      "summary": "Whole-catalogue validation rescans all decoded applications once per input, making the in-memory validation cost O(inputs × applications) before the requested limit can be applied.",
+      "evidence": "lib/arch_tools/arch_functor_catalogue.ml:232-235 folds the full decoded application list for every input; :236-244 filters and sorts that full list again for every input. Full validation before limit is required by specs/functor-instance-resolution.md:193-199, but this implementation’s repeated scans are not required by that contract.",
+      "fix": "Build a single artifact-keyed grouping/count map while decoding applications, then validate each input’s count, ordinal sequence, and forward references from its group. Keep whole-catalogue validation and output ordering unchanged.",
+      "fingerprint": "lib/arch_tools/arch_functor_catalogue.ml:232:architecture",
+      "specialist": "architect",
+      "fid": "lib/arch_tools/arch_functor_catalogue.ml:232:architecture#20b16765",
+      "status": "OPEN"
+    }
+  ],
+  "cross_runtime_findings": [],
+  "probable_duplicates": [],
+  "rejected": [],
+  "reobservations": [],
+  "dispositions": {
+    "reopened": [],
+    "pending_check": []
+  },
+  "warnings": [],
+  "stats": {
+    "input": 3,
+    "rejected": 0,
+    "cross_runtime": 0,
+    "reobservations": 0,
+    "reopened": 0,
+    "pending_check": 0,
+    "merged": 3,
+    "carried_forward": 0,
+    "probable_duplicates": 0
+  },
+  "normalizer_version": "2.0.0"
+}
