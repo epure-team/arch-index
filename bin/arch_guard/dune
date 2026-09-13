@@ -1,0 +1,4 @@
+(executable
+ (name arch_guard)
+ (public_name arch_guard)
+ (libraries arch_guard cmdliner))

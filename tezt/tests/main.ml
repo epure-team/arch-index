@@ -106,6 +106,9 @@ let () =
   Report.register () ;
   Actionable_review_reports.register () ;
   Origin_recurring_consumer.register () ;
+  Guard_division_analysis.register () ;
+  Guard_division_analysis.register_domain () ;
+  Guard_division_analysis.register_checkers () ;
 
   Sarif_in.register () ;
   Exported_selector.register () ;

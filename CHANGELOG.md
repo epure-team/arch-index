@@ -4,6 +4,13 @@
 
 ### Added
 
+- **Experimental `arch-guard` divisor analysis.** Separate report-only CLI/library
+  inventories immediate OCaml integer division/remainder primitives and classifies
+  native-int divisors in a bounded acyclic fragment. Explicit unsupported regions,
+  artifact attribution, and conditional limitations accompany text/JSON reports.
+  Existing graph extraction and rule verdicts are unchanged. See
+  [arch-guard](docs/arch-guard.md).
+
 - **Recurring origin checks on the built arch-index library.** A repository-local consumer
   reuses `forbid origin` for escaping assertions/divisions, a reviewed counted allowance and
   explicit population-reference drift checks. Native controls exercise new sites and increased

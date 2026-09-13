@@ -1,0 +1,360 @@
+arch-errors: channel e: 'Stdlib.ignore' matched nothing
+arch-errors: channel e: 'Stdlib.ignore' matched nothing
+arch-errors: channel r: 'Stdlib.Error' matched nothing
+arch-errors: channel r: 'Stdlib.Result.value' matched nothing
+arch-errors: channel r: 'Stdlib.Result.fold' matched nothing
+arch-errors: channel r: 'Stdlib.Result.get_ok' matched nothing
+arch-errors: channel r: 'Stdlib.Result.bind' matched nothing
+arch-errors: channel r: 'Stdlib.Result.Syntax.let*' matched nothing
+arch-errors: channel r: 'Stdlib.Result.Syntax.and*' matched nothing
+arch-errors: channel r: 'Stdlib.Result.map_error' matched nothing
+arch-errors: channel r: 'Stdlib.result' matched nothing
+arch-errors: channel r: 'Lwt.t' matched nothing
+arch-errors: channel result: 'Stdlib.Error' matched nothing
+arch-errors: channel result: 'Stdlib.Result.value' matched nothing
+arch-errors: channel result: 'Stdlib.Result.fold' matched nothing
+arch-errors: channel result: 'Stdlib.Result.get_ok' matched nothing
+arch-errors: channel result: 'Stdlib.Result.bind' matched nothing
+arch-errors: channel result: 'Stdlib.Result.Syntax.let*' matched nothing
+arch-errors: channel result: 'Stdlib.Result.Syntax.and*' matched nothing
+arch-errors: channel result: 'Stdlib.Result.map_error' matched nothing
+arch-errors: channel result: 'result' matched nothing
+arch-errors: channel result: 'Stdlib.result' matched nothing
+arch-errors: channel option: 'None' matched nothing
+arch-errors: channel option: 'Stdlib.Option.value' matched nothing
+arch-errors: channel option: 'Stdlib.Option.get' matched nothing
+arch-errors: channel option: 'Stdlib.Option.fold' matched nothing
+arch-errors: channel option: 'Stdlib.Option.bind' matched nothing
+arch-errors: channel option: 'Stdlib.Option.Syntax.let*' matched nothing
+arch-errors: channel option: 'Stdlib.Option.Syntax.and*' matched nothing
+arch-errors: channel option: 'option' matched nothing
+arch-errors: channel result: 'Stdlib.Error' matched nothing
+arch-errors: channel result: 'Stdlib.Result.value' matched nothing
+arch-errors: channel result: 'Stdlib.Result.fold' matched nothing
+arch-errors: channel result: 'Stdlib.Result.get_ok' matched nothing
+arch-errors: channel result: 'Stdlib.Result.bind' matched nothing
+arch-errors: channel result: 'Stdlib.Result.Syntax.let*' matched nothing
+arch-errors: channel result: 'Stdlib.Result.Syntax.and*' matched nothing
+arch-errors: channel result: 'Stdlib.Result.map_error' matched nothing
+arch-errors: channel result: 'result' matched nothing
+arch-errors: channel result: 'Stdlib.result' matched nothing
+arch-errors: channel option: 'None' matched nothing
+arch-errors: channel option: 'Stdlib.Option.value' matched nothing
+arch-errors: channel option: 'Stdlib.Option.get' matched nothing
+arch-errors: channel option: 'Stdlib.Option.fold' matched nothing
+arch-errors: channel option: 'Stdlib.Option.bind' matched nothing
+arch-errors: channel option: 'Stdlib.Option.Syntax.let*' matched nothing
+arch-errors: channel option: 'Stdlib.Option.Syntax.and*' matched nothing
+arch-errors: channel option: 'Fx.never_there' matched nothing
+arch-errors: channel result: 'Stdlib.Error' matched nothing
+arch-errors: channel result: 'Stdlib.Result.value' matched nothing
+arch-errors: channel result: 'Stdlib.Result.fold' matched nothing
+arch-errors: channel result: 'Stdlib.Result.get_ok' matched nothing
+arch-errors: channel result: 'Stdlib.Result.bind' matched nothing
+arch-errors: channel result: 'Stdlib.Result.Syntax.let*' matched nothing
+arch-errors: channel result: 'Stdlib.Result.Syntax.and*' matched nothing
+arch-errors: channel result: 'Stdlib.Result.map_error' matched nothing
+arch-errors: channel result: 'result' matched nothing
+arch-errors: channel result: 'Stdlib.result' matched nothing
+arch-errors: channel option: 'None' matched nothing
+arch-errors: channel option: 'Stdlib.Option.value' matched nothing
+arch-errors: channel option: 'Stdlib.Option.get' matched nothing
+arch-errors: channel option: 'Stdlib.Option.fold' matched nothing
+arch-errors: channel option: 'Stdlib.Option.bind' matched nothing
+arch-errors: channel option: 'Stdlib.Option.Syntax.let*' matched nothing
+arch-errors: channel option: 'Stdlib.Option.Syntax.and*' matched nothing
+arch-errors: channel r: 'Stdlib.Error' matched nothing
+arch-errors: channel r: 'Stdlib.Result.value' matched nothing
+arch-errors: channel r: 'Stdlib.Result.fold' matched nothing
+arch-errors: channel r: 'Stdlib.Result.get_ok' matched nothing
+arch-errors: channel r: 'Stdlib.Result.bind' matched nothing
+arch-errors: channel r: 'Stdlib.Result.Syntax.let*' matched nothing
+arch-errors: channel r: 'Stdlib.Result.Syntax.and*' matched nothing
+arch-errors: channel r: 'Stdlib.Result.map_error' matched nothing
+arch-errors: channel r: 'Stdlib.result' matched nothing
+[22:18:48.734] [SUCCESS] (1/245) helpers: the shared string search holds at its boundaries
+[22:18:48.735] [SUCCESS] (2/245) helpers: find_upwards stops at the enclosing dune-project
+[22:18:48.735] [SUCCESS] (3/245) registry-gaps: the R3 detector reports exactly the unregistered paths
+[22:18:49.052] [SUCCESS] (4/245) cmt: module-language shapes
+[22:18:59.147] [SUCCESS] (5/245) index: one polyglot repository, one database
+[22:18:59.153] [SUCCESS] (6/245) docs: curation-workflow SQL blocks still run
+[22:18:59.179] [SUCCESS] (7/245) load: NDJSON to a contract-marked index
+[22:18:59.203] [SUCCESS] (8/245) load: refuses what it cannot carry faithfully
+[22:18:59.256] [SUCCESS] (9/245) health: facts are exact, measures are not gates
+[22:18:59.276] [SUCCESS] (10/245) health: refuses a flat index rather than answering emptily
+[22:18:59.305] [SUCCESS] (11/245) contract: reaches under-approximates, unreachable over-approximates
+[22:18:59.320] [SUCCESS] (12/245) contract: refuses rather than answering unsoundly
+[22:18:59.336] [SUCCESS] (13/245) contract: an unknown name is refused on the flat schema too
+[22:18:59.343] [SUCCESS] (14/245) contract: an unreadable index exits 2, never 3
+[22:18:59.402] [SUCCESS] (15/245) duplicates: a proof, a single, and a difference
+[22:18:59.420] [SUCCESS] (16/245) duplicates: unreadable bodies are unverifiable, not proven
+[22:18:59.439] [SUCCESS] (17/245) duplicates: refuses an index with no source mapping
+[22:19:00.486] [SUCCESS] (18/245) curation: a load is all-or-nothing, and appends
+[22:19:00.593] [SUCCESS] (19/245) curation: provenance is mandatory and the log only grows
+[22:19:00.606] [SUCCESS] (20/245) curation: an optional module field disambiguates a same-named function (#35)
+[22:19:00.615] [SUCCESS] (21/245) curation: gardening open must not drop in_progress tasks (#34)
+[22:19:00.630] [SUCCESS] (22/245) curation: a bare and a module-qualified record for one name are rejected together
+[22:19:00.651] [SUCCESS] (23/245) mutants: the plan partitions the index and carries its tests
+[22:19:00.661] [SUCCESS] (24/245) mutants: a ⊤ edge inside the test cone destroys the proof
+[22:19:00.672] [SUCCESS] (25/245) mutants: the allowlist is engine-consumable and never empty by accident
+[22:19:00.683] [SUCCESS] (26/245) mutants: survivors are attributed to the innermost span
+[22:19:00.716] [SUCCESS] (27/245) mutants: the mutaml adapter reads both encodings and refuses the rest
+[22:19:00.719] [SUCCESS] (28/245) mutants: a NULL-kind edge makes targeting unsound
+[22:19:00.746] [SUCCESS] (29/245) decision-lint: an alias dies with any name it depends on
+[22:19:00.756] [SUCCESS] (30/245) decision-lint: solver noise must not shift the verdict stream
+[22:19:30.766] [SUCCESS] (31/245) decision-lint: a solver that goes silent must not hang the run
+[22:19:30.776] [SUCCESS] (32/245) decision-lint: a missing solver is reported absent, not dead
+[22:19:30.794] [SUCCESS] (33/245) coverage: no data is not zero, and ⊤-only coverage is flagged apart
+[22:19:30.827] [SUCCESS] (34/245) coverage: a malformed tracefile aborts instead of reporting 0%
+[22:19:30.833] [SUCCESS] (35/245) coverage: a covered function always lands in some bucket
+[22:19:30.848] [SUCCESS] (36/245) coverage: covered with surviving mutants is tested-by-nothing
+[22:19:30.862] [SUCCESS] (37/245) coverage: a name shared with a non-instrumented function is ambiguous
+[22:19:30.872] [SUCCESS] (38/245) coverage: --write replaces rather than accumulates
+[22:19:30.875] [SUCCESS] (39/245) coverage: a NULL-kind edge makes reachability unsound
+[22:19:30.897] [SUCCESS] (40/245) serve: a main-schema index is declined, not crashed on
+[22:19:30.942] [SUCCESS] (41/245) serve: the flat schema is served over HTTP
+[22:19:30.958] [SUCCESS] (42/245) rules: the five verdicts stay distinct
+[22:19:30.966] [SUCCESS] (43/245) rules: a glob boundary slip breaks verdicts both ways
+[22:19:30.996] [SUCCESS] (44/245) rules: the exit-code policy, including the flags that disable it
+[22:19:31.001] [SUCCESS] (45/245) rules: a misspelled --format aborts rather than falling back to text
+[22:19:31.019] [SUCCESS] (46/245) rules: a rule file it cannot parse aborts the gate
+[22:19:31.029] [SUCCESS] (47/245) rules: an un-⊤-marked index can never yield PASS
+[22:19:31.041] [SUCCESS] (48/245) rules: a rule that was never evaluated is not a passing rule
+[22:19:31.047] [SUCCESS] (49/245) rules: VIOLATION/POSSIBLE/UNKNOWN carry a concrete witness path; PASS carries none
+[22:19:31.053] [SUCCESS] (50/245) rules: VIOLATION's witness walks must_fwd even when a shorter fwd path exists
+[22:19:31.066] [SUCCESS] (51/245) rules: the text summary must not report a three-state verdict as one number
+[22:19:31.085] [SUCCESS] (52/245) rules: the summary census partitions the rules, and the gate is a separate line
+[22:19:31.098] [SUCCESS] (53/245) rules: an escaping cone and an un-⊤-marked index are not the same UNKNOWN
+[22:19:31.153] [SUCCESS] (54/245) rules: --on-vacuous covers every rule form, not only `reach`
+[22:19:31.240] [SUCCESS] (55/245) rules: ext: names external leaves, and is refused where it would be inert
+[22:19:31.250] [SUCCESS] (56/245) rules: an internal function cannot be classified ext: even with a dangling module_id
+[22:19:31.385] [SUCCESS] (57/245) rules origin: context and site caps stay independent (one_site)
+[22:19:31.523] [SUCCESS] (58/245) rules origin: context and site caps stay independent (distinct_sites)
+[22:19:31.665] [SUCCESS] (59/245) rules origin: an exemption is bounded by its count, not by its four fields
+[22:19:31.849] [SUCCESS] (60/245) rules origin: the parser refuses what it cannot serve, and says which character
+[22:19:31.980] [SUCCESS] (61/245) rules origin: an index with no origin data reports NOT_COMPUTED, never PASS
+[22:19:32.123] [SUCCESS] (62/245) rules origin: the allow-file survives a '|' in a name, and refuses a duplicate
+[22:19:32.281] [SUCCESS] (63/245) rules origin: the coverage figure, the channel scope, and the escapes filter
+[22:19:32.409] [SUCCESS] (64/245) rules origin: an index older than the channel column is handled, not crashed into
+[22:19:32.563] [SUCCESS] (65/245) pcc: pcc-index answers in one strict JSON object, or not at all
+[22:19:32.618] [SUCCESS] (66/245) pcc: a broken build produces no stdout to misread
+[22:19:32.811] [SUCCESS] (67/245) pcc: pcc-dossier reports a FAIL verdict without becoming one
+[22:19:33.410] [SUCCESS] (68/245) pcc: pcc-preflight tells a passing suite from a failing one
+[22:19:34.537] [SUCCESS] (69/245) callgraph-go: the three edge kinds and the verdicts they license
+[22:19:35.361] [SUCCESS] (70/245) callgraph-go: a cgo wrapper call is a ⊤ anchor
+[22:19:38.505] [SUCCESS] (71/245) lsp: Go is indexed with Go's own visibility rule
+[22:19:41.052] [SUCCESS] (72/245) lsp: Rust keeps its module nesting and its call edges
+[22:19:47.511] [SUCCESS] (73/245) lsp: TypeScript enrichment actually reaches the rows
+[22:19:47.634] [SUCCESS] (74/245) cmt: nested modules and functors are indexed where they are written
+[22:19:47.664] [SUCCESS] (75/245) impact: a hunk touches the span that contains it, and no other
+[22:19:47.685] [SUCCESS] (76/245) impact: contract_ok is the strict check, not 'flag present'
+[22:19:47.711] [SUCCESS] (77/245) impact: a span-less index degrades to file granularity, loudly
+[22:19:47.775] [SUCCESS] (78/245) impact: the findings gate fires on touched lines and refuses when uncomputed
+[22:19:47.778] [SUCCESS] (79/245) impact: a half line span is refused at load time
+[22:19:47.801] [SUCCESS] (80/245) impact: a diff content line is not a file header
+[22:19:47.925] [SUCCESS] (81/245) cmt: a closure with no ⊤ proves, one with a ⊤ does not
+[22:19:48.083] [SUCCESS] (82/245) cmt: shadows, function values and callbacks resolve honestly
+[22:19:48.184] [SUCCESS] (83/245) cmt: deferred code is not dead code
+[22:19:48.600] [SUCCESS] (84/245) soundness: the dominance corpus
+[22:19:48.697] [SUCCESS] (85/245) shadowed-definitions: no collision keeps the bare name
+[22:19:48.794] [SUCCESS] (86/245) shadowed-definitions: same-level shadow keeps two rows with distinct edges (#41)
+[22:19:48.889] [SUCCESS] (87/245) shadowed-definitions: a 3-way same-level shadow numbers and attributes correctly (#41)
+[22:19:48.982] [SUCCESS] (88/245) shadowed-definitions: only the live binding is exposed via the .mli (#41)
+[22:19:49.078] [SUCCESS] (89/245) shadowed-definitions: a nested-module same-level shadow is qualified and numbered (#41)
+[22:19:49.185] [SUCCESS] (90/245) shadowed-definitions: a cross-module qualified call reaches the live definition, not the shadowed one (#41)
+[22:19:49.951] [SUCCESS] (91/245) indexer: no wildcard binding is recorded as a function
+[22:19:50.062] [SUCCESS] (92/245) indexer: every reported count equals the number of rows stored, even when rows are refused
+[22:19:50.266] [SUCCESS] (93/245) effects: the OCaml CMT extractor answers all four questions
+[22:19:52.025] [SUCCESS] (94/245) effects: the Go SSA extractor answers the same four
+[22:19:52.044] [SUCCESS] (95/245) effects: a producer with no extractor still satisfies the contract
+[22:19:52.072] [SUCCESS] (96/245) effects: name+path endpoints resolve to the right id, or to all, never to a wrong one
+[22:19:57.104] [SUCCESS] (97/245) lsp: a refused symbol query names itself in the output
+[22:20:07.112] [SUCCESS] (98/245) lsp: a refused call query is named once per file, not per attempt
+[22:20:07.126] [SUCCESS] (99/245) runner diagnostics: missing LSP is reported without --verbose
+[22:20:07.134] [SUCCESS] (100/245) runner diagnostics: LSP start failure is reported without --verbose
+[22:20:17.144] [SUCCESS] (101/245) runner diagnostics: timeout and partial results are reported without --verbose
+[22:20:17.150] [SUCCESS] (102/245) runner diagnostics: unexpected spawn error is reported without --verbose
+[22:20:17.375] [SUCCESS] (103/245) readiness: a closed indexing phase is reported as such
+[22:20:19.600] [warn] readiness fell back to the quiescence heuristic across the gap: honest, but the indexing phase was missed
+[22:20:19.600] [SUCCESS] (104/245) readiness: a gap between phases is not the server reporting completion
+[22:20:24.625] [SUCCESS] (105/245) readiness: a server that reports no progress says so
+[22:20:24.631] [SUCCESS] (106/245) Arch_index_db.rejections_by_table: per-table attribution of rejected rows
+[22:20:24.638] [SUCCESS] (107/245) Arch_index_support.schema_tables_to_drop covers every producer-written table
+[22:20:24.731] [SUCCESS] (108/245) completion markers: every meta key a run writes is classified
+[22:20:24.846] [SUCCESS] (109/245) completion markers: none survives a re-index that indexes nothing
+[22:20:24.960] [SUCCESS] (110/245) escaping-origins: fatal origins in the closure, with coverage and MAY/MUST
+[22:20:25.069] [SUCCESS] (111/245) escaping-origins: an ambiguous WHOLE-MODULE root is refused, never unioned
+[22:20:25.177] [SUCCESS] (112/245) escaping-origins: the reported channel is the one queried, both ways
+[22:20:25.296] [SUCCESS] (113/245) escaping-origins: a root suffix must align on a path boundary
+[22:20:25.423] [SUCCESS] (114/245) escaping-origins: an unentered closure says so, rather than reading as clean
+[22:20:25.430] [SUCCESS] (115/245) escaping-origins: an index with no origin table is refused before any output
+[22:20:25.543] [SUCCESS] (116/245) escaping-origins: --forms selects, and an unknown form is refused
+[22:20:25.658] [SUCCESS] (117/245) escaping-origins: an ambiguous root is refused, never unioned
+[22:20:25.776] [SUCCESS] (118/245) point-free aliases: a local alias emits a MAY_ENUMERATED value_alias edge
+[22:20:51.215] [SUCCESS] (119/245) point-free aliases: the flat schema carries edge_form too (S5)
+[22:20:51.336] [SUCCESS] (120/245) point-free aliases: fan-in does not count an alias as a caller
+[22:20:51.463] [SUCCESS] (121/245) point-free aliases: callers-of and god-modules exclude alias edges
+[22:20:51.610] [SUCCESS] (122/245) point-free aliases: an alias inherits its target's raise set
+[22:20:51.712] [SUCCESS] (123/245) phantom origins: an omitted optional argument is not a returned None (3.14)
+[22:20:51.809] [SUCCESS] (124/245) phantom origins: a synthetic None still OBSERVES the declared path (3.14)
+[22:20:51.943] [SUCCESS] (125/245) module-alias heads: an alias-rooted head is rewritten, marked and never MUST
+[22:20:52.067] [SUCCESS] (126/245) module-alias heads: a nested rebinding resolves to ITS target, not the toplevel one
+[22:20:52.204] [SUCCESS] (127/245) module-alias heads: callers-of, fan-in and god-modules all COUNT a rewritten edge
+[22:20:52.309] [SUCCESS] (128/245) arch-report: every finding in report.json appears in the SARIF and the HTML (CHECK-5)
+[22:20:52.416] [SUCCESS] (129/245) arch-report: a failed analysis never renders covered, and reaches all three channels
+[22:20:52.609] [SUCCESS] (130/245) arch-report: report.sarif validates against the published 2.1.0 schema (CHECK-4)
+[22:20:52.718] [SUCCESS] (131/245) arch-report: an analysis that did not run renders explicitly, never as absent (FR-024)
+[22:20:52.826] [SUCCESS] (132/245) arch-report: imported heuristic findings are rendered, with their own provenance
+[22:20:53.001] [SUCCESS] (133/245) arch-report: --rules evaluates rules in the unified report
+[22:20:53.042] [SUCCESS] (134/245) actionable report standalone check: rules
+[22:20:53.080] [SUCCESS] (135/245) actionable report standalone check: ordering
+[22:20:55.434] [SUCCESS] (136/245) actionable report standalone check: operands
+[22:20:55.500] [SUCCESS] (137/245) actionable report standalone check: compatibility
+[22:20:55.527] [SUCCESS] (138/245) actionable report checker exit mapping: assert
+[22:20:55.547] [SUCCESS] (139/245) actionable report checker exit mapping: execution
+[22:20:56.677] [SUCCESS] (140/245) origin recurring consumer: authentic
+[22:20:59.987] [SUCCESS] (141/245) origin recurring consumer: failures
+[22:21:00.210] [SUCCESS] (142/245) origin recurring consumer: package
+[22:21:00.242] [SUCCESS] (143/245) origin recurring consumer checker exit: assert
+[22:21:00.273] [SUCCESS] (144/245) origin recurring consumer checker exit: execution
+[22:21:00.414] [SUCCESS] (145/245) sarif-in: an imported finding is heuristic and changes no edge (CHECK-1)
+[22:21:00.527] [SUCCESS] (146/245) sarif-in: a merged log attributes each finding to ITS own tool, not the last one
+[22:21:00.652] [SUCCESS] (147/245) sarif-in: an underscore is not a wildcard, a non-string level is not a warning
+[22:21:00.766] [SUCCESS] (148/245) sarif-in: an index predating the table is refused before anything is written
+[22:21:00.898] [SUCCESS] (149/245) sarif-in: unparseable writes no facts (CHECK-3); parseable-with-rejects is partial (CHECK-3-bis)
+[22:21:01.012] [SUCCESS] (150/245) exported selector: exported:** is fn:** restricted to the API surface
+[22:21:01.120] [SUCCESS] (151/245) exported selector: refused where it is not granted, before it can answer wrongly
+[22:21:01.290] [SUCCESS] (152/245) exported selector: accepted in exactly ONE position, refused in every other
+[22:21:01.300] [SUCCESS] (153/245) exported selector: the FLAT schema's own column is read (4.4)
+[22:21:01.400] [SUCCESS] (154/245) escaping-origins --roots exported: the cone starts at the API surface, not everywhere
+[22:21:01.503] [SUCCESS] (155/245) escaping-origins --roots exported: an index with no exports is REFUSED, not reported empty
+[22:21:01.506] [SUCCESS] (156/245) escaping-origins --roots exported: a producer-shaped FLAT index is REFUSED, not answered empty
+[22:21:01.607] [SUCCESS] (157/245) escaping-origins --roots exported: an index predating functions.exposed is REFUSED
+[22:21:01.710] [SUCCESS] (158/245) escaping-origins --roots exported: the keyword shadows a function named exported, and qualifying escapes it
+[22:21:01.717] [SUCCESS] (159/245) Arch_index_db.insert_function: a rejected row yields no id, not a neighbour's
+[22:21:01.829] [SUCCESS] (160/245) indexer: a call to a function whose row was rejected is MAY_TOP, not a MUST external leaf
+[22:21:01.941] [SUCCESS] (161/245) indexer: a rejected modules row indexes nothing from that unit, and its callers go to MAY_TOP
+[22:21:02.054] [SUCCESS] (162/245) indexer: a rejected types row drops its fields and constructors rather than filing them under another type
+[22:21:02.268] [SUCCESS] (163/245) cmt: a nested-module reference resolves to the linked unit
+[22:21:02.506] [SUCCESS] (164/245) cmt: a qualified reference resolves within the library it names
+[22:21:02.614] [SUCCESS] (165/245) cmt: two (wrapped false) libraries sharing a module name degrade to ⊤, never a guess
+[22:21:02.736] [SUCCESS] (166/245) cmt: a reference through a cross-library re-export facade resolves to the real unit
+[22:21:02.861] [SUCCESS] (167/245) cmt: an include-defined homonym never resolves into the other library — pinned, not endorsed
+[22:21:02.964] [SUCCESS] (168/245) cmt: a reference rooted outside the index still binds a local homonym — pinned, not endorsed
+[22:21:03.090] [SUCCESS] (169/245) cmt: a deeper include-defined homonym is not re-interpreted at the ANCHOR's own segment — pinned, not endorsed
+[22:21:03.209] [SUCCESS] (170/245) cmt: include_subdirs qualified — a nested module resolves within its own library
+[22:21:03.318] [SUCCESS] (171/245) cmt: a main module SHADOWING a sibling degrades to ⊤ — pinned, not endorsed
+[22:21:03.438] [SUCCESS] (172/245) cmt: an aliased nested module can still bind an unlinked homonym — pinned, not endorsed
+[22:21:03.552] [SUCCESS] (173/245) cmt: module_deps and type_usage still erase the owning library — pinned, not endorsed
+[22:21:03.671] [SUCCESS] (174/245) cmt: a homonym unit below the anchor still binds a LINKED wrong library — pinned, not endorsed
+[22:21:03.789] [SUCCESS] (175/245) cmt: a homonym unit name is never resolved to whichever library owns the row
+[22:21:04.216] [warn] MUST-with-NULL-callee (350) has fallen well below clean_measured (383). Consider lowering clean_measured in this commit so the ratchet keeps its teeth.
+[22:21:04.217] [SUCCESS] (176/245) cmt: the whole-repo MUST-with-NULL-callee count stays under its ceiling
+[22:21:04.287] [SUCCESS] (177/245) arch-query: a bad limit argument is refused, not defaulted
+[22:21:04.415] [SUCCESS] (178/245) exn: producer records origins, scopes and call scopes per node
+[22:21:04.694] [SUCCESS] (179/245) exn: raises / raisers-of / exn-stats are handler-aware and ⊤-honest
+[22:21:04.822] [SUCCESS] (180/245) error-channels: producer records value-channel origins, scopes and edges
+[22:21:04.952] [SUCCESS] (181/245) error-channels: re-indexing an existing database is idempotent
+[22:21:05.093] [SUCCESS] (182/245) error-channels: a re-index never inherits the previous run's completion markers
+[22:21:05.190] [SUCCESS] (183/245) error-channels: --errors-strict succeeds when every declaration matches
+[22:21:05.279] [SUCCESS] (184/245) error-channels: a channel shadowed by an earlier one is refused at load time
+[22:21:05.360] [SUCCESS] (185/245) error-channels: shadowing a BUILT-IN channel is refused with an actionable remedy
+[22:21:05.452] [SUCCESS] (186/245) error-channels: --errors-strict passes over a config that EXTENDS a built-in
+[22:21:05.791] [SUCCESS] (187/245) error-channels: may-fail per channel
+[22:21:05.909] [SUCCESS] (188/245) error-channels: config validation does not abort on a good file
+[22:21:06.027] [SUCCESS] (189/245) error-channels: --errors-strict promotes a miss to fatal
+[22:21:06.119] [SUCCESS] (190/245) error-channels: ARCH_ERRORS_PROFILES_DIR wins over <root>/profiles, and is printed
+[22:21:06.132] [SUCCESS] (191/245) error-channels: a Flat-schema DB refuses NOT_ANALYSED on every channel
+[22:21:06.325] [SUCCESS] (192/245) error-channels: [summaries] replaces external ⊤ with the declared set
+[22:21:06.415] [SUCCESS] (193/245) provenance: Arch_index.run stamps a real producer_runs row on real functions/calls
+[22:21:06.521] [SUCCESS] (194/245) provenance: re-indexing the same database does not accumulate producer_runs rows
+[22:21:06.527] [SUCCESS] (195/245) provenance: functions/calls join producer_runs, not five text columns
+[22:21:06.533] [SUCCESS] (196/245) provenance: an invalid soundness_class is rejected, not stored
+[22:21:06.541] [SUCCESS] (197/245) provenance: arch-load's --producer/--soundness-class flags
+[22:21:06.584] [SUCCESS] (198/245) coverage-matrix: an un-built OCaml project reports callgraph not_analysed, exit 1
+[22:21:06.675] [SUCCESS] (199/245) coverage-matrix: a built OCaml project reports callgraph covered
+[22:21:06.686] [SUCCESS] (200/245) coverage-matrix: --allow-partial accepts gaps with exit 0
+[22:21:06.699] [SUCCESS] (201/245) coverage-matrix: a Cargo workspace with no callgraph-rust driver built reports not_analysed
+[22:21:06.712] [SUCCESS] (202/245) coverage-matrix: a built arch-callgraph-go driver reports callgraph covered
+[22:21:06.734] [SUCCESS] (203/245) coverage-matrix: a built callgraph-rust driver AND merge pass reports callgraph covered
+[22:21:06.735] [SUCCESS] (204/245) coverage-matrix: find_sibling_tool never climbs past the enclosing dune-project
+[22:21:06.735] [SUCCESS] (205/245) coverage-matrix: find_sibling_tool never climbs past the enclosing dune-project (_build/default candidate)
+[22:21:06.735] [SUCCESS] (206/245) coverage-matrix: find_repo_root never climbs past the enclosing dune-project
+[22:21:06.747] [SUCCESS] (207/245) coverage-matrix: coverage and decisions are always not_analysed without --lcov, language NULL
+[22:21:06.769] [SUCCESS] (208/245) coverage-matrix: re-running replaces rather than accumulates rows
+[22:21:06.782] [SUCCESS] (209/245) coverage-matrix: writing into an existing, populated main-schema database is safe
+[22:21:06.795] [SUCCESS] (210/245) coverage-matrix: the error_channels row reads the producer's contract
+[22:21:06.889] [SUCCESS] (211/245) top-anchor: a function-typed parameter invoked as a callback is callback_param
+[22:21:06.982] [SUCCESS] (212/245) top-anchor: a functor argument's member invoked is module_param
+[22:21:07.078] [SUCCESS] (213/245) top-anchor: a resolved MUST edge has NULL top_reason and NULL top_anchor
+[22:21:07.171] [SUCCESS] (214/245) top-anchor: top_reason/top_anchor are non-NULL iff kind is MAY_TOP, across every row
+[22:21:07.178] [SUCCESS] (215/245) top-anchor: a top_reason on a non-MAY_TOP row violates the CHECK constraint
+[22:21:07.184] [SUCCESS] (216/245) top-anchor: an out-of-vocabulary top_reason violates the CHECK constraint
+[22:21:07.275] [SUCCESS] (217/245) sarif: --format sarif validates against the SARIF 2.1.0 schema
+[22:21:07.282] [SUCCESS] (218/245) sarif: a PASS verdict never becomes a result — only non-PASS verdicts do
+[22:21:07.288] [SUCCESS] (219/245) sarif: VIOLATION/POSSIBLE/UNKNOWN map to error/warning/note
+[22:21:07.294] [SUCCESS] (220/245) sarif: an UNKNOWN result carries properties.soundness=unknown_top and its top_reason
+[22:21:07.297] [SUCCESS] (221/245) sarif: UNKNOWN_NO_CONTRACT carries properties.soundness=no_contract, not unknown_top
+[22:21:07.303] [SUCCESS] (222/245) json: an UNKNOWN result's top_reasons carries the ⊤-anchor taxonomy value
+[22:21:07.309] [SUCCESS] (223/245) sarif: a rule's witness path becomes a codeFlow with one location per step, IN ORDER
+[22:21:07.315] [SUCCESS] (224/245) sarif: driver name/category/automationDetails are set, and the ⊤ frontier is a count, not results
+[22:21:07.326] [SUCCESS] (225/245) sarif: every non-PASS verdict in --format json appears in --format sarif
+[22:21:07.332] [SUCCESS] (226/245) sarif: an analysis_coverage row with status=not_analysed becomes a toolExecutionNotification, never silence
+[22:21:07.343] [SUCCESS] (227/245) sarif: tool.driver.name/version are read from a real producer_runs row, not just the fallback
+[22:21:07.414] [SUCCESS] (228/245) sarif: two runs from one producer must carry distinct category/automationDetails.id
+[22:21:07.420] [SUCCESS] (229/245) sarif: a VIOLATION result carries results[].locations with the source's fullyQualifiedName
+[22:21:07.420] [SUCCESS] (230/245) sarif: a file name containing a parenthesis does not fabricate a bogus location
+[22:21:07.420] [SUCCESS] (231/245) sarif: two runs sharing (producer, category) are rejected, not silently emitted
+[22:21:07.420] [SUCCESS] (232/245) sarif: a finding's soundness_class=heuristic round-trips into properties
+[22:21:07.429] [SUCCESS] (233/245) sarif: a `dep` VIOLATION does not fabricate results[].locations from its prose detail
+[22:21:07.432] [SUCCESS] (234/245) sarif: a nothing-proved result's message.text names the rule, the verdict, and its note
+[22:21:07.443] [SUCCESS] (235/245) sarif: a MAIN-schema UNKNOWN result's top_reasons is read via caller_id, not left empty
+[22:21:07.450] [SUCCESS] (236/245) sarif: a FLAT index's producer/soundness_class round-trip from comment_db_meta
+[22:21:07.458] [SUCCESS] (237/245) sarif: a truncated results[].locations still carries properties.detail_total
+[22:21:07.465] [SUCCESS] (238/245) rules: an UNKNOWN verdict on an index with kind but no top_reason column does not crash
+[22:21:07.477] [SUCCESS] (239/245) arch-impact/rules/coverage/mutants: a query-time Refused is rendered as a diagnostic, not dumped as an uncaught exception
+[22:21:07.487] [SUCCESS] (240/245) arch-query raises: refuses (exit 3), does not crash, on an index predating exn_scopes.channel
+[22:21:07.491] [SUCCESS] (241/245) arch-query escaping-origins: refuses (exit 3), does not crash, on an index predating exn_origins.channel
+[22:21:07.492] [SUCCESS] (242/245) Arch_db.ok: converts a raw 'no such column' error into Refused, naming the column, for ANY site with no guard
+[22:21:07.492] [SUCCESS] (243/245) Arch_db.ok: converts a raw 'no such table' error into Refused, naming the table, for ANY site with no guard
+[22:21:07.733] [SUCCESS] (244/245) recalibrate.sh --self-test passes
+[22:21:07.737] [SUCCESS] (245/245) recalibrate.sh's raw golden query matches the one CI runs
+assertion: AssertionError [ERR_ASSERTION]: controlled assertion
+    at main (/home/mathias/dev/arch-index-worktrees/guard-division-analysis/checks/actionable-review-reports.js:315:7)
+    at Object.<anonymous> (/home/mathias/dev/arch-index-worktrees/guard-division-analysis/checks/actionable-review-reports.js:340:3)
+    at Module._compile (node:internal/modules/cjs/loader:1944:14)
+    at Object..js (node:internal/modules/cjs/loader:2084:10)
+    at Module.load (node:internal/modules/cjs/loader:1666:32)
+    at Module._load (node:internal/modules/cjs/loader:1447:12)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:260:19)
+    at Module.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:154:5)
+    at node:internal/main/run_main_module:33:47
+execution error: Error: controlled execution
+    at main (/home/mathias/dev/arch-index-worktrees/guard-division-analysis/checks/actionable-review-reports.js:317:11)
+    at Object.<anonymous> (/home/mathias/dev/arch-index-worktrees/guard-division-analysis/checks/actionable-review-reports.js:340:3)
+    at Module._compile (node:internal/modules/cjs/loader:1944:14)
+    at Object..js (node:internal/modules/cjs/loader:2084:10)
+    at Module.load (node:internal/modules/cjs/loader:1666:32)
+    at Module._load (node:internal/modules/cjs/loader:1447:12)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:260:19)
+    at Module.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:154:5)
+    at node:internal/main/run_main_module:33:47
+origin-consumer: cleanup report staging: injected report staging cleanup failure
+origin-consumer: final record write failed: injected final record write failure
+ASSERTION: deliberate checker assertion
+EXECUTION: Error: deliberate checker execution error
+    at main (/home/mathias/dev/arch-index-worktrees/guard-division-analysis/checks/origin-recurring-consumer.js:261:72)
+    at Object.<anonymous> (/home/mathias/dev/arch-index-worktrees/guard-division-analysis/checks/origin-recurring-consumer.js:267:1)
+    at Module._compile (node:internal/modules/cjs/loader:1944:14)
+    at Object..js (node:internal/modules/cjs/loader:2084:10)
+    at Module.load (node:internal/modules/cjs/loader:1666:32)
+    at Module._load (node:internal/modules/cjs/loader:1447:12)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:260:19)
+    at Module.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:154:5)
+    at node:internal/main/run_main_module:33:47
+Statement error (CONSTRAINT) writing to type_usage: FOREIGN KEY constraint failed
+Statement error (CONSTRAINT) writing to type_usage: FOREIGN KEY constraint failed
+Statement error (CONSTRAINT) writing to dead_code_sites: FOREIGN KEY constraint failed
+Statement error (CONSTRAINT) writing to dead_code_sites: FOREIGN KEY constraint failed
+Statement error (CONSTRAINT) writing to dead_code_sites: FOREIGN KEY constraint failed
+Statement error (CONSTRAINT) writing to functions: FOREIGN KEY constraint failed
