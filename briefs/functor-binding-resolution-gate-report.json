@@ -1,9 +1,9 @@
 {
   "mode": "full",
-  "no_go_round": 1,
+  "no_go_round": 0,
   "max_rounds": 5,
   "legacy_no_go_round": false,
-  "round": 1,
+  "round": 2,
   "legacy_round": false,
   "current_round_strike": false,
   "config": {
@@ -14,10 +14,20 @@
   "cause": null,
   "warnings": [],
   "violations": [],
-  "checks": [],
+  "checks": [
+    {
+      "check": "roster/functor-binding-resolution/check-global-rollback.js",
+      "fingerprint": "lib/arch_index/arch_index.ml:616:spec",
+      "fid": "lib/arch_index/arch_index.ml:616:spec#da9a9632",
+      "red_verified": true,
+      "check_blob": "70e8a2fde546b256766506450a691bf5872a7556",
+      "weakened": false,
+      "greenFailed": false
+    }
+  ],
   "trace": {
     "obligated": true,
-    "lines_seen": 7,
+    "lines_seen": 14,
     "schema_version": "1.0",
     "skipped": false
   }
