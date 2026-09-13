@@ -1,0 +1,14 @@
+{
+  "finding": "lib/arch_guard/arch_guard.ml:213:spec#cd378d70",
+  "check": "scripts/check-guard-report-context.js",
+  "pre_fix_sha": "d44c0c6ae8f4991549f6de5bbc2bdb3f24eb25ec",
+  "command": "rtk proxy opam exec --switch=/home/mathias/dev/arch-index -- node -e 'const r=require(\"./scripts/lib/review/redgreen-scratch.js\").verifyCheck({repoRoot:process.cwd(),checkRelPath:\"scripts/check-guard-report-context.js\",preFixSha:\"d44c0c6ae8f4991549f6de5bbc2bdb3f24eb25ec\",recordedBlob:null,redVerified:false,timeoutMs:120000});console.log(JSON.stringify(r));process.exit(r.inconclusive||!r.red_verified||r.greenFailed?1:0);'",
+  "exit_code": 0,
+  "result": {
+    "red_verified": true,
+    "check_blob": "8108aa657905871c8693120bb3168ce40b9d6c0f",
+    "weakened": false,
+    "greenFailed": false
+  },
+  "scope": "Helper verification only; not a roster R2 verdict. Helper extracted an owned pre-fix archive, overlaid only the checker, required assertion RED and current-tree GREEN, and removed scratch."
+}

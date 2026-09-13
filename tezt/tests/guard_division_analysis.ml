@@ -68,6 +68,12 @@ let register_domain () =
   Lwt.return_unit
 
 let register_checkers () =
+  Test.register ~__FILE__ ~title:"arch-guard independent checker: report context"
+    ~tags:["arch_guard"; "independent_checker"] @@ (fun () ->
+    let checker = Filename.concat (repo_root ()) "scripts/check-guard-report-context.js" in
+    let code, stdout, stderr = run_command_split "node" [checker] in
+    if code <> 0 then Test.fail "report-context checker exit %d (1=assertion, >=2=execution)\n%s\n%s" code stdout stderr ;
+    Lwt.return_unit) ;
   let checker = Filename.concat (repo_root ()) "scripts/check-arch-guard.js" in
   List.iter
     (fun (mode, expected) ->

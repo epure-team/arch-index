@@ -1,4 +1,3 @@
 (library
  (name arch_guard)
- (public_name arch-index.guard)
  (libraries compiler-libs.common digestif yojson unix))

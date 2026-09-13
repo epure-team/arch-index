@@ -153,7 +153,8 @@ let analysis_json = `Assoc [("mode", `String "experimental-report-only"); ("frag
   ("domain", `String "constant-zero-v1");
   ("assumptions", `List [`String "trusted same-compiler and same-target CMT"; `String "artifact-only scope"; `String "no source freshness certificate"]);
   ("limitations", `List [`String "no whole-program completeness"; `String "no guaranteed execution or confirmed failure";
-    `String "no machine-checked proof"; `String "unsupported fragment is explicit"; `String "no interprocedural or heap reasoning"])]
+    `String "no machine-checked proof"; `String "unsupported fragment is explicit"; `String "no interprocedural or heap reasoning";
+    `String "indirect operations are not covered"; `String "omitted artifacts are not covered"])]
 
 let run paths =
   let artifacts = canonicalize paths |> List.map read_artifact in
@@ -209,9 +210,18 @@ let render_text paths =
   let inputs = result |> member "inputs" |> to_list in
   let sites = result |> member "sites" |> to_list in
   let census = result |> member "census" in
+  let tool = result |> member "tool" in
+  let analysis = result |> member "analysis" in
   let buffer = Buffer.create 1024 in
-  Printf.bprintf buffer "arch-guard experimental report\ninputs: %d (supplied accepted artifacts only)\nint_bits: %d\n"
-    (List.length inputs) Sys.int_size ;
+  Printf.bprintf buffer "arch-guard experimental report\ninputs: %d (supplied accepted artifacts only)\ncompiler_version: %s\nint_bits: %d\n"
+    (List.length inputs) (tool |> member "compiler_version" |> to_string)
+    (tool |> member "int_bits" |> to_int) ;
+  List.iter
+    (fun value -> Printf.bprintf buffer "assumption: %s\n" (to_string value))
+    (analysis |> member "assumptions" |> to_list) ;
+  List.iter
+    (fun value -> Printf.bprintf buffer "limitation: %s\n" (to_string value))
+    (analysis |> member "limitations" |> to_list) ;
   if sites = [] then Buffer.add_string buffer "No matching immediate primitive occurrences in supplied artifacts.\n" ;
   List.iter (fun site ->
       let location = site |> member "location" in

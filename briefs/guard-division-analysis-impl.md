@@ -4,6 +4,24 @@
 **Mode:** full
 **Status:** COMPLETED
 
+The status and gates below describe the pre-R1 implementation checkpoint, not the
+current correction. R1 review is NO-GO; corrective implementation is now running
+under plan613d6e2 and must replace this summary with fresh evidence before completion.
+
+## Ratchet
+
+- finding: `lib/arch_guard/arch_guard.ml:213:spec#cd378d70`
+- check: `scripts/check-guard-report-context.js` (new self-contained file)
+- red command: `rtk proxy node scripts/check-guard-report-context.js`
+- pre_fix_sha: `d44c0c6ae8f4991549f6de5bbc2bdb3f24eb25ec`
+- check_encodable: true
+- current evidence: actual CLI RED exit1 on empty and classified missing text compiler
+  context before production edits; integrated full-suite RED exit1, only the new
+  check failed (255 other Tezt +64 Alcotest pass). Minimal report/package correction
+  then passed256Tezt+64Alcotest. Actual archive helper RED/GREEN verified0 with blob
+  8108aa657905871c8693120bb3168ce40b9d6c0f; evidence correction-context-ratchet.json.
+  Final fixture/oracle correction and independent R2 still pending.
+
 ## Modified files
 
 | Paths | Change | Purpose |
