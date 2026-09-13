@@ -1,55 +1,20 @@
 {
   "task": "functor-binding-resolution",
   "date": "2026-09-13",
-  "status": "NO-GO",
+  "status": "GO",
   "auto_fixes_applied": [],
-  "findings": [
-    {
-      "severity": "CRITICAL",
-      "confidence": 5,
-      "path": "lib/arch_index/arch_index.ml",
-      "line": 616,
-      "category": "spec",
-      "summary": "Binding-side RAISE(ROLLBACK) can unwind catalogue and graph persistence",
-      "evidence": "Broad transaction opens at line616; catalogue writes668-670 and binding savepoint673 precede COMMIT703. Architect reproduced real CLI healthy exit0 modules1/functions3/applications2, versus RAISE(ROLLBACK) exit1 modules0/functions0/applications0, failure-row FK failure and no-active-transaction COMMIT. Existing CLI tests used ABORT and API sentinels were already committed.",
-      "fix": "Queue immutable collected binding payloads; persist each independently after all old producer transactions commit. Add a real-producer RAISE(ROLLBACK) regression proving old facts survive.",
-      "fingerprint": "lib/arch_index/arch_index.ml:616:spec",
-      "specialist": "spec-compliance",
-      "acs": [
-        "AC-8",
-        "FR-014"
-      ],
-      "fid": "lib/arch_index/arch_index.ml:616:spec#da9a9632",
-      "status": "OPEN",
-      "first_seen_round": 1,
-      "resolved_round": null,
-      "reopened_from_round": null,
-      "reopened_at_round": null,
-      "check": null,
-      "check_encodable": true,
-      "red_verified": null,
-      "pre_fix_sha": "5338a81ebeafbe11eb1fe61bf11aa8a0e65b74c5",
-      "check_blob": null
-    }
-  ],
+  "findings": [],
   "cross_runtime_findings": [],
   "summary": {
-    "critical": 1,
+    "critical": 0,
     "high": 0,
     "medium": 0,
     "low": 0,
     "auto_fixed": 0
   },
-  "no_go_reason": {
-    "type": "spec-ac-failure",
-    "cause": null,
-    "failed_acs": [
-      "AC-8",
-      "FR-014"
-    ]
-  },
-  "no_go_round": 1,
-  "round": 1,
+  "no_go_reason": null,
+  "no_go_round": 0,
+  "round": 2,
   "cycle": 1,
   "rounds_audit": [
     {
@@ -73,6 +38,28 @@
       ],
       "strike": false,
       "trace_schema_version": "1.0"
+    },
+    {
+      "round": 2,
+      "reviewed_sha": "5338a81ebeafbe11eb1fe61bf11aa8a0e65b74c5",
+      "fix_sha": "2a0e17157651a230e4df12f55d86e59a0d67b57f",
+      "fix_sha_reason": null,
+      "specialists_run": [
+        {
+          "name": "reviewer",
+          "selection_reason": "owner always; isolation correction full fanout"
+        },
+        {
+          "name": "architect",
+          "selection_reason": "isolation semantics changed; actual transaction boundary correction"
+        },
+        {
+          "name": "spec-compliance",
+          "selection_reason": "OPEN FR014/AC8 finding owner; full39-claim audit"
+        }
+      ],
+      "strike": false,
+      "trace_schema_version": "1.0"
     }
   ],
   "cross_runtime": {
@@ -89,9 +76,10 @@
   "escalation_reason": null,
   "normalized_by": "2.0.0",
   "notes": [
-    "Architect/spec findings deduplicated to one invariant; corrected spec audit supersedes initial all-PASS.",
-    "Clean pre-fix SHA captured after committing review evidence; product remains2d99b25.",
-    "No specialist Dune build claimed; root-only build ownership honored and root review build0.",
-    "Human gates covered by standing user autonomy; no severity/cap waiver or spec weakening."
+    "Round2 owner/architect/spec report no findings;39/39 FR+AC verified.",
+    "Specialist Dune/CHECK5 execution skipped under root-only builds; root final320Tezt+64Alcotest and archived RED/GREEN executed.",
+    "Spec agent context reused due thread limit; not a fresh voice.",
+    "OpenCode helper skipped unchanged degraded digest; not approval.",
+    "AC13/CHECK5 already permanently declared; no duplicate promotion necessary."
   ]
 }
