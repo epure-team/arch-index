@@ -1,0 +1,129 @@
+{
+  "properties": {
+    "verdicts_status": "COMPUTED",
+    "verdicts_reason": "Rules were evaluated in this report invocation against its open read-only database handle.",
+    "verdicts": {
+      "PASS": 0,
+      "VIOLATION": 0,
+      "POSSIBLE": 0,
+      "UNKNOWN": 1,
+      "UNKNOWN_NO_CONTRACT": 0,
+      "NO_SOURCE": 0,
+      "NO_TARGET": 0,
+      "NOT_COMPUTED": 0
+    },
+    "rule_ordering": {
+      "policy": "actionability_then_declaration",
+      "explanation": "Serialized alerts are ordered VIOLATION, POSSIBLE, uncertainty, then vacuity; declaration ordinal is the sole tie-breaker within a tier. Viewers may reorder them."
+    },
+    "index_producers": [
+      {
+        "producer": "arch_index_cmt",
+        "producer_version": null,
+        "soundness_class": "sound_with_top"
+      }
+    ],
+    "rule_results": [
+      {
+        "ordinal": 1,
+        "evaluator": "arch-rules",
+        "rule": "self escaping assertion and division origins",
+        "kind": "origin",
+        "verdict": "UNKNOWN",
+        "exact": false,
+        "detail": [],
+        "detail_total": 0,
+        "witness": [],
+        "top_reasons": [],
+        "origin_contexts": [],
+        "context_total": 0,
+        "context_omitted": 0,
+        "note": "coverage: 1079 node(s) in cone, 1 origin(s) of form assert,division on channel 'exception', 1 site(s); allow-file test/fixtures/origin-consumer/self.allow has 1 entry (0 matching nothing). GATE HELD: every site in view is covered by the allow-file, so no new fatal origin appeared among the ones this run could see. It is NOT a proof that none exists: the cone still escapes through 147 ⊤ edge(s) and an origin could sit behind one. This verdict is the expected outcome on a real index, not a failure of the check — a VIOLATION fails the gate regardless of ⊤, which is what makes the rule useful while completeness is out of reach"
+      }
+    ]
+  },
+  "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/main/sarif-2.1/schema/sarif-schema-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": { "driver": { "name": "arch-report", "rules": [] } },
+      "automationDetails": { "id": "arch-report/dead_code" },
+      "results": [],
+      "properties": {
+        "category": "arch-report/dead_code",
+        "top_frontier": 321,
+        "computed": false
+      },
+      "invocations": [
+        {
+          "executionSuccessful": true,
+          "toolExecutionNotifications": [
+            {
+              "message": {
+                "text": "analysis dead_code: unknown — this is NOT a clean result"
+              },
+              "descriptor": { "id": "not_analysed/dead_code" },
+              "properties": { "analysis": "dead_code" }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tool": { "driver": { "name": "arch-report", "rules": [] } },
+      "automationDetails": { "id": "arch-report/sarif_import" },
+      "results": [],
+      "properties": {
+        "category": "arch-report/sarif_import",
+        "top_frontier": 321,
+        "computed": false
+      },
+      "invocations": [
+        {
+          "executionSuccessful": true,
+          "toolExecutionNotifications": [
+            {
+              "message": {
+                "text": "analysis sarif_import: unknown — this is NOT a clean result"
+              },
+              "descriptor": { "id": "not_analysed/sarif_import" },
+              "properties": { "analysis": "sarif_import" }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tool": {
+        "driver": {
+          "name": "arch-rules",
+          "rules": [
+            { "id": "self escaping assertion and division origins#1" }
+          ]
+        }
+      },
+      "automationDetails": { "id": "arch-report/rules" },
+      "results": [
+        {
+          "ruleId": "self escaping assertion and division origins#1",
+          "level": "note",
+          "message": {
+            "text": "#1 self escaping assertion and division origins [origin]: UNKNOWN — coverage: 1079 node(s) in cone, 1 origin(s) of form assert,division on channel 'exception', 1 site(s); allow-file test/fixtures/origin-consumer/self.allow has 1 entry (0 matching nothing). GATE HELD: every site in view is covered by the allow-file, so no new fatal origin appeared among the ones this run could see. It is NOT a proof that none exists: the cone still escapes through 147 ⊤ edge(s) and an origin could sit behind one. This verdict is the expected outcome on a real index, not a failure of the check — a VIOLATION fails the gate regardless of ⊤, which is what makes the rule useful while completeness is out of reach"
+          },
+          "properties": {
+            "verdict": "UNKNOWN",
+            "soundness": "unknown_top",
+            "detail_total": 0
+          }
+        }
+      ],
+      "properties": {
+        "category": "arch-report/rules",
+        "top_frontier": 321,
+        "contract_ok": true,
+        "computed": true,
+        "proved": 0
+      }
+    }
+  ]
+}

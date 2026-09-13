@@ -1,7 +1,7 @@
 {
   "task": "functor-instance-resolution",
   "mode": "full",
-  "current_phase": "plan",
+  "current_phase": "implement",
   "events": [
     {
       "phase": "question",
@@ -37,6 +37,19 @@
       "at": "2026-09-13T09:50:28.799Z",
       "by": "roster-plan",
       "reason": "Two sequential independent Sol/Terra voices; vertical plan and self-contained role briefs validated under autonomy; atomic planJSON. Implementation baseline/TDD next."
+    },
+    {
+      "phase": "implement",
+      "outcome": "PARTIAL",
+      "at": "2026-09-13T11:17:00Z",
+      "by": "roster-implement",
+      "reason": "Awaiting explicit approval of clean_measured430→468 with unchanged headroom25 (effective ceiling455→493); no ratchet increase installed."
+    },
+    {
+      "phase": "implement",
+      "outcome": "COMPLETED",
+      "by": "roster-implement",
+      "reason": "User approved exact source-growth calibration; build and forced266Tezt+64Alcotest pass, four catalogue groups and three origin checks pass. Source checkpoint c2a8add; no graph precision claim. Real review next."
     }
   ]
 }

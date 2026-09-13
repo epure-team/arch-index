@@ -1,0 +1,31 @@
+{
+  "computed": true,
+  "contract_ok": true,
+  "verdict": "pass",
+  "failing": 0,
+  "proved": 0,
+  "violations": 0,
+  "possible": 0,
+  "unknown": 1,
+  "unknown_escaping": 1,
+  "unknown_no_contract": 0,
+  "vacuous": 0,
+  "not_computed": 0,
+  "results": [
+    {
+      "ordinal": 1,
+      "rule": "self escaping assertion and division origins",
+      "kind": "origin",
+      "verdict": "UNKNOWN",
+      "detail": [],
+      "detail_total": 0,
+      "witness": [],
+      "top_reasons": [],
+      "origin_contexts": [],
+      "context_total": 0,
+      "context_omitted": 0,
+      "note": "coverage: 1079 node(s) in cone, 1 origin(s) of form assert,division on channel 'exception', 1 site(s); allow-file test/fixtures/origin-consumer/self.allow has 1 entry (0 matching nothing). GATE HELD: every site in view is covered by the allow-file, so no new fatal origin appeared among the ones this run could see. It is NOT a proof that none exists: the cone still escapes through 147 ⊤ edge(s) and an origin could sit behind one. This verdict is the expected outcome on a real index, not a failure of the check — a VIOLATION fails the gate regardless of ⊤, which is what makes the rule useful while completeness is out of reach"
+    }
+  ],
+  "failed": []
+}

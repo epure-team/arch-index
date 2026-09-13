@@ -137,9 +137,9 @@ The pristine old/new-producer comparisons agree on both old and new corpora,
 including all common graph/error tables. Evidence and separate rationale:
 `roster/functor-instance-resolution/calibration-attribution.md`. This descriptive
 reference changes no allowance: `self.allow` is unchanged, and the evaluator
-continues to distinguish UNKNOWN from PASS. During implementation the revision
-label explicitly identifies the base plus source patch; it is anchored to the
-source commit before review. The separately approved MUST/NULL ratchet adjustment
+continues to distinguish UNKNOWN from PASS. The reference revision is the actual
+source snapshot `c2a8add5e394c162eeef4d204a73e1058a436df2`; the later metadata-only
+commit anchors this observation without changing that source. The separately approved MUST/NULL ratchet adjustment
 is not an origin exemption or a claim of improved target resolution.
 
 1. Rebuild and inspect the actual outcome and directional coverage deltas. First rule out a

@@ -1,0 +1,320 @@
+File "tezt/tests/dune", line 85, characters 7-11:
+85 |  (name main)
+            ^^^^
+[11:12:19.244] [SUCCESS] (1/266) helpers: the shared string search holds at its boundaries
+[11:12:19.244] [SUCCESS] (2/266) helpers: find_upwards stops at the enclosing dune-project
+[11:12:19.244] [SUCCESS] (3/266) registry-gaps: the R3 detector reports exactly the unregistered paths
+[11:12:19.457] [SUCCESS] (4/266) cmt: module-language shapes
+[11:12:29.405] [SUCCESS] (5/266) index: one polyglot repository, one database
+[11:12:29.412] [SUCCESS] (6/266) docs: curation-workflow SQL blocks still run
+[11:12:29.435] [SUCCESS] (7/266) load: NDJSON to a contract-marked index
+[11:12:29.460] [SUCCESS] (8/266) load: refuses what it cannot carry faithfully
+[11:12:29.516] [SUCCESS] (9/266) health: facts are exact, measures are not gates
+[11:12:29.536] [SUCCESS] (10/266) health: refuses a flat index rather than answering emptily
+[11:12:29.567] [SUCCESS] (11/266) contract: reaches under-approximates, unreachable over-approximates
+[11:12:29.584] [SUCCESS] (12/266) contract: refuses rather than answering unsoundly
+[11:12:29.600] [SUCCESS] (13/266) contract: an unknown name is refused on the flat schema too
+[11:12:29.609] [SUCCESS] (14/266) contract: an unreadable index exits 2, never 3
+[11:12:29.654] [SUCCESS] (15/266) duplicates: a proof, a single, and a difference
+[11:12:29.672] [SUCCESS] (16/266) duplicates: unreadable bodies are unverifiable, not proven
+[11:12:29.692] [SUCCESS] (17/266) duplicates: refuses an index with no source mapping
+[11:12:30.737] [SUCCESS] (18/266) curation: a load is all-or-nothing, and appends
+[11:12:30.841] [SUCCESS] (19/266) curation: provenance is mandatory and the log only grows
+[11:12:30.854] [SUCCESS] (20/266) curation: an optional module field disambiguates a same-named function (#35)
+[11:12:30.864] [SUCCESS] (21/266) curation: gardening open must not drop in_progress tasks (#34)
+[11:12:30.879] [SUCCESS] (22/266) curation: a bare and a module-qualified record for one name are rejected together
+[11:12:30.886] [SUCCESS] (23/266) mutants: the plan partitions the index and carries its tests
+[11:12:30.895] [SUCCESS] (24/266) mutants: a ⊤ edge inside the test cone destroys the proof
+[11:12:30.908] [SUCCESS] (25/266) mutants: the allowlist is engine-consumable and never empty by accident
+[11:12:30.920] [SUCCESS] (26/266) mutants: survivors are attributed to the innermost span
+[11:12:30.952] [SUCCESS] (27/266) mutants: the mutaml adapter reads both encodings and refuses the rest
+[11:12:30.955] [SUCCESS] (28/266) mutants: a NULL-kind edge makes targeting unsound
+[11:12:30.965] [SUCCESS] (29/266) decision-lint: an alias dies with any name it depends on
+[11:12:30.973] [SUCCESS] (30/266) decision-lint: solver noise must not shift the verdict stream
+[11:13:00.982] [SUCCESS] (31/266) decision-lint: a solver that goes silent must not hang the run
+[11:13:00.992] [SUCCESS] (32/266) decision-lint: a missing solver is reported absent, not dead
+[11:13:00.999] [SUCCESS] (33/266) coverage: no data is not zero, and ⊤-only coverage is flagged apart
+[11:13:01.037] [SUCCESS] (34/266) coverage: a malformed tracefile aborts instead of reporting 0%
+[11:13:01.043] [SUCCESS] (35/266) coverage: a covered function always lands in some bucket
+[11:13:01.059] [SUCCESS] (36/266) coverage: covered with surviving mutants is tested-by-nothing
+[11:13:01.072] [SUCCESS] (37/266) coverage: a name shared with a non-instrumented function is ambiguous
+[11:13:01.082] [SUCCESS] (38/266) coverage: --write replaces rather than accumulates
+[11:13:01.086] [SUCCESS] (39/266) coverage: a NULL-kind edge makes reachability unsound
+[11:13:01.100] [SUCCESS] (40/266) serve: a main-schema index is declined, not crashed on
+[11:13:01.146] [SUCCESS] (41/266) serve: the flat schema is served over HTTP
+[11:13:01.155] [SUCCESS] (42/266) rules: the five verdicts stay distinct
+[11:13:01.164] [SUCCESS] (43/266) rules: a glob boundary slip breaks verdicts both ways
+[11:13:01.198] [SUCCESS] (44/266) rules: the exit-code policy, including the flags that disable it
+[11:13:01.204] [SUCCESS] (45/266) rules: a misspelled --format aborts rather than falling back to text
+[11:13:01.220] [SUCCESS] (46/266) rules: a rule file it cannot parse aborts the gate
+[11:13:01.230] [SUCCESS] (47/266) rules: an un-⊤-marked index can never yield PASS
+[11:13:01.243] [SUCCESS] (48/266) rules: a rule that was never evaluated is not a passing rule
+[11:13:01.249] [SUCCESS] (49/266) rules: VIOLATION/POSSIBLE/UNKNOWN carry a concrete witness path; PASS carries none
+[11:13:01.255] [SUCCESS] (50/266) rules: VIOLATION's witness walks must_fwd even when a shorter fwd path exists
+[11:13:01.267] [SUCCESS] (51/266) rules: the text summary must not report a three-state verdict as one number
+[11:13:01.287] [SUCCESS] (52/266) rules: the summary census partitions the rules, and the gate is a separate line
+[11:13:01.303] [SUCCESS] (53/266) rules: an escaping cone and an un-⊤-marked index are not the same UNKNOWN
+[11:13:01.359] [SUCCESS] (54/266) rules: --on-vacuous covers every rule form, not only `reach`
+[11:13:01.448] [SUCCESS] (55/266) rules: ext: names external leaves, and is refused where it would be inert
+[11:13:01.458] [SUCCESS] (56/266) rules: an internal function cannot be classified ext: even with a dangling module_id
+[11:13:01.600] [SUCCESS] (57/266) rules origin: context and site caps stay independent (one_site)
+[11:13:01.735] [SUCCESS] (58/266) rules origin: context and site caps stay independent (distinct_sites)
+[11:13:01.882] [SUCCESS] (59/266) rules origin: an exemption is bounded by its count, not by its four fields
+[11:13:02.062] [SUCCESS] (60/266) rules origin: the parser refuses what it cannot serve, and says which character
+[11:13:02.186] [SUCCESS] (61/266) rules origin: an index with no origin data reports NOT_COMPUTED, never PASS
+[11:13:02.320] [SUCCESS] (62/266) rules origin: the allow-file survives a '|' in a name, and refuses a duplicate
+[11:13:02.479] [SUCCESS] (63/266) rules origin: the coverage figure, the channel scope, and the escapes filter
+[11:13:02.607] [SUCCESS] (64/266) rules origin: an index older than the channel column is handled, not crashed into
+[11:13:02.759] [SUCCESS] (65/266) pcc: pcc-index answers in one strict JSON object, or not at all
+[11:13:02.818] [SUCCESS] (66/266) pcc: a broken build produces no stdout to misread
+[11:13:03.013] [SUCCESS] (67/266) pcc: pcc-dossier reports a FAIL verdict without becoming one
+[11:13:03.602] [SUCCESS] (68/266) pcc: pcc-preflight tells a passing suite from a failing one
+[11:13:04.571] [SUCCESS] (69/266) callgraph-go: the three edge kinds and the verdicts they license
+[11:13:05.408] [SUCCESS] (70/266) callgraph-go: a cgo wrapper call is a ⊤ anchor
+[11:13:08.552] [SUCCESS] (71/266) lsp: Go is indexed with Go's own visibility rule
+[11:13:10.731] [SUCCESS] (72/266) lsp: Rust keeps its module nesting and its call edges
+[11:13:17.250] [SUCCESS] (73/266) lsp: TypeScript enrichment actually reaches the rows
+[11:13:17.356] [SUCCESS] (74/266) cmt: nested modules and functors are indexed where they are written
+[11:13:17.451] [SUCCESS] (75/266) functor catalogue: indexes one ordinary application
+[11:13:17.451] [SUCCESS] (76/266) functor catalogue: selection deduplicates exact strings only
+[11:13:17.475] [SUCCESS] (77/266) functor catalogue: native artifact and lifecycle premises hold
+[11:13:17.575] [SUCCESS] (78/266) functor catalogue: preserves preorder and operand shapes
+[11:13:17.675] [SUCCESS] (79/266) functor catalogue: one unreadable input prevents eligibility
+[11:13:17.780] [SUCCESS] (80/266) functor catalogue: query renders a validated snapshot
+[11:13:17.972] [SUCCESS] (81/266) functor catalogue independent checker: inventory
+[11:13:18.342] [SUCCESS] (82/266) functor catalogue independent checker: lifecycle
+[11:13:19.773] [SUCCESS] (83/266) functor catalogue independent checker: query
+[11:13:19.984] [SUCCESS] (84/266) functor catalogue independent checker: compatibility
+[11:13:20.014] [SUCCESS] (85/266) impact: a hunk touches the span that contains it, and no other
+[11:13:20.034] [SUCCESS] (86/266) impact: contract_ok is the strict check, not 'flag present'
+[11:13:20.064] [SUCCESS] (87/266) impact: a span-less index degrades to file granularity, loudly
+[11:13:20.131] [SUCCESS] (88/266) impact: the findings gate fires on touched lines and refuses when uncomputed
+[11:13:20.133] [SUCCESS] (89/266) impact: a half line span is refused at load time
+[11:13:20.158] [SUCCESS] (90/266) impact: a diff content line is not a file header
+[11:13:20.292] [SUCCESS] (91/266) cmt: a closure with no ⊤ proves, one with a ⊤ does not
+[11:13:20.447] [SUCCESS] (92/266) cmt: shadows, function values and callbacks resolve honestly
+[11:13:20.547] [SUCCESS] (93/266) cmt: deferred code is not dead code
+[11:13:20.961] [SUCCESS] (94/266) soundness: the dominance corpus
+[11:13:21.055] [SUCCESS] (95/266) shadowed-definitions: no collision keeps the bare name
+[11:13:21.145] [SUCCESS] (96/266) shadowed-definitions: same-level shadow keeps two rows with distinct edges (#41)
+[11:13:21.239] [SUCCESS] (97/266) shadowed-definitions: a 3-way same-level shadow numbers and attributes correctly (#41)
+[11:13:21.328] [SUCCESS] (98/266) shadowed-definitions: only the live binding is exposed via the .mli (#41)
+[11:13:21.417] [SUCCESS] (99/266) shadowed-definitions: a nested-module same-level shadow is qualified and numbered (#41)
+[11:13:21.526] [SUCCESS] (100/266) shadowed-definitions: a cross-module qualified call reaches the live definition, not the shadowed one (#41)
+[11:13:22.192] [SUCCESS] (101/266) indexer: no wildcard binding is recorded as a function
+[11:13:22.308] [SUCCESS] (102/266) indexer: every reported count equals the number of rows stored, even when rows are refused
+[11:13:22.494] [SUCCESS] (103/266) effects: the OCaml CMT extractor answers all four questions
+[11:13:24.212] [SUCCESS] (104/266) effects: the Go SSA extractor answers the same four
+[11:13:24.229] [SUCCESS] (105/266) effects: a producer with no extractor still satisfies the contract
+[11:13:24.258] [SUCCESS] (106/266) effects: name+path endpoints resolve to the right id, or to all, never to a wrong one
+[11:13:29.282] [SUCCESS] (107/266) lsp: a refused symbol query names itself in the output
+[11:13:39.291] [SUCCESS] (108/266) lsp: a refused call query is named once per file, not per attempt
+[11:13:39.304] [SUCCESS] (109/266) runner diagnostics: missing LSP is reported without --verbose
+[11:13:39.312] [SUCCESS] (110/266) runner diagnostics: LSP start failure is reported without --verbose
+[11:13:49.322] [SUCCESS] (111/266) runner diagnostics: timeout and partial results are reported without --verbose
+[11:13:49.329] [SUCCESS] (112/266) runner diagnostics: unexpected spawn error is reported without --verbose
+[11:13:49.554] [SUCCESS] (113/266) readiness: a closed indexing phase is reported as such
+[11:13:51.780] [warn] readiness fell back to the quiescence heuristic across the gap: honest, but the indexing phase was missed
+[11:13:51.780] [SUCCESS] (114/266) readiness: a gap between phases is not the server reporting completion
+[11:13:56.805] [SUCCESS] (115/266) readiness: a server that reports no progress says so
+[11:13:56.811] [SUCCESS] (116/266) Arch_index_db.rejections_by_table: per-table attribution of rejected rows
+[11:13:56.819] [SUCCESS] (117/266) Arch_index_support.schema_tables_to_drop covers every producer-written table
+[11:13:56.913] [SUCCESS] (118/266) completion markers: every meta key a run writes is classified
+[11:13:57.027] [SUCCESS] (119/266) completion markers: none survives a re-index that indexes nothing
+[11:13:57.140] [SUCCESS] (120/266) escaping-origins: fatal origins in the closure, with coverage and MAY/MUST
+[11:13:57.244] [SUCCESS] (121/266) escaping-origins: an ambiguous WHOLE-MODULE root is refused, never unioned
+[11:13:57.355] [SUCCESS] (122/266) escaping-origins: the reported channel is the one queried, both ways
+[11:13:57.481] [SUCCESS] (123/266) escaping-origins: a root suffix must align on a path boundary
+[11:13:57.607] [SUCCESS] (124/266) escaping-origins: an unentered closure says so, rather than reading as clean
+[11:13:57.613] [SUCCESS] (125/266) escaping-origins: an index with no origin table is refused before any output
+[11:13:57.728] [SUCCESS] (126/266) escaping-origins: --forms selects, and an unknown form is refused
+[11:13:57.841] [SUCCESS] (127/266) escaping-origins: an ambiguous root is refused, never unioned
+[11:13:57.957] [SUCCESS] (128/266) point-free aliases: a local alias emits a MAY_ENUMERATED value_alias edge
+[11:14:23.363] [SUCCESS] (129/266) point-free aliases: the flat schema carries edge_form too (S5)
+[11:14:23.478] [SUCCESS] (130/266) point-free aliases: fan-in does not count an alias as a caller
+[11:14:23.606] [SUCCESS] (131/266) point-free aliases: callers-of and god-modules exclude alias edges
+[11:14:23.752] [SUCCESS] (132/266) point-free aliases: an alias inherits its target's raise set
+[11:14:23.848] [SUCCESS] (133/266) phantom origins: an omitted optional argument is not a returned None (3.14)
+[11:14:23.941] [SUCCESS] (134/266) phantom origins: a synthetic None still OBSERVES the declared path (3.14)
+[11:14:24.077] [SUCCESS] (135/266) module-alias heads: an alias-rooted head is rewritten, marked and never MUST
+[11:14:24.195] [SUCCESS] (136/266) module-alias heads: a nested rebinding resolves to ITS target, not the toplevel one
+[11:14:24.324] [SUCCESS] (137/266) module-alias heads: callers-of, fan-in and god-modules all COUNT a rewritten edge
+[11:14:24.424] [SUCCESS] (138/266) arch-report: every finding in report.json appears in the SARIF and the HTML (CHECK-5)
+[11:14:24.531] [SUCCESS] (139/266) arch-report: a failed analysis never renders covered, and reaches all three channels
+[11:14:24.699] [SUCCESS] (140/266) arch-report: report.sarif validates against the published 2.1.0 schema (CHECK-4)
+[11:14:24.807] [SUCCESS] (141/266) arch-report: an analysis that did not run renders explicitly, never as absent (FR-024)
+[11:14:24.914] [SUCCESS] (142/266) arch-report: imported heuristic findings are rendered, with their own provenance
+[11:14:25.086] [SUCCESS] (143/266) arch-report: --rules evaluates rules in the unified report
+[11:14:25.128] [SUCCESS] (144/266) actionable report standalone check: rules
+[11:14:25.167] [SUCCESS] (145/266) actionable report standalone check: ordering
+[11:14:27.454] [SUCCESS] (146/266) actionable report standalone check: operands
+[11:14:27.515] [SUCCESS] (147/266) actionable report standalone check: compatibility
+[11:14:27.537] [SUCCESS] (148/266) actionable report checker exit mapping: assert
+[11:14:27.558] [SUCCESS] (149/266) actionable report checker exit mapping: execution
+[11:14:27.558] Starting test: origin recurring consumer: authentic
+[11:14:27.874] [error] origin checker authentic exited 1 (0=pass, 1=assertion, >=2=execution)
+[11:14:27.874] [FAILURE] (150/266, 1 failed) origin recurring consumer: authentic
+[11:14:27.874] Try again with: ./main.exe --verbose --file tezt/tests/origin_recurring_consumer.ml --title 'origin recurring consumer: authentic'
+[11:14:31.176] [SUCCESS] (151/266, 1 failed) origin recurring consumer: failures
+[11:14:31.394] [SUCCESS] (152/266, 1 failed) origin recurring consumer: package
+[11:14:31.424] [SUCCESS] (153/266, 1 failed) origin recurring consumer checker exit: assert
+[11:14:31.455] [SUCCESS] (154/266, 1 failed) origin recurring consumer checker exit: execution
+[11:14:31.472] [SUCCESS] (155/266, 1 failed) arch-guard: authentic CMT inventory drives classification
+[11:14:31.482] [SUCCESS] (156/266, 1 failed) arch-guard: constant-zero-v1 exact singleton transfer
+[11:14:31.559] [SUCCESS] (157/266, 1 failed) arch-guard independent checker: report context
+[11:14:31.819] [SUCCESS] (158/266, 1 failed) arch-guard independent checker: inventory
+[11:14:32.317] [SUCCESS] (159/266, 1 failed) arch-guard independent checker: numeric
+[11:14:38.957] [SUCCESS] (160/266, 1 failed) arch-guard independent checker: domain
+[11:14:46.718] [SUCCESS] (161/266, 1 failed) arch-guard independent checker: inputs
+[11:14:47.828] [SUCCESS] (162/266, 1 failed) arch-guard independent checker: report
+[11:14:48.004] [SUCCESS] (163/266, 1 failed) arch-guard independent checker: owned
+[11:14:48.029] [SUCCESS] (164/266, 1 failed) arch-guard independent checker: --assertion-control
+[11:14:48.055] [SUCCESS] (165/266, 1 failed) arch-guard independent checker: --execution-control
+[11:14:48.175] [SUCCESS] (166/266, 1 failed) sarif-in: an imported finding is heuristic and changes no edge (CHECK-1)
+[11:14:48.289] [SUCCESS] (167/266, 1 failed) sarif-in: a merged log attributes each finding to ITS own tool, not the last one
+[11:14:48.419] [SUCCESS] (168/266, 1 failed) sarif-in: an underscore is not a wildcard, a non-string level is not a warning
+[11:14:48.533] [SUCCESS] (169/266, 1 failed) sarif-in: an index predating the table is refused before anything is written
+[11:14:48.672] [SUCCESS] (170/266, 1 failed) sarif-in: unparseable writes no facts (CHECK-3); parseable-with-rejects is partial (CHECK-3-bis)
+[11:14:48.787] [SUCCESS] (171/266, 1 failed) exported selector: exported:** is fn:** restricted to the API surface
+[11:14:48.890] [SUCCESS] (172/266, 1 failed) exported selector: refused where it is not granted, before it can answer wrongly
+[11:14:49.055] [SUCCESS] (173/266, 1 failed) exported selector: accepted in exactly ONE position, refused in every other
+[11:14:49.064] [SUCCESS] (174/266, 1 failed) exported selector: the FLAT schema's own column is read (4.4)
+[11:14:49.165] [SUCCESS] (175/266, 1 failed) escaping-origins --roots exported: the cone starts at the API surface, not everywhere
+[11:14:49.264] [SUCCESS] (176/266, 1 failed) escaping-origins --roots exported: an index with no exports is REFUSED, not reported empty
+[11:14:49.268] [SUCCESS] (177/266, 1 failed) escaping-origins --roots exported: a producer-shaped FLAT index is REFUSED, not answered empty
+[11:14:49.368] [SUCCESS] (178/266, 1 failed) escaping-origins --roots exported: an index predating functions.exposed is REFUSED
+[11:14:49.473] [SUCCESS] (179/266, 1 failed) escaping-origins --roots exported: the keyword shadows a function named exported, and qualifying escapes it
+[11:14:49.479] [SUCCESS] (180/266, 1 failed) Arch_index_db.insert_function: a rejected row yields no id, not a neighbour's
+[11:14:49.592] [SUCCESS] (181/266, 1 failed) indexer: a call to a function whose row was rejected is MAY_TOP, not a MUST external leaf
+[11:14:49.709] [SUCCESS] (182/266, 1 failed) indexer: a rejected modules row indexes nothing from that unit, and its callers go to MAY_TOP
+[11:14:49.822] [SUCCESS] (183/266, 1 failed) indexer: a rejected types row drops its fields and constructors rather than filing them under another type
+[11:14:50.038] [SUCCESS] (184/266, 1 failed) cmt: a nested-module reference resolves to the linked unit
+[11:14:50.282] [SUCCESS] (185/266, 1 failed) cmt: a qualified reference resolves within the library it names
+[11:14:50.385] [SUCCESS] (186/266, 1 failed) cmt: two (wrapped false) libraries sharing a module name degrade to ⊤, never a guess
+[11:14:50.506] [SUCCESS] (187/266, 1 failed) cmt: a reference through a cross-library re-export facade resolves to the real unit
+[11:14:50.631] [SUCCESS] (188/266, 1 failed) cmt: an include-defined homonym never resolves into the other library — pinned, not endorsed
+[11:14:50.739] [SUCCESS] (189/266, 1 failed) cmt: a reference rooted outside the index still binds a local homonym — pinned, not endorsed
+[11:14:50.861] [SUCCESS] (190/266, 1 failed) cmt: a deeper include-defined homonym is not re-interpreted at the ANCHOR's own segment — pinned, not endorsed
+[11:14:50.982] [SUCCESS] (191/266, 1 failed) cmt: include_subdirs qualified — a nested module resolves within its own library
+[11:14:51.092] [SUCCESS] (192/266, 1 failed) cmt: a main module SHADOWING a sibling degrades to ⊤ — pinned, not endorsed
+[11:14:51.217] [SUCCESS] (193/266, 1 failed) cmt: an aliased nested module can still bind an unlinked homonym — pinned, not endorsed
+[11:14:51.331] [SUCCESS] (194/266, 1 failed) cmt: module_deps and type_usage still erase the owning library — pinned, not endorsed
+[11:14:51.461] [SUCCESS] (195/266, 1 failed) cmt: a homonym unit below the anchor still binds a LINKED wrong library — pinned, not endorsed
+[11:14:51.583] [SUCCESS] (196/266, 1 failed) cmt: a homonym unit name is never resolved to whichever library owns the row
+[11:14:51.583] Starting test: cmt: the whole-repo MUST-with-NULL-callee count stays under its ceiling
+[11:14:52.084] calls=20525  MUST-with-NULL-callee(Stdlib excluded)=468  [root outside index: 309, root indexed: 159]  resolver misses=0 (control: 5072 resolved calls match by that test)  ceiling=455
+[11:14:52.084] [error] 468 calls rows are kind=MUST with callee_id IS NULL (Stdlib excluded), above the ceiling of 455 (+13). Of these, 309 have a root module this index does not hold and 159 have one it does. A row is a call LEAVING THE INDEXED UNIVERSE stamped as a proven external leaf: arch_graph.ml emits no TOP marker for it, so the real callee is reported UNREACHABLE with confidence. It is NOT necessarily a resolver miss -- this message asserted that until 2026-09-06 and it was false of every row then present: measured on main at 090f832, 0 of 383 named a function this index holds under that name, against a positive control of 4437 resolved calls that do. Either resolve those references or emit them as MAY_TOP so the TOP frontier survives.
+[11:14:52.085] [FAILURE] (197/266, 2 failed) cmt: the whole-repo MUST-with-NULL-callee count stays under its ceiling
+[11:14:52.085] Try again with: ./main.exe --verbose --file tezt/tests/must_null_ceiling.ml --title 'cmt: the whole-repo MUST-with-NULL-callee count stays under its ceiling'
+[11:14:52.156] [SUCCESS] (198/266, 2 failed) arch-query: a bad limit argument is refused, not defaulted
+[11:14:52.274] [SUCCESS] (199/266, 2 failed) exn: producer records origins, scopes and call scopes per node
+[11:14:52.558] [SUCCESS] (200/266, 2 failed) exn: raises / raisers-of / exn-stats are handler-aware and ⊤-honest
+[11:14:52.675] [SUCCESS] (201/266, 2 failed) error-channels: producer records value-channel origins, scopes and edges
+[11:14:52.809] [SUCCESS] (202/266, 2 failed) error-channels: re-indexing an existing database is idempotent
+[11:14:52.942] [SUCCESS] (203/266, 2 failed) error-channels: a re-index never inherits the previous run's completion markers
+[11:14:53.042] [SUCCESS] (204/266, 2 failed) error-channels: --errors-strict succeeds when every declaration matches
+[11:14:53.125] [SUCCESS] (205/266, 2 failed) error-channels: a channel shadowed by an earlier one is refused at load time
+[11:14:53.207] [SUCCESS] (206/266, 2 failed) error-channels: shadowing a BUILT-IN channel is refused with an actionable remedy
+[11:14:53.298] [SUCCESS] (207/266, 2 failed) error-channels: --errors-strict passes over a config that EXTENDS a built-in
+[11:14:53.637] [SUCCESS] (208/266, 2 failed) error-channels: may-fail per channel
+[11:14:53.755] [SUCCESS] (209/266, 2 failed) error-channels: config validation does not abort on a good file
+[11:14:53.869] [SUCCESS] (210/266, 2 failed) error-channels: --errors-strict promotes a miss to fatal
+[11:14:53.963] [SUCCESS] (211/266, 2 failed) error-channels: ARCH_ERRORS_PROFILES_DIR wins over <root>/profiles, and is printed
+[11:14:53.976] [SUCCESS] (212/266, 2 failed) error-channels: a Flat-schema DB refuses NOT_ANALYSED on every channel
+[11:14:54.165] [SUCCESS] (213/266, 2 failed) error-channels: [summaries] replaces external ⊤ with the declared set
+[11:14:54.257] [SUCCESS] (214/266, 2 failed) provenance: Arch_index.run stamps a real producer_runs row on real functions/calls
+[11:14:54.364] [SUCCESS] (215/266, 2 failed) provenance: re-indexing the same database does not accumulate producer_runs rows
+[11:14:54.371] [SUCCESS] (216/266, 2 failed) provenance: functions/calls join producer_runs, not five text columns
+[11:14:54.377] [SUCCESS] (217/266, 2 failed) provenance: an invalid soundness_class is rejected, not stored
+[11:14:54.386] [SUCCESS] (218/266, 2 failed) provenance: arch-load's --producer/--soundness-class flags
+[11:14:54.399] [SUCCESS] (219/266, 2 failed) coverage-matrix: an un-built OCaml project reports callgraph not_analysed, exit 1
+[11:14:54.491] [SUCCESS] (220/266, 2 failed) coverage-matrix: a built OCaml project reports callgraph covered
+[11:14:54.502] [SUCCESS] (221/266, 2 failed) coverage-matrix: --allow-partial accepts gaps with exit 0
+[11:14:54.515] [SUCCESS] (222/266, 2 failed) coverage-matrix: a Cargo workspace with no callgraph-rust driver built reports not_analysed
+[11:14:54.528] [SUCCESS] (223/266, 2 failed) coverage-matrix: a built arch-callgraph-go driver reports callgraph covered
+[11:14:54.540] [SUCCESS] (224/266, 2 failed) coverage-matrix: a built callgraph-rust driver AND merge pass reports callgraph covered
+[11:14:54.541] [SUCCESS] (225/266, 2 failed) coverage-matrix: find_sibling_tool never climbs past the enclosing dune-project
+[11:14:54.541] [SUCCESS] (226/266, 2 failed) coverage-matrix: find_sibling_tool never climbs past the enclosing dune-project (_build/default candidate)
+[11:14:54.541] [SUCCESS] (227/266, 2 failed) coverage-matrix: find_repo_root never climbs past the enclosing dune-project
+[11:14:54.554] [SUCCESS] (228/266, 2 failed) coverage-matrix: coverage and decisions are always not_analysed without --lcov, language NULL
+[11:14:54.575] [SUCCESS] (229/266, 2 failed) coverage-matrix: re-running replaces rather than accumulates rows
+[11:14:54.590] [SUCCESS] (230/266, 2 failed) coverage-matrix: writing into an existing, populated main-schema database is safe
+[11:14:54.605] [SUCCESS] (231/266, 2 failed) coverage-matrix: the error_channels row reads the producer's contract
+[11:14:54.698] [SUCCESS] (232/266, 2 failed) top-anchor: a function-typed parameter invoked as a callback is callback_param
+[11:14:54.789] [SUCCESS] (233/266, 2 failed) top-anchor: a functor argument's member invoked is module_param
+[11:14:54.881] [SUCCESS] (234/266, 2 failed) top-anchor: a resolved MUST edge has NULL top_reason and NULL top_anchor
+[11:14:54.975] [SUCCESS] (235/266, 2 failed) top-anchor: top_reason/top_anchor are non-NULL iff kind is MAY_TOP, across every row
+[11:14:54.982] [SUCCESS] (236/266, 2 failed) top-anchor: a top_reason on a non-MAY_TOP row violates the CHECK constraint
+[11:14:54.988] [SUCCESS] (237/266, 2 failed) top-anchor: an out-of-vocabulary top_reason violates the CHECK constraint
+[11:14:55.068] [SUCCESS] (238/266, 2 failed) sarif: --format sarif validates against the SARIF 2.1.0 schema
+[11:14:55.075] [SUCCESS] (239/266, 2 failed) sarif: a PASS verdict never becomes a result — only non-PASS verdicts do
+[11:14:55.082] [SUCCESS] (240/266, 2 failed) sarif: VIOLATION/POSSIBLE/UNKNOWN map to error/warning/note
+[11:14:55.088] [SUCCESS] (241/266, 2 failed) sarif: an UNKNOWN result carries properties.soundness=unknown_top and its top_reason
+[11:14:55.091] [SUCCESS] (242/266, 2 failed) sarif: UNKNOWN_NO_CONTRACT carries properties.soundness=no_contract, not unknown_top
+[11:14:55.097] [SUCCESS] (243/266, 2 failed) json: an UNKNOWN result's top_reasons carries the ⊤-anchor taxonomy value
+[11:14:55.103] [SUCCESS] (244/266, 2 failed) sarif: a rule's witness path becomes a codeFlow with one location per step, IN ORDER
+[11:14:55.110] [SUCCESS] (245/266, 2 failed) sarif: driver name/category/automationDetails are set, and the ⊤ frontier is a count, not results
+[11:14:55.119] [SUCCESS] (246/266, 2 failed) sarif: every non-PASS verdict in --format json appears in --format sarif
+[11:14:55.125] [SUCCESS] (247/266, 2 failed) sarif: an analysis_coverage row with status=not_analysed becomes a toolExecutionNotification, never silence
+[11:14:55.134] [SUCCESS] (248/266, 2 failed) sarif: tool.driver.name/version are read from a real producer_runs row, not just the fallback
+[11:14:55.203] [SUCCESS] (249/266, 2 failed) sarif: two runs from one producer must carry distinct category/automationDetails.id
+[11:14:55.210] [SUCCESS] (250/266, 2 failed) sarif: a VIOLATION result carries results[].locations with the source's fullyQualifiedName
+[11:14:55.210] [SUCCESS] (251/266, 2 failed) sarif: a file name containing a parenthesis does not fabricate a bogus location
+[11:14:55.210] [SUCCESS] (252/266, 2 failed) sarif: two runs sharing (producer, category) are rejected, not silently emitted
+[11:14:55.210] [SUCCESS] (253/266, 2 failed) sarif: a finding's soundness_class=heuristic round-trips into properties
+[11:14:55.220] [SUCCESS] (254/266, 2 failed) sarif: a `dep` VIOLATION does not fabricate results[].locations from its prose detail
+[11:14:55.224] [SUCCESS] (255/266, 2 failed) sarif: a nothing-proved result's message.text names the rule, the verdict, and its note
+[11:14:55.234] [SUCCESS] (256/266, 2 failed) sarif: a MAIN-schema UNKNOWN result's top_reasons is read via caller_id, not left empty
+[11:14:55.240] [SUCCESS] (257/266, 2 failed) sarif: a FLAT index's producer/soundness_class round-trip from comment_db_meta
+[11:14:55.245] [SUCCESS] (258/266, 2 failed) sarif: a truncated results[].locations still carries properties.detail_total
+[11:14:55.252] [SUCCESS] (259/266, 2 failed) rules: an UNKNOWN verdict on an index with kind but no top_reason column does not crash
+[11:14:55.265] [SUCCESS] (260/266, 2 failed) arch-impact/rules/coverage/mutants: a query-time Refused is rendered as a diagnostic, not dumped as an uncaught exception
+[11:14:55.276] [SUCCESS] (261/266, 2 failed) arch-query raises: refuses (exit 3), does not crash, on an index predating exn_scopes.channel
+[11:14:55.280] [SUCCESS] (262/266, 2 failed) arch-query escaping-origins: refuses (exit 3), does not crash, on an index predating exn_origins.channel
+[11:14:55.280] [SUCCESS] (263/266, 2 failed) Arch_db.ok: converts a raw 'no such column' error into Refused, naming the column, for ANY site with no guard
+[11:14:55.281] [SUCCESS] (264/266, 2 failed) Arch_db.ok: converts a raw 'no such table' error into Refused, naming the table, for ANY site with no guard
+[11:14:55.511] [SUCCESS] (265/266, 2 failed) recalibrate.sh --self-test passes
+[11:14:55.515] [SUCCESS] (266/266, 2 failed) recalibrate.sh's raw golden query matches the one CI runs
+assertion: AssertionError [ERR_ASSERTION]: controlled assertion
+    at main (/home/mathias/dev/arch-index-worktrees/functor-instance-resolution/checks/actionable-review-reports.js:315:7)
+    at Object.<anonymous> (/home/mathias/dev/arch-index-worktrees/functor-instance-resolution/checks/actionable-review-reports.js:340:3)
+    at Module._compile (node:internal/modules/cjs/loader:1944:14)
+    at Object..js (node:internal/modules/cjs/loader:2084:10)
+    at Module.load (node:internal/modules/cjs/loader:1666:32)
+    at Module._load (node:internal/modules/cjs/loader:1447:12)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:260:19)
+    at Module.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:154:5)
+    at node:internal/main/run_main_module:33:47
+execution error: Error: controlled execution
+    at main (/home/mathias/dev/arch-index-worktrees/functor-instance-resolution/checks/actionable-review-reports.js:317:11)
+    at Object.<anonymous> (/home/mathias/dev/arch-index-worktrees/functor-instance-resolution/checks/actionable-review-reports.js:340:3)
+    at Module._compile (node:internal/modules/cjs/loader:1944:14)
+    at Object..js (node:internal/modules/cjs/loader:2084:10)
+    at Module.load (node:internal/modules/cjs/loader:1666:32)
+    at Module._load (node:internal/modules/cjs/loader:1447:12)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:260:19)
+    at Module.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:154:5)
+    at node:internal/main/run_main_module:33:47
+ASSERTION: Expected values to be strictly equal:
+
+1 !== 0
+
+origin-consumer: cleanup report staging: injected report staging cleanup failure
+origin-consumer: final record write failed: injected final record write failure
+ASSERTION: deliberate checker assertion
+EXECUTION: Error: deliberate checker execution error
+    at main (/home/mathias/dev/arch-index-worktrees/functor-instance-resolution/checks/origin-recurring-consumer.js:261:72)
+    at Object.<anonymous> (/home/mathias/dev/arch-index-worktrees/functor-instance-resolution/checks/origin-recurring-consumer.js:267:1)
+    at Module._compile (node:internal/modules/cjs/loader:1944:14)
+    at Object..js (node:internal/modules/cjs/loader:2084:10)
+    at Module.load (node:internal/modules/cjs/loader:1666:32)
+    at Module._load (node:internal/modules/cjs/loader:1447:12)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:260:19)
+    at Module.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:154:5)
+    at node:internal/main/run_main_module:33:47
+Statement error (CONSTRAINT) writing to type_usage: FOREIGN KEY constraint failed
+Statement error (CONSTRAINT) writing to type_usage: FOREIGN KEY constraint failed
+Statement error (CONSTRAINT) writing to dead_code_sites: FOREIGN KEY constraint failed
+Statement error (CONSTRAINT) writing to dead_code_sites: FOREIGN KEY constraint failed
+Statement error (CONSTRAINT) writing to dead_code_sites: FOREIGN KEY constraint failed
+Statement error (CONSTRAINT) writing to functions: FOREIGN KEY constraint failed
