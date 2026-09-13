@@ -1,7 +1,7 @@
 {
   "task": "functor-instance-resolution",
   "mode": "full",
-  "current_phase": "research",
+  "current_phase": "intake",
   "events": [
     {
       "phase": "question",
@@ -16,6 +16,13 @@
       "at": "2026-09-13T09:21:59.823Z",
       "by": "roster-research",
       "reason": "Seven questions documented by isolated research and four specialists; root read synthesis; version and identity gaps explicit. Intake next."
+    },
+    {
+      "phase": "intake",
+      "outcome": "VALIDATED",
+      "at": "2026-09-13T09:24:24.739Z",
+      "by": "roster-intake",
+      "reason": "Slice0 application catalogue and explicit collection boundaries; feature/Trust boundary=yes operator-validated under standing autonomy. No graph precision change; full spec next."
     }
   ]
 }
