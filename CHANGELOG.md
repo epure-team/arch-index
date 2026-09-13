@@ -4,7 +4,7 @@
 
 ### Added
 
-- **Experimental `arch-guard` divisor analysis.** Separate report-only CLI/library
+- **Experimental `arch-guard` divisor analysis.** Separate report-only CLI with a private implementation library
   inventories immediate OCaml integer division/remainder primitives and classifies
   native-int divisors in a bounded acyclic fragment. Explicit unsupported regions,
   artifact attribution, and conditional limitations accompany text/JSON reports.

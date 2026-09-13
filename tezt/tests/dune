@@ -132,6 +132,7 @@
   ../../scripts/origin-consumer.js
   ../../scripts/origin-consumer-artifacts.js
   ../../scripts/check-arch-guard.js
+  ../../scripts/check-guard-report-context.js
   ../../tezt/fixtures/arch_guard/inventory.ml
   ../../test/fixtures/origin-consumer/consumer.ml
   ../../test/fixtures/origin-consumer/self.rules
