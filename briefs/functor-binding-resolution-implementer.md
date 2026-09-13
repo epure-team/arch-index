@@ -1,6 +1,19 @@
 # Implementer — functor-binding-resolution
 
 **Date:** 2026-09-13
+
+## Authorized calibration amendment (2026-09-13)
+
+User explicitly approved attribution-gated reference recalibration after the
+first native checkpoint. Headroom remains25; graph semantics and allowances
+remain unchanged. Extend this task's scope solely to measured reference updates:
+tezt/tests/must_null_ceiling.ml (clean_measured and attribution comment only),
+test/fixtures/self-index-stats.txt, test/fixtures/origin-consumer/reference.json,
+and checks/origin-recurring-consumer.js (authentic frozen totals only).
+Require fresh symmetric2x2 engine/corpus measurements; refuse behavioral drift.
+No revision is invented for uncommitted product sources: record base+snapshot
+content digest. Original script requires clean commits, so use documented
+fresh disposable snapshots, not incremental builds or a fake script pass.
 **Status: VALIDATED**
 
 ## Goal and Scope Boundary
@@ -27,6 +40,8 @@ Spec validation does not claim current tests pass.
 ## Files
 
 - architecture-schema.sql
+- lib/arch_index/arch_index_db.ml (verified main schema version owner)
+- docs/schema.md (matching schema history)
 - lib/arch_index/arch_index_functors.ml
 - lib/arch_index/arch_index_functors.mli
 - lib/arch_index/arch_index.ml

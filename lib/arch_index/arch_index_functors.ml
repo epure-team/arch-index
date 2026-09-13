@@ -53,7 +53,7 @@ let location_json loc =
         (string_of_bool loc.Location.loc_ghost),
       true )
 
-let collect structure =
+let collect ?on_application structure =
   let next = ref 0 and rows = ref [] in
   let fresh () = incr next ; !next in
   let rec strip_constraint = function
@@ -77,11 +77,29 @@ let collect structure =
         let head_d = walk_module self head in
         let arg_d = walk_module self arg in
         add_row ordinal Apply m.mod_loc head_d arg_d ;
+        Option.iter
+          (fun f ->
+            f ~ordinal ~application_kind:Apply
+              ~head_application_ordinal:
+                (match strip_constraint head_d with
+                | `Application n -> Some n
+                | _ -> None)
+              ~head ~argument:(Some arg))
+          on_application ;
         `Application ordinal
     | Tmod_apply_unit head ->
         let ordinal = fresh () in
         let head_d = walk_module self head in
         add_row ordinal Apply_unit m.mod_loc head_d `Unit ;
+        Option.iter
+          (fun f ->
+            f ~ordinal ~application_kind:Apply_unit
+              ~head_application_ordinal:
+                (match strip_constraint head_d with
+                | `Application n -> Some n
+                | _ -> None)
+              ~head ~argument:None)
+          on_application ;
         `Application ordinal
     | Tmod_constraint (inner, _, constraint_, _) ->
         let inner_descriptor = walk_module self inner in

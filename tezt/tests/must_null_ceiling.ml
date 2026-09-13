@@ -299,7 +299,17 @@ let must_null_composition_query =
    +31 source rows (persistence4, collector8, reader14, tests5) and +7 already
    present at base; no same-corpus graph change. See the task's
    roster/functor-instance-resolution/calibration-attribution.md. *)
-let clean_measured = 468
+(* User-approved 2026-09-13, direct functor bindings: fresh symmetric snapshots
+   A=B468, C=D519. Both engines agree on complete grouped call rows and origin
+   coverage within each corpus. Source growth +51; no behavior/interaction delta.
+   Base7df5c03 + uncommitted product snapshot3413027703081d0e4905cf0af5b4c1603ff34ed90d81be93830c2e0dcf0627de.
+   Evidence: roster/functor-binding-resolution/calibration/evidence.json.
+   No headroom, query, floor, or graph semantics changed. *)
+(* Alias/curried extension, same authorized policy: A=B468,C=D524.
+   Snapshot1930c1a8acdd725a0cd9a59951eafe1cd9dd97c993bb42aed13b4570b1c27530;
+   calibration/alias-curried/evidence.json records source-only growth with
+   matching grouped calls/origin coverage per corpus. Headroom remains25. *)
+let clean_measured = 524
 
 let headroom = 25
 

@@ -145,6 +145,13 @@
   ../fixtures/functor_catalogue/query_checks.js
   ../fixtures/functor_catalogue/lifecycle_checks.js
   ../../scripts/check-functor-catalogue.js
+  ../../scripts/check-functor-bindings.js
+  ../../roster/functor-binding-resolution/lifecycle_probe.ml
+  ../../roster/functor-binding-resolution/inventory_probe.ml
+  ../../roster/functor-binding-resolution/collection_failure_probe.ml
+  ; Direct API probes compile in an owned temporary directory against this
+  ; exact build's installation staging, never an unrelated installed version.
+  (package arch-index)
   ../../roster/functor-instance-resolution/compatibility-rich-baseline.json
   ../../tezt/fixtures/arch_guard/inventory.ml
   ../../tezt/fixtures/arch_guard/r1_cases.ml

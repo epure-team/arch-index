@@ -1,0 +1,21 @@
+Project root: /home/mathias/dev/tezos/tezos
+Scanning /home/mathias/dev/tezos/tezos/_build/arch-index-bindings-probe-CeYDcp for .cmt/.cmti files...
+Found 410 .cmt and 0 .cmti files
+Found 0 exposed names, 0 doc comments
+Backed up 0 module intents, 0 function intents, 0 type intents
+Resolving 45018 pending calls...
+Inserted 45018 calls (16448 resolved to known functions)
+Resolving 509 module dependencies...
+Inserted 509 module deps (405 resolved to known modules)
+Resolving 34219 type usages...
+Inserted 34219 type usages (4519 resolved to known types)
+
+Done! Indexed:
+  410 modules
+  12373 functions
+  1555 types (1440 record fields, 1355 variant constructors)
+  45018 calls (16448 resolved)
+  509 module deps (405 resolved)
+  34219 type usages (4519 resolved)
+Database: /home/mathias/dev/tezos/tezos/_build/arch-index-bindings-probe-CeYDcp/probe.db
+Indexed: 410 modules, 12373 functions, 1555 types, 45018 calls

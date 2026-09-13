@@ -30,7 +30,8 @@ type intent_backup = {
    comment_db_meta key a producer writes is either in this list or explicitly
    declared non-load-bearing. *)
 let completion_marker_keys =
-  ["error_contract"; "exn_contract"; "callgraph_contract"; "functor_catalogue_contract"]
+  ["error_contract"; "exn_contract"; "callgraph_contract"; "functor_catalogue_contract";
+   "functor_binding_contract"]
 
 let schema_views_to_drop =
   [
@@ -56,6 +57,9 @@ let schema_views_to_drop =
 
 let schema_tables_to_drop =
   [
+    "functor_bindings";
+    "functor_declarations";
+    "functor_binding_inputs";
     "functor_applications";
     "functor_catalogue_inputs";
     "functor_catalogue_runs";

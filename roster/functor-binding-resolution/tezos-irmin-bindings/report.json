@@ -1,0 +1,140 @@
+{
+  "revision": "1727d7e192f2374edda7ad7adceef6f4ec51f71a",
+  "dirty_entries": 47,
+  "manifest_sha256": "9e38880a52f855c58081b1a171af5879058cbaa2697aaa5694827cbd16f8ecd1",
+  "selected": 410,
+  "producer_sha256": "c5c7658c63ad0bdab916fdce90d02d7aa135149a4caf3d93629b3e193d6eb37f",
+  "query_sha256": "2c3713e7150da5fb3c4f79de8e39fed6ac6bce90cb4385ab5312530e7d9b7c8a",
+  "query": {
+    "exit": 0,
+    "stdout": "[{\"contract\":\"v1\",\"selected_inputs\":410,\"collected_inputs\":410,\"total\":1275,\"matched\":202,\"unresolved\":1073,\"returned\":0,\"truncated\":1,\"scope\":\"selected_cmt_local_binding_provenance\",\"limitations\":\"not_runtime_instances;not_closed_world;no_call_target_resolution;no_actual_substitution;no_source_freshness_check;artifact_scoped_compiler_identity\"}]\n[]\n",
+    "stderr": ""
+  },
+  "inputs": [
+    {
+      "outcome": "collected",
+      "count": 410
+    }
+  ],
+  "catalogue": [
+    {
+      "applications": 1275
+    }
+  ],
+  "results": [
+    {
+      "status": "matched",
+      "reason": null,
+      "count": 202
+    },
+    {
+      "status": "unresolved",
+      "reason": "local_declaration_missing",
+      "count": 8
+    },
+    {
+      "status": "unresolved",
+      "reason": "parameter_supplied_head",
+      "count": 12
+    },
+    {
+      "status": "unresolved",
+      "reason": "unsupported_alias_rhs",
+      "count": 3
+    },
+    {
+      "status": "unresolved",
+      "reason": "unsupported_path",
+      "count": 1050
+    }
+  ],
+  "formals": [
+    {
+      "formal_position": 1,
+      "count": 150
+    },
+    {
+      "formal_position": 2,
+      "count": 23
+    },
+    {
+      "formal_position": 3,
+      "count": 15
+    },
+    {
+      "formal_position": 4,
+      "count": 6
+    },
+    {
+      "formal_position": 5,
+      "count": 6
+    },
+    {
+      "formal_position": 6,
+      "count": 2
+    }
+  ],
+  "slices": [
+    {
+      "slice": "irmin",
+      "status": "matched",
+      "reason": null,
+      "count": 82
+    },
+    {
+      "slice": "irmin",
+      "status": "unresolved",
+      "reason": "local_declaration_missing",
+      "count": 8
+    },
+    {
+      "slice": "irmin",
+      "status": "unresolved",
+      "reason": "parameter_supplied_head",
+      "count": 12
+    },
+    {
+      "slice": "irmin",
+      "status": "unresolved",
+      "reason": "unsupported_alias_rhs",
+      "count": 3
+    },
+    {
+      "slice": "irmin",
+      "status": "unresolved",
+      "reason": "unsupported_path",
+      "count": 279
+    },
+    {
+      "slice": "protocol",
+      "status": "matched",
+      "reason": null,
+      "count": 120
+    },
+    {
+      "slice": "protocol",
+      "status": "unresolved",
+      "reason": "unsupported_path",
+      "count": 771
+    }
+  ],
+  "graph": [
+    {
+      "kind": "MAY_ENUMERATED",
+      "count": 23209
+    },
+    {
+      "kind": "MAY_TOP",
+      "count": 8208
+    },
+    {
+      "kind": "MUST",
+      "count": 13601
+    }
+  ],
+  "declarations": [
+    {
+      "count": 149
+    }
+  ]
+}

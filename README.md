@@ -53,7 +53,17 @@ opam exec -- dune build
 ./arch-callgraph-ocaml --build-dir=_build/default/lib/arch_index \
   --db-path=/tmp/self.db --schema-path=architecture-schema.sql
 sqlite3 /tmp/self.db "SELECT count(*) FROM functions;"  # verify: should be ≥ 100
+
+# Inspect same-CMT local functor formal-to-actual provenance (default limit: 50)
+./arch-query /tmp/self.db functor-bindings
+./arch-query /tmp/self.db functor-bindings 100
 ```
+
+`functor-bindings` reports artifact-scoped compiler identities for supported local
+named functors. Actual operands remain symbolic: the report does not substitute
+module contents, resolve call targets, establish a closed world, or replace ⊤ edges.
+It requires a new main-schema CMT index carrying the binding-v1 contract; old,
+flat, and markerless databases are refused with exit 3 rather than shown as empty.
 
 ## Use cases for agents and reviewers
 

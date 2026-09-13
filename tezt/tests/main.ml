@@ -74,6 +74,7 @@ let () =
   Lsp_languages.register_typescript () ;
   Callgraph_nested.register () ;
   Functor_catalogue.register () ;
+  Functor_bindings.register () ;
   Impact.register_granularity () ;
   Impact.register_contract () ;
   Impact.register_no_spans () ;

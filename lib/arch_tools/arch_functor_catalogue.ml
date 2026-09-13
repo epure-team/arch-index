@@ -114,7 +114,7 @@ type input = {
   expected : int;
 }
 
-let read t ~limit = snapshot t @@ fun () ->
+let read_unwrapped t ~limit =
   if Arch_db.has_col t "calls" "caller_name" || List.exists(fun(tbl,cs)->not(Arch_db.has_table t tbl)||List.exists(fun c->not(Arch_db.has_col t tbl c))cs)required
   then Arch_db.refuse "UNSUPPORTED_SCHEMA: functor catalogue v1 tables/columns are absent";
   let marker =
@@ -247,3 +247,5 @@ let read t ~limit = snapshot t @@ fun () ->
     Arch_db.Int returned; Arch_db.Int (if returned < total then 1 else 0);
     Arch_db.Text "selected_cmt_syntax_only"; Arch_db.Text limitations]],
   List.filteri (fun i _ -> i < returned) public
+
+let read t ~limit = snapshot t @@ fun () -> read_unwrapped t ~limit

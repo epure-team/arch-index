@@ -12,7 +12,20 @@ type occurrence = {
   diagnostics : string;
 }
 
-val collect : Typedtree.structure -> occurrence list
+val collect :
+  ?on_application:
+    (ordinal:int ->
+     application_kind:application_kind ->
+     head_application_ordinal:int option ->
+     head:Typedtree.module_expr ->
+     argument:Typedtree.module_expr option ->
+     unit) ->
+  Typedtree.structure ->
+  occurrence list
+(** The optional callback observes the same typed application sites from which
+    catalogue rows are produced.  Omitting it retains catalogue-only behavior. *)
+
+val location_json : Location.t -> string * bool
 
 val store_collected :
   Sqlite3.db ->

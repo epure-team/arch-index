@@ -494,6 +494,7 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
       writes will have NULL provenance\n" ;
 
   let catalogue_collected = ref 0 in
+  let binding_eligible = ref true in
   (match producer_run_id, selected_catalogue_inputs with
   | Some run_id, _ :: _ ->
       let sql = Printf.sprintf
@@ -666,7 +667,18 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
                   let occurrences = Arch_index_functors.collect structure in
                   Arch_index_functors.store_collected db ~producer_run_id ~artifact ~source
                     ~compiler_unit ~module_id occurrences ;
-                  incr catalogue_collected)
+                  incr catalogue_collected ;
+                  (try
+                     let bindings = Arch_index_bindings.collect structure in
+                     Arch_index_bindings.store_collected db ~producer_run_id ~artifact bindings
+                   with exn ->
+                     binding_eligible := false ;
+                     Arch_io.eprintf "Warning: functor binding collection failed for %s: %s\\n"
+                       artifact (Printexc.to_string exn) ;
+                     try Arch_index_bindings.store_failed db ~producer_run_id ~artifact
+                     with failed ->
+                       Arch_io.eprintf "Warning: functor binding failure recording failed for %s: %s\\n"
+                         artifact (Printexc.to_string failed)))
             ~on_catalogue_outcome:(fun ~artifact ~outcome ->
               match producer_run_id with
               | None -> ()
@@ -1788,6 +1800,18 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
 
   (* Restore intents *)
   Arch_index_support.restore_intents db backup ;
+
+  (* Binding completion is independent of the syntax catalogue and is earned
+     only from persisted, committed data. Keep it last, after every producer
+     transaction, and never let a binding failure invalidate existing facts. *)
+  if !binding_eligible && !catalogue_collected = selected_catalogue_count then
+    (try
+       ignore
+         (Arch_index_bindings.finalize_contract db
+            ~selected_inputs:selected_catalogue_count)
+     with exn ->
+       Arch_io.eprintf "Warning: functor binding finalization failed: %s\n"
+         (Printexc.to_string exn)) ;
 
   (* Summary *)
   let n_fields = count_rows db "SELECT COUNT(*) FROM type_fields" in

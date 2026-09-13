@@ -1,0 +1,661 @@
+{
+  "version": 1,
+  "complete": true,
+  "status": "coverage-drift",
+  "policy": {
+    "verdict": "UNKNOWN",
+    "failed": false,
+    "gate_exit": 0
+  },
+  "coverage": {
+    "reference_revision": "c2a8add5e394c162eeef4d204a73e1058a436df2",
+    "current": {
+      "totals": {
+        "modules": 25,
+        "functions": 902,
+        "calls": 5620,
+        "origins": 524
+      },
+      "origin_groups": [
+        {
+          "channel": "exception",
+          "form": "assert",
+          "escapes": 1,
+          "count": 1
+        },
+        {
+          "channel": "exception",
+          "form": "compare",
+          "escapes": 1,
+          "count": 36
+        },
+        {
+          "channel": "exception",
+          "form": "failwith",
+          "escapes": 1,
+          "count": 26
+        },
+        {
+          "channel": "exception",
+          "form": "index",
+          "escapes": 1,
+          "count": 106
+        },
+        {
+          "channel": "exception",
+          "form": "invalid_arg",
+          "escapes": 1,
+          "count": 1
+        },
+        {
+          "channel": "exception",
+          "form": "reraise",
+          "escapes": 1,
+          "count": 7
+        },
+        {
+          "channel": "option",
+          "form": "raise",
+          "escapes": 1,
+          "count": 296
+        },
+        {
+          "channel": "result",
+          "form": "raise",
+          "escapes": 1,
+          "count": 4
+        },
+        {
+          "channel": "result",
+          "form": "unknown",
+          "escapes": 1,
+          "count": 47
+        }
+      ]
+    },
+    "deltas": [
+      {
+        "metric": "modules",
+        "reference": 24,
+        "current": 25,
+        "delta": 1
+      },
+      {
+        "metric": "functions",
+        "reference": 859,
+        "current": 902,
+        "delta": 43
+      },
+      {
+        "metric": "calls",
+        "reference": 5440,
+        "current": 5620,
+        "delta": 180
+      },
+      {
+        "metric": "origins",
+        "reference": 495,
+        "current": 524,
+        "delta": 29
+      },
+      {
+        "metric": "origin_group",
+        "channel": "exception",
+        "form": "compare",
+        "escapes": 1,
+        "reference": 34,
+        "current": 36,
+        "delta": 2
+      },
+      {
+        "metric": "origin_group",
+        "channel": "exception",
+        "form": "failwith",
+        "escapes": 1,
+        "reference": 19,
+        "current": 26,
+        "delta": 7
+      },
+      {
+        "metric": "origin_group",
+        "channel": "exception",
+        "form": "reraise",
+        "escapes": 1,
+        "reference": 6,
+        "current": 7,
+        "delta": 1
+      },
+      {
+        "metric": "origin_group",
+        "channel": "option",
+        "form": "raise",
+        "escapes": 1,
+        "reference": 283,
+        "current": 296,
+        "delta": 13
+      },
+      {
+        "metric": "origin_group",
+        "channel": "result",
+        "form": "unknown",
+        "escapes": 1,
+        "reference": 41,
+        "current": 47,
+        "delta": 6
+      },
+      {
+        "metric": "module_population",
+        "missing": [],
+        "extra": [
+          "lib/arch_index/arch_index_bindings.ml"
+        ]
+      },
+      {
+        "metric": "source_module_population",
+        "missing": [],
+        "extra": [
+          "lib/arch_index/arch_index_bindings.ml"
+        ]
+      }
+    ],
+    "indexed_modules": [
+      "lib/arch_index/arch_errors_config.ml",
+      "lib/arch_index/arch_index.ml",
+      "lib/arch_index/arch_index_bindings.ml",
+      "lib/arch_index/arch_index_cfg.ml",
+      "lib/arch_index/arch_index_cmt.ml",
+      "lib/arch_index/arch_index_comment_parser.ml",
+      "lib/arch_index/arch_index_compare.ml",
+      "lib/arch_index/arch_index_db.ml",
+      "lib/arch_index/arch_index_errch.ml",
+      "lib/arch_index/arch_index_exn.ml",
+      "lib/arch_index/arch_index_functors.ml",
+      "lib/arch_index/arch_index_git.ml",
+      "lib/arch_index/arch_index_line_counter.ml",
+      "lib/arch_index/arch_index_support.ml",
+      "lib/arch_index/call_graph_extractor.ml",
+      "lib/arch_index/comment_parser.ml",
+      "lib/arch_index/coverage_matrix.ml",
+      "lib/arch_index/doc_extractor.ml",
+      "lib/arch_index/language_registry.ml",
+      "lib/arch_index/lsp_client.ml",
+      "lib/arch_index/lsp_extractor.ml",
+      "lib/arch_index/lsp_types.ml",
+      "lib/arch_index/ocaml_enricher.ml",
+      "lib/arch_index/runner.ml",
+      "lib/arch_index/ts_enricher.ml"
+    ]
+  },
+  "provenance": {
+    "revision": "7df5c031f809bc92c34d483a14dac3342d300ce2",
+    "git_root": "/home/mathias/dev/arch-index-worktrees/functor-binding-resolution",
+    "detached": false,
+    "dirty": [
+      " M architecture-schema.sql",
+      " M bin/arch_query/arch_query.ml",
+      " M briefs/functor-binding-resolution-implementer.md",
+      " M briefs/functor-binding-resolution-plan.md",
+      " M briefs/functor-binding-resolution-reviewer.md",
+      " M docs/schema.md",
+      " M lib/arch_index/arch_index.ml",
+      " M lib/arch_index/arch_index_db.ml",
+      " M lib/arch_index/arch_index_functors.ml",
+      " M lib/arch_index/arch_index_functors.mli",
+      " M lib/arch_index/arch_index_support.ml",
+      " M lib/arch_tools/arch_functor_catalogue.ml",
+      " M skills-meta/friction.jsonl",
+      " M tezt/tests/main.ml",
+      "?? lib/arch_index/arch_index_bindings.ml",
+      "?? lib/arch_index/arch_index_bindings.mli",
+      "?? lib/arch_tools/arch_functor_bindings.ml",
+      "?? lib/arch_tools/arch_functor_bindings.mli",
+      "?? lib/arch_tools/arch_functor_catalogue.mli",
+      "?? roster/functor-binding-resolution/implementation-progress.md",
+      "?? tezt/tests/functor_bindings.ml"
+    ],
+    "output": "/home/mathias/dev/arch-index-worktrees/functor-binding-resolution/roster/functor-binding-resolution/origin-attribution",
+    "trusted_build_assumption": "CMT inputs are trusted local build artifacts; this record does not certify source-to-CMT freshness.",
+    "sources": [
+      {
+        "path": "lib/arch_index/arch_errors_config.ml",
+        "sha256": "9266e568fc73814eb17dd34f98b4e1daccf870125556f7e8fdade4128dd94d8b"
+      },
+      {
+        "path": "lib/arch_index/arch_errors_config.mli",
+        "sha256": "9891d6ed6d8376be4b5ac1a8852b5f3a5e5d068cd01cb9cbfe71cdae5c4c6efc"
+      },
+      {
+        "path": "lib/arch_index/arch_index_bindings.ml",
+        "sha256": "f94ef2eec290e5b9724abf8405b8fe97e3faa743065ff9085048e339a775e99b"
+      },
+      {
+        "path": "lib/arch_index/arch_index_bindings.mli",
+        "sha256": "c68d8833f3e5d6cfea7458a8dfb7d7bada614d667c82b6f3fbd9dae1fb18e4a8"
+      },
+      {
+        "path": "lib/arch_index/arch_index_cfg.ml",
+        "sha256": "d8f17977dd3e2149c38442d116b2c512bb3e613aa2402f6793dcc3ebb852247a"
+      },
+      {
+        "path": "lib/arch_index/arch_index_cfg.mli",
+        "sha256": "4664c3d540216cdcb1d946aacff998855ecb466c1a38e0e2089a248a7f797b41"
+      },
+      {
+        "path": "lib/arch_index/arch_index_cmt.ml",
+        "sha256": "b985af14d991b5bfe6ff315dd1f4dfa3ef8ec53cf7d6e798171d8c7eba8c4bb7"
+      },
+      {
+        "path": "lib/arch_index/arch_index_cmt.mli",
+        "sha256": "61db3df7fa1ca608abc82a4e7d22ec73dcd3f4f21a44f94224e4af1543b140ac"
+      },
+      {
+        "path": "lib/arch_index/arch_index_comment_parser.ml",
+        "sha256": "36156def46de881663d83dfcc3e782f74a43e3531f458a81d991d0c2cf2ef5b0"
+      },
+      {
+        "path": "lib/arch_index/arch_index_comment_parser.mli",
+        "sha256": "743d7b2109ef6bf927a04af5b0d8083edf860b2d432be740f6209355ce81e9ab"
+      },
+      {
+        "path": "lib/arch_index/arch_index_compare.ml",
+        "sha256": "f6bee8b52526594156973a889410bd4fc9b78d82feea7e0d575980d930ca6e0b"
+      },
+      {
+        "path": "lib/arch_index/arch_index_compare.mli",
+        "sha256": "f9df8a706c9a6393c87b9a3bdd58f85ce3094105ce014303b0507ad3528166d2"
+      },
+      {
+        "path": "lib/arch_index/arch_index_db.ml",
+        "sha256": "35e9022fa3f699f1a0ca72f91a1a67c6e711dc1a2ec4fe1cd97a5359c404e373"
+      },
+      {
+        "path": "lib/arch_index/arch_index_db.mli",
+        "sha256": "2b163be266f889a358f91c5135dec84082ff5d0c39deac627aed84d72830ec77"
+      },
+      {
+        "path": "lib/arch_index/arch_index_errch.ml",
+        "sha256": "94862cfa400e15373782d189258bf5616d9cf938ad7c68556a1c0ce3ecea9817"
+      },
+      {
+        "path": "lib/arch_index/arch_index_errch.mli",
+        "sha256": "172cdb3c0376f6dcfe149a24560db1179affe6863630dceaa07861814740fd86"
+      },
+      {
+        "path": "lib/arch_index/arch_index_exn.ml",
+        "sha256": "2e1c7079fd3a98fe0d4a3185167386fbfe0cec354d70be9ad4c0e0f3d9cead8d"
+      },
+      {
+        "path": "lib/arch_index/arch_index_exn.mli",
+        "sha256": "941c4b9c4f1829ce1eb41800d3d46aec45b5dd5fa49db9233452e00d3323c771"
+      },
+      {
+        "path": "lib/arch_index/arch_index_functors.ml",
+        "sha256": "2a8c6a260cf3daa065d65242e14b31a410ba1a6a4e8d1b4d62c0190a6063abd3"
+      },
+      {
+        "path": "lib/arch_index/arch_index_functors.mli",
+        "sha256": "11bfd60174394588c96ca81f531f992c5fcd490f05f313edfd49d20a090c3c11"
+      },
+      {
+        "path": "lib/arch_index/arch_index_git.ml",
+        "sha256": "93db1b4df3fe9cf2a1f723aee756bc52e5eac1f898e038e1d3f05263db349f6f"
+      },
+      {
+        "path": "lib/arch_index/arch_index_git.mli",
+        "sha256": "9d113a3c8f9edee9a0ac06212019919bd7aac93145bb79869c8bd99f6010f10d"
+      },
+      {
+        "path": "lib/arch_index/arch_index_line_counter.ml",
+        "sha256": "d918f93f2a9a5559d608a6eb75f9f5e5af6582a1985a066b21c75806598a5b8c"
+      },
+      {
+        "path": "lib/arch_index/arch_index_line_counter.mli",
+        "sha256": "56ab30e99f4aafc8e1b1484bd5b752b03bf03e00f832b0ce371dbb2312fa4cfa"
+      },
+      {
+        "path": "lib/arch_index/arch_index_support.ml",
+        "sha256": "67e1cf2476d3cefe0d78ee9c5cdaa7e51f056c13461a29cdd37229d990c27351"
+      },
+      {
+        "path": "lib/arch_index/arch_index_support.mli",
+        "sha256": "e2ea8fa91eb18debb6792652e417b1fe2957f401bae87de7cd29454ccb5d6c2d"
+      },
+      {
+        "path": "lib/arch_index/arch_index.ml",
+        "sha256": "3a1dec5bccf390b661a7de12e4ffe27115b681480015813714e025ef2f626d7e"
+      },
+      {
+        "path": "lib/arch_index/arch_index.mli",
+        "sha256": "d2582de0f4931871b7c34ea404f671659c99ff9e17ba94df75ea2f9d7f412f2d"
+      },
+      {
+        "path": "lib/arch_index/call_graph_extractor.ml",
+        "sha256": "a130e008a7abb3731971a75d57c86a459392421b983355b0ff1bffa261eb51f3"
+      },
+      {
+        "path": "lib/arch_index/call_graph_extractor.mli",
+        "sha256": "e1f43045cec5b5585ea53e502a8a2182edd7968c3d147da3ee9e56228dd2b6a2"
+      },
+      {
+        "path": "lib/arch_index/comment_parser.ml",
+        "sha256": "3cf0892e3e91e91629a4a24cfcf220b121c2eb0ae6ad1214a576b9ad991d35b0"
+      },
+      {
+        "path": "lib/arch_index/comment_parser.mli",
+        "sha256": "acee58b88164c38ef70cd263e07dc95727709a0303519530da2543288e32f116"
+      },
+      {
+        "path": "lib/arch_index/coverage_matrix.ml",
+        "sha256": "dbd4c2bc960613869fcb6e9ccff166796393158059b88964fd05fd554faba25b"
+      },
+      {
+        "path": "lib/arch_index/coverage_matrix.mli",
+        "sha256": "18df29e4ab27df4bbda367dd50e60bdb20ff2ac9056fbb06ed07bdec16360df2"
+      },
+      {
+        "path": "lib/arch_index/doc_extractor.ml",
+        "sha256": "5e9e0fdfe93744a2c4988c2a28fd9c5b9651b9ef6eacfb7572b9415dcc2e3370"
+      },
+      {
+        "path": "lib/arch_index/doc_extractor.mli",
+        "sha256": "14f5fe9f42d52b3acba1a29ffff0778cc04bbc06761b1d15e37799988e1aaf5f"
+      },
+      {
+        "path": "lib/arch_index/language_registry.ml",
+        "sha256": "2955f275919540a66282b58f07d0c784239672565f1c93b33a8b41e1fefa8485"
+      },
+      {
+        "path": "lib/arch_index/language_registry.mli",
+        "sha256": "c4082f701be4234d8fc84ae236db7cd371f22c2bc770532d0d597675871e8486"
+      },
+      {
+        "path": "lib/arch_index/lsp_client.ml",
+        "sha256": "576b273bf2647ef0a557f43d77c211f618485bcb124109c03795f7ca38c0370f"
+      },
+      {
+        "path": "lib/arch_index/lsp_client.mli",
+        "sha256": "c14c23423cc8fee06c32cae037831b8565df85cb6188e7a15d9f133c2bae59e4"
+      },
+      {
+        "path": "lib/arch_index/lsp_extractor.ml",
+        "sha256": "7281896e71c8b27ed1af05f516557619f364e7fe8e4d13636e720ead5dab77fc"
+      },
+      {
+        "path": "lib/arch_index/lsp_extractor.mli",
+        "sha256": "c8ee14e6cb38ed0202b44a83cd29b9250d3b767de50d2936005c8f22ec0895c9"
+      },
+      {
+        "path": "lib/arch_index/lsp_types.ml",
+        "sha256": "6fd4cc4cf8351c133b92f2804de531949354fe0f5552f87926e14ee80395f117"
+      },
+      {
+        "path": "lib/arch_index/lsp_types.mli",
+        "sha256": "54d2c87edd17ca9fe652327f03f1e2ebe1fd13eeff167918ec32e7ce802006b2"
+      },
+      {
+        "path": "lib/arch_index/ocaml_enricher.ml",
+        "sha256": "83b5b68c745223e1e8430a87c581412793b59cdac2e6d9c0e4d34173f33c83c1"
+      },
+      {
+        "path": "lib/arch_index/ocaml_enricher.mli",
+        "sha256": "98af6ff93e5e70995530480c4a00be7c573e570e6884136d87203cd75ce741da"
+      },
+      {
+        "path": "lib/arch_index/runner.ml",
+        "sha256": "b35f76d6a0a2b836ca5706b98f03401a135e0fe8643f5f0c84873332704bc1ee"
+      },
+      {
+        "path": "lib/arch_index/runner.mli",
+        "sha256": "60e2c65516fdebf98d3ea0a557852e2ac68eaa1e0b107fd70a4aea1b9fa44c30"
+      },
+      {
+        "path": "lib/arch_index/ts_enricher.ml",
+        "sha256": "b0236dafdd3d12a063a86aa11c4fce5d04a65bcfc2113699756f8141c3889651"
+      },
+      {
+        "path": "lib/arch_index/ts_enricher.mli",
+        "sha256": "01dd764c6f013b6eaa013e52fabc0cb8ccba68f7f4ebd7e141cdf501740d511e"
+      }
+    ],
+    "cmts": [
+      {
+        "path": ".arch_index.inline-tests/.t.eobjs/byte/dune__exe__Main.cmt",
+        "sha256": "f99c07d4bdda3873fb34d713d255d0bc86de438c0a39a0e9a9fd60ecbf19ffea"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__.cmt",
+        "sha256": "b41c9f6e3ff23b9849dd1ae1e4139e9fae16f9bac89ebaaf4bde3802ee3c3892"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Arch_errors_config.cmt",
+        "sha256": "35db3c1f88055714ffee93024ecf8e64c8e8f2ad91052c5e02aa5b899abad4b3"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Arch_errors_config.cmti",
+        "sha256": "1a07b70132b3b3572decbeab99540ee75b68b1a8df7627afc964d77dcf93953b"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Arch_index_bindings.cmt",
+        "sha256": "dcc4c06a0d5bfbe5d4ef4619233b1a6fa616349412f9c618f8622b3b2b33a645"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Arch_index_bindings.cmti",
+        "sha256": "9455cfe8c8baeee485383d5a20a9350edf5efa130489eac9be77afc7127ac901"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Arch_index_cfg.cmt",
+        "sha256": "412d84f6d575471e5847df7a21a02fbed215d3bd66dd4a804e6354275bbe3f14"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Arch_index_cfg.cmti",
+        "sha256": "486dbbf735f6bb3f8813a7fe1cef852797886b3b13b4c68f25b3156f8bb79dde"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Arch_index_cmt.cmt",
+        "sha256": "af3b2de609dcc004f1e6e9ef129f6d01ad18ac575730e18f08033585ab5bc6a0"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Arch_index_cmt.cmti",
+        "sha256": "9c0c1c32e86d19b9ccec9da64906b35ecd78decdf85503bbc34aabd42093d343"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Arch_index_comment_parser.cmt",
+        "sha256": "4b2d7faf2f46f8005055ecb21fc629d7bfb7c11fe6d01c4d584ecb90ef335e7d"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Arch_index_comment_parser.cmti",
+        "sha256": "a6e238acda4dd1debdd7708b479c06e1ccf5ae3a0713d058cdcb6b15a33a3098"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Arch_index_compare.cmt",
+        "sha256": "6484e8b5f9c1154d94ad6082f0a79ab7b257556041f0414b326ddcf9cb8774f1"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Arch_index_compare.cmti",
+        "sha256": "7bce51f31ab4b617342926bc38dae9ec49878c9d5ccb9b072bc3c5d52a66baa9"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Arch_index_db.cmt",
+        "sha256": "c53ac2543599d6210890cbda2b28f72af33eb39591052b8566f4c0a2d2ac7247"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Arch_index_db.cmti",
+        "sha256": "d35d461821265a9959726be06a822551e0f98e15a9a69d44d9dad7e80e529cb3"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Arch_index_errch.cmt",
+        "sha256": "4e0c2a960e0ce0d5a07d6ffb67bd2f4d80a49c52e1ae81ff1b9d33f6151adc02"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Arch_index_errch.cmti",
+        "sha256": "c9e7593ee4d752574db3afc95cd1c90fd0e9f18d75ccc17672acc60fbdca1200"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Arch_index_exn.cmt",
+        "sha256": "952709c5fde2b011467bfd4b3e0ce6821ed158a861b45b21d43d44332de9b70a"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Arch_index_exn.cmti",
+        "sha256": "4bcafe9caeffa29df8429ce4209f736e5d8b225c2444a0ab122dffb45561a165"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Arch_index_functors.cmt",
+        "sha256": "ccc3309920568e042b844a3f9d1afd7f8e75c7d3eaf8f609c9ae9d55dadb755b"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Arch_index_functors.cmti",
+        "sha256": "4cb7e1752e23e01ca376ae6e40655d6d34e138deda1682cc9ac96244c1f56e96"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Arch_index_git.cmt",
+        "sha256": "f1b9451930f9ee2b04f8f450c630c690ddccff118457c6343b66bf1254996e54"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Arch_index_git.cmti",
+        "sha256": "53bb8bdb69ab74bdf41ecca92ad43b17048114c0658e8d883c4762b7ba3a792b"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Arch_index_line_counter.cmt",
+        "sha256": "166aab094e92a221a8b36426def83e071807d4805c2b33cb4609eee531cad6b7"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Arch_index_line_counter.cmti",
+        "sha256": "59c3077e2ade5283dff0af44cfaf56710fadab5f16eee95bd893d0319d210ccc"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Arch_index_support.cmt",
+        "sha256": "43933ae46f52fe173b3af06acf9d6f957be8eca114433263378561d95cdd6da6"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Arch_index_support.cmti",
+        "sha256": "b39952c79794a8886298d3dea5aafad29634cb9ff355a1346df5b2ae14654323"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Call_graph_extractor.cmt",
+        "sha256": "290d5cb5da10a65e3ff126197e614fbb3c53d949f6acf21a9dbf2429a6c408bd"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Call_graph_extractor.cmti",
+        "sha256": "d11ad439b6cc485914a432172b3cf8a8cc25eee65e6dabd70d78dbe77bae9574"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Comment_parser.cmt",
+        "sha256": "30731645bfa9ccfe6f586e44f52743d3577752c8a05b85666e31fd8583cc62f0"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Comment_parser.cmti",
+        "sha256": "ce449ccf837a820fc6120f3a6c097af94090ee40eb9b263d63d788301b32d429"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Coverage_matrix.cmt",
+        "sha256": "37c35ff7e69fe77efc311037a440ee3ef9d5d38f15c3dcf2250e037c9c9dc3fb"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Coverage_matrix.cmti",
+        "sha256": "0e18f9582486def0d43cf6967445f78ef7db6ab6bf42db1f604358f4de282be0"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Doc_extractor.cmt",
+        "sha256": "392f9f69193e4d9c78db18b90545fa13ae81f850bb759bb6aa937949091253b2"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Doc_extractor.cmti",
+        "sha256": "4f0950af5e3f990821832458703ebede012634b27048e12d9591179d6a7e3a38"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Language_registry.cmt",
+        "sha256": "875acf107993e5c7ff049c182eca94ed6f29d6b6d973ef7757cc92bf5da638b8"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Language_registry.cmti",
+        "sha256": "2cf4f4e85db7eb8b07690859d8c1ab23db344a83a772a789d99bff119213fb3c"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Lsp_client.cmt",
+        "sha256": "34761c3bc58a00b60ced9320830e0af10b884f1d43c2518dc96ea12a28f2b0a6"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Lsp_client.cmti",
+        "sha256": "3b973cf5fe3b1de4532795f5e7b3d28a4f3a3c08a9ff91fbc7603b3f5883ce85"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Lsp_extractor.cmt",
+        "sha256": "84110c10c5c39bd92a2caeabd2270677e3acf7ad7a8684da388482cfee2f3472"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Lsp_extractor.cmti",
+        "sha256": "c6e2670a15170453a9244dac1d87c62bf12b9731b1cae73c0c0b7fc57dc8c368"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Lsp_types.cmt",
+        "sha256": "14a67aeeec3e5d430e7f34f733f90207259763284f270fe21b13d19e52b2bf44"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Lsp_types.cmti",
+        "sha256": "ae56f4a59006d1db22b6221cb9255924e15ee8439500d67f85d7abf34fa38b71"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Ocaml_enricher.cmt",
+        "sha256": "aa8a3982a90a9c6a03e656ca836f22cae59abd619b28f64a2a308a019c16aec6"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Ocaml_enricher.cmti",
+        "sha256": "df843d97f1e72428c3db9438e5109658bdc3a350419cbd6c6a1892045e53e2e8"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Runner.cmt",
+        "sha256": "84e55d0c7bba3e37be686606896fe5c452cb646cbd1c7a6c970b7b3e2301cc17"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Runner.cmti",
+        "sha256": "b24e4874149e4ea4c12dd26a522b2e44832f30326ddd3e3ce25a0ecb67df3cf9"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Ts_enricher.cmt",
+        "sha256": "913bc57bb2433e6e03c6f9c64e6d9883f506cb10c7db3d5e1d914087ac3fc4d7"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index__Ts_enricher.cmti",
+        "sha256": "e54a4dc84745b843a3577a4222d6c2b171befbd8c6d68d047d5a92bcbf248626"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index.cmt",
+        "sha256": "299ed0cb423fd5620d13bb842a4ac9832393a93f8cc9a8aed787dd70e6b58fcb"
+      },
+      {
+        "path": ".arch_index.objs/byte/arch_index.cmti",
+        "sha256": "7c1b51e9acb1e788f1e0813f6958cc4146bc7da49dad6651b336f0197b0561d6"
+      }
+    ],
+    "inputs": {
+      "architecture-schema.sql": "1dd2d909e1feb2582e8a13f717ef165b7be9b73b908f73f47983920bded580d0",
+      "test/fixtures/origin-consumer/self.rules": "47cf0f58fc432bdf60535ce5b5c83e0ce5862f9982d49e6f2010ffcbdf8d9a5e",
+      "test/fixtures/origin-consumer/self.allow": "304579792941cbe1a2eb270f6d6b61694569ea3c69c7488fe6b5dfa16d1877ef",
+      "test/fixtures/origin-consumer/reference.json": "2ef2a9f7abeec7e50f06bef24f562f87c38c12714cb4ada01c0e308cebdf8a00",
+      "_build/default/bin/arch_callgraph_ocaml/arch_callgraph_ocaml.exe": "6a70372c7482bda2bdeb6ddbc4badfd2cff4710f57722c4ac19870522b394a36",
+      "_build/default/bin/arch_rules/arch_rules.exe": "4514edeaa1167772ec9b4d53a02488bbb927d65eae2527963d879bb7d7edc2b3",
+      "_build/default/bin/arch_report/arch_report.exe": "b681a2aad33529c3e06462db53c991e2ea3c7b3de19a1a8d618e7779a0755361"
+    },
+    "errors_config": {
+      "path": null,
+      "sha256": null
+    },
+    "database": {
+      "schema_version": "1.15",
+      "producers": [
+        {
+          "producer": "arch_index_cmt",
+          "producer_version": null,
+          "soundness_class": "sound_with_top",
+          "invocation_digest": "8f2e77f6bcf8ad439055b9caff6b89c4"
+        }
+      ]
+    }
+  },
+  "artifacts": {
+    "gate.json": "e749497f3bb69942392d402958e49afa2f55b9174512d59e85b045de24fcf442",
+    "report.json": "cb603b11fe0f85dcda436a225c9eb5806066e0f0f89a7bf3d1d67bca88fbfedf",
+    "report.sarif": "c76c12f046e6c678238804b3945999d27f1290e91c3401a8c10ba81d912e6365",
+    "report.html": "2938fa1b4213a7191c93af956274cd518f4d7e3a5cae7d46d29aa9f8018f58fd"
+  }
+}
