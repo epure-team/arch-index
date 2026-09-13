@@ -1,7 +1,7 @@
 {
   "task": "functor-instance-resolution",
   "mode": "full",
-  "current_phase": "review",
+  "current_phase": "qa",
   "events": [
     {
       "phase": "question",
@@ -56,6 +56,12 @@
       "outcome": "GO",
       "by": "roster-review",
       "reason": "Round1cycle1: independent reviewer/architect/spec gates, three MEDIUM advisories/no HIGH; two brief-only fixes. Full convergence0, real trace; OpenCode timeout degraded. QA next under standing autonomy."
+    },
+    {
+      "phase": "qa",
+      "outcome": "GO",
+      "by": "roster-qa",
+      "reason": "Fresh build0, forced266Tezt+64Alcotest0, four spec groups/bundle/hygiene0; QA convergence1/1 zero violations. OpenCode QA skipped by real shared breaker. Ship under explicit user autonomy next."
     }
   ]
 }

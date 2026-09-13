@@ -1,0 +1,72 @@
+{
+  "build": {
+    "chunk_id": "9ed009",
+    "wall_time_seconds": 0.259601321,
+    "exit_code": 0,
+    "original_token_count": 0,
+    "output": ""
+  },
+  "gates": [
+    {
+      "command": "git diff --check main...HEAD",
+      "chunk_id": "090d8e",
+      "wall_time_seconds": 0.000138078,
+      "exit_code": 0,
+      "original_token_count": 0,
+      "output": ""
+    },
+    {
+      "command": "node scripts/review-bundle-verify.js",
+      "chunk_id": "4a0176",
+      "wall_time_seconds": 0.000003346,
+      "exit_code": 0,
+      "original_token_count": 20,
+      "output": "review-bundle-verify: OK — 22 file(s) present and sha-matched (bundle 1.6.0).\n"
+    },
+    {
+      "command": "opam exec --switch=/home/mathias/dev/arch-index -- node scripts/check-functor-catalogue.js inventory",
+      "chunk_id": "be21bc",
+      "wall_time_seconds": 0.161339301,
+      "exit_code": 0,
+      "original_token_count": 29,
+      "output": "{\"mode\":\"inventory\",\"result\":{\"native_census\":\"18 apply + 1 apply_unit\",\"contexts\":5,\"external_and_shadowed\":3}}\n"
+    },
+    {
+      "command": "opam exec --switch=/home/mathias/dev/arch-index -- node scripts/check-functor-catalogue.js lifecycle",
+      "chunk_id": "a5a5c5",
+      "wall_time_seconds": 0.309161224,
+      "exit_code": 0,
+      "original_token_count": 70,
+      "output": "{\"mode\":\"lifecycle\",\"result\":{\"selection\":3,\"rollback\":true,\"extended\":{\"checked_outcomes\":[\"unreadable\",\"unsupported_annotation\",\"missing_source\",\"dropped_module\",\"collection_failed\"],\"lifecycle\":[\"reindex-stale-rows\",\"zero-selection-marker\",\"collected-zero-applications\"]}}}\n"
+    },
+    {
+      "command": "opam exec --switch=/home/mathias/dev/arch-index -- node scripts/check-functor-catalogue.js query",
+      "chunk_id": "573be9",
+      "wall_time_seconds": 1.304310836,
+      "exit_code": 0,
+      "original_token_count": 31,
+      "output": "{\"mode\":\"query\",\"result\":{\"valid\":3,\"formats\":6,\"corruption\":19,\"extended\":{\"successes\":31,\"mutations\":22,\"formats\":6}}}\n"
+    },
+    {
+      "command": "opam exec --switch=/home/mathias/dev/arch-index -- node scripts/check-functor-catalogue.js compatibility",
+      "chunk_id": "036825",
+      "wall_time_seconds": 0.168560319,
+      "exit_code": 0,
+      "original_token_count": 37,
+      "output": "{\"mode\":\"compatibility\",\"result\":{\"oracle\":\"versioned rich baseline\",\"semantic_tables_and_contracts\":16,\"legacy_queries\":3,\"indexing_passes\":2}}\n"
+    }
+  ],
+  "convergence": {
+    "task": "functor-instance-resolution",
+    "status": "GO",
+    "round": 1,
+    "cycle": 1,
+    "qa_no_go_round": 0,
+    "config": {
+      "max_rounds": 5
+    },
+    "cause": null,
+    "warnings": [],
+    "violations": []
+  }
+}
