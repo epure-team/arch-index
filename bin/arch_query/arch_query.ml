@@ -103,6 +103,7 @@ Subcommands:
   gardening        [open|log]  open gardening tasks, or the append-only log (default: open)
   unsafe-params    [unfixed|fixed|all]  string-typed params tracked for a proper type (default: unfixed)
   functor-applications [limit] selected-CMT syntactic applications (default limit: 50)
+  functor-bindings [limit] selected-CMT local formal provenance (default limit: 50)
 
 A "MEASURE" command reports an exact number and sorts by it. It never fails the build and never
 takes a --fail-on-... threshold: "is this too big" is a human judgement, not something these
@@ -140,19 +141,19 @@ let () =
   match argv with
   | _ :: db_path :: cmd :: rest -> (
       let functor_limit =
-        if cmd <> "functor-applications" then None
+        if cmd <> "functor-applications" && cmd <> "functor-bindings" then None
         else
           let parse s =
             if s = "" || not (String.for_all (fun c -> c >= '0' && c <= '9') s) then
-              die 2 "arch-query: functor-applications limit must be a nonnegative decimal integer" ;
+              die 2 (Printf.sprintf "arch-query: %s limit must be a nonnegative decimal integer" cmd) ;
             match int_of_string_opt s with
             | Some n when n >= 0 -> n
-            | _ -> die 2 "arch-query: functor-applications limit is out of range"
+            | _ -> die 2 (Printf.sprintf "arch-query: %s limit is out of range" cmd)
           in
           match rest with
           | [] -> Some 50
           | [s] -> Some (parse s)
-          | _ -> die 2 "arch-query: functor-applications accepts at most one limit"
+          | _ -> die 2 (Printf.sprintf "arch-query: %s accepts at most one limit" cmd)
       in
       let fmt = mode () in
       let t =
@@ -271,6 +272,23 @@ let () =
               Arch_fmt.print fmt
                 ["artifact"; "source"; "compiler_unit"; "ordinal"; "application_kind";
                  "location"; "head"; "argument"; "diagnostics"] applications
+        | "functor-bindings" ->
+            let summary, bindings =
+              Arch_functor_bindings.read t ~limit:(Option.get functor_limit)
+            in
+            Arch_fmt.print fmt
+              ["contract"; "selected_inputs"; "collected_inputs"; "total"; "matched";
+               "unresolved"; "returned"; "truncated"; "scope"; "limitations"] summary ;
+            (* Unlike the older commands, the provenance stream always carries
+               its second table: in JSON that makes an empty collected report
+               observably different from a refusal. *)
+            if fmt = Arch_fmt.Json && bindings = [] then print_endline "[]"
+            else
+              Arch_fmt.print fmt
+                ["artifact"; "source"; "compiler_unit"; "ordinal"; "status"; "reason";
+                 "declaration_key"; "declaration_name"; "formal_position"; "formal_kind";
+                 "formal_key"; "formal_name"; "head_application_ordinal";
+                 "actual_root_key"; "argument"] bindings
         (* PORT FIX. These four read `calls.caller_name`, which exists only on the FLAT
            schema, so on arch-index's own CMT-produced schema the bash version died with a
            raw sqlite error and exit 1 — including `callers-of`, which the README advertises

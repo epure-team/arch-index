@@ -1,0 +1,21 @@
+Project root: /tmp/arch-index-binding-calibration-XLOGHR/base
+Scanning /tmp/arch-index-binding-calibration-XLOGHR/base/_build/default for .cmt/.cmti files...
+Found 131 .cmt and 78 .cmti files
+Found 339 exposed names, 248 doc comments
+Backed up 0 module intents, 0 function intents, 0 type intents
+Resolving 20525 pending calls...
+Inserted 20525 calls (9053 resolved to known functions)
+Resolving 100 module dependencies...
+Inserted 100 module deps (84 resolved to known modules)
+Resolving 5201 type usages...
+Inserted 5201 type usages (97 resolved to known types)
+
+Done! Indexed:
+  119 modules
+  3585 functions
+  127 types (415 record fields, 171 variant constructors)
+  20525 calls (9053 resolved)
+  100 module deps (84 resolved)
+  5201 type usages (97 resolved)
+Database: /tmp/arch-index-binding-calibration-XLOGHR/ceiling-A.db
+Indexed: 119 modules, 3585 functions, 127 types, 20525 calls

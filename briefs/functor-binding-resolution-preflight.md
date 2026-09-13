@@ -21,3 +21,16 @@ build exit0; direct Tezt --list exit0 (output truncated, not an asserted test
 count or test pass); bundle22/22 hashes pass. opam/node/git/gh present; formatter,
 claims reconciler, KB and harness still absent. Prior unknown Tezt temporary
 files reported by runner are preserved. READY; no source edits or tool installs.
+
+Renewed active-worktree preflight2026-09-13 at base7df5c03: build exit0,
+Tezt collection exit0, review bundle22 hashes1.6.0 verified. This is tool
+readiness, not a passing implementation suite. Existing manifest/active slot
+preserved; no new worktree, tool installation or stale-ledger reset.
+
+Continuation2026-09-13 after neutral calibration approval: READY. Canonical
+roster-run ledger schema predicate passed; latest historical implement/PARTIAL
+routes back to implementation, with its authority blocker resolved by the user.
+Fresh build0, direct binding-test collection0 and review-bundle22/22 SHA1.6.0
+pass. node/opam/sqlite3 resolve. No new worktree or tool install. Old unowned
+Tezt temporary-file warnings remain untouched. Hooks/KB/specialist profile are
+absent; existing Sol fallback is explicitly assigned tests only, root owns Dune.

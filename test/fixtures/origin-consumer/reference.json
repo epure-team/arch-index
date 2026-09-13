@@ -1,31 +1,99 @@
 {
   "version": 1,
-  "revision": "c2a8add5e394c162eeef4d204a73e1058a436df2",
+  "revision": "7df5c031f809bc92c34d483a14dac3342d300ce2+worktree-sha256:1930c1a8acdd725a0cd9a59951eafe1cd9dd97c993bb42aed13b4570b1c27530",
   "modules": [
-    "lib/arch_index/arch_errors_config.ml", "lib/arch_index/arch_index.ml",
-    "lib/arch_index/arch_index_cfg.ml", "lib/arch_index/arch_index_cmt.ml",
-    "lib/arch_index/arch_index_comment_parser.ml", "lib/arch_index/arch_index_compare.ml",
-    "lib/arch_index/arch_index_db.ml", "lib/arch_index/arch_index_errch.ml",
-    "lib/arch_index/arch_index_exn.ml", "lib/arch_index/arch_index_git.ml",
+    "lib/arch_index/arch_errors_config.ml",
+    "lib/arch_index/arch_index.ml",
+    "lib/arch_index/arch_index_bindings.ml",
+    "lib/arch_index/arch_index_cfg.ml",
+    "lib/arch_index/arch_index_cmt.ml",
+    "lib/arch_index/arch_index_comment_parser.ml",
+    "lib/arch_index/arch_index_compare.ml",
+    "lib/arch_index/arch_index_db.ml",
+    "lib/arch_index/arch_index_errch.ml",
+    "lib/arch_index/arch_index_exn.ml",
     "lib/arch_index/arch_index_functors.ml",
-    "lib/arch_index/arch_index_line_counter.ml", "lib/arch_index/arch_index_support.ml",
-    "lib/arch_index/call_graph_extractor.ml", "lib/arch_index/comment_parser.ml",
-    "lib/arch_index/coverage_matrix.ml", "lib/arch_index/doc_extractor.ml",
-    "lib/arch_index/language_registry.ml", "lib/arch_index/lsp_client.ml",
-    "lib/arch_index/lsp_extractor.ml", "lib/arch_index/lsp_types.ml",
-    "lib/arch_index/ocaml_enricher.ml", "lib/arch_index/runner.ml",
+    "lib/arch_index/arch_index_git.ml",
+    "lib/arch_index/arch_index_line_counter.ml",
+    "lib/arch_index/arch_index_support.ml",
+    "lib/arch_index/call_graph_extractor.ml",
+    "lib/arch_index/comment_parser.ml",
+    "lib/arch_index/coverage_matrix.ml",
+    "lib/arch_index/doc_extractor.ml",
+    "lib/arch_index/language_registry.ml",
+    "lib/arch_index/lsp_client.ml",
+    "lib/arch_index/lsp_extractor.ml",
+    "lib/arch_index/lsp_types.ml",
+    "lib/arch_index/ocaml_enricher.ml",
+    "lib/arch_index/runner.ml",
     "lib/arch_index/ts_enricher.ml"
   ],
-  "totals": {"modules": 24, "functions": 859, "calls": 5440, "origins": 495},
+  "totals": {
+    "modules": 25,
+    "functions": 954,
+    "calls": 6131,
+    "origins": 553
+  },
   "origin_groups": [
-    {"channel":"exception","form":"assert","escapes":1,"count":1},
-    {"channel":"exception","form":"compare","escapes":1,"count":34},
-    {"channel":"exception","form":"failwith","escapes":1,"count":19},
-    {"channel":"exception","form":"index","escapes":1,"count":106},
-    {"channel":"exception","form":"invalid_arg","escapes":1,"count":1},
-    {"channel":"exception","form":"reraise","escapes":1,"count":6},
-    {"channel":"option","form":"raise","escapes":1,"count":283},
-    {"channel":"result","form":"raise","escapes":1,"count":4},
-    {"channel":"result","form":"unknown","escapes":1,"count":41}
+    {
+      "channel": "exception",
+      "form": "assert",
+      "escapes": 1,
+      "count": 1
+    },
+    {
+      "channel": "exception",
+      "form": "compare",
+      "escapes": 1,
+      "count": 49
+    },
+    {
+      "channel": "exception",
+      "form": "failwith",
+      "escapes": 1,
+      "count": 28
+    },
+    {
+      "channel": "exception",
+      "form": "index",
+      "escapes": 1,
+      "count": 106
+    },
+    {
+      "channel": "exception",
+      "form": "invalid_arg",
+      "escapes": 1,
+      "count": 1
+    },
+    {
+      "channel": "exception",
+      "form": "raise",
+      "escapes": 1,
+      "count": 1
+    },
+    {
+      "channel": "exception",
+      "form": "reraise",
+      "escapes": 1,
+      "count": 8
+    },
+    {
+      "channel": "option",
+      "form": "raise",
+      "escapes": 1,
+      "count": 304
+    },
+    {
+      "channel": "result",
+      "form": "raise",
+      "escapes": 1,
+      "count": 4
+    },
+    {
+      "channel": "result",
+      "form": "unknown",
+      "escapes": 1,
+      "count": 51
+    }
   ]
 }

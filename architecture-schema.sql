@@ -87,6 +87,46 @@ CREATE TABLE IF NOT EXISTS functor_applications (
     FOREIGN KEY(producer_run_id, artifact) REFERENCES functor_catalogue_inputs(producer_run_id, artifact) ON DELETE CASCADE
 );
 
+-- Same-CMT formal provenance, independent of the syntax catalogue contract.
+CREATE TABLE IF NOT EXISTS functor_binding_inputs (
+    producer_run_id INTEGER NOT NULL,
+    artifact TEXT NOT NULL,
+    outcome TEXT NOT NULL CHECK(outcome IN ('collected','collection_failed')),
+    expected_declarations INTEGER NOT NULL CHECK(expected_declarations >= 0),
+    expected_bindings INTEGER NOT NULL CHECK(expected_bindings >= 0),
+    PRIMARY KEY(producer_run_id, artifact),
+    FOREIGN KEY(producer_run_id, artifact) REFERENCES functor_catalogue_inputs(producer_run_id, artifact) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS functor_declarations (
+    producer_run_id INTEGER NOT NULL,
+    artifact TEXT NOT NULL,
+    declaration_key TEXT NOT NULL CHECK(declaration_key <> ''),
+    name TEXT NOT NULL CHECK(name <> ''),
+    location TEXT NOT NULL,
+    formals TEXT NOT NULL,
+    PRIMARY KEY(producer_run_id, artifact, declaration_key),
+    FOREIGN KEY(producer_run_id, artifact) REFERENCES functor_binding_inputs(producer_run_id, artifact) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS functor_bindings (
+    producer_run_id INTEGER NOT NULL,
+    artifact TEXT NOT NULL,
+    ordinal INTEGER NOT NULL CHECK(ordinal > 0),
+    status TEXT NOT NULL CHECK(status IN ('matched','unresolved')),
+    reason TEXT CHECK(reason IN ('cross_unit_head','parameter_supplied_head','alias_cycle','local_declaration_missing','unsupported_alias_rhs','unsupported_path','unsupported_head_shape','curried_result_not_functor','formal_kind_mismatch')),
+    declaration_key TEXT,
+    formal_position INTEGER,
+    head_application_ordinal INTEGER,
+    actual_root_key TEXT CHECK(actual_root_key IS NULL OR actual_root_key <> ''),
+    CHECK((status='matched' AND reason IS NULL AND declaration_key IS NOT NULL AND formal_position IS NOT NULL AND formal_position > 0)
+       OR (status='unresolved' AND reason IS NOT NULL AND declaration_key IS NULL AND formal_position IS NULL)),
+    PRIMARY KEY(producer_run_id, artifact, ordinal),
+    FOREIGN KEY(producer_run_id, artifact) REFERENCES functor_binding_inputs(producer_run_id, artifact) ON DELETE CASCADE,
+    FOREIGN KEY(producer_run_id, artifact, ordinal) REFERENCES functor_applications(producer_run_id, artifact, ordinal) ON DELETE CASCADE,
+    FOREIGN KEY(producer_run_id, artifact, declaration_key) REFERENCES functor_declarations(producer_run_id, artifact, declaration_key) ON DELETE CASCADE
+);
+
 -- Modules (source files)
 CREATE TABLE IF NOT EXISTS modules (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

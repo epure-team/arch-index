@@ -317,8 +317,16 @@ alias trace, implicit external resolution, or inferred callee is exposed.
 
 ## Runnable Checks
 
-The following check families are contractually required but are not yet runnable or executed. The
-planned file `scripts/check-functor-bindings.js` does not currently support a passing claim here.
+The following check families are contractually required and are now registered in the
+Tezt/Dune test dependency graph. Inventory combines source-valid native fixtures with explicitly
+premise-checked synthetic CMTs; lifecycle combines direct storage/finalizer APIs with actual
+producer CLI failures. Query uses authored semantic/renderer oracles and a genuine accessed-SQL
+failure through the CLI. Reader begin/commit/rollback fault injection is direct API evidence,
+not a claim that each transaction method was injected into the separate CLI process.
+Compatibility includes historical main and flat semantic oracles. Current execution evidence
+and review status live in `roster/functor-binding-resolution/acceptance-status.md`.
+Commands inherit the compiler environment from opam/Dune/CI. Outside a selected environment,
+set `ARCH_FUNCTOR_OPAM_SWITCH` to the intended switch; no machine-specific switch is hardcoded.
 Each plain Node invocation must distinguish pass `0`, semantic assertion failure `1`, and
 infrastructure failure `>=2`; no missing tool or fixture may masquerade as assertion failure.
 
