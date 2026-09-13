@@ -1,0 +1,20 @@
+[
+  {
+    "severity": "LOW",
+    "confidence": 5,
+    "path": "docs/arch-guard.md",
+    "line": 11,
+    "category": "architecture",
+    "summary": "Verification instructions under-build the private checker dependencies",
+    "evidence": "The Quick start instructs only `dune build --root . @install` at docs/arch-guard.md:8-13, while the verification commands at docs/arch-guard.md:82-109 require private, deliberately non-installed probe executables. The independent `owned` checker proves four such probes are required (`probes:4`) and the full build supplies them. Thus a reader following the documented build command before the documented checker list can receive a setup error despite a correct installable CLI.",
+    "fix": "Before the verification command block, state the exact project-switch full-build prerequisite: `rtk proxy opam exec --switch=/home/mathias/dev/arch-index -- dune build --root .`; retain @install as the lightweight CLI quick-start path if desired.",
+    "fingerprint": "docs/arch-guard.md:11:architecture",
+    "specialist": "architect",
+    "status": "OPEN",
+    "boundary": "documented CLI quick-start to private verification probes",
+    "invariant": "Every documented verification command has its required build artifacts after the documented prerequisite.",
+    "failure_mode": "A clean checkout built only through @install has the public CLI but lacks the private probes consumed by the listed checker modes, producing a checker setup failure.",
+    "acs": ["AC-3"],
+    "convergence": ["documentation", "private-test-seam"]
+  }
+]

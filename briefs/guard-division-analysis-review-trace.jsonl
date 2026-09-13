@@ -7,3 +7,11 @@
 {"schema_version":"1.0","ts":"2026-09-13T06:33:33.491Z","task":"guard-division-analysis","round":1,"cycle":1,"event":"specialist","actor":"cross-runtime-reviewer","outcome":"ran"}
 {"schema_version":"1.0","ts":"2026-09-13T06:33:33.780Z","task":"guard-division-analysis","round":1,"cycle":1,"event":"normalizer","actor":"review-normalize.js","outcome":"ran"}
 {"schema_version":"1.0","ts":"2026-09-13T06:34:40.132Z","task":"guard-division-analysis","round":1,"cycle":1,"event":"normalizer","actor":"review-normalize.js","outcome":"ran"}
+{"schema_version":"1.0","ts":"2026-09-13T08:23:24.162Z","task":"guard-division-analysis","round":2,"cycle":1,"event":"scope-gate","actor":"check-scope-diff.sh","outcome":"ran"}
+{"schema_version":"1.0","ts":"2026-09-13T08:23:24.347Z","task":"guard-division-analysis","round":2,"cycle":1,"event":"specialist","actor":"reviewer","outcome":"ran"}
+{"schema_version":"1.0","ts":"2026-09-13T08:23:24.527Z","task":"guard-division-analysis","round":2,"cycle":1,"event":"specialist","actor":"architect","outcome":"ran"}
+{"schema_version":"1.0","ts":"2026-09-13T08:23:24.709Z","task":"guard-division-analysis","round":2,"cycle":1,"event":"specialist","actor":"spec-compliance","outcome":"ran"}
+{"schema_version":"1.0","ts":"2026-09-13T08:23:24.889Z","task":"guard-division-analysis","round":2,"cycle":1,"event":"specialist","actor":"code-quality-auditor","outcome":"skipped","detail":"kb/properties.md absent"}
+{"schema_version":"1.0","ts":"2026-09-13T08:23:25.073Z","task":"guard-division-analysis","round":2,"cycle":1,"event":"specialist","actor":"reviewer-tui","outcome":"skipped","detail":"No TUI surface"}
+{"schema_version":"1.0","ts":"2026-09-13T08:23:25.262Z","task":"guard-division-analysis","round":2,"cycle":1,"event":"specialist","actor":"cross-runtime-reviewer","outcome":"skipped","detail":"Actual helper refused same-cycle degraded unchanged digest; no re-probe"}
+{"schema_version":"1.0","ts":"2026-09-13T08:23:25.460Z","task":"guard-division-analysis","round":2,"cycle":1,"event":"normalizer","actor":"review-normalize.js","outcome":"ran"}

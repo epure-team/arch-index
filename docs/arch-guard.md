@@ -81,9 +81,11 @@ atomic filesystem snapshot or a freshness certificate.
 
 ## Verification status
 
-Run checkers under the same compiler environment as the build:
+Run a full build and the checkers under the same configured compiler environment.
+The CLI-only `@install` build above does not build the private verification probes:
 
 ```sh
+dune build --root .
 node scripts/check-arch-guard.js inventory
 node scripts/check-arch-guard.js numeric
 node scripts/check-arch-guard.js domain
