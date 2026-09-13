@@ -1,0 +1,59 @@
+{
+  "task": "functor-binding-resolution",
+  "mode": "full",
+  "schema_version": "1.0",
+  "steps": [
+    {
+      "id": "step-1",
+      "skill": "roster-implement",
+      "inputs": [
+        "briefs/functor-binding-resolution-implementer.md"
+      ],
+      "outputs": [
+        "briefs/functor-binding-resolution-impl.md"
+      ],
+      "hook": false
+    },
+    {
+      "id": "step-2",
+      "skill": "roster-review",
+      "inputs": [
+        "briefs/functor-binding-resolution-impl.md",
+        "briefs/functor-binding-resolution-reviewer.md"
+      ],
+      "outputs": [
+        "briefs/functor-binding-resolution-review.json"
+      ],
+      "hook": false
+    },
+    {
+      "id": "step-3",
+      "skill": "roster-qa",
+      "inputs": [
+        "briefs/functor-binding-resolution-review.json",
+        "briefs/functor-binding-resolution-qa-scope.md"
+      ],
+      "outputs": [
+        "briefs/functor-binding-resolution-qa.md"
+      ],
+      "hook": false
+    },
+    {
+      "id": "step-4",
+      "skill": "roster-ship",
+      "inputs": [
+        "briefs/functor-binding-resolution-review.json",
+        "briefs/functor-binding-resolution-qa.md"
+      ],
+      "outputs": [
+        "briefs/functor-binding-resolution-ship-gate.md"
+      ],
+      "hook": false
+    }
+  ],
+  "quality_gates": {
+    "build": "rtk proxy opam exec --switch=/home/mathias/dev/arch-index -- dune build --root .",
+    "test": "rtk proxy opam exec --switch=/home/mathias/dev/arch-index -- dune test --root . --force",
+    "lint": ""
+  }
+}
