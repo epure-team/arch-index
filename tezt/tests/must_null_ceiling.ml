@@ -289,7 +289,13 @@ let must_null_composition_query =
    Arch_tezt.Temp.file] — is present in this branch's own measurement. The
    difference between the two files is mechanical, not lucky: #87's helper reaches
    a cross-library [Temp.file], this branch's fixture never leaves [Stdlib]. *)
-let clean_measured = 383
+(* 2026-09-13 arch-guard source-growth calibration. Pristine 2x2:
+   base/base = new/base =396; base/new = new/new =430. Every additional
+   row belongs to newly added source:33 external dependency calls and one
+   Tezt.Temp.dir re-export. No pre-existing path/callee group changes.
+   Query, floor and headroom remain unchanged; this is not improved resolution.
+   Evidence: roster/guard-division-analysis/ratchet-source-growth.md. *)
+let clean_measured = 430
 
 let headroom = 25
 

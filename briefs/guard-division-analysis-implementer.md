@@ -3,6 +3,14 @@
 **Date:** 2026-09-13
 **Status: VALIDATED**
 
+## Bounded scope amendment — 2026-09-13 resume
+
+One authorized exception supersedes no-pin-edit wording below: recalibrate only
+tezt/tests/must_null_ceiling.ml clean_measured383→430 and document the measured
+source-only delta. Keep headroom25, query, adequacy floor, extractor, self golden and
+origin references unchanged. Evidence and user-continuation context are recorded in
+roster/guard-division-analysis/ratchet-source-growth.md. No other scope expansion.
+
 Workdir MUST /home/mathias/dev/arch-index-worktrees/guard-division-analysis; not the default main checkout. Read /home/mathias/.codex/RTK.md; shell commands rtk proxy, local edits apply_patch. Preserve unrelated files. No additional worktree needed.
 
 Before code, read specs/guard-division-analysis.md completely: this is the frozen normative behavior/output contract, not optional context. Plan controls decomposition/domain choice; spec controls exact observables. If contradictory, escalate rather than improvise. No user quiz or new approval needed within scope; never waive technical gates.
@@ -149,4 +157,3 @@ Root owns manifest/ACTIVE_TASK and baseline before source edits. Specialist impl
 All selected spec obligations must be covered or explicitly reported as untested for review/QA, never silently downgraded. Do not move unsupported fencing to the end. A recognized site under an unsupported ancestor cannot be nonzero/unreachable even in if false. Unknown ordinary calls instead return Top and independently visit arguments. Public ID is perartifact preorder, not crossbuild fingerprint.
 
 No database schema/existing extraction/rule or reference changes; no Tezos run in this slice. Preserve source/output paths and caller-supplied artifacts; no auto builds from CLI. Wrapper only dispatches built binary. Test-only probe not installed publicly. Never global tool installs or unrelated cleanup. Finish with compact evidence and completed implementation brief only after all required gates pass; root integrates/commits and routes independent review.
-
