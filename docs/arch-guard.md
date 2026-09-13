@@ -1,4 +1,4 @@
-# arch-guard (experimental, implementation in progress)
+# arch-guard (experimental)
 
 `arch-guard` is a separate, report-only OCaml analysis component. It inventories
 immediate compiler-resolved integer division/remainder primitive applications in
@@ -71,8 +71,7 @@ atomic filesystem snapshot or a freshness certificate.
 
 ## Verification status
 
-Implementation and independent checks are still in progress, not roster-approved
-for shipment. Run checkers under the same compiler environment as the build:
+Run checkers under the same compiler environment as the build:
 
 ```sh
 node scripts/check-arch-guard.js inventory

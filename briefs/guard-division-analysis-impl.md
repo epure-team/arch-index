@@ -2,49 +2,68 @@
 
 **Date:** 2026-09-13
 **Mode:** full
-**Status:** PARTIAL — clean-build ratchet requires a pin-file scope decision forbidden by the frozen manifest; awaiting user authority
+**Status:** COMPLETED
 
-## Implemented checkpoint
+## Modified files
 
-68e77df61c68f811331180abfc25293911b2f955: separate bounded OCaml divisor library/CLI,
-independent inventory and interpreter, constant-zero domain, six JS checker modes,
-private native probes, Tezt integration and documentation. Existing lib/arch_index,
-database/schema, rules and pins unchanged.
+| Paths | Change | Purpose |
+|---|---|---|
+| lib/arch_guard/, bin/arch_guard/, arch-guard | New component | Separate bounded OCaml divisor analysis and report-only CLI |
+| scripts/check-arch-guard.js, tezt/fixtures/arch_guard/, tezt/tests/guard_division_analysis.ml | New checks/probes | Independent concrete oracle, native fixtures, contract boundaries |
+| tezt/lib/dune, tezt/tests/dune, tezt/tests/main.ml | Test integration | Build and execute ten new guard tests/checker modes |
+| tezt/tests/must_null_ceiling.ml | Authorized calibration exception | Pin383→430, unchanged25 headroom/query/floor |
+| docs/arch-guard.md, README.md, CHANGELOG.md | Documentation | Experimental contract and limitations |
+| briefs/, specs/guard-division-analysis.md, roster/guard-division-analysis/, skills-meta/friction.jsonl | Pipeline artifacts | Scope, decisions and reproducible evidence |
 
-Modified files are enumerated by that commit (34 files); principal product paths:
-lib/arch_guard/,bin/arch_guard/,arch-guard,scripts/check-arch-guard.js,
-tezt/fixtures/arch_guard/,tezt/tests/guard_division_analysis.ml and test wiring,
-docs/arch-guard.md,README.md,CHANGELOG.md. Other changes are scoped spec/evidence.
+Product checkpoint68e77df61c68f811331180abfc25293911b2f955; calibration fae9243.
+Existing lib/arch_index/lib/arch_tools, database/schema, rules, golden and origin references unchanged.
 
-## Decisions and evidence
+## Decisions made
 
-See roster/guard-division-analysis/independent-checker-progress.md and native TDD
-notes. Fresh type environment reconstruction is limited to the linked compiler's
-standard library. Changed-read evidence uses a private shared-reader seam,
-separate from installed CLI atomicity; no timing-race or formal-proof claim.
-640734 arithmetic/domain responses and23219242 algebra assertions passed.
+Constant-zero-v1 uses Bottom/Const/Nonzero/Top with explicit word width and conservative
+overflow. Syntax inventory is independent from interpretation; unsupported ancestry is sticky,
+function entries reset local state, compiler identifier identity distinguishes shadowing.
+CMT environment reconstruction uses only the linked compiler standard library.
+Changed-read testing uses a private shared-reader seam, not a public probe or timing-race claim.
+Installed CLI error atomicity is tested separately. See native TDD notes and
+independent-checker-progress.md for authentic RED/GREEN and corrected test expectations.
+
+User continuation resolved the previous excluded-pin blocker with one narrow amendment.
+ratchet-source-growth.md attributes every additional call: all396 baseline rows preserved,
+34 new rows in four new files. Independent Terra attribution review agrees; not formal QA.
+Old383 pin lagged baseline396; new430 measures the full branch corpus. No extractor change.
 
 ## Quality gates
 
-- @install + test executable build:0.
-- Full integrated dune test on that build population:0,255Tezt+64Alcotest;
-  complete collected output in integrated-suite.log.
-- All six independent checker modes and assertion/execution controls:0 as Tezt
-  tests (controls correctly observe1/2 respectively).
-- Existing origin-consumer authentic/failures/package:0 each; fresh production
-  package held/validator0. Self golden exactly23/828/5223. Rules0:one proved,
-  threeUNKNOWN,zero failures. Precommit impact0 is not final-head evidence.
-- Staged whitespace gate initially found an extra EOF blank line in baseline
-  documentation; removed; recheck0. Scope gate0.
-- Fresh committed two-by-two recalibration:1 (source-only growth396→430; limit408).
-- Full dune build0, followed by existing whole-repo ratchet test:1,430>408.
+Commands ran in this worktree, compiler-backed commands under
+`opam exec --switch=/home/mathias/dev/arch-index --` (shell prefix `rtk proxy`).
 
-## Remaining / scope blocker
+- Full `dune build --root .`: exit0. @install alone is insufficient for whole-repo ratchet.
+- `dune test --root . --force`: exit0,255/255Tezt and64Alcotest.
+  Retained final-full-suite.log; all six guard checkers and both failure controls executed.
+- Numeric evidence:12 native inventory sites plus26 additional cases;640734 actual domain
+  responses and23219242 law assertions. Deterministic testing, not machine-checked proof.
+- `env DUNE_CACHE=enabled DUNE_CACHE_STORAGE_MODE=copy ./scripts/recalibrate.sh --check`:
+  committed fae9243, exit0; golden23/828/5223 in all cells; ratchet A=B396,C=D430,pin430.
+- Fresh self index: golden23modules/828functions/5223calls byte-identical; origin producer
+  and artifact validator exit0,held. All origin checker modes also pass in full suite.
+- Self rules exit0: one proved,threeUNKNOWN,zero failures. No precision improvement claimed.
+- Self impact against77c7691436a716bfec503e22f1649a4303179fcc..HEAD: exit0,
+  zero touched indexed functions,66 changed files outside index UNKNOWN; effects and
+  decision analysis not computed. Not a claim of zero semantic impact.
+- `git diff --check` and `bash scripts/check-scope-diff.sh briefs/guard-division-analysis-manifest.txt`: exit0.
+- Review bundle preflight:22 SHA verified,version1.6.0. No separate configured formatter.
 
-This is not a terminal label merely for a failing test. The proposed remedy
-requires authority to edit a pin file explicitly excluded by the frozen plan and
-manifest. Details in clean-build-ratchet-blocker.md. No threshold weakened, no new
-scope assumed. After user decision: resolve the clean-build gate, rerun final gates,
-finish phase and commit clean, then independent full roster-review/QA/ship.
+## Points of attention for review
 
-No review/QA/PR completed. ACTIVE_TASK remains active for the authorized resume.
+Audit actual compiler primitive/type identity, unsupported ancestry, alias patterns,
+modular arithmetic, exact resource boundaries, output buffering and domain oracle independence.
+Private changed-read seam evidence must not be described as a live filesystem race test.
+All47FR/19AC require independent review; implementation completion is not review/QA GO.
+
+## Identified out-of-scope
+
+No Tezos scan or measured production precision gain. No whole-program safety, source freshness,
+formal certificate, interprocedural reasoning or functor specialization delivered here.
+Owned arch-index library census is genuinely empty for divisor sites; do not generalize it.
+Next roadmap slice remains bounded functor instantiation. No unrelated worktree cleanup.

@@ -9,7 +9,7 @@ Workdir /home/mathias/dev/arch-index-worktrees/guard-division-analysis. Independ
 
 All commands cwd this task worktree. Never run concurrent Dune here. Capture terminal exit codes.
 
-- `rtk proxy opam exec --switch=/home/mathias/dev/arch-index -- dune build --root . @install`
+- `rtk proxy opam exec --switch=/home/mathias/dev/arch-index -- dune build --root .`
 - `rtk proxy opam exec --switch=/home/mathias/dev/arch-index -- dune test --root . --force`
 - `rtk proxy git diff --check`
 - `rtk proxy node scripts/check-arch-guard.js inventory`
@@ -30,4 +30,3 @@ Standalone check exits0 pass/1 assertion/>=2 execution error. Tezt must also exe
 Actual native fixtures for all8primitive identities, shadowed operators, partial applications,0/2/unknown/aliases/zero guards/reversed guards/joins/shadowing/and-groups/fresh nested functions/unsupported ancestry. Test each status and eligible/top/bottom/unsupported precedence. Domain independent JS BigInt concrete containment at widths3–8 with non-singleton samples and31/63extrema; false zero exclusion or false bottom is failure regardless census arithmetic. Actual text/JSON equivalence and closed schema; invalid/missing/ghost locations; artifact duplicates/symlinks/annotations/malformed/midread-change paths; limits exact/oneover with honest seam-vs-real-CLI evidence labels. Checker execution/setup errors must never be assertion passes.
 
 Report exact owned-library artifacts/counts even0; keep fixture precision separate from production/Tezos gains. Existing full suite and self baseline unchanged. QA convergence state and mechanical gate required, no GO while failures or required work remain. Retain compact logs and exact head, clean only positively owned scratch later.
-

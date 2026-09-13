@@ -7,5 +7,6 @@
     {"phase":"intake","outcome":"VALIDATED","at":"2026-09-12T20:03:50.963Z","by":"roster-intake"},
     {"phase":"spec","outcome":"VALIDATED","by":"roster-spec","reason":"Operator validation under explicit standing autonomy; no fresh human quiz claimed; claims tooling absent and metadata draft."},
     {"phase":"plan","outcome":"COMPLETED","by":"roster-plan"},
-    {"phase":"implement","outcome":"PARTIAL","reason":"clean-build ratchet requires a pin-file scope decision forbidden by the frozen manifest; awaiting user authority","by":"roster-implement"}]
+    {"phase":"implement","outcome":"PARTIAL","reason":"clean-build ratchet requires a pin-file scope decision forbidden by the frozen manifest; awaiting user authority","by":"roster-implement"},
+    {"phase":"implement","outcome":"COMPLETED","at":"2026-09-13T06:16:42Z","reason":"User continuation resolved narrow pin scope; attribution and committed clean-build recalibration pass; full suite255Tezt+64Alcotest passes.","by":"roster-implement"}]
 }
