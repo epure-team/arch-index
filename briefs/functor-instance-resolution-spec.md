@@ -24,3 +24,7 @@ implementation deliverables, not executed product passes at spec time.
 
 Cross-spec entity inspection found no conflict. Full runnable/native checks,
 review and QA remain mandatory. Standard Full route, no formal-evidence claim.
+
+Operator clarification before plan: FR-001 applies to collected inputs, not merely
+decodable artifacts whose module/persistence later failed; FR-014/015 govern
+those failures. This removes an implication conflict without expanding scope.
