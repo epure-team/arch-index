@@ -65,7 +65,7 @@ No claims authority/KB/hook installation exists. Keyword check on durable task t
 
 All commands prefixed rtk proxy, cwd task worktree, no concurrent Dune on same tree.
 
-- Build: opam exec --switch=/home/mathias/dev/arch-index -- dune build --root . @install
+- Build: opam exec --switch=/home/mathias/dev/arch-index -- dune build --root .
 - Full suite: opam exec --switch=/home/mathias/dev/arch-index -- dune test --root . --force
 - Whitespace: git diff --check (no separate configured formatter/full linter).
 - Existing fresh self-index/golden; scripts/recalibrate.sh --check; arch-rules self --on-vacuous fail; arch-impact self; scripts/origin-consumer.js then artifact validator.
@@ -134,7 +134,7 @@ No installed claims reconciler/KB/hooks; no simulated checks. No new global inst
 
 All commands cwd this task worktree. Never run concurrent Dune here. Capture terminal exit codes.
 
-- `rtk proxy opam exec --switch=/home/mathias/dev/arch-index -- dune build --root . @install`
+- `rtk proxy opam exec --switch=/home/mathias/dev/arch-index -- dune build --root .`
 - `rtk proxy opam exec --switch=/home/mathias/dev/arch-index -- dune test --root . --force`
 - `rtk proxy git diff --check`
 - `rtk proxy node scripts/check-arch-guard.js inventory`
