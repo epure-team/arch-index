@@ -5,7 +5,7 @@ status: live
 feature: OCaml functor binding provenance (resolution slice 1)
 brief: roster/functor-binding-resolution/task.md
 date: 2026-09-13
-version: 1.0.0
+version: 1.0.1
 ---
 
 # Spec — OCaml functor binding provenance
@@ -303,6 +303,8 @@ alias trace, implicit external resolution, or inferred callee is exposed.
 - **AC-11 (US-2, C9).** Cases for every precedence stage produce the specified exit/category and empty stdout, including accessed-operation failures. _Covers FR-018, FR-021, FR-022; CHECK-3, CHECK-4._
 - **AC-12 (US-1, C10).** Shadowing, aliases, cross-CMT lookalikes, external heads, and misleading display relationships prove local syntactic matching only and expose no target, graph, tamper, substitution, runtime, or freshness claim. _Covers FR-003, FR-011, FR-017; CHECK-1, CHECK-4._
 
+- **AC-13 (US-1, C6; rollback correction gate).** A standalone real-producer regression builds and invokes the producer from the exact checkout under test on two owned native CMT inputs with two applications each, first proves a healthy positive run, then injects a schema-only SQLite trigger that executes `RAISE(ROLLBACK)` on the fault input's second binding insert only after another artifact already has binding rows. The fault run **MUST** exit 0 with the binding-failure warning; its catalogue and graph facts **MUST** equal the healthy run; the earlier good input's binding-input, declaration, and result rows **MUST** remain complete; the fault input **MUST** have a persisted `collection_failed` row, zero declaration/result rows, and no eligibility contribution; and `functor_binding_contract` **MUST** be absent. The fixture/trigger premise **MUST NOT** depend on artifact-name or filesystem-selection ordering. _Covers FR-014–FR-016; CHECK-5._
+
 ## Edge Cases
 
 - An unused direct declaration with zero applications stores counts 1/0 and may earn the marker; no declarations with zero applications is also valid for a collected input.
@@ -334,6 +336,8 @@ infrastructure failure `>=2`; no missing tool or fixture may masquerade as asser
 - **CHECK-2 — lifecycle:** `node scripts/check-functor-bindings.js lifecycle`; covers AC-3, AC-7, AC-8 with real persistence rollback and deterministic interruption/failure boundaries.
 - **CHECK-3 — query:** `node scripts/check-functor-bindings.js query`; covers AC-2, AC-5, AC-6, AC-9, AC-10, AC-11 using crafted marked corruption, limit 0, independent semantic cells, and six explicit formatter byte oracles.
 - **CHECK-4 — compatibility:** `node scripts/check-functor-bindings.js compatibility`; covers AC-1, AC-2, AC-8, AC-11, AC-12 with old catalogue/graph query and semantic-table comparisons plus byte-unchanged read-only query.
+
+- **CHECK-5 — real-producer global rollback:** `node roster/functor-binding-resolution/check-global-rollback.js`; covers AC-13. This standalone checker builds `bin/arch_callgraph_ocaml/arch_callgraph_ocaml.exe` with `dune build --root <repository-under-test>` in the inherited selected compiler environment, invokes only that checkout's resulting producer, compiles its owned two-CMT fixture with the inherited compiler, and uses a schema-only `RAISE(ROLLBACK)` trigger. Exit 0 means all assertions pass, exit 1 means a semantic assertion fired, and exit >=2 means setup/build/infrastructure error. This command is a separate gate, not a nested build inside Dune tests. Implementation and RED/GREEN evidence are pending.
 
 ## Claims Metadata
 
@@ -380,10 +384,12 @@ unavailable and is not claimed.
 {"record":"acceptance-criterion","id":"AC-10","for":["FR-023","FR-024","FR-025"]}
 {"record":"acceptance-criterion","id":"AC-11","for":["FR-018","FR-021","FR-022"]}
 {"record":"acceptance-criterion","id":"AC-12","for":["FR-003","FR-011","FR-017"]}
+{"record":"acceptance-criterion","id":"AC-13","for":["FR-014","FR-015","FR-016"]}
 {"record":"check","id":"CHECK-1","for":["AC-1","AC-3","AC-4","AC-5","AC-6","AC-7","AC-12"]}
 {"record":"check","id":"CHECK-2","for":["AC-3","AC-7","AC-8"]}
 {"record":"check","id":"CHECK-3","for":["AC-2","AC-5","AC-6","AC-9","AC-10","AC-11"]}
 {"record":"check","id":"CHECK-4","for":["AC-1","AC-2","AC-8","AC-11","AC-12"]}
+{"record":"check","id":"CHECK-5","for":["AC-13"]}
 ```
 
 ## Entities
