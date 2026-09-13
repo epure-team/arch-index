@@ -3,6 +3,15 @@
 **Date:** 2026-09-13
 **Status: VALIDATED**
 
+## Bounded scope amendment — 2026-09-13 resume
+
+The user's continuation after the explicit recalibration request permits one exception
+to the no-pin-edit rule below: tezt/tests/must_null_ceiling.ml clean_measured383→430,
+with its attribution comment, after individually attributing34 new-source calls.
+Keep headroom25, query, adequacy floor, extractor, self golden and origin references
+unchanged. See roster/guard-division-analysis/ratchet-source-growth.md. The manifest
+adds only that file. Independent review/QA and fresh full-build gates still apply.
+
 Decomposition source: validated intake only. Spec status gate passes (406242c); the implementation must read the frozen spec, not re-answer its questions. Independent voices ran sequentially, fresh Sol then Terra, with intake only. No codebase inspection by planning voices.
 
 ## Consensus Table
