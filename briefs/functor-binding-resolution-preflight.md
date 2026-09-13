@@ -15,3 +15,9 @@ FULL new cycle: binding/target behavior entails design decisions. No existing
 ledger for this slug. Deterministic checks on normalized task description
 performed before routing; no explicit critical flag. Standard confirmations
 covered by standing autonomy, no formal-gate bypass or formal proof claim.
+
+Renewed pre-implementation probe on main75bef6a, 2026-09-13:
+build exit0; direct Tezt --list exit0 (output truncated, not an asserted test
+count or test pass); bundle22/22 hashes pass. opam/node/git/gh present; formatter,
+claims reconciler, KB and harness still absent. Prior unknown Tezt temporary
+files reported by runner are preserved. READY; no source edits or tool installs.
