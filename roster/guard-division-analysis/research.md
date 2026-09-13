@@ -76,4 +76,3 @@ See [full external report and version caveats](research-external.md).
 - No single universal interval division formula established for intervals straddling zero.
 - Generic matrix decision-lint detail says not integrated, while Tezt's dependency builds it: reported metadata text is not evidence the binary is unavailable.
 - Graph orientation skipped: no installed research-orientation pack; no graph-derived authority used.
-
