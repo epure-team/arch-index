@@ -1,0 +1,20 @@
+{
+  "kind": "bounded_syntactic_functor_catalogue",
+  "executed_tezos_head": "1727d7e192f2374edda7ad7adceef6f4ec51f71a",
+  "post_run_source_checkpoint": "c2a8add5e394c162eeef4d204a73e1058a436df2",
+  "tezos_tree_state": "dirty (46 porcelain entries at inventory time; not relabelled clean)",
+  "ocaml_compiler": "5.3.0",
+  "input_content_sha256": "5eb82c1b042df623688e4310c36b43dfed3282491d586044e79724f7e9953e4c",
+  "slices": [
+    {"name":"irmin-core","cmts":66,"content_sha256":"22605cfba120c0ed512bf63d2f9841e74cff8ccadcc5dba84c29cb7d754cd875"},
+    {"name":"irmin-pack","cmts":17,"content_sha256":"0d50f63dca759d7047c3f4893d5e0e2017a0214ee78fce85e876df1e4e4ca07f"},
+    {"name":"irmin-pack-unix","cmts":52,"content_sha256":"80d09a26e24aa608499a19cae4c669f0868765ba8621c45c5cf7c63282a04ebc"},
+    {"name":"proto-alpha","cmts":275,"content_sha256":"6a16a9d9654b7d926a747a31c8f77772c9d01db78a1a862fb503644bb81ea964"}
+  ],
+  "raw_inventory_cmts": 414,
+  "selected_cmts": 410,
+  "raw_exclusions": {
+    "dune_alias_modules": 3,
+    "generated_wrapper_without_resolvable_source": 1
+  }
+}
