@@ -1,0 +1,23 @@
+recalibrate: baseline merge-base(HEAD, origin/main) = 77c7691436a7
+recalibrate: head              = 00f4df8acbab
+recalibrate: building baseline…
+recalibrate: building head…
+
+── golden (descriptive, measured over _build/default/lib/arch_index)
+   pinned in tree               modules: 23 functions: 828 calls: 5223
+   A base bin/base src          modules: 23 functions: 828 calls: 5223
+   B  NEW bin/base src          modules: 23 functions: 828 calls: 5223
+   C base bin/ NEW src          modules: 23 functions: 828 calls: 5223
+   D  NEW bin/ NEW src          modules: 23 functions: 828 calls: 5223
+   → attributable to source change only (B = A).
+   ✓ pinned value is current.
+
+── ceiling (ratchet, measured over _build/default)
+   pinned in tree               430
+   A base bin/base src          396
+   B  NEW bin/base src          396
+   C base bin/ NEW src          437
+   D  NEW bin/ NEW src          437
+   → attributable to source change only (B = A).
+   • within headroom: measures 437 against pinned 430 (+/-25) — advisory, not stale
+   ✓ pinned value is current.

@@ -1,0 +1,44 @@
+== Change impact
+  • index: /tmp/guard-correction-self.wDUGvK/self.db
+
+-- Touched functions (0)
+  • none — the diff touches no indexed function (config, docs, generated code, or a file outside the index)
+  • 100 changed file(s) are NOT in the index — impact for them is UNKNOWN, not zero:
+    CHANGELOG.md
+    README.md
+    arch-guard
+    bin/arch_guard/arch_guard.ml
+    bin/arch_guard/dune
+    briefs/guard-division-analysis-gate-report.json
+    briefs/guard-division-analysis-impl.md
+    briefs/guard-division-analysis-implementer.md
+    briefs/guard-division-analysis-intake.md
+    briefs/guard-division-analysis-plan.json
+    briefs/guard-division-analysis-plan.md
+    briefs/guard-division-analysis-preflight.md
+    briefs/guard-division-analysis-qa-scope.md
+    briefs/guard-division-analysis-review-trace.jsonl
+    briefs/guard-division-analysis-review.json
+    briefs/guard-division-analysis-reviewer.md
+    briefs/guard-division-analysis-spec.md
+    briefs/guard-division-analysis-state.json
+    briefs/guard-division-analysis-xruntime.jsonl
+    briefs/origin-recurring-consumer-ship-gate.md
+    … and 80 more
+
+-- Who is affected (reverse reachability)
+  • 0 function(s) DEFINITELY reach the change (0 exported), over MUST ∪ MAY_ENUMERATED. This is a LOWER bound — ⊤ edges are dropped to make it computable.
+  • 0 exported function(s) affected (definite upstream, plus exported functions changed directly):
+
+-- Blast radius (forward reachability)
+  • the changed code definitely reaches 0 function(s) (also a lower bound)
+  • ⊤ frontier: none — the forward cone is CLOSED, so the radius above really is a bound, not just a lower bound
+
+-- Tests reaching the change
+  • no test definitely reaches the change — either it is untested, or the tests are not in this index (check what was indexed before concluding it is untested)
+
+-- Effects crossed
+  • not available on this index (no effects tables) — this is 'not computed', not 'no effects'
+
+-- Findings introduced by this diff
+  • decision analysis not present in this index — not computed

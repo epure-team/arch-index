@@ -28,9 +28,15 @@ use `opam exec --switch=/home/mathias/dev/arch-index --`.
 - `git diff --check`, scope manifest gate,22-file review-bundle verification:0.
   Fetched origin/main remains77c7691436a716bfec503e22f1649a4303179fcc.
 
-Fresh committed recalibration and committed-range impact still required after
-the product checkpoint. Original pin430/headroom25/query/reference values remain
-unchanged. No Tezos scan, formal proof, or production precision gain is claimed.
+Fresh pristine recalibration at committed00f4df8acbab8174eb9142b6efecb7cc3f4ca5e2
+completed exit0: golden23/828/5223 in all four cells; ceiling A=B396,C=D437,
+pin430 within unchanged25 headroom. Output: correction-recalibration.log, with
+trailing spaces removed after the staged whitespace gate flagged the raw log.
+`./arch-impact /tmp/guard-correction-self.wDUGvK/self.db
+--diff 77c7691436a716bfec503e22f1649a4303179fcc..HEAD --repo .` at00f4df8 exited0:
+zero touched indexed functions,100 outside-index files UNKNOWN, effects/decision
+not computed; retained correction-impact.log. Original pin/query/reference values
+remain unchanged. No Tezos scan, formal proof, or production precision gain claimed.
 
 The root rejected an agent proposal to encode the newline-path defect as an
 expected failure. The positive FR-043 test remained RED until production quoted
