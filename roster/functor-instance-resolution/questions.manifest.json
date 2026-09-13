@@ -1,0 +1,15 @@
+{
+  "digests": {
+    "questions": "d9aa664229d075565a49d8799e9b774e52be06c4249a8eaf6d41f1f879ee3d62"
+  },
+  "questions": [
+    "How does the analyzer currently decode OCaml module expressions, module applications, functor parameters, anonymous structures, and nested application chains from compiler artifacts?",
+    "Where and how are module paths normalized today, including module-alias rewrites, unresolved paths, and the preservation of source-level versus canonical identities?",
+    "What database entities and invariants currently represent definitions, bodies, module instances, call sites, and call-graph targets, and which uniqueness constraints govern them?",
+    "How does the current call-resolution pipeline distinguish a uniquely resolved target, multiple possible targets, and an unresolved or uncertain target?",
+    "Which native fixtures and query-level tests currently exercise modules, functors, aliases, exception identities, and bounded graph-enumeration behavior?",
+    "[ecosystem] What identities and application structure do current OCaml compiler artifacts expose for functor applications, module arguments, aliases, anonymous structures, and generative definitions?",
+    "[ecosystem] What guarantees does the OCaml language and compiler documentation provide about applicative versus generative functors and the identity of exceptions defined within module or functor bodies?"
+  ],
+  "technical_ids": []
+}
