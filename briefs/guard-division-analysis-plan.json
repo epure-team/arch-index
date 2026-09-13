@@ -49,7 +49,7 @@
     }
   ],
   "quality_gates": {
-    "build": "rtk proxy opam exec --switch=/home/mathias/dev/arch-index -- dune build --root . @install",
+    "build": "rtk proxy opam exec --switch=/home/mathias/dev/arch-index -- dune build --root .",
     "test": "rtk proxy opam exec --switch=/home/mathias/dev/arch-index -- dune test --root . --force",
     "lint": "rtk proxy git diff --check"
   }

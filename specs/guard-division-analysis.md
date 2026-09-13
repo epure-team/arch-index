@@ -248,6 +248,8 @@ Numeric unsupported does not abort the whole report; malformed input or breached
 
 ### US-3 — Interpretable experiment result
 
+**V1 public-boundary clarification (R1):** Only the installed `arch_guard` executable and root `arch-guard` dispatcher are supported public interfaces. `lib/arch_guard` is a private Dune implementation library linking the executable and local test probes, not an installed `arch-index.guard` embedding API. Its render functions are internal; compiler-libs global state may be reset within the command process. Host-process restoration and a new subprocess/serialization embedding API are not promised.
+
 - **FR-033** [US-3; US-3.1; C-16; AC-3; AC-19]: A successful invocation MUST render one complete result in the selected `text` or `json` format, and both renderers over the same inputs MUST agree on every site's artifact, ID, status, primitive, reasons, every census count, and artifact-only/report-only scope warnings.
 - **FR-034** [US-3; US-3.2; AC-3]: The public CLI MUST accept `arch-guard --cmt FILE [--cmt FILE ...] [--format text|json]`, default to text, require at least one explicit input, provide help/version with exit `0`, reject unknown or bad arguments with exit `2`, and MUST NOT scan, build, execute, write a database, or offer an output-file mutation path.
 - **FR-035** [US-3; US-3.2; AC-3]: The root `arch-guard` entry MUST only dispatch an existing built public binary named `arch_guard` and MUST NOT build or install it as a side effect.
@@ -324,6 +326,12 @@ The following commands specify a planned checker interface; they do not claim `s
 - **CHECK-6** [AC-3, AC-8]: `rtk proxy node scripts/check-arch-guard.js owned` → runs the built CLI on the explicitly selected owned `lib/arch_index` artifacts and checks that the actual artifact/site/status census is reported honestly, including a zero-site result, without adding another corpus.
 
 The checker modes are independently invocable: no mode's pass result depends on another mode having run first. Fixture compilation or discovery needed by a mode is part of that mode's setup and setup failure is an execution error (`>=2`), never an assertion failure.
+
+### R1 correction obligations (existing FR/AC retained)
+
+CHECK-1 must explicitly exercise later saturation, overapplication, labelled and missing-original-slot operands, combined unsupported ancestry, unresolved/non-native types, and byte-identical reversal of distinct accepted inputs. CHECK-2 must cover the complete binding/function-entry/exclusion cases of AC-11 through AC-16 with exact reason arrays, not status counts alone. CHECK-5 must enforce status-specific semantic reasons, reject numeric-only reasons for UNSUPPORTED, compare every required text site field and census with JSON, and include wrong-reason and omitted-text-field negative controls; duplicate coordinates and 256/257 UTF-8-byte spelling boundaries remain required. Public installation tests must verify CLI presence, private library absence, and working private probes.
+
+The additional self-contained R1 ratchet command is `rtk proxy node scripts/check-guard-report-context.js` (no arguments). It must check actual CLI JSON/text on owned compiled empty and classified artifacts against FR-036 and C-5, including indirect operations and omitted artifacts. It follows the same 0/1/>=2 and child-resource contract. Only that file is overlaid into pre-fix revision `d44c0c6ae8f4991549f6de5bbc2bdb3f24eb25ec`; authentic RED must be an assertion failure, not a build/setup failure. This is a pending regression obligation, not verified evidence; promote to numbered CHECK/paired AC after verified review ratchet success. Existing 47 FRs, 19 ACs, numeric fragment and closed JSON schema are unchanged.
 
 
 ## Claims Metadata
