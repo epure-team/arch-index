@@ -1,0 +1,88 @@
+{
+  "source": "final implementation self/origin run",
+  "revision": "fae9243fff60d49c37b3b8d8bb4ff1845cb259ed",
+  "dirty": [
+    " M briefs/guard-division-analysis-implementer.md",
+    " M briefs/guard-division-analysis-qa-scope.md",
+    " M briefs/guard-division-analysis-reviewer.md",
+    " M docs/arch-guard.md"
+  ],
+  "status": "held",
+  "policy": {
+    "verdict": "UNKNOWN",
+    "failed": false,
+    "gate_exit": 0
+  },
+  "current": {
+    "totals": {
+      "modules": 23,
+      "functions": 828,
+      "calls": 5223,
+      "origins": 491
+    },
+    "origin_groups": [
+      {
+        "channel": "exception",
+        "form": "assert",
+        "escapes": 1,
+        "count": 1
+      },
+      {
+        "channel": "exception",
+        "form": "compare",
+        "escapes": 1,
+        "count": 34
+      },
+      {
+        "channel": "exception",
+        "form": "failwith",
+        "escapes": 1,
+        "count": 18
+      },
+      {
+        "channel": "exception",
+        "form": "index",
+        "escapes": 1,
+        "count": 106
+      },
+      {
+        "channel": "exception",
+        "form": "invalid_arg",
+        "escapes": 1,
+        "count": 1
+      },
+      {
+        "channel": "exception",
+        "form": "reraise",
+        "escapes": 1,
+        "count": 4
+      },
+      {
+        "channel": "option",
+        "form": "raise",
+        "escapes": 1,
+        "count": 282
+      },
+      {
+        "channel": "result",
+        "form": "raise",
+        "escapes": 1,
+        "count": 4
+      },
+      {
+        "channel": "result",
+        "form": "unknown",
+        "escapes": 1,
+        "count": 41
+      }
+    ]
+  },
+  "deltas": [],
+  "artifacts": {
+    "gate.json": "486571d0d5370d5716c1fb26f00d388fe0c78fca700d6d38b65d56c85275bbff",
+    "report.json": "ba5d9897f034355754b364df6c6d4ac1aad35dcb99bd9fa2c9abfc87a8487837",
+    "report.sarif": "84026b13836028b97e9b5be4ac2cdda6248f27236eff4d6d81be7f08938fbffa",
+    "report.html": "99f3a298308d067523ab9562c6ef48c3dddd988fe8d008acfc5774f29f9c7464"
+  },
+  "note": "Producer and artifact validator exit0. Independent owned self-index golden byte-equality also passed. This held gate is UNKNOWN, not a proof."
+}

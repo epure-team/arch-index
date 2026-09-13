@@ -1,0 +1,30 @@
+[
+  {
+    "severity": "MEDIUM",
+    "confidence": 5,
+    "path": "scripts/check-arch-guard.js",
+    "line": 202,
+    "category": "correctness",
+    "summary": "Inventory gate omits the frozen malformed-application eligibility cases",
+    "evidence": "inventory() covers eight ordinary saturated primitives and a one-argument partial application, but has no later-saturation, over-application, labelled operand, or None-in-original-slot-2 with later arguments fixture. fixture_probe only mutates annotations, locations and identifier spelling. Thus the passing inventory gate does not exercise AC-4's original-slot and accumulated eligibility-reason obligations; removing unsupported_labels or shifting a missing slot would not be detected by these fixtures.",
+    "fix": "Extend the private typed-tree fixture seam and CHECK-1 with each frozen unusual application shape. Assert immediate-site cardinality, original slot-2 metadata, UNSUPPORTED precedence and the exact accumulated sorted eligibility reasons, including combinations with unsupported ancestry.",
+    "fingerprint": "scripts/check-arch-guard.js:202:correctness",
+    "specialist": "reviewer",
+    "status": "OPEN",
+    "acs": ["AC-4", "AC-5", "AC-14"]
+  },
+  {
+    "severity": "MEDIUM",
+    "confidence": 5,
+    "path": "scripts/check-arch-guard.js",
+    "line": 268,
+    "category": "correctness",
+    "summary": "Report oracle accepts semantic reasons contradicting site status",
+    "evidence": "validateReport checks reason vocabulary and sorting but never status-to-reason correspondence or an exclusion reason for UNSUPPORTED. A read-only sensitivity experiment loaded the actual validator, obtained the actual Guard_domain CMT report, replaced its UNSUPPORTED site's reasons with only divisor_nonzero_if_reached, and the validator accepted it (exit 0). numeric() checks statuses without reasons. reportMode also compares text only for one MAY_ZERO fixture and census, omitting per-site artifact/id/reason equivalence across all five statuses required by C-16/FR-033.",
+    "fix": "Require the exact conditional reason for each numeric status and at least one applicable exclusion reason for unsupported sites. Compare every text site against JSON artifact/id/status/primitive/reasons on a multi-site fixture containing all five statuses, and add sensitivity controls showing mismatched reasons and omitted text fields fail.",
+    "fingerprint": "scripts/check-arch-guard.js:268:correctness",
+    "specialist": "reviewer",
+    "status": "OPEN",
+    "acs": ["AC-10", "AC-13", "AC-19"]
+  }
+]
