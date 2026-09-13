@@ -1,7 +1,7 @@
 {
   "task": "functor-instance-resolution",
   "mode": "full",
-  "current_phase": "intake",
+  "current_phase": "spec",
   "events": [
     {
       "phase": "question",
@@ -23,6 +23,13 @@
       "at": "2026-09-13T09:24:24.739Z",
       "by": "roster-intake",
       "reason": "Slice0 application catalogue and explicit collection boundaries; feature/Trust boundary=yes operator-validated under standing autonomy. No graph precision change; full spec next."
+    },
+    {
+      "phase": "spec",
+      "outcome": "VALIDATED",
+      "at": "2026-09-13T09:43:26.781Z",
+      "by": "roster-spec",
+      "reason": "Two stories, eight clarifications, fourteen resolved challenges,30FR/16AC/four planned check groups; operator validation under standing autonomy. Full plan next."
     }
   ]
 }

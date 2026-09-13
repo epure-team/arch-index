@@ -98,6 +98,23 @@ directly involved snippets above were read by the operator, not merely located.
 - Operator validates Type=feature and Trust boundary=yes under the user's express
   autonomy instruction. No new material external authority is needed for this
   bounded slice; publication of the held issue remains excluded.
+- Spec clarification decisions for plan decomposition: traverse all reachable
+  OCaml5.3 Typedtree children, but only immediate module applications are catalogue
+  occurrences. Keep shallow operand descriptors and application-only preorder
+  ordinals, scoped by the exact discovered artifact path (copies/symlink paths
+  are distinct selections, not unique physical programs). Persist per-input
+  outcomes, expected counts and producer provenance; publish no partial input's
+  occurrences. Reindex clears eligibility first and drops catalogue tables;
+  earn a separate v1 catalogue marker only after complete committed collection
+  over a nonempty selected set. No graph/API tuple change.
+- The query validates the entire catalogue before applying its default50 strict
+  decimal limit or emitting two existing-format tables. Valid empty catalogue is
+  exit0; schema/absent marker/inconsistent catalogue refuse exit3 with no stdout;
+  malformed usage/open/operational failures remain exit2. Limits do not hide bad
+  rows. Public output omits database/run ids and timestamps and states selected
+  syntax-only scope, no runtime/closure/target/freshness guarantee. Native producer
+  fixtures and independent hand-authored query DBs verify the two stories; typed
+  artifact probes cover otherwise unavailable Papply/ghost premises explicitly.
 
 ## Quality Gates
 
