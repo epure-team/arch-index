@@ -37,4 +37,3 @@ Text is a human-readable projection of the same result: input count/scope,int wi
 Validate/dedupe/sort inputs before output. Reject absent/unreadable/nonregular/symlink leaf, unsupported CMT annotation, compiler mismatch or changed read, duplicate module/source tuple across distinct artifacts. Explicit no hard process memory/time isolation guarantee; files are trusted local compiler artifacts.
 128unique inputs,32MiBperfile,256MiBtotal,100000expression nodes,10000sites,AST recursion512; no truncation. JSON16MiB bound before stdout.
 Numeric unsupported does not abort the whole report; malformed input or breached resource limit does.
-
