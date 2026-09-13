@@ -288,6 +288,8 @@ Numeric unsupported does not abort the whole report; malformed input or breached
 - **AC-18** [US-1, US-3, C-15, EC-15]: Supplying compatible implementation CMTs and each exposed incompatible/unsupported/malformed annotation class → only compatible implementations succeed, failures are atomic and diagnosed at the reader's supported granularity, and reports record the linked compiler/trusted-build assumptions without claiming forward ABI compatibility.
 - **AC-19** [US-1, US-3, C-16, EC-16]: Exercising missing/invalid/ghost/cross-file locations, overlong/missing operand spellings, all reason classes, and duplicate coordinates → every site remains uniquely represented, no UTF-8 or coordinate is fabricated, reason vocabulary and sorting are exact, and text/JSON agree on required semantic fields and counts.
 
+- **AC-20** [US-3, C-5, FR-036; R2 ratchet]: Reporting owned empty and classified artifacts through the actual CLI in both formats → compiler version, integer width, trusted-build/no-source-freshness assumptions, and all shared limitations are present, explicitly denying coverage of indirect operations and omitted artifacts. The standalone regression must fail by assertion on the recorded pre-fix revision and pass on the corrected implementation.
+
 ## FR-to-AC trace matrix
 
 | Acceptance criterion | Functional requirements |
@@ -311,12 +313,13 @@ Numeric unsupported does not abort the whole report; malformed input or breached
 | AC-17 | FR-022, FR-024, FR-042 |
 | AC-18 | FR-010, FR-011, FR-036 |
 | AC-19 | FR-013, FR-014, FR-033, FR-039, FR-040, FR-041 |
+| AC-20 | FR-012, FR-033, FR-036, FR-043 |
 
 Every FR appears in at least one matrix row; the bracketed citations on each FR identify its originating story scenario and/or resolved challenge.
 
 ## Runnable Checks
 
-The following commands specify a planned checker interface; they do not claim `scripts/check-arch-guard.js` exists yet. Every mode MUST use exit `0` for pass, `1` for a contract assertion failure, and an exit code of at least `2` for checker setup, execution, timeout, malformed-fixture, or internal error. The checker MUST cap each spawned process at 120 seconds and 16 MiB of captured output.
+The following commands are implemented checker interfaces. Run a full `dune build --root .` first, under the configured compiler environment, to build the CLI and private probes. Every mode MUST use exit `0` for pass, `1` for a contract assertion failure, and an exit code of at least `2` for checker setup, execution, timeout, malformed-fixture, or internal error. The checker MUST cap each spawned process at 120 seconds and 16 MiB of captured output.
 
 - **CHECK-1** [AC-1, AC-4, AC-5, AC-6]: `rtk proxy node scripts/check-arch-guard.js inventory` → compiles/uses the inventory fixture and independently checks primitive identity, immediate-site uniqueness, original slot 2, shadow exclusion, stable ordering, canonical deduplication, and collision failure.
 - **CHECK-2** [AC-2, AC-10, AC-11, AC-12, AC-13, AC-14, AC-15, AC-16]: `rtk proxy node scripts/check-arch-guard.js numeric` → checks the five-status precedence and closed reasons across aliases, guards, joins, binder scope, fresh function entries, opaque calls, unsupported ancestry, and non-iterative exclusions.
@@ -324,6 +327,7 @@ The following commands specify a planned checker interface; they do not claim `s
 - **CHECK-4** [AC-6, AC-7, AC-18]: `rtk proxy node scripts/check-arch-guard.js inputs` → checks canonical path rules, symlink rejection, duplicate module/source rejection, hash-change handling, annotation compatibility classes, every inclusive/one-over input and traversal limit, atomic stderr diagnostics, exit `2`, and exactly empty stdout.
 - **CHECK-5** [AC-3, AC-7, AC-8, AC-10, AC-13, AC-19]: `rtk proxy node scripts/check-arch-guard.js report` → validates exact JSON keys/types/enums/order, census equations, reason vocabulary, location/spelling rules, empty-inventory wording, conditional limitations, full-buffer size failures, and semantic text/JSON agreement.
 - **CHECK-6** [AC-3, AC-8]: `rtk proxy node scripts/check-arch-guard.js owned` → runs the built CLI on the explicitly selected owned `lib/arch_index` artifacts and checks that the actual artifact/site/status census is reported honestly, including a zero-site result, without adding another corpus.
+- **CHECK-7** [AC-20]: `rtk proxy node scripts/check-guard-report-context.js` → independently checks actual empty/classified CLI JSON and text for the complete shared compiler, assumption, and limitation context; no arguments or external corpus.
 
 The checker modes are independently invocable: no mode's pass result depends on another mode having run first. Fixture compilation or discovery needed by a mode is part of that mode's setup and setup failure is an execution error (`>=2`), never an assertion failure.
 
@@ -331,7 +335,7 @@ The checker modes are independently invocable: no mode's pass result depends on 
 
 CHECK-1 must explicitly exercise later saturation, overapplication, labelled and missing-original-slot operands, combined unsupported ancestry, unresolved/non-native types, and byte-identical reversal of distinct accepted inputs. CHECK-2 must cover the complete binding/function-entry/exclusion cases of AC-11 through AC-16 with exact reason arrays, not status counts alone. CHECK-5 must enforce status-specific semantic reasons, reject numeric-only reasons for UNSUPPORTED, compare every required text site field and census with JSON, and include wrong-reason and omitted-text-field negative controls; duplicate coordinates and 256/257 UTF-8-byte spelling boundaries remain required. Public installation tests must verify CLI presence, private library absence, and working private probes.
 
-The additional self-contained R1 ratchet command is `rtk proxy node scripts/check-guard-report-context.js` (no arguments). It must check actual CLI JSON/text on owned compiled empty and classified artifacts against FR-036 and C-5, including indirect operations and omitted artifacts. It follows the same 0/1/>=2 and child-resource contract. Only that file is overlaid into pre-fix revision `d44c0c6ae8f4991549f6de5bbc2bdb3f24eb25ec`; authentic RED must be an assertion failure, not a build/setup failure. This is a pending regression obligation, not verified evidence; promote to numbered CHECK/paired AC after verified review ratchet success. Existing 47 FRs, 19 ACs, numeric fragment and closed JSON schema are unchanged.
+The self-contained R1 regression is now CHECK-7 / AC-20. Only that file is overlaid into pre-fix revision `d44c0c6ae8f4991549f6de5bbc2bdb3f24eb25ec`; authentic RED must be an assertion failure, not a build/setup failure. R2 full convergence gate verified RED and current GREEN, with unchanged check blob `8108aa657905871c8693120bb3168ce40b9d6c0f` (see `briefs/guard-division-analysis-gate-report.json`). This executable ratchet is not a formal proof. Existing 47 FRs, the original 19 ACs, numeric fragment and closed JSON schema are unchanged; AC-20 adds permanent regression coverage of existing obligations.
 
 
 ## Claims Metadata
@@ -406,12 +410,14 @@ Metadata remains draft: no installed claims reconciler/authority, so determinist
 {"record":"acceptance-criterion","id":"AC-17","for":["FR-022","FR-024","FR-042"]}
 {"record":"acceptance-criterion","id":"AC-18","for":["FR-010","FR-011","FR-036"]}
 {"record":"acceptance-criterion","id":"AC-19","for":["FR-013","FR-014","FR-033","FR-039","FR-040","FR-041"]}
+{"record":"acceptance-criterion","id":"AC-20","for":["FR-012","FR-033","FR-036","FR-043"]}
 {"record":"check","id":"CHECK-1","for":["AC-1","AC-4","AC-5","AC-6"]}
 {"record":"check","id":"CHECK-2","for":["AC-2","AC-10","AC-11","AC-12","AC-13","AC-14","AC-15","AC-16"]}
 {"record":"check","id":"CHECK-3","for":["AC-9","AC-17"]}
 {"record":"check","id":"CHECK-4","for":["AC-6","AC-7","AC-18"]}
 {"record":"check","id":"CHECK-5","for":["AC-3","AC-7","AC-8","AC-10","AC-13","AC-19"]}
 {"record":"check","id":"CHECK-6","for":["AC-3","AC-8"]}
+{"record":"check","id":"CHECK-7","for":["AC-20"]}
 ```
 
 ## Entities

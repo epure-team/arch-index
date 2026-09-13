@@ -1,9 +1,9 @@
 {
   "mode": "full",
-  "no_go_round": 1,
+  "no_go_round": 0,
   "max_rounds": 5,
   "legacy_no_go_round": false,
-  "round": 1,
+  "round": 2,
   "legacy_round": false,
   "current_round_strike": false,
   "config": {
@@ -14,10 +14,20 @@
   "cause": null,
   "warnings": [],
   "violations": [],
-  "checks": [],
+  "checks": [
+    {
+      "check": "scripts/check-guard-report-context.js",
+      "fingerprint": "lib/arch_guard/arch_guard.ml:213:spec",
+      "fid": "lib/arch_guard/arch_guard.ml:213:spec#cd378d70",
+      "red_verified": true,
+      "check_blob": "8108aa657905871c8693120bb3168ce40b9d6c0f",
+      "weakened": false,
+      "greenFailed": false
+    }
+  ],
   "trace": {
     "obligated": true,
-    "lines_seen": 9,
+    "lines_seen": 17,
     "schema_version": "1.0",
     "skipped": false
   }
