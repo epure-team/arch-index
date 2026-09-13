@@ -8,6 +8,12 @@
  (name fixture_probe)
  (libraries compiler-libs.common yojson unix))
 
+; Test-only Typedtree seam for effect primitive application identities. It is
+; deliberately not installed and reports whether the requested mutation ran.
+(executable
+ (name effect_fixture_probe)
+ (libraries compiler-libs.common yojson))
+
 ; Deterministic test-only seam for a before/after digest mismatch. It links
 ; against the wrapped library's internal module and is not installed.
 (executable

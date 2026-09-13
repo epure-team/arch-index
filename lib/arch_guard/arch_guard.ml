@@ -226,10 +226,11 @@ let render_text paths =
   List.iter (fun site ->
       let location = site |> member "location" in
       let coordinate value = match value with `Null -> "?" | `Int n -> string_of_int n | `Intlit n -> n | _ -> fail "invalid rendered coordinate" in
-      let source = match location |> member "file" with `String s -> s | _ -> "?" in
+      let quoted value = Yojson.Safe.to_string (`String value) in
+      let source = match location |> member "file" with `String s -> quoted s | _ -> "?" in
       Printf.bprintf buffer "%s %s artifact=%s id=%d location=%s:%s:%s reasons=%s\n"
         (site |> member "status" |> to_string) (site |> member "primitive" |> to_string)
-        (site |> member "artifact" |> to_string) (site |> member "id" |> to_int)
+        (site |> member "artifact" |> to_string |> quoted) (site |> member "id" |> to_int)
         source (coordinate (location |> member "start" |> member "line"))
         (coordinate (location |> member "start" |> member "column"))
         (site |> member "reasons" |> to_list |> List.map to_string |> String.concat ",")) sites ;

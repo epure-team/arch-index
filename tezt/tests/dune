@@ -133,7 +133,15 @@
   ../../scripts/origin-consumer-artifacts.js
   ../../scripts/check-arch-guard.js
   ../../scripts/check-guard-report-context.js
+  %{exe:../fixtures/arch_guard/domain_probe.exe}
+  %{exe:../fixtures/arch_guard/fixture_probe.exe}
+  %{exe:../fixtures/arch_guard/effect_fixture_probe.exe}
+  %{exe:../fixtures/arch_guard/changed_read_probe.exe}
   ../../tezt/fixtures/arch_guard/inventory.ml
+  ../../tezt/fixtures/arch_guard/r1_cases.ml
+  ../../tezt/fixtures/arch_guard/effect_fixture.ml
+  ../../tezt/fixtures/arch_guard/checker_report_oracle.js
+  ../../tezt/fixtures/arch_guard/checker_numeric_cases.js
   ../../test/fixtures/origin-consumer/consumer.ml
   ../../test/fixtures/origin-consumer/self.rules
   ../../test/fixtures/origin-consumer/self.allow

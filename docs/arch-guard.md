@@ -13,6 +13,10 @@ dune build --root . @install
 ```
 
 The wrapper only runs an existing binary; it does not build or install anything.
+The installed `arch_guard` executable and root wrapper are the only supported
+public interfaces. The implementation library under `lib/arch_guard` is private;
+its modules and render functions exist for the command and local test probes, not
+as an in-process embedding API.
 CMT files must match the compiler and target used to build the tool. Never supply
 untrusted marshalled compiler artifacts. This is not a process-level sandbox.
 
@@ -50,12 +54,18 @@ artifacts, not absence of failures in a program.
 
 ## Reports and limits
 
-Text is the default. JSON schema version 1 includes artifact SHA-256 attribution,
+Text is the default. Both formats record the linked compiler version, host integer
+width, trusted same-compiler/same-target and no-source-freshness assumptions, and
+the shared artifact-only/report-only limitations. In particular, indirect
+operations and omitted artifacts are not covered. JSON schema version 1 includes artifact SHA-256 attribution,
 source locations, original operand-slot-2 syntax, statuses, reasons, assumptions,
 limitations, and census. IDs are deterministic per-artifact inventory ordinals,
 not cross-build fingerprints. Locations describe artifacts, not certified fresh
 source files. `precision_gain_sites` counts NONZERO plus UNREACHABLE sites; it is
 not a production defect rate or a measured improvement on Tezos.
+Text site lines render artifact paths and non-null source filenames as JSON-quoted
+strings. Escaped whitespace and delimiter-like path content therefore remain on
+one physical line; a missing source filename remains `?`.
 
 Successful reports, including ZERO and UNSUPPORTED, exit 0. Input, usage, and
 internal errors exit 2 with a stderr diagnostic and no partial stdout. Output is
@@ -80,9 +90,13 @@ node scripts/check-arch-guard.js domain
 node scripts/check-arch-guard.js inputs
 node scripts/check-arch-guard.js report
 node scripts/check-arch-guard.js owned
+node scripts/check-guard-report-context.js
 ```
 
-`ARCH_GUARD_OCAMLC` may name the matching compiler executable. The checker never
+For the six-mode checker, `ARCH_GUARD_OCAMLC` may name the matching compiler executable.
+The standalone context regression uses `ocamlc` from the configured environment
+and the local built CLI; its archived pre-fix verification builds that CLI only
+when absent. The checker never
 installs a toolchain. Its private domain probe is checked against independent
 JavaScript BigInt signed modular arithmetic: exhaustive small widths 3–8 and
 selected 31/63-bit extrema. This is executable evidence, not machine-checked
