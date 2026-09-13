@@ -6,10 +6,13 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const cp = require('node:child_process');
+const {census,validateReport,validateTextProjection} = require('../tezt/fixtures/arch_guard/checker_report_oracle.js');
+const numericCases = require('../tezt/fixtures/arch_guard/checker_numeric_cases.js');
 const root = path.resolve(__dirname, '..');
 const binary = process.env.ARCH_GUARD || path.join(root, '_build/default/bin/arch_guard/arch_guard.exe');
 const probe = process.env.ARCH_GUARD_DOMAIN_PROBE || path.join(root, '_build/default/tezt/fixtures/arch_guard/domain_probe.exe');
 const fixtureProbe = process.env.ARCH_GUARD_FIXTURE_PROBE || path.join(root, '_build/default/tezt/fixtures/arch_guard/fixture_probe.exe');
+const effectFixtureProbe = process.env.ARCH_GUARD_EFFECT_FIXTURE_PROBE || path.join(root, '_build/default/tezt/fixtures/arch_guard/effect_fixture_probe.exe');
 const changedReadProbe = process.env.ARCH_GUARD_CHANGED_READ_PROBE || path.join(root, '_build/default/tezt/fixtures/arch_guard/changed_read_probe.exe');
 const cap = 16 * 1024 * 1024;
 function run(command, args, options = {}) {
@@ -31,7 +34,20 @@ function withFixture(source, action) {
     return action(path.join(dir, 'fixture.cmt'), dir);
   } finally { fs.rmSync(dir, {recursive: true, force: true}); }
 }
+function withNamedFixture(sourceName, source, action) {
+  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'arch-guard-named-'));
+  try {
+    fs.writeFileSync(path.join(dir,sourceName),source);
+    success(process.env.ARCH_GUARD_OCAMLC || 'ocamlc',['-bin-annot','-c',sourceName],{cwd:dir});
+    return action(path.join(dir,sourceName.replace(/\.ml$/,'.cmt')),dir);
+  } finally { fs.rmSync(dir,{recursive:true,force:true}); }
+}
 function report(cmt) { return JSON.parse(success(binary, ['--cmt', cmt, '--format', 'json'])); }
+function rewrite(input, output, args) {
+  const mutation = JSON.parse(success(fixtureProbe, ['rewrite','--input',input,'--output',output,'--annotation','implementation',...args]));
+  assert.equal(mutation.ok, true);
+  return mutation;
+}
 const constant = n => ({kind: 'const', value: String(n)});
 const bottom = {kind: 'bottom'}, top = {kind: 'top'}, nonzero = {kind: 'nonzero'};
 function contains(a, n) {
@@ -141,58 +157,45 @@ function domain() {
   flush();
   return {checked, lawAssertions, exhaustiveWidths: [3, 4, 5, 6, 7, 8], sampledWidths: [31, 63]};
 }
-function census(r) {
-  assert.equal(r.census.artifacts, r.inputs.length);
-  assert.equal(r.census.total_sites, r.sites.length);
-  const names = {NONZERO: 'nonzero', ZERO: 'zero', MAY_ZERO: 'may_zero', UNREACHABLE: 'unreachable', UNSUPPORTED: 'unsupported'};
-  for (const [status, name] of Object.entries(names)) assert.equal(r.census[name], r.sites.filter(s => s.status === status).length);
-  assert.equal(r.census.numeric_covered, r.census.nonzero + r.census.zero + r.census.may_zero + r.census.unreachable);
-  assert.equal(r.census.total_sites, r.census.numeric_covered + r.census.unsupported);
-  assert.equal(r.census.precision_gain_sites, r.census.nonzero + r.census.unreachable);
-}
 function numeric() {
-  const cases = [
-    ['let f () = let a = 2 in let b = a in 10 / b', 'NONZERO'],
-    ['let f () = let a = 2 in let a = 0 in 10 / a', 'ZERO'],
-    ['let f () = let a = 2 in let a = 0 and b = a in 10 / b', 'NONZERO'],
-    ['let f d = if 0 <> d then 10 / d else 0', 'NONZERO'],
-    ['let f d = if 0 = d then 10 / d else 0', 'ZERO'],
-    ['let f d = if d == 0 then 10 / d else 0', 'ZERO'],
-    ['let f d = if d != 0 then 10 / d else 0', 'NONZERO'],
-    ['let f d = if d > 0 then 10 / d else 0', 'MAY_ZERO'],
-    ['let f () = if false then 10 / 2 else 0', 'UNREACHABLE'],
-    ['let f () = if false then [|10 / 2|] else [||]', 'UNSUPPORTED'],
-    ['let f () = if false then (fun () -> 10 / 2) else (fun () -> 0)', 'NONZERO'],
-    ['let f () = let d = 2 in (fun () -> 10 / d)', 'MAY_ZERO'],
-    ['let f g = let d = g () in 10 / d', 'MAY_ZERO'],
-    ['let f g d = g (10 / d)', 'MAY_ZERO'],
-    ['let f () = let d = 3 - 3 in 10 / d', 'ZERO'],
-    ['let f () = let d = 2 * 3 + 1 in 10 / d', 'NONZERO'],
-    ['let f () = let d = -2 in 10 / d', 'NONZERO'],
-    ['let f b = let d = if b then 2 else 3 in 10 / d', 'NONZERO'],
-    ['let f () = let (d, _) = (2, 0) in 10 / d', 'UNSUPPORTED'],
-    ['let rec f d = 10 / d', 'UNSUPPORTED'],
-    ['let f ?(d=2) () = 10 / d', 'UNSUPPORTED'],
-    ['let f = function d -> 10 / d', 'UNSUPPORTED'],
-    ['let f d = lazy (10 / d)', 'UNSUPPORTED'],
-    ['let f d = false && (10 / d = 0)', 'UNSUPPORTED'],
-    // OCaml 5.3 emits Tpat_alias(Tpat_any, d) for an annotated parameter:
-    // alias patterns are explicitly outside the selected fragment.
-    ['type integer = int\nlet f (d : integer) = if d <> 0 then 10 / d else 0', 'UNSUPPORTED'],
-    ['type integer = int\nlet f () = 10 / (2 : integer)', 'NONZERO'],
-  ];
-  cases.forEach(([source, expected], index) => withFixture(source + '\n', cmt => {
-    const r = report(cmt); census(r); assert.equal(r.sites.length, 1, `numeric case ${index}: site count`);
+  numericCases.forEach(([source, expected, reason], index) => withFixture(source + '\n', cmt => {
+    const r = report(cmt); validateReport(r); assert.equal(r.sites.length, 1, `numeric case ${index}: site count`);
     assert.equal(r.sites[0].status, expected, `numeric case ${index}: ${source}; reasons=${r.sites[0].reasons}`);
+    assert.deepEqual(r.sites[0].reasons, [reason], `numeric case ${index}: exact reasons`);
   }));
   const source = fs.readFileSync(path.join(root, 'tezt/fixtures/arch_guard/inventory.ml'), 'utf8');
   const expected = new Map([[1,'NONZERO'],[2,'UNSUPPORTED'],[3,'UNSUPPORTED'],[4,'UNSUPPORTED'],[5,'UNSUPPORTED'],[8,'UNSUPPORTED'],[10,'NONZERO'],[11,'NONZERO'],[12,'MAY_ZERO'],[13,'UNREACHABLE'],[14,'MAY_ZERO'],[15,'ZERO']]);
   return withFixture(source, cmt => {
-    const r = report(cmt); census(r);
+    const r = report(cmt); validateReport(r);
     assert.equal(r.sites.length, expected.size);
     for (const s of r.sites) { assert.equal(s.status, expected.get(s.location.start.line), `site line ${s.location.start.line}`); expected.delete(s.location.start.line); }
     assert.equal(expected.size, 0);
-    return {additionalCases:cases.length, census:r.census};
+    const r1Source = fs.readFileSync(path.join(root,'tezt/fixtures/arch_guard/r1_cases.ml'),'utf8');
+    const r1 = withFixture(r1Source, (r1Cmt,r1Dir) => {
+      const native=report(r1Cmt);
+      for (const kind of ['non-native','unresolved']) for (const slot of [1,2]) {
+        const output=path.join(r1Dir,`guard-${kind}-${slot}.cmt`);
+        const evidence=rewrite(r1Cmt,output,['--guard-operand-type',kind,'--guard-operand-slot',String(slot)]);
+        assert.equal(evidence.guard_operand_type_changed,true);
+        const changed=report(output); validateReport(changed);
+        assert.equal(changed.sites[1].status,'MAY_ZERO'); assert.deepEqual(changed.sites[1].reasons,['divisor_may_be_zero']);
+      }
+      return native;
+    });
+    validateReport(r1); assert.equal(r1.sites.length,36);
+    const expectedR1 = numericCases.r1Expected;
+    r1.sites.forEach((site,index) => { assert.equal(site.id,index+1); assert.equal(site.status,expectedR1[index][0]); assert.deepEqual(site.reasons,expectedR1[index][1]); });
+    assert.deepEqual(r1.census,{artifacts:1,total_sites:36,numeric_covered:19,nonzero:6,zero:2,may_zero:11,unreachable:0,unsupported:17,precision_gain_sites:6});
+    const effectSource=fs.readFileSync(path.join(root,'tezt/fixtures/arch_guard/effect_fixture.ml'),'utf8');
+    const effects=withFixture(effectSource,(effectSeed,effectDir) => ['%perform','%resume','%runstack','%reperform'].map(name => {
+      const output=path.join(effectDir,`${name.slice(1)}.cmt`);
+      const evidence=JSON.parse(success(effectFixtureProbe,['--input',effectSeed,'--output',output,'--primitive',name]));
+      assert.equal(evidence.changed,true); assert.equal(evidence.scope,'test-only Typedtree effect-primitive application seam');
+      const changed=report(output); validateReport(changed); assert.equal(changed.sites.length,1);
+      assert.equal(changed.sites[0].status,'UNSUPPORTED'); assert.deepEqual(changed.sites[0].reasons,['unsupported_effect_primitive']);
+      return name;
+    }));
+    return {additionalCases:numericCases.length, originalInventory:r.census, r1:r1.census, effects};
   });
 }
 function rejected(args, pattern) {
@@ -222,65 +225,64 @@ function inventory() {
     assert.deepEqual(dedup, r);
     const copy = path.join(dir, 'copy.cmt'); fs.copyFileSync(cmt, copy);
     rejected(['--cmt', cmt, '--cmt', copy], /duplicate module\/source/);
-    return r.census;
+    fs.writeFileSync(path.join(dir,'second.ml'),'let second () = 20 mod 3\n');
+    success(process.env.ARCH_GUARD_OCAMLC || 'ocamlc',['-bin-annot','-c','second.ml'],{cwd:dir});
+    const second = path.join(dir,'second.cmt');
+    const forward = success(binary,['--cmt',cmt,'--cmt',second,'--format','json']);
+    const reversed = success(binary,['--cmt',second,'--cmt',cmt,'--format','json']);
+    assert.equal(reversed,forward,'distinct accepted artifacts must render byte-identically when reversed');
+
+    const inventorySource=fs.readFileSync(path.join(root,'tezt/fixtures/arch_guard/inventory.ml'),'utf8');
+    const seams=withFixture(inventorySource,(seed,seamDir) => {
+      const mutate=(name,args,flag='application_changed') => {
+        const output=path.join(seamDir,`${name}.cmt`); const evidence=rewrite(seed,output,args);
+        assert.equal(evidence[flag],true,`${name}: requested mutation flag`); const value=report(output); validateReport(value); return value;
+      };
+      const later=mutate('later',['--application-shape','later-saturation','--target-site','2']);
+      assert.equal(later.sites.length,12); assert.deepEqual(later.sites[1].operand,{slot:2,category:'missing',representation:null});
+      assert.equal(later.sites[1].status,'UNSUPPORTED'); assert.deepEqual(later.sites[1].reasons,['missing_operand','unsupported_arity']);
+      const over=mutate('over',['--application-shape','overapplied','--target-site','1']);
+      assert.deepEqual(over.sites[0].operand,{slot:2,category:'integer_literal',representation:'2'}); assert.deepEqual(over.sites[0].reasons,['unsupported_arity']);
+      const labelled=mutate('labelled',['--application-shape','labelled-operand','--target-site','1']);
+      assert.deepEqual(labelled.sites[0].operand,{slot:2,category:'integer_literal',representation:'2'}); assert.deepEqual(labelled.sites[0].reasons,['unsupported_labels']);
+      const missing=mutate('missing',['--application-shape','missing-second-slot','--target-site','1']);
+      assert.deepEqual(missing.sites[0].operand,{slot:2,category:'missing',representation:null}); assert.deepEqual(missing.sites[0].reasons,['missing_operand','unsupported_arity','unsupported_operand_type']);
+      const all=mutate('over-all',['--application-shape','overapplied-all']);
+      assert.equal(all.sites.length,12); assert.deepEqual(all.sites[2].reasons,['unsupported_arity','unsupported_expression:Texp_while']);
+      for (const kind of ['non-native','unresolved']) for (const slot of [1,2]) {
+        const typed=mutate(`type-${kind}-${slot}`,['--operand-type',kind,'--operand-slot',String(slot),'--target-site','1'],'operand_type_changed');
+        assert.deepEqual(typed.sites[0].reasons,['unsupported_operand_type']);
+      }
+      for (const bytes of [256,257]) {
+        const spellingReport=mutate(`identifier-${bytes}`,['--identifier-bytes',String(bytes)],'identifier_changed');
+        const spelling=spellingReport.sites.find(site => site.operand.representation === null ? site.reasons.includes('operand_spelling_omitted') : site.operand.representation.startsWith('é'));
+        assert(spelling,'mutated UTF-8 identifier site must remain inventoried');
+        if (bytes===256) { assert.equal(Buffer.byteLength(spelling.operand.representation),256); assert(!spelling.reasons.includes('operand_spelling_omitted')); }
+        else { assert.equal(spelling.operand.representation,null); assert(spelling.reasons.includes('operand_spelling_omitted')); }
+      }
+      const duplicate=mutate('duplicate',['--duplicate-coordinates'],'duplicate_coordinates');
+      assert.equal(duplicate.sites.length,12); assert.equal(new Set(duplicate.sites.map(s=>s.id)).size,12);
+      assert.equal(new Set(duplicate.sites.map(s=>`${s.location.start.offset}:${s.location.end.offset}`)).size,1);
+      withFixture('let f numerator divisor = numerator / divisor\n',(operandSeed,operandDir) => {
+        const typeOutput=path.join(operandDir,'type-slot.cmt');
+        const typeEvidence=rewrite(operandSeed,typeOutput,['--operand-type','unresolved','--operand-slot','1']);
+        assert.deepEqual(typeEvidence.observed_operand_types.filter(row => row.site === 1).map(row => row.type),['unresolved','int'],'operand type mutation honors requested slot');
+        const identifierOutput=path.join(operandDir,'identifier-slot.cmt');
+        const identifierEvidence=rewrite(operandSeed,identifierOutput,['--identifier-bytes','257','--operand-slot','1']);
+        assert.equal(identifierEvidence.identifier_changed,true);
+        const identifierSite=report(identifierOutput).sites[0];
+        assert.equal(identifierSite.operand.representation,null,'identifier byte mutation always targets original slot 2');
+        assert(identifierSite.reasons.includes('operand_spelling_omitted'));
+      });
+      return {cases:12};
+    });
+    return {base:r.census,seams};
   });
 }
-function keys(object, names) { assert.deepEqual(Object.keys(object).sort(), names.split(' ').sort()); }
-function validateReport(r) {
-  keys(r, 'schema_version tool analysis outcome inputs sites census');
-  assert.equal(r.schema_version, 1);
-  keys(r.tool, 'name version compiler_version int_bits');
-  assert.equal(r.tool.name, 'arch-guard'); assert.equal(r.tool.version, '0.1.0');
-  assert.equal(typeof r.tool.compiler_version, 'string'); assert([31,63].includes(r.tool.int_bits));
-  keys(r.analysis, 'mode fragment domain assumptions limitations');
-  assert.equal(r.analysis.mode, 'experimental-report-only');
-  assert.equal(r.analysis.fragment, 'ocaml-int-acyclic-v1');
-  assert.equal(r.analysis.domain, 'constant-zero-v1');
-  for (const list of [r.analysis.assumptions, r.analysis.limitations]) { assert(Array.isArray(list)); list.forEach(x => assert.equal(typeof x, 'string')); }
-  assert.match(r.analysis.assumptions.join(' '), /trusted.*same-compiler.*same-target/);
-  assert.match(r.analysis.limitations.join(' '), /no machine-checked proof/);
-  assert.equal(r.outcome, r.sites.length ? 'classified' : 'empty_inventory');
-  keys(r.census, 'artifacts total_sites numeric_covered nonzero zero may_zero unreachable unsupported precision_gain_sites');
-  Object.values(r.census).forEach(n => assert(Number.isSafeInteger(n) && n >= 0));
-  census(r);
-  const seen = new Set();
-  r.inputs.forEach(i => { keys(i, 'path sha256 module source bytes'); assert(path.isAbsolute(i.path)); assert.match(i.sha256, /^[a-f0-9]{64}$/); assert.equal(typeof i.module, 'string'); assert(i.source === null || typeof i.source === 'string'); assert(Number.isSafeInteger(i.bytes) && i.bytes >= 0); });
-  assert.deepEqual(r.inputs.map(i => i.path), r.inputs.map(i => i.path).sort());
-  r.sites.forEach(s => {
-    keys(s, 'artifact id primitive integer_kind operand location status reasons');
-    assert(r.inputs.some(i => i.path === s.artifact));
-    assert(Number.isSafeInteger(s.id) && s.id > 0);
-    const identity = `${s.artifact}:${s.id}`; assert(!seen.has(identity)); seen.add(identity);
-    assert(['NONZERO','ZERO','MAY_ZERO','UNREACHABLE','UNSUPPORTED'].includes(s.status));
-    const families = {'%divint':'int','%modint':'int','%int32_div':'int32','%int32_mod':'int32','%int64_div':'int64','%int64_mod':'int64','%nativeint_div':'nativeint','%nativeint_mod':'nativeint'};
-    assert.equal(s.integer_kind, families[s.primitive]); assert(Object.hasOwn(families,s.primitive));
-    keys(s.operand, 'slot category representation'); assert.equal(s.operand.slot, 2);
-    assert(['integer_literal','identifier','other','missing'].includes(s.operand.category));
-    assert(s.operand.representation === null || typeof s.operand.representation === 'string');
-    if (s.operand.category === 'identifier' && s.operand.representation !== null) assert(Buffer.byteLength(s.operand.representation) <= 256);
-    if (['other','missing'].includes(s.operand.category)) assert.equal(s.operand.representation,null);
-    keys(s.location, 'file start end ghost'); assert.equal(typeof s.location.ghost, 'boolean');
-    for (const p of [s.location.start, s.location.end]) {
-      keys(p, 'line column offset');
-      if (p.line === null) assert.deepEqual(p, {line: null, column: null, offset: null});
-      else { assert(p.line >= 1); assert(p.column >= 1); assert(p.offset >= 0); }
-    }
-    assert(s.reasons.length > 0); assert.deepEqual(s.reasons, [...new Set(s.reasons)].sort());
-    const closed = ['divisor_nonzero_if_reached','divisor_zero_if_reached','divisor_may_be_zero','contradictory_supported_branch','unsupported_arity','unsupported_labels','missing_operand','unsupported_integer_kind','unsupported_operand_type','unsupported_function_parameters','unsupported_function_cases','unsupported_recursive_binding','unsupported_binding_pattern','unsupported_short_circuit','unsupported_effect_primitive','operand_spelling_omitted','location_unavailable','ghost_location'];
-    for (const reason of s.reasons) assert(closed.includes(reason) || /^unsupported_expression:T(?:exp|cl)_[a-z_]+$/.test(reason), `unknown reason ${reason}`);
-  });
-  const tuple = s => [s.artifact,s.location.start.offset,s.location.end.offset,s.primitive,s.id];
-  function compare(a,b) {
-    a=tuple(a); b=tuple(b);
-    for (let i=0;i<a.length;i++) {
-      if (a[i] === b[i]) continue;
-      if (a[i] === null) return -1;
-      if (b[i] === null) return 1;
-      return a[i] < b[i] ? -1 : 1;
-    }
-    return 0;
-  }
-  assert.deepEqual(r.sites, [...r.sites].sort(compare));
+function assertReportMutationRejected(reportValue, mutate, label) {
+  const changed = structuredClone(reportValue);
+  mutate(changed);
+  assert.throws(() => validateReport(changed), assert.AssertionError, label);
 }
 function reportMode() {
   const boundary = outputBoundary();
@@ -288,12 +290,38 @@ function reportMode() {
     const r = report(cmt); validateReport(r); assert.equal(r.sites.length, 0);
     assert.match(success(binary, ['--cmt', cmt]), /No matching immediate primitive occurrences in supplied artifacts\./);
   });
+  const projectionSource=fs.readFileSync(path.join(root,'tezt/fixtures/arch_guard/inventory.ml'),'utf8');
+  withFixture(projectionSource,cmt => {
+    const json=report(cmt); validateReport(json);
+    assert.deepEqual([...new Set(json.sites.map(site=>site.status))].sort(),['MAY_ZERO','NONZERO','UNREACHABLE','UNSUPPORTED','ZERO']);
+    const text=success(binary,['--cmt',cmt,'--format','text']); validateTextProjection(text,json);
+    const omitted=text.replace(/ artifact=[^ ]+/, '');
+    assert.throws(() => validateTextProjection(omitted,json),assert.AssertionError,'same projection oracle rejects an omitted required site field');
+    const firstSiteLine=text.split('\n').find(line=>/^(?:NONZERO|ZERO|MAY_ZERO|UNREACHABLE|UNSUPPORTED) /.test(line));
+    const duplicated=text.replace(`${firstSiteLine}\n`,`${firstSiteLine}\n${firstSiteLine}\n`);
+    assert.throws(() => validateTextProjection(duplicated,json),assert.AssertionError,'same projection oracle rejects a duplicate site line');
+    const unsupportedIndex=json.sites.findIndex(site=>site.status==='UNSUPPORTED'); assert(unsupportedIndex>=0);
+    assertReportMutationRejected(json,changed => { changed.sites[unsupportedIndex].reasons=['divisor_may_be_zero']; },'UNSUPPORTED rejects a numeric-only reason');
+    assertReportMutationRejected(json,changed => { changed.sites[unsupportedIndex].reasons=['ghost_location']; },'UNSUPPORTED requires an actual exclusion reason');
+    const numericIndex=json.sites.findIndex(site=>site.status==='NONZERO'); assert(numericIndex>=0);
+    assertReportMutationRejected(json,changed => { changed.sites[numericIndex].reasons=['divisor_nonzero_if_reached','unsupported_arity']; },'numeric status rejects an exclusion reason');
+  });
+  for (const sourceName of ['source space.ml','source id=.ml','source\nname.ml']) withNamedFixture(sourceName,'let f d = 10 / d\n',(cmt,dir) => {
+    const moved=path.join(dir,`artifact ${sourceName.replace(/\.ml$/,'')} id=.cmt`); fs.renameSync(cmt,moved);
+    const json=report(moved); validateReport(json);
+    validateTextProjection(success(binary,['--cmt',moved,'--format','text']),json);
+  });
   return withFixture('let f d = 10 / d\n', (cmt, dir) => {
     const r = report(cmt); validateReport(r);
+    assertReportMutationRejected(r, changed => {
+      changed.sites[0].reasons = ['divisor_nonzero_if_reached'];
+    }, 'status-aware oracle must reject a wrong but vocabulary-valid semantic reason');
     for (const location of ['invalid','ghost','cross-file','backwards','max-column']) {
       const output = path.join(dir, `${location}.cmt`);
       success(fixtureProbe, ['rewrite','--input',cmt,'--output',output,'--annotation','implementation','--location',location]);
       const mutated = report(output); validateReport(mutated); const s = mutated.sites[0];
+      const exactColumns=location==='max-column' ? new Map([[`${s.artifact}:${s.id}`,(1n<<BigInt(mutated.tool.int_bits-1)).toString()]]) : new Map();
+      validateTextProjection(success(binary,['--cmt',output,'--format','text']),mutated,exactColumns);
       assert.equal(mutated.sites.length, 1);
       if (location === 'ghost') { assert(s.location.ghost); assert(s.reasons.includes('ghost_location')); }
       if (location === 'invalid') { assert.equal(s.location.file, null); assert.equal(s.location.start.line, null); }
@@ -303,10 +331,7 @@ function reportMode() {
     const output = path.join(dir, 'spelling.cmt');
     success(fixtureProbe, ['rewrite','--input',cmt,'--output',output,'--annotation','implementation','--long-identifier']);
     const s = report(output).sites[0]; assert.equal(s.operand.representation, null); assert(s.reasons.includes('operand_spelling_omitted'));
-    const text = success(binary, ['--cmt', cmt]);
-    for (const [name, n] of Object.entries(r.census)) assert(text.includes(`${name}: ${n}\n`));
-    assert.match(text, /MAY_ZERO %divint/);
-    assert.match(text, /fixture\.ml:1:/, 'text must expose application source location');
+    const text = success(binary, ['--cmt', cmt]); validateTextProjection(text,r);
     return {metadataCases: 6, boundary, census: r.census};
   });
 }
@@ -434,7 +459,23 @@ function owned() {
   if (!artifacts.length) throw new Error('owned library artifacts missing; build @install first');
   const r = JSON.parse(success(binary,[...artifacts.flatMap(p => ['--cmt',p]),'--format','json']));
   validateReport(r);
-  return {scope:'explicit owned lib/arch_index artifacts only', census:r.census};
+  for (const args of [['--help'],['--version']]) {
+    const direct=run(binary,args); assert.equal(direct.status,0,direct.stderr);
+    const dispatched=run(path.join(root,'arch-guard'),args); assert.equal(dispatched.status,0,dispatched.stderr);
+  }
+  const isolated=fs.mkdtempSync(path.join(os.tmpdir(),'arch-guard-wrapper-'));
+  try {
+    const wrapper=path.join(isolated,'arch-guard'); fs.copyFileSync(path.join(root,'arch-guard'),wrapper); fs.chmodSync(wrapper,0o755);
+    const before=fs.readdirSync(isolated).sort(); const missing=run(wrapper,['--version']);
+    assert.equal(missing.status,2); assert.equal(missing.stdout,''); assert.match(missing.stderr,/binary not found; build arch_guard/);
+    assert.deepEqual(fs.readdirSync(isolated).sort(),before,'wrapper must not build or install as a side effect');
+  } finally { fs.rmSync(isolated,{recursive:true,force:true}); }
+  const installPath=path.join(root,'_build/default/arch-index.install');
+  const install=fs.readFileSync(installPath,'utf8');
+  assert.match(install,/arch_guard(?:\.exe)?/,'fresh install manifest contains public arch_guard executable');
+  assert.doesNotMatch(install,/lib\/arch_guard|arch_index__Arch_guard|META.*guard/,'private arch_guard library payload must not be installed');
+  for (const executable of [probe,fixtureProbe,effectFixtureProbe,changedReadProbe]) assert(fs.statSync(executable).isFile(),`private probe missing: ${executable}`);
+  return {scope:'explicit owned lib/arch_index artifacts only', census:r.census, publicCli:true, privateLibraryInstalled:false, probes:4};
 }
 try {
   const mode = process.argv[2];

@@ -1,3 +1,4 @@
+open Asttypes
 open Typedtree
 
 type annotation =
@@ -8,6 +9,16 @@ type annotation =
   | Partial_interface
 
 type location = Valid | Invalid | Ghost | Cross_file | Backwards | Max_column
+
+type application_shape =
+  | Ordinary
+  | Later_saturation
+  | Overapplied
+  | Overapplied_all
+  | Labelled_operand
+  | Missing_second_slot
+
+type operand_type = Original | Non_native | Unresolved
 
 let fail fmt = Printf.ksprintf (fun message -> raise (Failure message)) fmt
 
@@ -28,6 +39,21 @@ let location_of_string = function
   | "max-column" -> Max_column
   | value -> fail "unknown location %S" value
 
+let application_shape_of_string = function
+  | "ordinary" -> Ordinary
+  | "later-saturation" -> Later_saturation
+  | "overapplied" -> Overapplied
+  | "overapplied-all" -> Overapplied_all
+  | "labelled-operand" -> Labelled_operand
+  | "missing-second-slot" -> Missing_second_slot
+  | value -> fail "unknown application shape %S" value
+
+let operand_type_of_string = function
+  | "original" -> Original
+  | "non-native" -> Non_native
+  | "unresolved" -> Unresolved
+  | value -> fail "unknown operand type %S" value
+
 let primitive = function
   | "%divint" | "%modint" | "%int32_div" | "%int32_mod"
   | "%int64_div" | "%int64_mod" | "%nativeint_div" | "%nativeint_mod" -> true
@@ -37,6 +63,17 @@ let target_head expression =
   match expression.exp_desc with
   | Texp_ident (_, _, {val_kind = Val_prim {prim_name; _}; _}) -> primitive prim_name
   | _ -> false
+
+let zero_guard_head expression =
+  match expression.exp_desc with
+  | Texp_ident (_, _, {val_kind = Val_prim {prim_name; _}; _}) ->
+      List.mem prim_name ["%equal"; "%notequal"; "%eq"; "%noteq"]
+  | _ -> false
+
+let replacement_type = function
+  | Original -> invalid_arg "original operand type has no replacement"
+  | Non_native -> Predef.type_int64
+  | Unresolved -> Btype.newgenty (Types.Tvar None)
 
 let position ~file ~line ~bol ~offset =
   {Lexing.pos_fname = file; pos_lnum = line; pos_bol = bol; pos_cnum = offset}
@@ -58,20 +95,53 @@ let mutate_location mode (loc : Location.t) =
       {loc with loc_start = position ~file:"fixture-probe.ml" ~line:1 ~bol:0 ~offset:max_int;
                 loc_end = position ~file:"fixture-probe.ml" ~line:1 ~bol:0 ~offset:max_int}
 
-let long_identifier =
-  Longident.Ldot (Longident.Lident (String.make 200 'a'), String.make 100 'b')
+let utf8_identifier bytes =
+  if bytes < 0 then fail "identifier bytes must be nonnegative" ;
+  let buffer = Buffer.create bytes in
+  for _ = 1 to bytes / 2 do Buffer.add_string buffer "é" done ;
+  if bytes mod 2 = 1 then Buffer.add_char buffer 'a' ;
+  Longident.Lident (Buffer.contents buffer)
 
-let mutate_structure ~location ~long_identifier_requested ~first_location_file_bytes structure =
+let mutate_structure ~location ~identifier_bytes ~first_location_file_bytes
+    ~application_shape ~operand_type ~operand_slot ~guard_operand_type
+    ~guard_operand_slot ~target_site
+    ~duplicate_coordinates structure =
   let target_sites = ref 0 in
-  let long_identifier_changed = ref false in
+  let identifier_changed = ref false in
   let first_location_file_changed = ref false in
+  let application_changed = ref false in
+  let operand_type_changed = ref false in
+  let guard_operand_type_changed = ref false in
   let base = Tast_mapper.default in
   let expr self expression =
     let expression = base.expr self expression in
+    let expression =
+      match guard_operand_type, expression.exp_desc with
+      | Original, _ -> expression
+      | kind, Texp_apply (head, arguments) when zero_guard_head head ->
+          guard_operand_type_changed := true ;
+          let arguments = List.mapi (fun index (label, argument) ->
+            if Option.fold ~none:true ~some:(fun slot -> index = slot - 1)
+                 guard_operand_slot
+            then
+              (label, Option.map (fun operand ->
+                 {operand with exp_type = replacement_type kind}) argument)
+            else (label, argument)) arguments in
+          {expression with exp_desc = Texp_apply (head, arguments)}
+      | _ -> expression
+    in
     match expression.exp_desc with
     | Texp_apply (head, arguments) when target_head head ->
         incr target_sites ;
-        let loc = mutate_location location expression.exp_loc in
+        let selected = Option.fold ~none:true
+            ~some:(fun requested -> requested = !target_sites) target_site in
+        let loc =
+          if duplicate_coordinates then
+            let start = position ~file:"duplicate-coordinate.ml" ~line:7 ~bol:100 ~offset:108 in
+            let finish = position ~file:"duplicate-coordinate.ml" ~line:7 ~bol:100 ~offset:116 in
+            {Location.loc_start = start; loc_end = finish; loc_ghost = false}
+          else mutate_location location expression.exp_loc
+        in
         let loc =
           match first_location_file_bytes with
           | None -> loc
@@ -84,7 +154,7 @@ let mutate_structure ~location ~long_identifier_requested ~first_location_file_b
                loc_end = {loc.loc_end with pos_fname = file}}
         in
         let arguments =
-          if not long_identifier_requested || !long_identifier_changed then arguments
+          if Option.is_none identifier_bytes || !identifier_changed then arguments
           else
             List.mapi
               (fun index (label, argument) ->
@@ -92,21 +162,93 @@ let mutate_structure ~location ~long_identifier_requested ~first_location_file_b
                 else
                   match argument with
                   | Some ({exp_desc = Texp_ident (path, lid, description); _} as operand) ->
-                      long_identifier_changed := true ;
-                      let lid = {lid with txt = long_identifier} in
+                      identifier_changed := true ;
+                      let lid = {lid with txt = utf8_identifier (Option.get identifier_bytes)} in
                       (label, Some {operand with exp_desc = Texp_ident (path, lid, description)})
                   | Some _ | None -> (label, argument))
               arguments
         in
-        {expression with exp_desc = Texp_apply (head, arguments); exp_loc = loc}
+        let arguments =
+          if operand_type = Original || !operand_type_changed || not selected then arguments
+          else
+            List.mapi
+              (fun index (label, argument) ->
+                if index <> operand_slot - 1 then (label, argument)
+                else
+                  match argument with
+                  | None -> (label, None)
+                  | Some operand ->
+                      operand_type_changed := true ;
+                      let exp_type = replacement_type operand_type in
+                      (label, Some {operand with exp_type}))
+              arguments
+        in
+        let application = {expression with exp_desc = Texp_apply (head, arguments); exp_loc = loc} in
+        if (not selected)
+           || (!application_changed && application_shape <> Overapplied_all) then application
+        else (
+          application_changed := application_shape <> Ordinary ;
+          match application_shape with
+          | Ordinary -> application
+          | Later_saturation ->
+              let extra = match arguments with (_, Some value) :: _ -> Some value | _ -> None in
+              {application with exp_desc = Texp_apply (application, [(Nolabel, extra)])}
+          | Overapplied | Overapplied_all ->
+              let extra = match arguments with (_, Some value) :: _ -> Some value | _ -> None in
+              {application with exp_desc = Texp_apply (head, arguments @ [(Nolabel, extra)])}
+          | Labelled_operand ->
+              let arguments = List.mapi (fun index (_, value) ->
+                if index = 1 then (Labelled "divisor", value) else (Nolabel, value)) arguments in
+              {application with exp_desc = Texp_apply (head, arguments)}
+          | Missing_second_slot ->
+              let original = match List.nth_opt arguments 1 with Some (_, value) -> value | None -> None in
+              let arguments = List.mapi (fun index (label, value) ->
+                if index = 1 then (label, None) else (label, value)) arguments in
+              {application with exp_desc = Texp_apply (head, arguments @ [(Nolabel, original)])})
     | _ -> expression
   in
   let mapper = {base with expr} in
   let structure = mapper.structure mapper structure in
-  (structure, !target_sites, !long_identifier_changed, !first_location_file_changed)
+  (structure, !target_sites, !identifier_changed, !first_location_file_changed,
+   !application_changed, !operand_type_changed, !guard_operand_type_changed)
 
 let require_fresh_output path =
   if Sys.file_exists path then fail "output must be a fresh owned path: %s" path
+
+let observed_type ty =
+  match Types.get_desc ty with
+  | Tconstr (path, [], _) when Path.same path Predef.path_int -> "int"
+  | Tconstr (path, [], _) when Path.same path Predef.path_int64 -> "int64"
+  | Tvar _ | Tunivar _ -> "unresolved"
+  | _ -> "other"
+
+let observe_target_operand_types structure =
+  let site = ref 0 in
+  let observed = ref [] in
+  let base = Tast_iterator.default_iterator in
+  let expr self expression =
+    (match expression.exp_desc with
+    | Texp_apply (head, arguments) when target_head head ->
+        incr site ;
+        List.iteri
+          (fun index argument ->
+            let value =
+              match snd argument with
+              | None -> `Null
+              | Some operand -> `String (observed_type operand.exp_type)
+            in
+            observed :=
+              `Assoc
+                [("site", `Int !site); ("slot", `Int (index + 1));
+                 ("type", value)]
+              :: !observed)
+          arguments
+    | _ -> ()) ;
+    base.expr self expression
+  in
+  let iterator = {base with expr} in
+  iterator.structure iterator structure ;
+  List.rev !observed
 
 let read_implementation path =
   match Cmt_format.read path with
@@ -126,11 +268,18 @@ let save output info cmi annotations =
 let json_bool name value = (name, `Bool value)
 let json_string name value = (name, `String value)
 
-let rewrite ~input ~output ~annotation ~location ~long_identifier_requested ~first_location_file_bytes =
+let rewrite ~input ~output ~annotation ~location ~identifier_bytes ~first_location_file_bytes
+    ~application_shape ~operand_type ~operand_slot ~guard_operand_type
+    ~guard_operand_slot ~target_site
+    ~duplicate_coordinates =
   require_fresh_output output ;
   let cmi, info, structure = read_implementation input in
-  let structure, target_sites, long_identifier_changed, first_location_file_changed =
-    mutate_structure ~location ~long_identifier_requested ~first_location_file_bytes structure
+  let structure, target_sites, identifier_changed, first_location_file_changed,
+      application_changed, operand_type_changed, guard_operand_type_changed =
+    mutate_structure ~location ~identifier_bytes ~first_location_file_bytes
+      ~application_shape ~operand_type ~operand_slot ~guard_operand_type
+      ~guard_operand_slot ~target_site
+      ~duplicate_coordinates structure
   in
   let annotations =
     match annotation with
@@ -142,10 +291,20 @@ let rewrite ~input ~output ~annotation ~location ~long_identifier_requested ~fir
     | Partial_implementation -> Cmt_format.Partial_implementation [||]
     | Partial_interface -> Cmt_format.Partial_interface [||]
   in
-  if target_sites = 0 && (location <> Valid || long_identifier_requested) then
+  if target_sites = 0 &&
+     (location <> Valid || Option.is_some identifier_bytes || application_shape <> Ordinary
+      || operand_type <> Original || guard_operand_type <> Original
+      || duplicate_coordinates) then
     fail "input has no target primitive application to mutate: %s" input ;
-  if long_identifier_requested && not long_identifier_changed then
+  if Option.is_some identifier_bytes && not identifier_changed then
     fail "input has no target primitive whose original slot 2 is an identifier: %s" input ;
+  if application_shape <> Ordinary && not application_changed then
+    fail "requested application mutation did not select a target site: %s" input ;
+  if operand_type <> Original && not operand_type_changed then
+    fail "requested operand-type mutation did not find a present selected operand: %s" input ;
+  if guard_operand_type <> Original && not guard_operand_type_changed then
+    fail "requested guard operand-type mutation found no zero comparison: %s" input ;
+  let observed_operand_types = observe_target_operand_types structure in
   save output info cmi annotations ;
   `Assoc
     [json_bool "ok" true; json_string "input" input; json_string "output" output;
@@ -155,10 +314,19 @@ let rewrite ~input ~output ~annotation ~location ~long_identifier_requested ~fir
      json_string "location"
        (match location with Valid -> "valid" | Invalid -> "invalid" | Ghost -> "ghost" | Cross_file -> "cross-file"
         | Backwards -> "backwards" | Max_column -> "max-column");
-     json_bool "long_identifier" long_identifier_changed;
+     ("identifier_bytes", match identifier_bytes with None -> `Null | Some bytes -> `Int bytes);
+     json_bool "identifier_changed" identifier_changed;
      ("first_location_file_bytes", match first_location_file_bytes with None -> `Null | Some bytes -> `Int bytes);
      json_bool "first_location_file_changed" first_location_file_changed;
-     ("target_sites", `Int target_sites)]
+     json_bool "application_changed" application_changed;
+     json_bool "operand_type_changed" operand_type_changed;
+     ("operand_slot", `Int operand_slot);
+     json_bool "guard_operand_type_changed" guard_operand_type_changed;
+     ("guard_operand_slot", match guard_operand_slot with None -> `Null | Some slot -> `Int slot);
+     ("target_site", match target_site with None -> `Null | Some site -> `Int site);
+     json_bool "duplicate_coordinates" duplicate_coordinates;
+     ("target_sites", `Int target_sites);
+     ("observed_operand_types", `List observed_operand_types)]
 
 let inspect input =
   let _, _, structure = read_implementation input in
@@ -222,28 +390,54 @@ let generate ~output ~kind ~count =
 
 let usage () =
   prerr_endline
-    "usage: fixture_probe rewrite --input INPUT.cmt --output OUTPUT.cmt --annotation implementation|interface|packed|partial-implementation|partial-interface [--location valid|invalid|ghost|cross-file|backwards|max-column] [--long-identifier] [--first-location-file-bytes N] | inspect --input INPUT.cmt | generate --output OUTPUT.ml --kind sites|nest|nodes --count N" ;
+    "usage: fixture_probe rewrite --input INPUT.cmt --output OUTPUT.cmt --annotation implementation|interface|packed|partial-implementation|partial-interface [--location valid|invalid|ghost|cross-file|backwards|max-column] [--identifier-bytes N] [--application-shape ordinary|later-saturation|overapplied|overapplied-all|labelled-operand|missing-second-slot] [--operand-type original|non-native|unresolved] [--operand-slot 1|2] [--guard-operand-type original|non-native|unresolved] [--guard-operand-slot 1|2] [--target-site N] [--duplicate-coordinates] [--first-location-file-bytes N] | inspect --input INPUT.cmt | generate --output OUTPUT.ml --kind sites|nest|nodes --count N" ;
   exit 2
 
 let required = function Some value -> value | None -> usage ()
 
-let rec parse_rewrite input output annotation location long_identifier_requested first_location_file_bytes = function
+let rec parse_rewrite input output annotation location identifier_bytes first_location_file_bytes
+    application_shape operand_type operand_slot guard_operand_type guard_operand_slot
+    target_site duplicate_coordinates = function
   | [] ->
       let input = required input in
       let output = required output in
       let annotation = required annotation in
       rewrite ~input ~output ~annotation:(annotation_of_string annotation)
         ~location:(location_of_string (match location with Some value -> value | None -> "valid"))
-        ~long_identifier_requested ~first_location_file_bytes
-  | "--input" :: value :: rest -> parse_rewrite (Some value) output annotation location long_identifier_requested first_location_file_bytes rest
-  | "--output" :: value :: rest -> parse_rewrite input (Some value) annotation location long_identifier_requested first_location_file_bytes rest
-  | "--annotation" :: value :: rest -> parse_rewrite input output (Some value) location long_identifier_requested first_location_file_bytes rest
-  | "--location" :: value :: rest -> parse_rewrite input output annotation (Some value) long_identifier_requested first_location_file_bytes rest
-  | "--long-identifier" :: rest -> parse_rewrite input output annotation location true first_location_file_bytes rest
+        ~identifier_bytes ~first_location_file_bytes
+        ~application_shape:(application_shape_of_string (Option.value ~default:"ordinary" application_shape))
+        ~operand_type:(operand_type_of_string (Option.value ~default:"original" operand_type))
+        ~operand_slot
+        ~guard_operand_type:(operand_type_of_string (Option.value ~default:"original" guard_operand_type))
+        ~guard_operand_slot ~target_site ~duplicate_coordinates
+  | "--input" :: value :: rest -> parse_rewrite (Some value) output annotation location identifier_bytes first_location_file_bytes application_shape operand_type operand_slot guard_operand_type guard_operand_slot target_site duplicate_coordinates rest
+  | "--output" :: value :: rest -> parse_rewrite input (Some value) annotation location identifier_bytes first_location_file_bytes application_shape operand_type operand_slot guard_operand_type guard_operand_slot target_site duplicate_coordinates rest
+  | "--annotation" :: value :: rest -> parse_rewrite input output (Some value) location identifier_bytes first_location_file_bytes application_shape operand_type operand_slot guard_operand_type guard_operand_slot target_site duplicate_coordinates rest
+  | "--location" :: value :: rest -> parse_rewrite input output annotation (Some value) identifier_bytes first_location_file_bytes application_shape operand_type operand_slot guard_operand_type guard_operand_slot target_site duplicate_coordinates rest
+  | "--long-identifier" :: rest -> parse_rewrite input output annotation location (Some 301) first_location_file_bytes application_shape operand_type operand_slot guard_operand_type guard_operand_slot target_site duplicate_coordinates rest
+  | "--identifier-bytes" :: value :: rest ->
+      let bytes = try int_of_string value with Failure _ -> fail "invalid identifier bytes %S" value in
+      parse_rewrite input output annotation location (Some bytes) first_location_file_bytes application_shape operand_type operand_slot guard_operand_type guard_operand_slot target_site duplicate_coordinates rest
+  | "--application-shape" :: value :: rest -> parse_rewrite input output annotation location identifier_bytes first_location_file_bytes (Some value) operand_type operand_slot guard_operand_type guard_operand_slot target_site duplicate_coordinates rest
+  | "--operand-type" :: value :: rest -> parse_rewrite input output annotation location identifier_bytes first_location_file_bytes application_shape (Some value) operand_slot guard_operand_type guard_operand_slot target_site duplicate_coordinates rest
+  | "--operand-slot" :: value :: rest ->
+      let slot = try int_of_string value with Failure _ -> fail "invalid operand slot %S" value in
+      if slot <> 1 && slot <> 2 then fail "operand slot must be 1 or 2" ;
+      parse_rewrite input output annotation location identifier_bytes first_location_file_bytes application_shape operand_type slot guard_operand_type guard_operand_slot target_site duplicate_coordinates rest
+  | "--guard-operand-type" :: value :: rest -> parse_rewrite input output annotation location identifier_bytes first_location_file_bytes application_shape operand_type operand_slot (Some value) guard_operand_slot target_site duplicate_coordinates rest
+  | "--guard-operand-slot" :: value :: rest ->
+      let slot = try int_of_string value with Failure _ -> fail "invalid guard operand slot %S" value in
+      if slot <> 1 && slot <> 2 then fail "guard operand slot must be 1 or 2" ;
+      parse_rewrite input output annotation location identifier_bytes first_location_file_bytes application_shape operand_type operand_slot guard_operand_type (Some slot) target_site duplicate_coordinates rest
+  | "--target-site" :: value :: rest ->
+      let site = try int_of_string value with Failure _ -> fail "invalid target site %S" value in
+      if site < 1 then fail "target site must be positive" ;
+      parse_rewrite input output annotation location identifier_bytes first_location_file_bytes application_shape operand_type operand_slot guard_operand_type guard_operand_slot (Some site) duplicate_coordinates rest
+  | "--duplicate-coordinates" :: rest -> parse_rewrite input output annotation location identifier_bytes first_location_file_bytes application_shape operand_type operand_slot guard_operand_type guard_operand_slot target_site true rest
   | "--first-location-file-bytes" :: value :: rest ->
       let bytes = try int_of_string value with Failure _ -> fail "invalid first-location-file-bytes %S" value in
       if bytes < 0 then fail "first-location-file-bytes must be nonnegative" ;
-      parse_rewrite input output annotation location long_identifier_requested (Some bytes) rest
+      parse_rewrite input output annotation location identifier_bytes (Some bytes) application_shape operand_type operand_slot guard_operand_type guard_operand_slot target_site duplicate_coordinates rest
   | _ -> usage ()
 
 let rec parse_inspect input = function
@@ -268,7 +462,7 @@ let () =
   try
     let result =
       match Array.to_list Sys.argv with
-      | _ :: "rewrite" :: arguments -> parse_rewrite None None None None false None arguments
+      | _ :: "rewrite" :: arguments -> parse_rewrite None None None None None None None None 2 None None None false arguments
       | _ :: "inspect" :: arguments -> parse_inspect None arguments
       | _ :: "generate" :: arguments -> parse_generate None None None arguments
       | _ -> usage ()
