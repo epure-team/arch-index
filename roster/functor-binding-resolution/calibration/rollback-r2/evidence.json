@@ -1,0 +1,1258 @@
+{
+  "base": "b98fcd06bcc98a94c0627b454d846fd01d54fa0d",
+  "snapshot": [
+    {
+      "file": "checks/origin-recurring-consumer.js",
+      "sha256": "40b0246b241348990e289c85d72b6fd87fd51fe510617da4b2f4eb0a4e50dd5d"
+    },
+    {
+      "file": "lib/arch_index/arch_index.ml",
+      "sha256": "db777a68625449b170e1f8648e00a142d96d73dc3cad706ba5edfd5fb1ddb04a"
+    },
+    {
+      "file": "lib/arch_index/arch_index_bindings.ml",
+      "sha256": "64655a4f9c00a2024d6c87395e8e813184ade1b2f57223c0d77c2ed4da45d820"
+    },
+    {
+      "file": "lib/arch_index/arch_index_bindings.mli",
+      "sha256": "69ce23aaf2a91e586cb81cdd2521e3b567ec56a15a9da7ea79a42acffb91113e"
+    },
+    {
+      "file": "lib/arch_tools/arch_functor_bindings.ml",
+      "sha256": "ff866cfc3225170c6df67dc60f898305dd7a5960d3a4d655c20ec5c3a376fb20"
+    },
+    {
+      "file": "lib/arch_tools/arch_functor_bindings.mli",
+      "sha256": "f33f1cfe0fb6e76a4ec8533bd102254cb12f253644db9958bbf52c4dbec6e02e"
+    },
+    {
+      "file": "lib/arch_tools/arch_functor_catalogue.mli",
+      "sha256": "455b9bed486aeeb1f1d2f11ce69d06917bf6bd010c3092f2a50e72de6c4b26cb"
+    },
+    {
+      "file": "specs/functor-binding-resolution.md",
+      "sha256": "28912e003bd269693a693bc35be49bd1b86bde5f4e47f0bbec7cd4f62fde63a6"
+    },
+    {
+      "file": "test/fixtures/origin-consumer/reference.json",
+      "sha256": "8c612be028a36ab77036e074380f9529fdbca88a9799fede09a928abe7aaf23d"
+    },
+    {
+      "file": "test/fixtures/self-index-stats.txt",
+      "sha256": "e6d2d0f263545caafc7d09aa59aa7faeeb9668d9dd4d26402f6f44aa3cd069db"
+    },
+    {
+      "file": "tezt/tests/functor_bindings.ml",
+      "sha256": "136ff0014fc689313a5e00a948c6a42f9293c0fb5b3f0e926c1cf7717b0c1512"
+    }
+  ],
+  "snapshot_sha256": "7912cbba47b77362b90ff36f243e8703ba140badf790346cc77d6e9db96f77cc",
+  "cells": {
+    "ceiling-A": {
+      "totals": {
+        "modules": 122,
+        "functions": 3843,
+        "calls": 22272,
+        "origins": 1203,
+        "must_null": 534
+      },
+      "groups": [
+        {
+          "channel": "exception",
+          "form": "assert",
+          "escapes": 1,
+          "count": 6
+        },
+        {
+          "channel": "exception",
+          "form": "compare",
+          "escapes": 1,
+          "count": 133
+        },
+        {
+          "channel": "exception",
+          "form": "division",
+          "escapes": 1,
+          "count": 3
+        },
+        {
+          "channel": "exception",
+          "form": "failwith",
+          "escapes": 1,
+          "count": 45
+        },
+        {
+          "channel": "exception",
+          "form": "index",
+          "escapes": 1,
+          "count": 166
+        },
+        {
+          "channel": "exception",
+          "form": "invalid_arg",
+          "escapes": 1,
+          "count": 5
+        },
+        {
+          "channel": "exception",
+          "form": "raise",
+          "escapes": 1,
+          "count": 21
+        },
+        {
+          "channel": "exception",
+          "form": "reraise",
+          "escapes": 1,
+          "count": 12
+        },
+        {
+          "channel": "option",
+          "form": "raise",
+          "escapes": 1,
+          "count": 702
+        },
+        {
+          "channel": "result",
+          "form": "raise",
+          "escapes": 1,
+          "count": 27
+        },
+        {
+          "channel": "result",
+          "form": "unknown",
+          "escapes": 1,
+          "count": 83
+        }
+      ],
+      "modules": [
+        "bin/arch_coverage/arch_cov_write.ml",
+        "bin/arch_query/arch_effects_queries.ml",
+        "lib/arch_db/arch_load.ml",
+        "lib/arch_effects/capability_db.ml",
+        "lib/arch_effects/capability_extractor.ml",
+        "lib/arch_effects/capability_types.ml",
+        "lib/arch_effects/effects_db.ml",
+        "lib/arch_effects/effects_load.ml",
+        "lib/arch_effects/extractor_intf.ml",
+        "lib/arch_effects/ocaml_effects_extractor.ml",
+        "lib/arch_guard/arch_guard.ml",
+        "lib/arch_guard/guard_domain.ml",
+        "lib/arch_guard/guard_input.ml",
+        "lib/arch_guard/guard_interpreter.ml",
+        "lib/arch_index/arch_errors_config.ml",
+        "lib/arch_index/arch_index.ml",
+        "lib/arch_index/arch_index_bindings.ml",
+        "lib/arch_index/arch_index_cfg.ml",
+        "lib/arch_index/arch_index_cmt.ml",
+        "lib/arch_index/arch_index_comment_parser.ml",
+        "lib/arch_index/arch_index_compare.ml",
+        "lib/arch_index/arch_index_db.ml",
+        "lib/arch_index/arch_index_errch.ml",
+        "lib/arch_index/arch_index_exn.ml",
+        "lib/arch_index/arch_index_functors.ml",
+        "lib/arch_index/arch_index_git.ml",
+        "lib/arch_index/arch_index_line_counter.ml",
+        "lib/arch_index/arch_index_support.ml",
+        "lib/arch_index/call_graph_extractor.ml",
+        "lib/arch_index/comment_parser.ml",
+        "lib/arch_index/coverage_matrix.ml",
+        "lib/arch_index/doc_extractor.ml",
+        "lib/arch_index/language_registry.ml",
+        "lib/arch_index/lsp_client.ml",
+        "lib/arch_index/lsp_extractor.ml",
+        "lib/arch_index/lsp_types.ml",
+        "lib/arch_index/ocaml_enricher.ml",
+        "lib/arch_index/runner.ml",
+        "lib/arch_index/ts_enricher.ml",
+        "lib/arch_io/arch_io.ml",
+        "lib/arch_tools/arch_db.ml",
+        "lib/arch_tools/arch_diff.ml",
+        "lib/arch_tools/arch_exn.ml",
+        "lib/arch_tools/arch_fmt.ml",
+        "lib/arch_tools/arch_functor_bindings.ml",
+        "lib/arch_tools/arch_functor_catalogue.ml",
+        "lib/arch_tools/arch_graph.ml",
+        "lib/arch_tools/arch_lcov.ml",
+        "lib/arch_tools/arch_origin_context.ml",
+        "lib/arch_tools/arch_path.ml",
+        "lib/arch_tools/arch_report.ml",
+        "lib/arch_tools/arch_rule_eval.ml",
+        "lib/arch_tools/arch_sarif.ml",
+        "lib/arch_tools/arch_sel.ml",
+        "lib/jsonrpc_client/http_transport.ml",
+        "lib/jsonrpc_client/jsonrpc_client.ml",
+        "lib/jsonrpc_client/stdio_transport.ml",
+        "poc/decision-lint/test/fixture.ml",
+        "tezt/fixtures/functor_catalogue/catalogue.ml",
+        "tezt/lib/arch_tezt.ml",
+        "tezt/tests/actionable_review_reports.ml",
+        "tezt/tests/callgraph_go.ml",
+        "tezt/tests/callgraph_nested.ml",
+        "tezt/tests/callgraph_ocaml.ml",
+        "tezt/tests/callgraph_soundness.ml",
+        "tezt/tests/completion_markers.ml",
+        "tezt/tests/contract.ml",
+        "tezt/tests/coverage.ml",
+        "tezt/tests/coverage_matrix.ml",
+        "tezt/tests/curation.ml",
+        "tezt/tests/curation_doc.ml",
+        "tezt/tests/decision_lint.ml",
+        "tezt/tests/dropped_node_dependents.ml",
+        "tezt/tests/duplicates.ml",
+        "tezt/tests/effects.ml",
+        "tezt/tests/error_channels.ml",
+        "tezt/tests/escaping_origins.ml",
+        "tezt/tests/escaping_origins_exported.ml",
+        "tezt/tests/exn_raise_sets.ml",
+        "tezt/tests/exported_selector.ml",
+        "tezt/tests/flat_exported_selector.ml",
+        "tezt/tests/functor_bindings.ml",
+        "tezt/tests/functor_catalogue.ml",
+        "tezt/tests/guard_division_analysis.ml",
+        "tezt/tests/health.ml",
+        "tezt/tests/helpers.ml",
+        "tezt/tests/impact.ml",
+        "tezt/tests/insert_rowid_attribution.ml",
+        "tezt/tests/load.ml",
+        "tezt/tests/lsp_call_diagnostics.ml",
+        "tezt/tests/lsp_error_diagnostics.ml",
+        "tezt/tests/lsp_languages.ml",
+        "tezt/tests/lsp_readiness.ml",
+        "tezt/tests/lsp_runner_diagnostics.ml",
+        "tezt/tests/module_alias_heads.ml",
+        "tezt/tests/multilang.ml",
+        "tezt/tests/must_null_ceiling.ml",
+        "tezt/tests/mutants.ml",
+        "tezt/tests/nested_module_qualification.ml",
+        "tezt/tests/ocaml_shapes.ml",
+        "tezt/tests/origin_recurring_consumer.ml",
+        "tezt/tests/pcc.ml",
+        "tezt/tests/phantom_option_origins.ml",
+        "tezt/tests/point_free_aliases.ml",
+        "tezt/tests/provenance.ml",
+        "tezt/tests/qualified_library_scoping.ml",
+        "tezt/tests/query_limits.ml",
+        "tezt/tests/recalibrate_self_test.ml",
+        "tezt/tests/registry_gaps.ml",
+        "tezt/tests/rejection_attribution.ml",
+        "tezt/tests/report.ml",
+        "tezt/tests/reported_counts_are_row_counts.ml",
+        "tezt/tests/reported_equals_stored.ml",
+        "tezt/tests/rules.ml",
+        "tezt/tests/rules_origin.ml",
+        "tezt/tests/sarif_in.ml",
+        "tezt/tests/sarif_out.ml",
+        "tezt/tests/schema_column_guards.ml",
+        "tezt/tests/schema_drop_list.ml",
+        "tezt/tests/serve.ml",
+        "tezt/tests/shadowed_definitions.ml",
+        "tezt/tests/top_anchor_taxonomy.ml"
+      ],
+      "calls_sha256": "db3e919213b7efd10b13a5d5d6d47d45b8f0497c187f91fc97dfdb982933c4c2"
+    },
+    "ceiling-B": {
+      "totals": {
+        "modules": 122,
+        "functions": 3843,
+        "calls": 22272,
+        "origins": 1203,
+        "must_null": 534
+      },
+      "groups": [
+        {
+          "channel": "exception",
+          "form": "assert",
+          "escapes": 1,
+          "count": 6
+        },
+        {
+          "channel": "exception",
+          "form": "compare",
+          "escapes": 1,
+          "count": 133
+        },
+        {
+          "channel": "exception",
+          "form": "division",
+          "escapes": 1,
+          "count": 3
+        },
+        {
+          "channel": "exception",
+          "form": "failwith",
+          "escapes": 1,
+          "count": 45
+        },
+        {
+          "channel": "exception",
+          "form": "index",
+          "escapes": 1,
+          "count": 166
+        },
+        {
+          "channel": "exception",
+          "form": "invalid_arg",
+          "escapes": 1,
+          "count": 5
+        },
+        {
+          "channel": "exception",
+          "form": "raise",
+          "escapes": 1,
+          "count": 21
+        },
+        {
+          "channel": "exception",
+          "form": "reraise",
+          "escapes": 1,
+          "count": 12
+        },
+        {
+          "channel": "option",
+          "form": "raise",
+          "escapes": 1,
+          "count": 702
+        },
+        {
+          "channel": "result",
+          "form": "raise",
+          "escapes": 1,
+          "count": 27
+        },
+        {
+          "channel": "result",
+          "form": "unknown",
+          "escapes": 1,
+          "count": 83
+        }
+      ],
+      "modules": [
+        "bin/arch_coverage/arch_cov_write.ml",
+        "bin/arch_query/arch_effects_queries.ml",
+        "lib/arch_db/arch_load.ml",
+        "lib/arch_effects/capability_db.ml",
+        "lib/arch_effects/capability_extractor.ml",
+        "lib/arch_effects/capability_types.ml",
+        "lib/arch_effects/effects_db.ml",
+        "lib/arch_effects/effects_load.ml",
+        "lib/arch_effects/extractor_intf.ml",
+        "lib/arch_effects/ocaml_effects_extractor.ml",
+        "lib/arch_guard/arch_guard.ml",
+        "lib/arch_guard/guard_domain.ml",
+        "lib/arch_guard/guard_input.ml",
+        "lib/arch_guard/guard_interpreter.ml",
+        "lib/arch_index/arch_errors_config.ml",
+        "lib/arch_index/arch_index.ml",
+        "lib/arch_index/arch_index_bindings.ml",
+        "lib/arch_index/arch_index_cfg.ml",
+        "lib/arch_index/arch_index_cmt.ml",
+        "lib/arch_index/arch_index_comment_parser.ml",
+        "lib/arch_index/arch_index_compare.ml",
+        "lib/arch_index/arch_index_db.ml",
+        "lib/arch_index/arch_index_errch.ml",
+        "lib/arch_index/arch_index_exn.ml",
+        "lib/arch_index/arch_index_functors.ml",
+        "lib/arch_index/arch_index_git.ml",
+        "lib/arch_index/arch_index_line_counter.ml",
+        "lib/arch_index/arch_index_support.ml",
+        "lib/arch_index/call_graph_extractor.ml",
+        "lib/arch_index/comment_parser.ml",
+        "lib/arch_index/coverage_matrix.ml",
+        "lib/arch_index/doc_extractor.ml",
+        "lib/arch_index/language_registry.ml",
+        "lib/arch_index/lsp_client.ml",
+        "lib/arch_index/lsp_extractor.ml",
+        "lib/arch_index/lsp_types.ml",
+        "lib/arch_index/ocaml_enricher.ml",
+        "lib/arch_index/runner.ml",
+        "lib/arch_index/ts_enricher.ml",
+        "lib/arch_io/arch_io.ml",
+        "lib/arch_tools/arch_db.ml",
+        "lib/arch_tools/arch_diff.ml",
+        "lib/arch_tools/arch_exn.ml",
+        "lib/arch_tools/arch_fmt.ml",
+        "lib/arch_tools/arch_functor_bindings.ml",
+        "lib/arch_tools/arch_functor_catalogue.ml",
+        "lib/arch_tools/arch_graph.ml",
+        "lib/arch_tools/arch_lcov.ml",
+        "lib/arch_tools/arch_origin_context.ml",
+        "lib/arch_tools/arch_path.ml",
+        "lib/arch_tools/arch_report.ml",
+        "lib/arch_tools/arch_rule_eval.ml",
+        "lib/arch_tools/arch_sarif.ml",
+        "lib/arch_tools/arch_sel.ml",
+        "lib/jsonrpc_client/http_transport.ml",
+        "lib/jsonrpc_client/jsonrpc_client.ml",
+        "lib/jsonrpc_client/stdio_transport.ml",
+        "poc/decision-lint/test/fixture.ml",
+        "tezt/fixtures/functor_catalogue/catalogue.ml",
+        "tezt/lib/arch_tezt.ml",
+        "tezt/tests/actionable_review_reports.ml",
+        "tezt/tests/callgraph_go.ml",
+        "tezt/tests/callgraph_nested.ml",
+        "tezt/tests/callgraph_ocaml.ml",
+        "tezt/tests/callgraph_soundness.ml",
+        "tezt/tests/completion_markers.ml",
+        "tezt/tests/contract.ml",
+        "tezt/tests/coverage.ml",
+        "tezt/tests/coverage_matrix.ml",
+        "tezt/tests/curation.ml",
+        "tezt/tests/curation_doc.ml",
+        "tezt/tests/decision_lint.ml",
+        "tezt/tests/dropped_node_dependents.ml",
+        "tezt/tests/duplicates.ml",
+        "tezt/tests/effects.ml",
+        "tezt/tests/error_channels.ml",
+        "tezt/tests/escaping_origins.ml",
+        "tezt/tests/escaping_origins_exported.ml",
+        "tezt/tests/exn_raise_sets.ml",
+        "tezt/tests/exported_selector.ml",
+        "tezt/tests/flat_exported_selector.ml",
+        "tezt/tests/functor_bindings.ml",
+        "tezt/tests/functor_catalogue.ml",
+        "tezt/tests/guard_division_analysis.ml",
+        "tezt/tests/health.ml",
+        "tezt/tests/helpers.ml",
+        "tezt/tests/impact.ml",
+        "tezt/tests/insert_rowid_attribution.ml",
+        "tezt/tests/load.ml",
+        "tezt/tests/lsp_call_diagnostics.ml",
+        "tezt/tests/lsp_error_diagnostics.ml",
+        "tezt/tests/lsp_languages.ml",
+        "tezt/tests/lsp_readiness.ml",
+        "tezt/tests/lsp_runner_diagnostics.ml",
+        "tezt/tests/module_alias_heads.ml",
+        "tezt/tests/multilang.ml",
+        "tezt/tests/must_null_ceiling.ml",
+        "tezt/tests/mutants.ml",
+        "tezt/tests/nested_module_qualification.ml",
+        "tezt/tests/ocaml_shapes.ml",
+        "tezt/tests/origin_recurring_consumer.ml",
+        "tezt/tests/pcc.ml",
+        "tezt/tests/phantom_option_origins.ml",
+        "tezt/tests/point_free_aliases.ml",
+        "tezt/tests/provenance.ml",
+        "tezt/tests/qualified_library_scoping.ml",
+        "tezt/tests/query_limits.ml",
+        "tezt/tests/recalibrate_self_test.ml",
+        "tezt/tests/registry_gaps.ml",
+        "tezt/tests/rejection_attribution.ml",
+        "tezt/tests/report.ml",
+        "tezt/tests/reported_counts_are_row_counts.ml",
+        "tezt/tests/reported_equals_stored.ml",
+        "tezt/tests/rules.ml",
+        "tezt/tests/rules_origin.ml",
+        "tezt/tests/sarif_in.ml",
+        "tezt/tests/sarif_out.ml",
+        "tezt/tests/schema_column_guards.ml",
+        "tezt/tests/schema_drop_list.ml",
+        "tezt/tests/serve.ml",
+        "tezt/tests/shadowed_definitions.ml",
+        "tezt/tests/top_anchor_taxonomy.ml"
+      ],
+      "calls_sha256": "db3e919213b7efd10b13a5d5d6d47d45b8f0497c187f91fc97dfdb982933c4c2"
+    },
+    "ceiling-C": {
+      "totals": {
+        "modules": 122,
+        "functions": 3845,
+        "calls": 22286,
+        "origins": 1204,
+        "must_null": 534
+      },
+      "groups": [
+        {
+          "channel": "exception",
+          "form": "assert",
+          "escapes": 1,
+          "count": 6
+        },
+        {
+          "channel": "exception",
+          "form": "compare",
+          "escapes": 1,
+          "count": 133
+        },
+        {
+          "channel": "exception",
+          "form": "division",
+          "escapes": 1,
+          "count": 3
+        },
+        {
+          "channel": "exception",
+          "form": "failwith",
+          "escapes": 1,
+          "count": 45
+        },
+        {
+          "channel": "exception",
+          "form": "index",
+          "escapes": 1,
+          "count": 166
+        },
+        {
+          "channel": "exception",
+          "form": "invalid_arg",
+          "escapes": 1,
+          "count": 5
+        },
+        {
+          "channel": "exception",
+          "form": "raise",
+          "escapes": 1,
+          "count": 21
+        },
+        {
+          "channel": "exception",
+          "form": "reraise",
+          "escapes": 1,
+          "count": 12
+        },
+        {
+          "channel": "option",
+          "form": "raise",
+          "escapes": 1,
+          "count": 703
+        },
+        {
+          "channel": "result",
+          "form": "raise",
+          "escapes": 1,
+          "count": 27
+        },
+        {
+          "channel": "result",
+          "form": "unknown",
+          "escapes": 1,
+          "count": 83
+        }
+      ],
+      "modules": [
+        "bin/arch_coverage/arch_cov_write.ml",
+        "bin/arch_query/arch_effects_queries.ml",
+        "lib/arch_db/arch_load.ml",
+        "lib/arch_effects/capability_db.ml",
+        "lib/arch_effects/capability_extractor.ml",
+        "lib/arch_effects/capability_types.ml",
+        "lib/arch_effects/effects_db.ml",
+        "lib/arch_effects/effects_load.ml",
+        "lib/arch_effects/extractor_intf.ml",
+        "lib/arch_effects/ocaml_effects_extractor.ml",
+        "lib/arch_guard/arch_guard.ml",
+        "lib/arch_guard/guard_domain.ml",
+        "lib/arch_guard/guard_input.ml",
+        "lib/arch_guard/guard_interpreter.ml",
+        "lib/arch_index/arch_errors_config.ml",
+        "lib/arch_index/arch_index.ml",
+        "lib/arch_index/arch_index_bindings.ml",
+        "lib/arch_index/arch_index_cfg.ml",
+        "lib/arch_index/arch_index_cmt.ml",
+        "lib/arch_index/arch_index_comment_parser.ml",
+        "lib/arch_index/arch_index_compare.ml",
+        "lib/arch_index/arch_index_db.ml",
+        "lib/arch_index/arch_index_errch.ml",
+        "lib/arch_index/arch_index_exn.ml",
+        "lib/arch_index/arch_index_functors.ml",
+        "lib/arch_index/arch_index_git.ml",
+        "lib/arch_index/arch_index_line_counter.ml",
+        "lib/arch_index/arch_index_support.ml",
+        "lib/arch_index/call_graph_extractor.ml",
+        "lib/arch_index/comment_parser.ml",
+        "lib/arch_index/coverage_matrix.ml",
+        "lib/arch_index/doc_extractor.ml",
+        "lib/arch_index/language_registry.ml",
+        "lib/arch_index/lsp_client.ml",
+        "lib/arch_index/lsp_extractor.ml",
+        "lib/arch_index/lsp_types.ml",
+        "lib/arch_index/ocaml_enricher.ml",
+        "lib/arch_index/runner.ml",
+        "lib/arch_index/ts_enricher.ml",
+        "lib/arch_io/arch_io.ml",
+        "lib/arch_tools/arch_db.ml",
+        "lib/arch_tools/arch_diff.ml",
+        "lib/arch_tools/arch_exn.ml",
+        "lib/arch_tools/arch_fmt.ml",
+        "lib/arch_tools/arch_functor_bindings.ml",
+        "lib/arch_tools/arch_functor_catalogue.ml",
+        "lib/arch_tools/arch_graph.ml",
+        "lib/arch_tools/arch_lcov.ml",
+        "lib/arch_tools/arch_origin_context.ml",
+        "lib/arch_tools/arch_path.ml",
+        "lib/arch_tools/arch_report.ml",
+        "lib/arch_tools/arch_rule_eval.ml",
+        "lib/arch_tools/arch_sarif.ml",
+        "lib/arch_tools/arch_sel.ml",
+        "lib/jsonrpc_client/http_transport.ml",
+        "lib/jsonrpc_client/jsonrpc_client.ml",
+        "lib/jsonrpc_client/stdio_transport.ml",
+        "poc/decision-lint/test/fixture.ml",
+        "tezt/fixtures/functor_catalogue/catalogue.ml",
+        "tezt/lib/arch_tezt.ml",
+        "tezt/tests/actionable_review_reports.ml",
+        "tezt/tests/callgraph_go.ml",
+        "tezt/tests/callgraph_nested.ml",
+        "tezt/tests/callgraph_ocaml.ml",
+        "tezt/tests/callgraph_soundness.ml",
+        "tezt/tests/completion_markers.ml",
+        "tezt/tests/contract.ml",
+        "tezt/tests/coverage.ml",
+        "tezt/tests/coverage_matrix.ml",
+        "tezt/tests/curation.ml",
+        "tezt/tests/curation_doc.ml",
+        "tezt/tests/decision_lint.ml",
+        "tezt/tests/dropped_node_dependents.ml",
+        "tezt/tests/duplicates.ml",
+        "tezt/tests/effects.ml",
+        "tezt/tests/error_channels.ml",
+        "tezt/tests/escaping_origins.ml",
+        "tezt/tests/escaping_origins_exported.ml",
+        "tezt/tests/exn_raise_sets.ml",
+        "tezt/tests/exported_selector.ml",
+        "tezt/tests/flat_exported_selector.ml",
+        "tezt/tests/functor_bindings.ml",
+        "tezt/tests/functor_catalogue.ml",
+        "tezt/tests/guard_division_analysis.ml",
+        "tezt/tests/health.ml",
+        "tezt/tests/helpers.ml",
+        "tezt/tests/impact.ml",
+        "tezt/tests/insert_rowid_attribution.ml",
+        "tezt/tests/load.ml",
+        "tezt/tests/lsp_call_diagnostics.ml",
+        "tezt/tests/lsp_error_diagnostics.ml",
+        "tezt/tests/lsp_languages.ml",
+        "tezt/tests/lsp_readiness.ml",
+        "tezt/tests/lsp_runner_diagnostics.ml",
+        "tezt/tests/module_alias_heads.ml",
+        "tezt/tests/multilang.ml",
+        "tezt/tests/must_null_ceiling.ml",
+        "tezt/tests/mutants.ml",
+        "tezt/tests/nested_module_qualification.ml",
+        "tezt/tests/ocaml_shapes.ml",
+        "tezt/tests/origin_recurring_consumer.ml",
+        "tezt/tests/pcc.ml",
+        "tezt/tests/phantom_option_origins.ml",
+        "tezt/tests/point_free_aliases.ml",
+        "tezt/tests/provenance.ml",
+        "tezt/tests/qualified_library_scoping.ml",
+        "tezt/tests/query_limits.ml",
+        "tezt/tests/recalibrate_self_test.ml",
+        "tezt/tests/registry_gaps.ml",
+        "tezt/tests/rejection_attribution.ml",
+        "tezt/tests/report.ml",
+        "tezt/tests/reported_counts_are_row_counts.ml",
+        "tezt/tests/reported_equals_stored.ml",
+        "tezt/tests/rules.ml",
+        "tezt/tests/rules_origin.ml",
+        "tezt/tests/sarif_in.ml",
+        "tezt/tests/sarif_out.ml",
+        "tezt/tests/schema_column_guards.ml",
+        "tezt/tests/schema_drop_list.ml",
+        "tezt/tests/serve.ml",
+        "tezt/tests/shadowed_definitions.ml",
+        "tezt/tests/top_anchor_taxonomy.ml"
+      ],
+      "calls_sha256": "5c2a60f80ea1fde912673e97a285dea0de6fa25eb79d12972c74d22bce82dab1"
+    },
+    "ceiling-D": {
+      "totals": {
+        "modules": 122,
+        "functions": 3845,
+        "calls": 22286,
+        "origins": 1204,
+        "must_null": 534
+      },
+      "groups": [
+        {
+          "channel": "exception",
+          "form": "assert",
+          "escapes": 1,
+          "count": 6
+        },
+        {
+          "channel": "exception",
+          "form": "compare",
+          "escapes": 1,
+          "count": 133
+        },
+        {
+          "channel": "exception",
+          "form": "division",
+          "escapes": 1,
+          "count": 3
+        },
+        {
+          "channel": "exception",
+          "form": "failwith",
+          "escapes": 1,
+          "count": 45
+        },
+        {
+          "channel": "exception",
+          "form": "index",
+          "escapes": 1,
+          "count": 166
+        },
+        {
+          "channel": "exception",
+          "form": "invalid_arg",
+          "escapes": 1,
+          "count": 5
+        },
+        {
+          "channel": "exception",
+          "form": "raise",
+          "escapes": 1,
+          "count": 21
+        },
+        {
+          "channel": "exception",
+          "form": "reraise",
+          "escapes": 1,
+          "count": 12
+        },
+        {
+          "channel": "option",
+          "form": "raise",
+          "escapes": 1,
+          "count": 703
+        },
+        {
+          "channel": "result",
+          "form": "raise",
+          "escapes": 1,
+          "count": 27
+        },
+        {
+          "channel": "result",
+          "form": "unknown",
+          "escapes": 1,
+          "count": 83
+        }
+      ],
+      "modules": [
+        "bin/arch_coverage/arch_cov_write.ml",
+        "bin/arch_query/arch_effects_queries.ml",
+        "lib/arch_db/arch_load.ml",
+        "lib/arch_effects/capability_db.ml",
+        "lib/arch_effects/capability_extractor.ml",
+        "lib/arch_effects/capability_types.ml",
+        "lib/arch_effects/effects_db.ml",
+        "lib/arch_effects/effects_load.ml",
+        "lib/arch_effects/extractor_intf.ml",
+        "lib/arch_effects/ocaml_effects_extractor.ml",
+        "lib/arch_guard/arch_guard.ml",
+        "lib/arch_guard/guard_domain.ml",
+        "lib/arch_guard/guard_input.ml",
+        "lib/arch_guard/guard_interpreter.ml",
+        "lib/arch_index/arch_errors_config.ml",
+        "lib/arch_index/arch_index.ml",
+        "lib/arch_index/arch_index_bindings.ml",
+        "lib/arch_index/arch_index_cfg.ml",
+        "lib/arch_index/arch_index_cmt.ml",
+        "lib/arch_index/arch_index_comment_parser.ml",
+        "lib/arch_index/arch_index_compare.ml",
+        "lib/arch_index/arch_index_db.ml",
+        "lib/arch_index/arch_index_errch.ml",
+        "lib/arch_index/arch_index_exn.ml",
+        "lib/arch_index/arch_index_functors.ml",
+        "lib/arch_index/arch_index_git.ml",
+        "lib/arch_index/arch_index_line_counter.ml",
+        "lib/arch_index/arch_index_support.ml",
+        "lib/arch_index/call_graph_extractor.ml",
+        "lib/arch_index/comment_parser.ml",
+        "lib/arch_index/coverage_matrix.ml",
+        "lib/arch_index/doc_extractor.ml",
+        "lib/arch_index/language_registry.ml",
+        "lib/arch_index/lsp_client.ml",
+        "lib/arch_index/lsp_extractor.ml",
+        "lib/arch_index/lsp_types.ml",
+        "lib/arch_index/ocaml_enricher.ml",
+        "lib/arch_index/runner.ml",
+        "lib/arch_index/ts_enricher.ml",
+        "lib/arch_io/arch_io.ml",
+        "lib/arch_tools/arch_db.ml",
+        "lib/arch_tools/arch_diff.ml",
+        "lib/arch_tools/arch_exn.ml",
+        "lib/arch_tools/arch_fmt.ml",
+        "lib/arch_tools/arch_functor_bindings.ml",
+        "lib/arch_tools/arch_functor_catalogue.ml",
+        "lib/arch_tools/arch_graph.ml",
+        "lib/arch_tools/arch_lcov.ml",
+        "lib/arch_tools/arch_origin_context.ml",
+        "lib/arch_tools/arch_path.ml",
+        "lib/arch_tools/arch_report.ml",
+        "lib/arch_tools/arch_rule_eval.ml",
+        "lib/arch_tools/arch_sarif.ml",
+        "lib/arch_tools/arch_sel.ml",
+        "lib/jsonrpc_client/http_transport.ml",
+        "lib/jsonrpc_client/jsonrpc_client.ml",
+        "lib/jsonrpc_client/stdio_transport.ml",
+        "poc/decision-lint/test/fixture.ml",
+        "tezt/fixtures/functor_catalogue/catalogue.ml",
+        "tezt/lib/arch_tezt.ml",
+        "tezt/tests/actionable_review_reports.ml",
+        "tezt/tests/callgraph_go.ml",
+        "tezt/tests/callgraph_nested.ml",
+        "tezt/tests/callgraph_ocaml.ml",
+        "tezt/tests/callgraph_soundness.ml",
+        "tezt/tests/completion_markers.ml",
+        "tezt/tests/contract.ml",
+        "tezt/tests/coverage.ml",
+        "tezt/tests/coverage_matrix.ml",
+        "tezt/tests/curation.ml",
+        "tezt/tests/curation_doc.ml",
+        "tezt/tests/decision_lint.ml",
+        "tezt/tests/dropped_node_dependents.ml",
+        "tezt/tests/duplicates.ml",
+        "tezt/tests/effects.ml",
+        "tezt/tests/error_channels.ml",
+        "tezt/tests/escaping_origins.ml",
+        "tezt/tests/escaping_origins_exported.ml",
+        "tezt/tests/exn_raise_sets.ml",
+        "tezt/tests/exported_selector.ml",
+        "tezt/tests/flat_exported_selector.ml",
+        "tezt/tests/functor_bindings.ml",
+        "tezt/tests/functor_catalogue.ml",
+        "tezt/tests/guard_division_analysis.ml",
+        "tezt/tests/health.ml",
+        "tezt/tests/helpers.ml",
+        "tezt/tests/impact.ml",
+        "tezt/tests/insert_rowid_attribution.ml",
+        "tezt/tests/load.ml",
+        "tezt/tests/lsp_call_diagnostics.ml",
+        "tezt/tests/lsp_error_diagnostics.ml",
+        "tezt/tests/lsp_languages.ml",
+        "tezt/tests/lsp_readiness.ml",
+        "tezt/tests/lsp_runner_diagnostics.ml",
+        "tezt/tests/module_alias_heads.ml",
+        "tezt/tests/multilang.ml",
+        "tezt/tests/must_null_ceiling.ml",
+        "tezt/tests/mutants.ml",
+        "tezt/tests/nested_module_qualification.ml",
+        "tezt/tests/ocaml_shapes.ml",
+        "tezt/tests/origin_recurring_consumer.ml",
+        "tezt/tests/pcc.ml",
+        "tezt/tests/phantom_option_origins.ml",
+        "tezt/tests/point_free_aliases.ml",
+        "tezt/tests/provenance.ml",
+        "tezt/tests/qualified_library_scoping.ml",
+        "tezt/tests/query_limits.ml",
+        "tezt/tests/recalibrate_self_test.ml",
+        "tezt/tests/registry_gaps.ml",
+        "tezt/tests/rejection_attribution.ml",
+        "tezt/tests/report.ml",
+        "tezt/tests/reported_counts_are_row_counts.ml",
+        "tezt/tests/reported_equals_stored.ml",
+        "tezt/tests/rules.ml",
+        "tezt/tests/rules_origin.ml",
+        "tezt/tests/sarif_in.ml",
+        "tezt/tests/sarif_out.ml",
+        "tezt/tests/schema_column_guards.ml",
+        "tezt/tests/schema_drop_list.ml",
+        "tezt/tests/serve.ml",
+        "tezt/tests/shadowed_definitions.ml",
+        "tezt/tests/top_anchor_taxonomy.ml"
+      ],
+      "calls_sha256": "5c2a60f80ea1fde912673e97a285dea0de6fa25eb79d12972c74d22bce82dab1"
+    },
+    "origin-A": {
+      "totals": {
+        "modules": 25,
+        "functions": 954,
+        "calls": 6131,
+        "origins": 553,
+        "must_null": 165
+      },
+      "groups": [
+        {
+          "channel": "exception",
+          "form": "assert",
+          "escapes": 1,
+          "count": 1
+        },
+        {
+          "channel": "exception",
+          "form": "compare",
+          "escapes": 1,
+          "count": 49
+        },
+        {
+          "channel": "exception",
+          "form": "failwith",
+          "escapes": 1,
+          "count": 28
+        },
+        {
+          "channel": "exception",
+          "form": "index",
+          "escapes": 1,
+          "count": 106
+        },
+        {
+          "channel": "exception",
+          "form": "invalid_arg",
+          "escapes": 1,
+          "count": 1
+        },
+        {
+          "channel": "exception",
+          "form": "raise",
+          "escapes": 1,
+          "count": 1
+        },
+        {
+          "channel": "exception",
+          "form": "reraise",
+          "escapes": 1,
+          "count": 8
+        },
+        {
+          "channel": "option",
+          "form": "raise",
+          "escapes": 1,
+          "count": 304
+        },
+        {
+          "channel": "result",
+          "form": "raise",
+          "escapes": 1,
+          "count": 4
+        },
+        {
+          "channel": "result",
+          "form": "unknown",
+          "escapes": 1,
+          "count": 51
+        }
+      ],
+      "modules": [
+        "lib/arch_index/arch_errors_config.ml",
+        "lib/arch_index/arch_index.ml",
+        "lib/arch_index/arch_index_bindings.ml",
+        "lib/arch_index/arch_index_cfg.ml",
+        "lib/arch_index/arch_index_cmt.ml",
+        "lib/arch_index/arch_index_comment_parser.ml",
+        "lib/arch_index/arch_index_compare.ml",
+        "lib/arch_index/arch_index_db.ml",
+        "lib/arch_index/arch_index_errch.ml",
+        "lib/arch_index/arch_index_exn.ml",
+        "lib/arch_index/arch_index_functors.ml",
+        "lib/arch_index/arch_index_git.ml",
+        "lib/arch_index/arch_index_line_counter.ml",
+        "lib/arch_index/arch_index_support.ml",
+        "lib/arch_index/call_graph_extractor.ml",
+        "lib/arch_index/comment_parser.ml",
+        "lib/arch_index/coverage_matrix.ml",
+        "lib/arch_index/doc_extractor.ml",
+        "lib/arch_index/language_registry.ml",
+        "lib/arch_index/lsp_client.ml",
+        "lib/arch_index/lsp_extractor.ml",
+        "lib/arch_index/lsp_types.ml",
+        "lib/arch_index/ocaml_enricher.ml",
+        "lib/arch_index/runner.ml",
+        "lib/arch_index/ts_enricher.ml"
+      ],
+      "calls_sha256": "797a5fbff5dbed405e97911a990f6b2fb9a75781fc11edf872ee16abc7c189e3"
+    },
+    "origin-B": {
+      "totals": {
+        "modules": 25,
+        "functions": 954,
+        "calls": 6131,
+        "origins": 553,
+        "must_null": 165
+      },
+      "groups": [
+        {
+          "channel": "exception",
+          "form": "assert",
+          "escapes": 1,
+          "count": 1
+        },
+        {
+          "channel": "exception",
+          "form": "compare",
+          "escapes": 1,
+          "count": 49
+        },
+        {
+          "channel": "exception",
+          "form": "failwith",
+          "escapes": 1,
+          "count": 28
+        },
+        {
+          "channel": "exception",
+          "form": "index",
+          "escapes": 1,
+          "count": 106
+        },
+        {
+          "channel": "exception",
+          "form": "invalid_arg",
+          "escapes": 1,
+          "count": 1
+        },
+        {
+          "channel": "exception",
+          "form": "raise",
+          "escapes": 1,
+          "count": 1
+        },
+        {
+          "channel": "exception",
+          "form": "reraise",
+          "escapes": 1,
+          "count": 8
+        },
+        {
+          "channel": "option",
+          "form": "raise",
+          "escapes": 1,
+          "count": 304
+        },
+        {
+          "channel": "result",
+          "form": "raise",
+          "escapes": 1,
+          "count": 4
+        },
+        {
+          "channel": "result",
+          "form": "unknown",
+          "escapes": 1,
+          "count": 51
+        }
+      ],
+      "modules": [
+        "lib/arch_index/arch_errors_config.ml",
+        "lib/arch_index/arch_index.ml",
+        "lib/arch_index/arch_index_bindings.ml",
+        "lib/arch_index/arch_index_cfg.ml",
+        "lib/arch_index/arch_index_cmt.ml",
+        "lib/arch_index/arch_index_comment_parser.ml",
+        "lib/arch_index/arch_index_compare.ml",
+        "lib/arch_index/arch_index_db.ml",
+        "lib/arch_index/arch_index_errch.ml",
+        "lib/arch_index/arch_index_exn.ml",
+        "lib/arch_index/arch_index_functors.ml",
+        "lib/arch_index/arch_index_git.ml",
+        "lib/arch_index/arch_index_line_counter.ml",
+        "lib/arch_index/arch_index_support.ml",
+        "lib/arch_index/call_graph_extractor.ml",
+        "lib/arch_index/comment_parser.ml",
+        "lib/arch_index/coverage_matrix.ml",
+        "lib/arch_index/doc_extractor.ml",
+        "lib/arch_index/language_registry.ml",
+        "lib/arch_index/lsp_client.ml",
+        "lib/arch_index/lsp_extractor.ml",
+        "lib/arch_index/lsp_types.ml",
+        "lib/arch_index/ocaml_enricher.ml",
+        "lib/arch_index/runner.ml",
+        "lib/arch_index/ts_enricher.ml"
+      ],
+      "calls_sha256": "797a5fbff5dbed405e97911a990f6b2fb9a75781fc11edf872ee16abc7c189e3"
+    },
+    "origin-C": {
+      "totals": {
+        "modules": 25,
+        "functions": 956,
+        "calls": 6145,
+        "origins": 554,
+        "must_null": 165
+      },
+      "groups": [
+        {
+          "channel": "exception",
+          "form": "assert",
+          "escapes": 1,
+          "count": 1
+        },
+        {
+          "channel": "exception",
+          "form": "compare",
+          "escapes": 1,
+          "count": 49
+        },
+        {
+          "channel": "exception",
+          "form": "failwith",
+          "escapes": 1,
+          "count": 28
+        },
+        {
+          "channel": "exception",
+          "form": "index",
+          "escapes": 1,
+          "count": 106
+        },
+        {
+          "channel": "exception",
+          "form": "invalid_arg",
+          "escapes": 1,
+          "count": 1
+        },
+        {
+          "channel": "exception",
+          "form": "raise",
+          "escapes": 1,
+          "count": 1
+        },
+        {
+          "channel": "exception",
+          "form": "reraise",
+          "escapes": 1,
+          "count": 8
+        },
+        {
+          "channel": "option",
+          "form": "raise",
+          "escapes": 1,
+          "count": 305
+        },
+        {
+          "channel": "result",
+          "form": "raise",
+          "escapes": 1,
+          "count": 4
+        },
+        {
+          "channel": "result",
+          "form": "unknown",
+          "escapes": 1,
+          "count": 51
+        }
+      ],
+      "modules": [
+        "lib/arch_index/arch_errors_config.ml",
+        "lib/arch_index/arch_index.ml",
+        "lib/arch_index/arch_index_bindings.ml",
+        "lib/arch_index/arch_index_cfg.ml",
+        "lib/arch_index/arch_index_cmt.ml",
+        "lib/arch_index/arch_index_comment_parser.ml",
+        "lib/arch_index/arch_index_compare.ml",
+        "lib/arch_index/arch_index_db.ml",
+        "lib/arch_index/arch_index_errch.ml",
+        "lib/arch_index/arch_index_exn.ml",
+        "lib/arch_index/arch_index_functors.ml",
+        "lib/arch_index/arch_index_git.ml",
+        "lib/arch_index/arch_index_line_counter.ml",
+        "lib/arch_index/arch_index_support.ml",
+        "lib/arch_index/call_graph_extractor.ml",
+        "lib/arch_index/comment_parser.ml",
+        "lib/arch_index/coverage_matrix.ml",
+        "lib/arch_index/doc_extractor.ml",
+        "lib/arch_index/language_registry.ml",
+        "lib/arch_index/lsp_client.ml",
+        "lib/arch_index/lsp_extractor.ml",
+        "lib/arch_index/lsp_types.ml",
+        "lib/arch_index/ocaml_enricher.ml",
+        "lib/arch_index/runner.ml",
+        "lib/arch_index/ts_enricher.ml"
+      ],
+      "calls_sha256": "8888a0c67caecd6d5e9641d04823d9430a602c361c696e3f46e932e52bf60594"
+    },
+    "origin-D": {
+      "totals": {
+        "modules": 25,
+        "functions": 956,
+        "calls": 6145,
+        "origins": 554,
+        "must_null": 165
+      },
+      "groups": [
+        {
+          "channel": "exception",
+          "form": "assert",
+          "escapes": 1,
+          "count": 1
+        },
+        {
+          "channel": "exception",
+          "form": "compare",
+          "escapes": 1,
+          "count": 49
+        },
+        {
+          "channel": "exception",
+          "form": "failwith",
+          "escapes": 1,
+          "count": 28
+        },
+        {
+          "channel": "exception",
+          "form": "index",
+          "escapes": 1,
+          "count": 106
+        },
+        {
+          "channel": "exception",
+          "form": "invalid_arg",
+          "escapes": 1,
+          "count": 1
+        },
+        {
+          "channel": "exception",
+          "form": "raise",
+          "escapes": 1,
+          "count": 1
+        },
+        {
+          "channel": "exception",
+          "form": "reraise",
+          "escapes": 1,
+          "count": 8
+        },
+        {
+          "channel": "option",
+          "form": "raise",
+          "escapes": 1,
+          "count": 305
+        },
+        {
+          "channel": "result",
+          "form": "raise",
+          "escapes": 1,
+          "count": 4
+        },
+        {
+          "channel": "result",
+          "form": "unknown",
+          "escapes": 1,
+          "count": 51
+        }
+      ],
+      "modules": [
+        "lib/arch_index/arch_errors_config.ml",
+        "lib/arch_index/arch_index.ml",
+        "lib/arch_index/arch_index_bindings.ml",
+        "lib/arch_index/arch_index_cfg.ml",
+        "lib/arch_index/arch_index_cmt.ml",
+        "lib/arch_index/arch_index_comment_parser.ml",
+        "lib/arch_index/arch_index_compare.ml",
+        "lib/arch_index/arch_index_db.ml",
+        "lib/arch_index/arch_index_errch.ml",
+        "lib/arch_index/arch_index_exn.ml",
+        "lib/arch_index/arch_index_functors.ml",
+        "lib/arch_index/arch_index_git.ml",
+        "lib/arch_index/arch_index_line_counter.ml",
+        "lib/arch_index/arch_index_support.ml",
+        "lib/arch_index/call_graph_extractor.ml",
+        "lib/arch_index/comment_parser.ml",
+        "lib/arch_index/coverage_matrix.ml",
+        "lib/arch_index/doc_extractor.ml",
+        "lib/arch_index/language_registry.ml",
+        "lib/arch_index/lsp_client.ml",
+        "lib/arch_index/lsp_extractor.ml",
+        "lib/arch_index/lsp_types.ml",
+        "lib/arch_index/ocaml_enricher.ml",
+        "lib/arch_index/runner.ml",
+        "lib/arch_index/ts_enricher.ml"
+      ],
+      "calls_sha256": "8888a0c67caecd6d5e9641d04823d9430a602c361c696e3f46e932e52bf60594"
+    }
+  },
+  "temporary": "/tmp/arch-index-binding-calibration-gmKL2l",
+  "verdict": "SOURCE_ONLY"
+}

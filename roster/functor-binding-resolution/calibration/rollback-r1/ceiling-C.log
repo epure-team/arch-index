@@ -1,0 +1,21 @@
+Project root: /tmp/arch-index-binding-calibration-33RByH/candidate
+Scanning /tmp/arch-index-binding-calibration-33RByH/candidate/_build/default for .cmt/.cmti files...
+Found 134 .cmt and 81 .cmti files
+Found 352 exposed names, 254 doc comments
+Backed up 0 module intents, 0 function intents, 0 type intents
+Resolving 22286 pending calls...
+Inserted 22286 calls (9775 resolved to known functions)
+Resolving 103 module dependencies...
+Inserted 103 module deps (85 resolved to known modules)
+Resolving 5520 type usages...
+Inserted 5520 type usages (112 resolved to known types)
+
+Done! Indexed:
+  122 modules
+  3845 functions
+  135 types (441 record fields, 173 variant constructors)
+  22286 calls (9775 resolved)
+  103 module deps (85 resolved)
+  5520 type usages (112 resolved)
+Database: /tmp/arch-index-binding-calibration-33RByH/ceiling-C.db
+Indexed: 122 modules, 3845 functions, 135 types, 22286 calls

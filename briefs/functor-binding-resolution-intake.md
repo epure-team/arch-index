@@ -131,6 +131,24 @@ branch must pass the full roster and exact-head CI before PR merge.
 
 ## Open Questions
 
+### Review correction gate (2026-09-13; unchanged isolation scope)
+
+The first review reproduced binding `RAISE(ROLLBACK)` unwinding the enclosing old
+producer transaction. Correct this within the existing storage-isolation requirement:
+collect immutable per-input payloads while CMTs are available, then persist each input
+independently after old graph/catalogue transactions finish, before binding finalization.
+Do not retain Typedtrees, wrap all binding inputs in a shared transaction, short-circuit
+later jobs after a failed input, or alter graph/catalogue semantics.
+
+Add the separate gate `node roster/functor-binding-resolution/check-global-rollback.js`.
+It builds and invokes the exact checkout's producer (including git-archive RED exports),
+compiles two owned native CMTs with two applications each, proves a healthy control,
+then injects a schema-only ordinal-2 RAISE(ROLLBACK) conditional on another artifact
+already having binding rows. Require fault-run exit0 plus warning, unchanged old facts,
+one intact earlier binding input, failed input row with zero entities, and absent marker.
+Use exit0/1/>=2 pass/assertion/setup convention. Run outside Dune tests to avoid nested
+build locks. Preserve all earlier test families, full suite and unchanged-headroom gates.
+
 None for this slice. Cross-unit and higher-order bindings, closed-world completeness,
 and per-instance exception semantics are explicit subsequent scopes, not implementer
 discretion. The spec must freeze the exact record grammar/refusal precedence and

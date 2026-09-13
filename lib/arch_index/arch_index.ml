@@ -495,6 +495,9 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
 
   let catalogue_collected = ref 0 in
   let binding_eligible = ref true in
+  (* Only immutable scalar/list payloads escape the Typedtree callback. Binding
+     SQL must wait until all graph and catalogue transactions have committed. *)
+  let binding_jobs = ref [] in
   (match producer_run_id, selected_catalogue_inputs with
   | Some run_id, _ :: _ ->
       let sql = Printf.sprintf
@@ -670,15 +673,12 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
                   incr catalogue_collected ;
                   (try
                      let bindings = Arch_index_bindings.collect structure in
-                     Arch_index_bindings.store_collected db ~producer_run_id ~artifact bindings
+                     binding_jobs := (producer_run_id, artifact, Some bindings) :: !binding_jobs
                    with exn ->
                      binding_eligible := false ;
                      Arch_io.eprintf "Warning: functor binding collection failed for %s: %s\\n"
                        artifact (Printexc.to_string exn) ;
-                     try Arch_index_bindings.store_failed db ~producer_run_id ~artifact
-                     with failed ->
-                       Arch_io.eprintf "Warning: functor binding failure recording failed for %s: %s\\n"
-                         artifact (Printexc.to_string failed)))
+                     binding_jobs := (producer_run_id, artifact, None) :: !binding_jobs))
             ~on_catalogue_outcome:(fun ~artifact ~outcome ->
               match producer_run_id with
               | None -> ()
@@ -1800,6 +1800,28 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
 
   (* Restore intents *)
   Arch_index_support.restore_intents db backup ;
+
+  (* Each outermost savepoint commits just one binding input. In particular,
+     SQLite RAISE(ROLLBACK) cannot unwind old facts or earlier binding inputs.
+     Drain every job even after failure; the latch controls only the marker. *)
+  List.iter
+    (fun (producer_run_id, artifact, bindings) ->
+      let record_failed () =
+        try Arch_index_bindings.store_failed db ~producer_run_id ~artifact
+        with failed ->
+          Arch_io.eprintf "Warning: functor binding failure recording failed for %s: %s\n"
+            artifact (Printexc.to_string failed)
+      in
+      match bindings with
+      | None -> record_failed ()
+      | Some bindings ->
+          (try Arch_index_bindings.store_collected db ~producer_run_id ~artifact bindings
+           with exn ->
+             binding_eligible := false ;
+             Arch_io.eprintf "Warning: functor binding collection failed for %s: %s\n"
+               artifact (Printexc.to_string exn) ;
+             record_failed ()))
+    (List.rev !binding_jobs) ;
 
   (* Binding completion is independent of the syntax catalogue and is earned
      only from persisted, committed data. Keep it last, after every producer

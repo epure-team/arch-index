@@ -53,7 +53,7 @@
   ],
   "quality_gates": {
     "build": "rtk proxy opam exec --switch=/home/mathias/dev/arch-index -- dune build --root .",
-    "test": "rtk proxy opam exec --switch=/home/mathias/dev/arch-index -- dune test --root . --force",
+    "test": "rtk proxy opam exec --switch=/home/mathias/dev/arch-index -- dune test --root . --force && rtk proxy opam exec --switch=/home/mathias/dev/arch-index -- node roster/functor-binding-resolution/check-global-rollback.js",
     "lint": ""
   }
 }

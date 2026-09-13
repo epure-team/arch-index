@@ -93,3 +93,35 @@ No general0CFA, cross-unit/member normalization, actual substitution, runtime
 instances, new call targets, extra headroom, Tezos modifications, held issue or
 PR93 changes. The1050 unsupported_path results suggest a future scoped path census;
 they are not distinct paths and not necessarily all external units.
+
+## Corrective round2 implementation — COMPLETED
+
+Spec revalidation and sequential Sol/Terra plan retained26FR, added AC13/CHECK5.
+Product correction only in arch_index.ml: queue immutable payloads during CMT
+collection, drain per input after all old producer transactions, continue after
+failure and keep independent eligibility false. No Typedtree retention or new API.
+Standalone two-input global-rollback and three-input continuation tests have real
+local RED exit1 then GREEN exit0. Existing four check families rerun exit0.
+
+Full post-correction suite initially319/320 due solely to origin reference drift.
+Two fresh symmetric2x2 calibrations prove SOURCE_ONLY with identical same-corpus
+grouped calls/origins/modules; references updated25/956/6145/554. Ceiling pin524,
+headroom25, rules and allowlist unchanged. Both owned temporary build trees removed.
+Final full build exit0; final full suite320/320Tezt+64Alcotest exit0,
+completion18:54:18UTC. Log: roster/functor-binding-resolution/rollback-final-tests.log.
+Scope, syntax, whitespace and bundle gates pass. Independent bounded Sol source
+audit found no findings (no builds executed by that role); formal review still next.
+Detailed correction/oracle/calibration evidence: rollback-correction.md.
+
+## Ratchet
+
+- **Finding:** lib/arch_index/arch_index.ml:616:spec
+  **Check:** roster/functor-binding-resolution/check-global-rollback.js (spec CHECK-5)
+  **Red command:** node roster/functor-binding-resolution/check-global-rollback.js
+  **check_encodable:** true
+  **Pre-fix SHA:** 5338a81ebeafbe11eb1fe61bf11aa8a0e65b74c5
+
+The checker is standalone and builds the exact checkout producer under the inherited
+selected OCaml environment. No new helper or installed binary is used in scratch.
+Local RED exit1 and GREEN exit0 are recorded in rollback-correction.md. Formal
+convergence verification against the archived pre-fix SHA remains review's gate.

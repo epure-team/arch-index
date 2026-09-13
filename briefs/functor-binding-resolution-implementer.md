@@ -124,3 +124,56 @@ High risks: ordinal drift, shadowed Ident joins, curried off-by-one, partial mar
 wholevalidation limit bypass, invalid synthetic premises and overclaimed benchmark.
 No unrelated refactors or calibration relaxations. Claims/KB/hooks unavailable,
 so manual pipeline with actual evidence, not simulated managed validation.
+
+## Review correction plan — 2026-09-13 (supersedes initial execution order)
+
+**Status: VALIDATED** under standing autonomous continuation; no quiz answers fabricated.
+Decomposition source: intake Review correction gate. Spec brief checked as status gate.
+Earlier implementation is complete historically, but review remains NO-GO for FR-014/AC-8.
+
+One vertical corrective slice, with tests and product changes together:
+1. Preserve original manifest base7df5c03 and clean pre-fix review SHA5338a81; reactivate
+   task slot. Existing full320Tezt+64Alcotest baseline applies to unchanged product.
+2. BEFORE product edits, add standalone self-contained
+   roster/functor-binding-resolution/check-global-rollback.js (CHECK-5). Build the
+   exact checkout producer and compile owned native fixtures; no installed binary or
+   imported new helper. Healthy two-input control must precede genuine ordinal-2
+   global rollback. Capture semantic RED exit1, never a setup error as proof.
+3. Change only producer orchestration in lib/arch_index/arch_index.ml: collect and
+   queue immutable data without Typedtrees; after all old producer transactions,
+   drain each job independently, preserving old facts, earlier successful binding
+   inputs, failure-row attempts, warning and false eligibility latch. Never place
+   the drain inside a shared transaction or skip later jobs after a failure.
+4. Run CHECK-5 GREEN plus a three-input continuation case in that checker: fault
+   after an earlier success, suppress further injected faults once a failed row is
+   recorded, prove the remaining input succeeds. No reliance on artifact names or
+   traversal order. Preserve the required two-input control/fault case separately.
+5. All five Node checks, full build/test, scope, bundle and whitespace gates. Run
+   CHECK-5 separately under selected opam environment, never nested inside Dune.
+   Recalibrate only if fresh symmetric attribution proves neutral source effects;
+   headroom25 and all graph semantics remain unchanged.
+6. Commit the completed round with clean status; roster-review verifies the linked
+   new ratchet against pre-fix SHA (git archive export), then roster-qa. Only both
+   GO verdicts permit PR/exact-head green CI/rebase merge and owned-worktree cleanup.
+
+Consensus: sequential independent Sol then Terra agreed on isolation, immutable
+payloads, failure-aware finalization, authentic rollback and later-job preservation.
+Root corrected Sol's initial test-after-refactor order to mandatory TDD; Terra
+independently required test-first. Sol's 'partial state queryable' means SQL evidence
+only: the public command still refuses absent-marker databases. These are corrections
+from the existing contract, not alternate product choices. No DISAGREE/USER-CHALLENGE.
+
+Risks: hidden enclosing transactions, stale binary in RED export, vacuous trigger,
+shared drain transaction, short-circuited later input, false marker and incomplete old
+fact comparison. Assert full semantic old tables and catalogue marker, premise-check
+healthy fixtures, identify good/failed inputs by persisted outcomes, and preserve all
+existing acceptance tests. No new schema/API/refusal/target-resolution capability.
+
+Additional exact gate:
+```sh
+rtk proxy opam exec --switch=/home/mathias/dev/arch-index -- node roster/functor-binding-resolution/check-global-rollback.js
+```
+
+Required coverage now26FR/13AC and five checks. CHECK-5 is separate from Dune;
+review and QA must run it explicitly. No claim that hosted CI already invokes it.
+Claims/KB/hooks remain absent; manual pipeline retained. Root owns all Dune builds.
