@@ -1,0 +1,28 @@
+; Test-only native Typedtree/CMT premise probe.  It is deliberately not installed.
+(executable
+ (name typedtree_probe)
+ (modules typedtree_probe)
+ (libraries compiler-libs.common yojson))
+
+; Test-only direct probes of real wrapped storage/lifecycle APIs.  They are
+; deliberately not installed and do not introduce production fault switches.
+(executable
+ (name storage_probe)
+ (modules storage_probe)
+ (libraries arch_index sqlite3 yojson))
+
+(executable
+ (name lifecycle_probe)
+ (modules lifecycle_probe)
+ (libraries arch_index sqlite3 yojson))
+
+(executable
+ (name selection_probe)
+ (modules selection_probe)
+ (libraries arch_index yojson))
+
+; Seed input for the probe and the future independent Node oracle.
+(library
+ (name catalogue)
+ (modules catalogue)
+ (wrapped false))

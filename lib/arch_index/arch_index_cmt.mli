@@ -475,5 +475,7 @@ val process_cmt :
   ?value_channels:Arch_errors_config.channel list ->
   ?stmt_carrier:Sqlite3.stmt ->
   ?producer_run_id:int option ->
+  ?on_implementation:(artifact:string -> source:string -> compiler_unit:string -> module_id:int -> Typedtree.structure -> unit) ->
+  ?on_catalogue_outcome:(artifact:string -> outcome:string -> unit) ->
   string ->
   pending_call list * pending_dep list * pending_type_usage list

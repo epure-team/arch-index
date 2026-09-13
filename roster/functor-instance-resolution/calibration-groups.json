@@ -1,0 +1,166 @@
+{
+  "controls": {
+    "aa": {
+      "calls": 19826,
+      "indexed_root": 141,
+      "resolver_misses": 0,
+      "name_match_control": 4888
+    },
+    "ba": {
+      "calls": 19826,
+      "indexed_root": 141,
+      "resolver_misses": 0,
+      "name_match_control": 4888
+    },
+    "ab": {
+      "calls": 20525,
+      "indexed_root": 159,
+      "resolver_misses": 0,
+      "name_match_control": 5072
+    },
+    "bb": {
+      "calls": 20525,
+      "indexed_root": 159,
+      "resolver_misses": 0,
+      "name_match_control": 5072
+    }
+  },
+  "group_deltas": [
+    {
+      "identity": [
+        "lib/arch_index/arch_index.ml",
+        "Sqlite3.bind"
+      ],
+      "before": 0,
+      "after": 2,
+      "delta": 2
+    },
+    {
+      "identity": [
+        "lib/arch_index/arch_index.ml",
+        "Sqlite3.finalize"
+      ],
+      "before": 0,
+      "after": 1,
+      "delta": 1
+    },
+    {
+      "identity": [
+        "lib/arch_index/arch_index.ml",
+        "Sqlite3.step"
+      ],
+      "before": 0,
+      "after": 1,
+      "delta": 1
+    },
+    {
+      "identity": [
+        "lib/arch_index/arch_index_functors.ml",
+        "Path.name"
+      ],
+      "before": 0,
+      "after": 1,
+      "delta": 1
+    },
+    {
+      "identity": [
+        "lib/arch_index/arch_index_functors.ml",
+        "Sqlite3.exec"
+      ],
+      "before": 0,
+      "after": 2,
+      "delta": 2
+    },
+    {
+      "identity": [
+        "lib/arch_index/arch_index_functors.ml",
+        "Sqlite3.finalize"
+      ],
+      "before": 0,
+      "after": 1,
+      "delta": 1
+    },
+    {
+      "identity": [
+        "lib/arch_index/arch_index_functors.ml",
+        "Sqlite3.prepare"
+      ],
+      "before": 0,
+      "after": 1,
+      "delta": 1
+    },
+    {
+      "identity": [
+        "lib/arch_index/arch_index_functors.ml",
+        "Sqlite3.step"
+      ],
+      "before": 0,
+      "after": 1,
+      "delta": 1
+    },
+    {
+      "identity": [
+        "lib/arch_index/arch_index_functors.ml",
+        "Yojson.Safe.to_string"
+      ],
+      "before": 0,
+      "after": 2,
+      "delta": 2
+    },
+    {
+      "identity": [
+        "lib/arch_tools/arch_functor_catalogue.ml",
+        "Arch_tools.Arch_db.Ty.option"
+      ],
+      "before": 0,
+      "after": 10,
+      "delta": 10
+    },
+    {
+      "identity": [
+        "lib/arch_tools/arch_functor_catalogue.ml",
+        "Arch_tools.Arch_db.Ty.t2"
+      ],
+      "before": 0,
+      "after": 1,
+      "delta": 1
+    },
+    {
+      "identity": [
+        "lib/arch_tools/arch_functor_catalogue.ml",
+        "Arch_tools.Arch_db.Ty.t5"
+      ],
+      "before": 0,
+      "after": 2,
+      "delta": 2
+    },
+    {
+      "identity": [
+        "lib/arch_tools/arch_functor_catalogue.ml",
+        "Yojson.Safe.from_string"
+      ],
+      "before": 0,
+      "after": 1,
+      "delta": 1
+    },
+    {
+      "identity": [
+        "tezt/tests/functor_catalogue.ml",
+        "Arch_tezt.Check.list"
+      ],
+      "before": 0,
+      "after": 1,
+      "delta": 1
+    },
+    {
+      "identity": [
+        "tezt/tests/functor_catalogue.ml",
+        "Arch_tezt.Check.option"
+      ],
+      "before": 0,
+      "after": 4,
+      "delta": 4
+    }
+  ],
+  "removed_groups": []
+}

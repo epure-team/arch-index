@@ -1,0 +1,118 @@
+{
+  "verified_shifted_rows": 8,
+  "delta_lines": 18,
+  "rows": [
+    {
+      "before": {
+        "path": "lib/arch_index/arch_index_cmt.ml",
+        "caller": "process_cmt.<fun:2858:24>.<fun:2859:35>",
+        "call_site": "lib/arch_index/arch_index_cmt.ml:2860",
+        "callee_name": "Ident.name"
+      },
+      "after": {
+        "path": "lib/arch_index/arch_index_cmt.ml",
+        "caller": "process_cmt.<fun:2876:24>.<fun:2877:35>",
+        "call_site": "lib/arch_index/arch_index_cmt.ml:2878",
+        "callee_name": "Ident.name"
+      }
+    },
+    {
+      "before": {
+        "path": "lib/arch_index/arch_index_cmt.ml",
+        "caller": "process_cmt.<fun:2858:24>.<fun:2859:35>",
+        "call_site": "lib/arch_index/arch_index_cmt.ml:2861",
+        "callee_name": "Ident.unique_name"
+      },
+      "after": {
+        "path": "lib/arch_index/arch_index_cmt.ml",
+        "caller": "process_cmt.<fun:2876:24>.<fun:2877:35>",
+        "call_site": "lib/arch_index/arch_index_cmt.ml:2879",
+        "callee_name": "Ident.unique_name"
+      }
+    },
+    {
+      "before": {
+        "path": "lib/arch_index/arch_index_cmt.ml",
+        "caller": "process_cmt.<fun:2858:24>.<fun:2879:29>",
+        "call_site": "lib/arch_index/arch_index_cmt.ml:2880",
+        "callee_name": "Ident.unique_name"
+      },
+      "after": {
+        "path": "lib/arch_index/arch_index_cmt.ml",
+        "caller": "process_cmt.<fun:2876:24>.<fun:2897:29>",
+        "call_site": "lib/arch_index/arch_index_cmt.ml:2898",
+        "callee_name": "Ident.unique_name"
+      }
+    },
+    {
+      "before": {
+        "path": "lib/arch_index/arch_index_cmt.ml",
+        "caller": "process_cmt.<fun:2858:24>.<fun:2879:29>",
+        "call_site": "lib/arch_index/arch_index_cmt.ml:2881",
+        "callee_name": "Ident.name"
+      },
+      "after": {
+        "path": "lib/arch_index/arch_index_cmt.ml",
+        "caller": "process_cmt.<fun:2876:24>.<fun:2897:29>",
+        "call_site": "lib/arch_index/arch_index_cmt.ml:2899",
+        "callee_name": "Ident.name"
+      }
+    },
+    {
+      "before": {
+        "path": "lib/arch_index/arch_index_cmt.ml",
+        "caller": "process_cmt.<fun:2937:36>.<fun:3417:29>",
+        "call_site": "lib/arch_index/arch_index_cmt.ml:3418",
+        "callee_name": "Ident.name"
+      },
+      "after": {
+        "path": "lib/arch_index/arch_index_cmt.ml",
+        "caller": "process_cmt.<fun:2955:36>.<fun:3435:29>",
+        "call_site": "lib/arch_index/arch_index_cmt.ml:3436",
+        "callee_name": "Ident.name"
+      }
+    },
+    {
+      "before": {
+        "path": "lib/arch_index/arch_index_cmt.ml",
+        "caller": "process_cmt.<fun:2937:36>.<fun:3417:29>.<fun:3481:41>",
+        "call_site": "lib/arch_index/arch_index_cmt.ml:3482",
+        "callee_name": "Ident.name"
+      },
+      "after": {
+        "path": "lib/arch_index/arch_index_cmt.ml",
+        "caller": "process_cmt.<fun:2955:36>.<fun:3435:29>.<fun:3499:41>",
+        "call_site": "lib/arch_index/arch_index_cmt.ml:3500",
+        "callee_name": "Ident.name"
+      }
+    },
+    {
+      "before": {
+        "path": "lib/arch_index/arch_index_cmt.ml",
+        "caller": "process_cmt.<fun:2937:36>.<fun:3417:29>.<fun:3494:41>",
+        "call_site": "lib/arch_index/arch_index_cmt.ml:3497",
+        "callee_name": "Ident.name"
+      },
+      "after": {
+        "path": "lib/arch_index/arch_index_cmt.ml",
+        "caller": "process_cmt.<fun:2955:36>.<fun:3435:29>.<fun:3512:41>",
+        "call_site": "lib/arch_index/arch_index_cmt.ml:3515",
+        "callee_name": "Ident.name"
+      }
+    },
+    {
+      "before": {
+        "path": "lib/arch_index/arch_index_cmt.ml",
+        "caller": "process_cmt.<fun:2937:36>.<fun:3417:29>.<fun:3494:41>.<fun:3511:57>",
+        "call_site": "lib/arch_index/arch_index_cmt.ml:3516",
+        "callee_name": "Ident.name"
+      },
+      "after": {
+        "path": "lib/arch_index/arch_index_cmt.ml",
+        "caller": "process_cmt.<fun:2955:36>.<fun:3435:29>.<fun:3512:41>.<fun:3529:57>",
+        "call_site": "lib/arch_index/arch_index_cmt.ml:3534",
+        "callee_name": "Ident.name"
+      }
+    }
+  ]
+}
