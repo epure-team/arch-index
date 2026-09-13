@@ -1,0 +1,44 @@
+Command (from the functor-instance-resolution worktree):
+
+  rtk bash roster/functor-instance-resolution/tezos-irmin-candidate/reproduce.sh
+
+Captured stdout:
+
+manifest_entries=410
+manifest_sha256=9e38880a52f855c58081b1a171af5879058cbaa2697aaa5694827cbd16f8ecd1
+Project root: /home/mathias/dev/tezos/tezos
+Scanning /home/mathias/dev/tezos/tezos/_build/arch-index-functor-candidate.OawYi2 for .cmt/.cmti files...
+Found 410 .cmt and 0 .cmti files
+Found 0 exposed names, 0 doc comments
+Backed up 0 module intents, 0 function intents, 0 type intents
+Resolving 45018 pending calls...
+Inserted 45018 calls (16448 resolved to known functions)
+Resolving 509 module dependencies...
+Inserted 509 module deps (405 resolved to known modules)
+Resolving 34219 type usages...
+Inserted 34219 type usages (4519 resolved to known types)
+
+Done! Indexed:
+  410 modules
+  12373 functions
+  1555 types (1440 record fields, 1355 variant constructors)
+  45018 calls (16448 resolved)
+  509 module deps (405 resolved)
+  34219 type usages (4519 resolved)
+Database: /tmp/arch-index-functor-candidate.B5mbrn.db
+Indexed: 410 modules, 12373 functions, 1555 types, 45018 calls
+--- raw: functor-applications 0 ---
+[{"contract":"v1","selected_inputs":410,"collected_inputs":410,"total":1275,"returned":0,"truncated":1,"scope":"selected_cmt_syntax_only","limitations":"not_runtime_instances;not_closed_world;no_target_resolution;no_source_freshness_check;paths_are_artifact_selections"}]
+[]
+--- raw: stats ---
+[{"contract":"v1"}]
+[{"functions":12373,"exported":0,"call_edges":45018}]
+[{"kind":"MAY_ENUMERATED","edges":23209},
+{"kind":"MUST","edges":13601},
+{"kind":"MAY_TOP","edges":8208}]
+[{"dead_call_sites":0}]
+[{"mutation_sites":416,"deref_sites":215,"fns_measured":8152}]
+--- derived: applications by source slice ---
+[{"slice":"irmin-core","applications":228},{"slice":"irmin-pack","applications":13},{"slice":"irmin-pack-unix","applications":143},{"slice":"proto-alpha","applications":891}]
+--- derived: diagnostics ---
+[{"diagnostics":"[]","count":962},{"diagnostics":"[\"anonymous_argument\"]","count":313}]

@@ -47,4 +47,3 @@ rtk proxy opam exec --switch=/home/mathias/dev/arch-index -- node scripts/check-
 rtk proxy node scripts/review-bundle-verify.js
 rtk proxy git diff --check
 ```
-

@@ -15,9 +15,14 @@ does not retroactively change this run's revision label.
 
 The producer used the arch-index OCaml-5.3 executable and a temporary symlink
 corpus under Tezos `_build/`, so CMT-relative source paths resolved against the
-real Tezos root. The temporary corpus and SQLite database were deleted after
-the compact results below were captured. Aggregate and per-slice content
-digests are in `provenance.json`.
+real Tezos root. The corpus was created by `mktemp -d
+/home/mathias/dev/tezos/tezos/_build/arch-index-functor-candidate.XXXXXX` and
+deleted by its shell trap, together with its `/tmp/arch-index-functor-candidate.*.db`.
+This was a reversible temporary mutation below `_build`, not a persistent source
+or Git-checkout mutation; it is nevertheless a deviation from a literal
+"no Tezos mutation" reading and is recorded here. Aggregate and per-slice
+content digests are in `provenance.json`; the exact original paths and byte
+hashes are in `manifest-410.tsv`.
 
 The earlier raw inventory contained 414 CMTs. The effective producer set is
 410, rather than silently claiming all 414:
@@ -30,13 +35,13 @@ The earlier raw inventory contained 414 CMTs. The effective producer set is
 | Tezos proto_alpha raw | 275 | 275 | 891 |
 | **Total** | **410** | **410** | **1,275** |
 
-The four raw exclusions are producer-boundary facts, not missing work: three
-generated Dune alias CMTs are intentionally skipped by `find_cmt_files`, and
+The four raw exclusions are coverage limits of the raw 414-CMT inventory:
+three generated Dune alias CMTs are intentionally skipped by `find_cmt_files`, and
 `tezos_raw_protocol_alpha.cmt` names generated source
 `src/proto_alpha/lib_protocol/tezos_raw_protocol_alpha.ml-gen`, which is not
-resolvable in this checkout. Including it makes the catalogue contract absent
-(`missing_source=1`), so it was excluded for the complete, source-preserving
-410-input run.
+resolvable in this checkout. Including that CMT makes the catalogue contract
+absent (`missing_source=1`). The 410-input catalogue is complete only relative
+to its manifest; it does not cover all 414 raw inventory entries.
 
 ## Outcome
 
@@ -80,3 +85,5 @@ The catalogue explicitly states `not_runtime_instances`, `not_closed_world`,
 `no_target_resolution`, `no_source_freshness_check`, and
 `paths_are_artifact_selections`. A fresh baseline with the identical 410-CMT
 digest manifest is required before any resolution delta can be calculated.
+`reproduce.sh` contains the exact no-build command sequence, and
+`raw-run-410.txt` is the compact stdout capture from its final rerun.
