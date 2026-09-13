@@ -1,0 +1,8 @@
+{"schema_version":"1.0","ts":"2026-09-13T11:43:10.180Z","task":"functor-instance-resolution","round":1,"cycle":1,"event":"scope-gate","actor":"check-scope-diff.sh","outcome":"ran"}
+{"schema_version":"1.0","ts":"2026-09-13T11:49:49.652Z","task":"functor-instance-resolution","round":1,"cycle":1,"event":"specialist","actor":"reviewer","outcome":"ran"}
+{"schema_version":"1.0","ts":"2026-09-13T11:50:23.066Z","task":"functor-instance-resolution","round":1,"cycle":1,"event":"specialist","actor":"code-quality-auditor","outcome":"skipped","detail":"No kb/properties.md installed"}
+{"schema_version":"1.0","ts":"2026-09-13T11:50:23.248Z","task":"functor-instance-resolution","round":1,"cycle":1,"event":"specialist","actor":"reviewer-tui","outcome":"skipped","detail":"No TUI in task scope"}
+{"schema_version":"1.0","ts":"2026-09-13T11:50:23.460Z","task":"functor-instance-resolution","round":1,"cycle":1,"event":"scope-gate","actor":"check-scope-diff.sh","outcome":"ran"}
+{"schema_version":"1.0","ts":"2026-09-13T11:54:51.022Z","task":"functor-instance-resolution","round":1,"cycle":1,"event":"specialist","actor":"architect","outcome":"ran"}
+{"schema_version":"1.0","ts":"2026-09-13T11:55:59.160Z","task":"functor-instance-resolution","round":1,"cycle":1,"event":"specialist","actor":"spec-compliance","outcome":"ran"}
+{"schema_version":"1.0","ts":"2026-09-13T11:56:38.406Z","task":"functor-instance-resolution","round":1,"cycle":1,"event":"normalizer","actor":"review-normalize.js","outcome":"ran"}

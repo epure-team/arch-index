@@ -1,0 +1,81 @@
+{
+  "task": "functor-instance-resolution",
+  "date": "2026-09-13",
+  "status": "GO",
+  "auto_fixes_applied": [
+    {
+      "path": "briefs/functor-instance-resolution-reviewer.md",
+      "line": 50,
+      "category": "style",
+      "description": "Remove extra blank line at EOF"
+    },
+    {
+      "path": "briefs/functor-instance-resolution-qa-scope.md",
+      "line": 42,
+      "category": "style",
+      "description": "Remove extra blank line at EOF"
+    }
+  ],
+  "findings": [],
+  "cross_runtime_findings": [],
+  "summary": {
+    "critical": 0,
+    "high": 0,
+    "medium": 3,
+    "low": 0,
+    "auto_fixed": 2
+  },
+  "no_go_reason": {
+    "type": null,
+    "cause": null,
+    "failed_acs": []
+  },
+  "no_go_round": 0,
+  "round": 1,
+  "cycle": 1,
+  "rounds_audit": [
+    {
+      "round": 1,
+      "reviewed_sha": null,
+      "fix_sha": null,
+      "fix_sha_reason": "dirty-tree",
+      "specialists_run": [
+        {
+          "name": "reviewer",
+          "selection_reason": "Owner reviewer always runs; fresh independent Sol"
+        },
+        {
+          "name": "architect",
+          "selection_reason": "More than three files and new public query boundary; Terra non-product author"
+        },
+        {
+          "name": "spec-compliance",
+          "selection_reason": "Feature spec exists: all30FR and16AC audited; Terra non-product author"
+        }
+      ],
+      "strike": false,
+      "trace_schema_version": "1.0"
+    }
+  ],
+  "cross_runtime": {
+    "opencode": {
+      "status": "degraded",
+      "reason": "timeout",
+      "config_digest": "opencode:fd1dbeaa7d0c6431",
+      "round": 1
+    }
+  },
+  "streak_override": null,
+  "mode": "full",
+  "escalation_needed": false,
+  "escalation_reason": null,
+  "normalized_by": "2.0.0",
+  "advisory_findings_artifact": "roster/functor-instance-resolution/review-normalized.json",
+  "reviewed_source_sha": "c2a8add5e394c162eeef4d204a73e1058a436df2",
+  "notes": [
+    "GO resets primary findings per roster lifecycle; three MEDIUM advisory findings remain in normalized/raw artifacts, not resolved or waived HIGH invariants.",
+    "No product code changed during review. Blank-line auto-fixes covered by subsequent independent specialist build/tests and branch hygiene0.",
+    "OpenCode timeout is degraded, not a passed independent review. Manual full roster chain; no claims reconciler/hooks/KB configured.",
+    "Standard per-step user prompts covered by explicit user authorization for autonomous full roster through green PR and merge; no escalation/cap override used."
+  ]
+}
