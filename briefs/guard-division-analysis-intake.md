@@ -55,7 +55,7 @@ No claims authority/KB/hook installation exists. Keyword check on durable task t
 
 All commands prefixed rtk proxy, cwd task worktree, no concurrent Dune on same tree.
 
-- Build: opam exec --switch=/home/mathias/dev/arch-index -- dune build --root . @install
+- Build: opam exec --switch=/home/mathias/dev/arch-index -- dune build --root . (full corpus build, including installation targets)
 - Full suite: opam exec --switch=/home/mathias/dev/arch-index -- dune test --root . --force
 - Whitespace: git diff --check (no separate configured formatter/full linter).
 - Existing fresh self-index/golden; scripts/recalibrate.sh --check; arch-rules self --on-vacuous fail; arch-impact self; scripts/origin-consumer.js then artifact validator.
@@ -66,5 +66,18 @@ All commands prefixed rtk proxy, cwd task worktree, no concurrent Dune on same t
 
 ## Open Questions
 
-None deferred to implementation. Representation and module layout are engineering choices within the required behavior, resolved in plan; flags/output contract/bounds and ambiguities are adversarially frozen in spec before implementation.
+## R1 correction amendment — operator validation under standing autonomy
 
+The independent review is NO-GO; this amendment closes its seven OPEN findings without weakening the 47 functional requirements or 19 acceptance criteria. No new user approval or completed correction is claimed.
+
+V1's supported public interfaces are the installed `arch_guard` executable and root `arch-guard` dispatcher. `lib/arch_guard` remains a private Dune implementation library for that executable and owned test probes, not an installed `arch-index.guard` embedding API. Compiler global state may be reset within the CLI process; host-process restoration and a new subprocess/serialization embedding API are not deliverables. Verify private library absence and public executable presence in the freshly generated installation manifest, and retain working probe linkage.
+
+Correct report context in both JSON and text, including accepted empty inventories: linked compiler, host 31/63-bit width, supplied-artifact scope, trusted same-compiler/same-target and no-source-freshness assumptions; explicit limitations on completeness, execution, confirmed failure, machine-checked proof, interprocedural/heap reasoning, indirect operations and omitted artifacts. Keep the closed JSON schema unchanged and project text from the same result.
+
+Add a self-contained new `scripts/check-guard-report-context.js` regression executable (no required arguments) for finding `lib/arch_guard/arch_guard.ml:213:spec#cd378d70`, with pre-fix SHA `d44c0c6ae8f4991549f6de5bbc2bdb3f24eb25ec`. It must compile owned empty and classified fixtures and call the actual CLI in both formats, returning 0/pass, 1/assertion, >=2/setup or execution, with 120-second and 16-MiB child caps. The red/green gate overlays only this new file into a pre-fix archive: it must not depend on newly added helpers. Use an existing built CLI normally; build the single CLI target only if absent in the archive, using the caller's configured compiler environment. Record authentic pre-fix assertion failure and corrective success; register the check in Tezt. Never nest Dune when the normal suite already supplies the binary.
+
+Strengthen existing inventory, numeric and report modes with owned native or trusted Typedtree/CMT-seam fixtures. Cover later saturation, overapplication, labelled operands, missing original slot 2 with later arguments, combined eligibility/ancestry and unresolved/non-native operand and guard types. Assert immediate-site cardinality, unchanged slot metadata and exact sorted reasons. Cover alpha-renaming, aliases before/inside refinement, fresh nested/curried/immediately-applied entries beneath nonzero/contradictory/unsupported ancestors, inner locals, defaults/cases, multiple exclusion causes, unaffected siblings, all loop positions and closed dispatch including methods/effect primitives, indirect and unlisted calls. Check status-specific reasons, reject unsupported sites with only a numeric reason, compare every site field and census between JSON and text on an all-five-status fixture, and include wrong-reason/omitted-text-field sensitivity controls. Exercise reversed distinct accepted inputs byte-for-byte, duplicate coordinates, exact 256/257 UTF-8-byte spelling boundaries, help/version and wrapper no-auto-build behavior.
+
+Corrections stay in already named component/test/docs paths plus the exact new standalone ratchet file. If fixture tables need separation, use the existing `tezt/fixtures/arch_guard/` scope; do not broaden the manifest to all scripts. OCaml fixture/report/package changes precede the JS oracle integration; serialize all Dune commands in the active worktree. Finish with full build, full forced suite, all standalone checks, fresh self/golden/origin gates and committed clean-build recalibration, followed by a fresh independent roster review and QA. Preserve R1 findings and cross-runtime degraded evidence; no PR before GO gates. Update the roadmap and clean only owned disposable artifacts.
+
+None deferred to implementation. Representation and module layout are engineering choices within the required behavior, resolved in plan; flags/output contract/bounds and ambiguities are adversarially frozen in spec before implementation.
