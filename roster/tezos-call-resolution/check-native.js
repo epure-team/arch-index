@@ -10,6 +10,8 @@ const titles = [
   'local structured modules: ownership, masks, arity and emission forms',
   'local structured module: rejected owned body remains dropped_node TOP',
   'local structured modules: CMT identities and flat attribution stay file-local',
+  'local structured modules: labeled arity ratchet',
+  'local structured modules: verifier refusal coverage',
 ];
 function classify(status, output) {
   if (status === 0 && titles.every(title => output.split('\n').some(line =>
@@ -21,7 +23,7 @@ function classify(status, output) {
 }
 try {
   if (process.argv.includes('--self-test')) {
-    const green = titles.map(t => `[SUCCESS] (1/3) ${t}`).join('\n');
+    const green = titles.map((t,i) => `[SUCCESS] (${i+1}/${titles.length}) ${t}`).join('\n');
     assert.equal(classify(0, green), 'pass');
     assert.equal(classify(0, ''), 'setup');
     assert.equal(classify(1, '[error] LOCAL_MODULE_ASSERTION: got 0 expected 1'), 'assertion');

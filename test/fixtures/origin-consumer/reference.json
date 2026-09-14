@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "revision": "ea8e5b4269985e779020a92a5054bc0678f5edb6+worktree-sha256:971a30b6d62d83082ae6a2d8d0d4a82301329fdbc648835b7576d1d9524e2ef9",
+  "revision": "12ab1fcbd7f4e0cea6b54ea7452b7d9f83338a97+arity-repair-self-source-manifest-sha256:11c9a290232226bd82b96e1c690675aef8a219a1bf338170d1eabaa70a042c75",
   "modules": [
     "lib/arch_index/arch_errors_config.ml",
     "lib/arch_index/arch_index.ml",
@@ -31,7 +31,7 @@
   "totals": {
     "modules": 25,
     "functions": 980,
-    "calls": 6241,
+    "calls": 6245,
     "origins": 561
   },
   "origin_groups": [

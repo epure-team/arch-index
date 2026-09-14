@@ -14,6 +14,9 @@
     {"phase":"spec","outcome":"VALIDATED","by":"roster-spec"},
     {"phase":"plan","outcome":"COMPLETED","by":"roster-plan"},
     {"phase":"implement","outcome":"PARTIAL","reason":"Scope approval required to recalibrate six existing compatibility/self-analysis evidence files outside the validated manifest; full guard currently fails.","by":"roster-implement","at":"2026-09-14"},
-    {"phase":"implement","outcome":"COMPLETED","reason":"User approved six-path extension; full guard324/324 and exact fixed410 witness comparison pass.","by":"roster-implement","at":"2026-09-14"}
+    {"phase":"implement","outcome":"COMPLETED","reason":"User approved six-path extension; full guard324/324 and exact fixed410 witness comparison pass.","by":"roster-implement","at":"2026-09-14"},
+    {"phase":"review","outcome":"NO-GO","reason":"Round1 cycle1: reproduced FR007 labeled-slot residual divergence; FR014 negative coverage incomplete. Convergence gate exit0, no strike; OpenCode degraded timeout.","by":"roster-review","at":"2026-09-14"},
+    {"phase":"spec","outcome":"VALIDATED","reason":"Existing contract revalidated on review return, explicit supplied-slot clarification and AC12/CHECK4 native ratchet plus AC13/CHECK5 negative-input coverage. Standing autonomous delegation, no new scope.","by":"roster-spec","at":"2026-09-14"},
+    {"phase":"implement","outcome":"COMPLETED","reason":"Round1 repair: native arity ratchet RED/GREEN; negative verifier39, native6/6, full326/326, fixed410 exact witness and self checks pass. Ready for review round2.","by":"roster-implement","at":"2026-09-14"}
   ]
 }

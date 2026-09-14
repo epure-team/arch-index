@@ -252,4 +252,18 @@ let register () =
   register_basic () ;
   register_boundaries () ;
   register_dropped () ;
-  register_cross_cmt_and_flat ()
+  register_cross_cmt_and_flat () ;
+  List.iter (fun (name, script) ->
+      Test.register ~__FILE__ ~title:("local structured modules: " ^ name)
+        ~tags:["cmt"; "local_module"; "independent_checker"]
+      @@ fun () ->
+      let checker = Filename.concat (repo_root ())
+          ("roster/tezos-call-resolution/" ^ script) in
+      let code, stdout, stderr = run_command_split "node" [checker] in
+      if code = 1 then
+        Test.fail "LOCAL_MODULE_ASSERTION: %s\n%s\n%s" name stdout stderr
+      else if code <> 0 then
+        Test.fail "LOCAL_MODULE_SETUP: %s exit %d\n%s\n%s" name code stdout stderr ;
+      Lwt.return_unit)
+    ["labeled arity ratchet", "check-labeled-arity.js";
+     "verifier refusal coverage", "check-verifier-inputs.js"]

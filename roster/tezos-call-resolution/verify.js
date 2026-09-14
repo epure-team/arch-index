@@ -33,20 +33,20 @@ function parseArgs(argv) {
   if(self&&witness) throw new ComparisonInputError('--witness is only valid for a candidate comparison');
   return {baseline,self,witness};
 }
-function loadProvenance(baseline) {
+function loadProvenance(baseline,{expected=EXPECTED}={}) {
   const file=path.join(path.dirname(baseline),'provenance.json');
   if(!fs.existsSync(file)) throw new ComparisonInputError('baseline lacks sibling provenance.json');
   let value;try{value=JSON.parse(fs.readFileSync(file,'utf8'));}catch(error){throw new ComparisonInputError(`invalid provenance: ${error.message}`);}
   if(path.resolve(value.db||'')!==baseline) throw new ComparisonInputError('provenance does not bind the requested database path');
-  if(value.manifest_sha256!==EXPECTED.manifest||value.producer_sha256!==EXPECTED.baselineProducer
-    ||value.revision!==EXPECTED.tezosRevision||value.checkout!==EXPECTED.checkout||value.selected!==410
+  if(value.manifest_sha256!==expected.manifest||value.producer_sha256!==expected.baselineProducer
+    ||value.revision!==expected.tezosRevision||value.checkout!==expected.checkout||value.selected!==410
     ||value.source_status_unchanged!==true||value.input_hashes_unchanged!==true)
     throw new ComparisonInputError('baseline provenance does not match the pinned producer/corpus/source record');
   return {file,value,sha256:fileSha(file)};
 }
-function readManifest() {
-  const content=fs.readFileSync(manifest);
-  if(sha(content)!==EXPECTED.manifest) throw new ComparisonInputError('fixed410 manifest digest mismatch');
+function readManifest({manifestFile=manifest,expected=EXPECTED}={}) {
+  const content=fs.readFileSync(manifestFile);
+  if(sha(content)!==expected.manifest) throw new ComparisonInputError('fixed410 manifest digest mismatch');
   const entries=content.toString('utf8').split('\n').filter(line=>line&&!line.startsWith('#')).map(line=>line.split('\t'));
   if(entries.length!==410||entries.some(parts=>parts.length!==3)) throw new ComparisonInputError('fixed410 manifest is incomplete or malformed');
   const seen=new Set();
@@ -182,7 +182,8 @@ function main() {
     }
   }
 }
-try { main(); } catch(error) {
+if(require.main===module) try { main(); } catch(error) {
   process.stderr.write(`SETUP FAILED: ${error.stack||error}\n`);
   process.exitCode=error instanceof ComparisonInputError?2:3;
 }
+module.exports={EXPECTED,loadProvenance,readManifest,loadWitness};
