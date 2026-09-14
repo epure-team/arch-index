@@ -40,18 +40,28 @@ function requireDatabaseShape(db,expectedArtifactSuffixes) {
   const missingCaller=db.prepare('SELECT count(*) n FROM calls c LEFT JOIN functions f ON f.id=c.caller_id WHERE f.id IS NULL').get().n;
   const missingTarget=db.prepare('SELECT count(*) n FROM calls c LEFT JOIN functions f ON f.id=c.callee_id WHERE c.callee_id IS NOT NULL AND f.id IS NULL').get().n;
   if(missingCaller||missingTarget) throw new ComparisonInputError('missing caller or target row');
-  for(const table of ['functor_catalogue_runs','functor_catalogue_inputs','functor_binding_inputs'])
-    if(!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table)) throw new ComparisonInputError(`missing table: ${table}`);
-  const runs=db.prepare('SELECT selected_inputs FROM functor_catalogue_runs').all();
+  const provenanceTables={functor_catalogue_runs:['producer_run_id','selected_inputs'],
+    functor_catalogue_inputs:['producer_run_id','artifact','outcome','module_id'],
+    functor_binding_inputs:['producer_run_id','artifact','outcome']};
+  for(const [table,columns] of Object.entries(provenanceTables)) {
+    const found=new Set(db.prepare(`PRAGMA table_info(${table})`).all().map(row=>row.name));
+    if(!found.size) throw new ComparisonInputError(`missing table: ${table}`);
+    for(const column of columns) if(!found.has(column)) throw new ComparisonInputError(`missing column: ${table}.${column}`);
+  }
+  const runs=db.prepare('SELECT producer_run_id,selected_inputs FROM functor_catalogue_runs').all();
   if(runs.length!==1||Number(runs[0].selected_inputs)!==410) throw new ComparisonInputError('catalogue run does not declare exactly 410 selected inputs');
   for(const table of ['functor_catalogue_inputs','functor_binding_inputs']) {
-    const outcomes=db.prepare(`SELECT outcome,count(*) n FROM ${table} GROUP BY outcome`).all();
-    if(outcomes.length!==1||outcomes[0].outcome!=='collected'||Number(outcomes[0].n)!==410)
+    const outcomes=db.prepare(`SELECT outcome,count(*) n,count(DISTINCT artifact) artifacts FROM ${table} WHERE producer_run_id=? GROUP BY outcome`).all(runs[0].producer_run_id);
+    const total=Number(db.prepare(`SELECT count(*) n FROM ${table}`).get().n);
+    if(total!==410||outcomes.length!==1||outcomes[0].outcome!=='collected'
+      ||Number(outcomes[0].n)!==410||Number(outcomes[0].artifacts)!==410)
       throw new ComparisonInputError(`${table} is incomplete`);
   }
   const joined=Number(db.prepare(`SELECT count(*) n FROM functor_catalogue_inputs c
     JOIN functor_binding_inputs b ON b.producer_run_id=c.producer_run_id AND b.artifact=c.artifact
-    JOIN modules m ON m.id=c.module_id WHERE c.outcome='collected' AND b.outcome='collected'`).get().n);
+    JOIN modules m ON m.id=c.module_id
+    JOIN functor_catalogue_runs r ON r.producer_run_id=c.producer_run_id
+    WHERE c.outcome='collected' AND b.outcome='collected' AND r.producer_run_id=?`).get(runs[0].producer_run_id).n);
   if(joined!==410) throw new ComparisonInputError('catalogue/binding/module completion join is not exactly 410');
   if(expectedArtifactSuffixes) {
     const actual=db.prepare('SELECT artifact FROM functor_catalogue_inputs').all().map(row=>{

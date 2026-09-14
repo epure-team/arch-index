@@ -149,6 +149,10 @@
   ../../roster/functor-binding-resolution/lifecycle_probe.ml
   ../../roster/functor-binding-resolution/inventory_probe.ml
   ../../roster/functor-binding-resolution/collection_failure_probe.ml
+  ../../roster/tezos-call-resolution/check-labeled-arity.js
+  ../../roster/tezos-call-resolution/check-verifier-inputs.js
+  ../../roster/tezos-call-resolution/verify.js
+  ../../roster/tezos-call-resolution/comparison.js
   ; Direct API probes compile in an owned temporary directory against this
   ; exact build's installation staging, never an unrelated installed version.
   (package arch-index)

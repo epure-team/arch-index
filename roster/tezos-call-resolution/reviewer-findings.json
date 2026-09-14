@@ -1,0 +1,15 @@
+[
+  {
+    "severity": "MEDIUM",
+    "confidence": 5,
+    "path": "lib/arch_index/arch_index_cmt.ml",
+    "line": 2174,
+    "category": "correctness",
+    "summary": "Omitted labeled arguments generate an unwitnessed computed-return TOP after local-module resolution",
+    "evidence": "Native OCaml 5.3 fixture /tmp/arch-index-reviewer-label-qt01kV/label.ml defines M.f ~a ~b = if b > 0 then (fun c -> a + b + c) else (fun c -> c), then partial () = M.f ~b:1 2. The independently compiled UID probe reports body arity=2, supplied Some arguments=2, and Typedtree argument slots=3 (the omitted ~a is None). The new branch returns syntactic arity 2, but nargs at line 2150 is List.length args=3; line 2267 consequently emits a residual. Executed the current collector on the same CMT with the optional ownership context disabled and enabled: disabled emits only M.f/module_param/partial=true; enabled emits M.f/enumerated/partial=true plus *TOP*/callback_param/partial=false. The real candidate DB contains that extra MAY_TOP row. A fully supplied M.f ~a:3 ~b:1 2 control has supplied=3 and correctly needs its residual. A focused assertion requiring zero residuals for the omitted-label case fails exit 1 (1 !== 0). Thus the existing slot-count issue becomes a new observable precision regression in the changed qualified-head path, violating FR-007's syntactic-arity preservation and the witness rule requiring supplied arguments > body arity. The existing four native cases and all 34 fixed410 residuals pass, so they do not cover this case.",
+    "fix": "Use actual supplied expression arguments (Some entries), rather than all Typedtree slots, for the new known-body saturation/overapplication decision. Preserve the partial head and add a native omitted-label regression with a fully supplied overapplication control; assert the residual count and pending partial metadata. Keep unrelated CFG behavior scoped separately.",
+    "fingerprint": "lib/arch_index/arch_index_cmt.ml|local-module-arity-counts-omitted-label-slots",
+    "specialist": "reviewer",
+    "status": "OPEN"
+  }
+]

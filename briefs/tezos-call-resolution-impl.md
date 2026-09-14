@@ -41,3 +41,56 @@ Review identity/member masking and flat attribution; native positive tests alone
 ## Identified out-of-scope
 
 The previously requested six-path extension is now approved and implemented; the diagnosis remains historical. No new scope expansion is proposed. Do not change historical gate results, Tezos inputs, schema, dependencies, held PR93 or unrelated worktrees. Product attempts delivered remain0/5; attempt1 awaits independent review/QA/CI, not yet discarded or kept.
+
+## Ratchet
+
+Round1 NO-GO repair (full guard now PASS326/326): all three observations of omitted-label
+arity share `roster/tezos-call-resolution/check-labeled-arity.js` (CHECK-4/AC-12).
+Finding fids: lib/arch_index/arch_index_cmt.ml:2174:correctness#e6e59b53,
+lib/arch_index/arch_index_cmt.ml:2150:spec#208245bb,
+lib/arch_index/arch_index_cmt.ml:2150:correctness#0e5e8ad3.
+Red command: `node roster/tezos-call-resolution/check-labeled-arity.js`.
+check_encodable: true. New self-contained native fixture/probe, authentic pre-fix
+assertion exit1 and post-build exit0; see arity-ratchet-evidence.md. Historical
+gate red_verified must remain null while pre_fix_sha is null/dirty-tree; manually
+observed RED/GREEN is recorded separately and does not manufacture a clean SHA.
+
+FR014 coverage finding roster/tezos-call-resolution/check-comparison.js:116:spec#36ef3d4f
+is covered by new `roster/tezos-call-resolution/check-verifier-inputs.js`
+(CHECK-5/AC-13), command `node roster/tezos-call-resolution/check-verifier-inputs.js`,
+check_encodable: true.39 negative/positive assertions pass. The run-set strengthening
+has retrospective old-code failure evidence, not a falsely claimed pre-edit RED;
+see verifier-input-evidence.md.
+
+## Round1 repair completed — handoff for review round2
+
+The revalidated spec adds AC12/CHECK4 and AC13/CHECK5. The15-line producer delta
+counts Some arguments only for newly owned structure heads; legacy head and
+noreturn CFG accounting are unchanged. The self-contained arity check verifies
+four real compiled callers in both collector contexts, including omitted optional
+and named arguments, actual partial metadata and exact residual counts. Both new
+checks are registered in the full native suite and tracked as Dune dependencies.
+
+The comparator now binds both input tables to the declared run, requires distinct
+410 artifacts and validates required provenance columns. It has39 isolated
+negative/positive checks; exports for expected/file test fixtures do not alter
+pinned CLI defaults. This strengthening has retrospective old-code assertion
+evidence, not a falsely claimed pre-edit RED. No Tezos or baseline mutation.
+
+Current exact executions: build exit0; full forced runtest exit0, Tezt326/326
+(session96167; raw trace improvement/2026-09-14-tezos-resolution/attempt1-arity-guard-trace.csexp);
+CHECK1 native6/6 exit0 (session77767); wrapper self5 exit0; CHECK2 comparison28
+exit0; CHECK4 arity exit0 after genuine pre-fix assertion1; CHECK5 inputs39 exit0;
+bundle22 hashes exit0; whitespace exit0. CHECK3 candidate exit0 at
+2026-09-14T06-26-30-653Z-candidate-2526704, same canonical90e76d6... digest,
++400/+395 relations and zero losses; self replay exit0 at
+2026-09-14T06-27-04-107Z-self-2550553. Exact previous witness still applies because
+every canonical row is unchanged. Producer SHA c953970a15b64d026f7b502ba5d61be537c3ab5b51e219435b4a3483d57764b8.
+
+Only self reference call count changed6241→6245 with source-manifest provenance;
+functions980/origins561 and all origin groups unchanged, self.allow unchanged.
+Full recurring-consumer/fault tests passed after this authorized recalibration.
+No additional compatibility oracle movement. Existing round1 reviews remain
+historical NO-GO evidence. Round2 review, QA, exact-head hosted CI and merge are
+not yet approved;0/5 product attempts delivered. Unrelated dirt remains excluded
+from the task commit; do not misreport the whole checkout as clean.

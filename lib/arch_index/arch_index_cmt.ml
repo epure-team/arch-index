@@ -2148,6 +2148,17 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels
                  defeats type inspection on a .cmt-restored env; otherwise use
                  the callee's type arrow arity. *)
               let nargs = List.length args in
+              (* Omitted labeled slots are not supplied expressions. Only the
+                 new owned-body path uses this count; leave legacy head and
+                 noreturn/CFG accounting unchanged in this focused slice. *)
+              let body_nargs =
+                match fn_expr.exp_desc with
+                | Texp_ident (path, _, _) -> (
+                    match module_target path with
+                    | Some _ -> List.length (List.filter_map snd args)
+                    | None -> nargs)
+                | _ -> nargs
+              in
               (* A literal head's edge is emitted by record_head (Head_local to
                  the node) — suppress the literal visit's occurrence edge. *)
               (match fn_expr.exp_desc with
@@ -2178,7 +2189,7 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels
               (* Under-saturated (partial) application → builds a closure, the
                  callee body does not run → never MUST. A result that is itself
                  a function (arrow) is also under-saturated / returns-a-function. *)
-              let partial = is_arrow expr.exp_type || nargs < head_arity in
+              let partial = is_arrow expr.exp_type || body_nargs < head_arity in
               (* SLICE 3: a declared [transforms]/[converters] path, or an
                  UNDECLARED bind-shaped operator (specs/error-channels.md
                  "Binds": [inferred_bind]), is excluded from the ordinary
@@ -2264,7 +2275,7 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels
                    applied to the (unknown) returned function value — a residual
                    call to an unknowable target. Record it as ⊤ so [unreachable]
                    stays sound. *)
-                if head_arity > 0 && nargs > head_arity then
+                if head_arity > 0 && body_nargs > head_arity then
                   add_call (Head_unknown ("*TOP*", Callback_param)) expr.exp_loc ;
                 add_arg_escapes args expr.exp_loc
               in

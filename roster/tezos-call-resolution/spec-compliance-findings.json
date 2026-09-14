@@ -1,0 +1,28 @@
+[
+  {
+    "severity": "CRITICAL",
+    "confidence": 5,
+    "path": "lib/arch_index/arch_index_cmt.ml",
+    "line": 2150,
+    "category": "spec",
+    "summary": "Omitted labeled argument slots are counted as supplied and fabricate a computed-return TOP",
+    "evidence": "FR-007/AC-6 permits a computed-return residual only for overapplication. The implementation assigns nargs = List.length args and later emits TOP when nargs > head_arity. In the independent CMT reproducer `M.f ~b:1 2`, compiler evidence is supplied=2, slots=3, fn_arity=2; context-enabled collection emits the expected partial enumerated M.f plus a new *TOP*/callback_param, while context-disabled collection emits no computed-return residual. Existing native coverage tests positional under/overapplication only.",
+    "fix": "Count only present (`Some`) arguments for the overapplication residual comparison, preserve result-arrow partial classification, add omitted labeled/optional-slot regression tests in both collector contexts, then regenerate and independently review fixed410 evidence.",
+    "fingerprint": "spec:tezos-call-resolution:FR-007:labeled-slot-overapplication",
+    "specialist": "spec-compliance",
+    "acs": ["AC-6", "FR-007"]
+  },
+  {
+    "severity": "MEDIUM",
+    "confidence": 5,
+    "path": "roster/tezos-call-resolution/check-comparison.js",
+    "line": 116,
+    "category": "spec",
+    "summary": "FR-014 fail-closed input and provenance branches lack negative tests",
+    "evidence": "The checker creates a complete positive snapshot and covers missing DB, missing table, and orphan caller/target, but no executable negative case was found for missing/changed manifest, changed artifact hash, 0/409 collection, wrong catalogue/binding run markers or joined run set, baseline provenance mismatch, or wrong witness snapshot digest. Code checks exist in verify.js and comparison.js, while the successful CHECK-3 run exercises only valid inputs.",
+    "fix": "Add isolated negative tests for every FR-014 input, provenance, run-completeness, and witness-binding refusal branch, asserting the required nonzero exit class and no keep result.",
+    "fingerprint": "spec:tezos-call-resolution:FR-014:negative-coverage-gaps",
+    "specialist": "spec-compliance",
+    "acs": ["AC-10", "FR-014", "CHECK-2"]
+  }
+]

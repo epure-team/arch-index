@@ -16,6 +16,16 @@ Scope is the validated intake. This spec does not promise general defunctorizati
 
 The eight resolved Q&A are recorded in [spec-input](../roster/tezos-call-resolution/spec-input.md) and [adversarial resolutions](../roster/tezos-call-resolution/spec-resolutions.md). In particular, structural traversal alone is not module ownership, and SQL counts are not a semantic oracle.
 
+Review round1 clarification of C-5/FR-007: Typedtree application slots containing
+`None` are absent arguments, not supplied expressions. For newly known local
+structure bodies, saturation/residual accounting counts `Some` expressions.
+Compiler-inserted default expressions inside `Some` still count. Given a body
+`f ~a ~b` returning a function and `f ~b:1 2`, the head remains partial and no
+computed-return residual is introduced merely by the absent `~a` slot. The fully
+supplied `f ~a:3 ~b:1 2` retains its residual. Existing non-owned head and CFG
+classification are outside this focused correction. This clarifies the existing
+obligation; it does not waive the discovered failure or change resolution scope.
+
 ## User Stories
 
 ### US-1: Follow known local-module calls (P0)
@@ -78,6 +88,8 @@ Eight challenges (C-1–C-8) were raised by a fresh Sol pass and resolved before
 - AC-9 [US-2 happy path/C-7]: Same-binary replay and reordered duplicate rows report zero change; deletion/swap/kind mutations fail the appropriate assertions.
 - AC-10 [US-2, C-8]: Fixed410 verifies hashes/completeness and enumerates permitted gains by slice with full old/new groups; malformed/incomplete/unsupported changes refuse.
 - AC-11 [US-2, C-8]: Only positive product gain plus all gates qualifies for keep; neutral instrumentation is excluded and each retained PR merges sequentially.
+- AC-12 [US-1, C-5, review round1]: A native omitted-label partial call retains its partial owned head without an invented return residual; its fully supplied overapplication control retains the residual.
+- AC-13 [US-2, C-8, review round1]: Isolated malformed/missing provenance, input, collection and witness cases exercise the actual refusal functions and cannot produce a successful keep result; real Tezos inputs remain untouched.
 
 ## Edge Cases
 
@@ -97,6 +109,8 @@ Commands below are implementation deliverables, not a claim they already exist o
 - CHECK-1 [AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8]: `node roster/tezos-call-resolution/check-native.js` → native compiled identity/arity/refusal/storage/fallback assertions pass. Exercise real producer boundaries, not a stub resolver.
 - CHECK-2 [AC-9, AC-10]: `node roster/tezos-call-resolution/check-comparison.js` → standalone fixture comparison tests, including zero/partial/missing/wrong-shape inputs, duplicated-line reordering, target/kind changes and deletions.
 - CHECK-3 [AC-9, AC-10, AC-11]: `node roster/tezos-call-resolution/verify.js --baseline /tmp/arch-index-resolution-baseline-OmhcEs/baseline.db --witness improvement/2026-09-14-tezos-resolution/attempt1-reviewed-witness.json` → hash-locked fixed410 producer run, per-group relation/multiset comparison and report. The exact witness is generated from independently reviewed compiler evidence as documented in roster/tezos-call-resolution/uid-witness-report.md; missing evidence refuses. Baseline self-comparison uses `--self` without `--witness`. Actual keep additionally requires positive permitted gain and the full pipeline.
+- CHECK-4 [AC-12] (authentic-success-path, fail-closed-path): `node roster/tezos-call-resolution/check-labeled-arity.js` → self-contained native compiler/collector regression verifies supplied slots, partial head metadata and exact return-residual counts; 1 is an assertion failure, >=2 a setup error. Introduced on the round1 NO-GO bounce and must be observed red before the product fix.
+- CHECK-5 [AC-13] (fail-closed-path): `node roster/tezos-call-resolution/check-verifier-inputs.js` → isolated negative tests of provenance, input hashes, collection completeness and exact witness binding, with no writes to Tezos or retained baseline. Positive controls prevent vacuous refusal tests.
 
 Full guard: `opam exec --switch=/home/mathias/dev/arch-index -- dune build --root .`, then `opam exec --switch=/home/mathias/dev/arch-index -- dune runtest --root . --force`, bundle verification and whitespace check. Exact report filenames, self-comparison mode, cleanup ownership and machine provenance binding are fixed by the implementation plan before checker construction. Verify MUST refuse a baseline lacking its matching recorded producer/corpus provenance; a naked DB path does not establish comparability.
 
@@ -130,9 +144,13 @@ Full guard: `opam exec --switch=/home/mathias/dev/arch-index -- dune build --roo
 {"record":"acceptance-criterion","id":"AC-9","for":["FR-011","FR-012"]}
 {"record":"acceptance-criterion","id":"AC-10","for":["FR-013","FR-014"]}
 {"record":"acceptance-criterion","id":"AC-11","for":["FR-015"]}
+{"record":"acceptance-criterion","id":"AC-12","for":["FR-007","FR-008"]}
+{"record":"acceptance-criterion","id":"AC-13","for":["FR-014"]}
 {"record":"check","id":"CHECK-1","for":["AC-1","AC-2","AC-3","AC-4","AC-5","AC-6","AC-7","AC-8"]}
 {"record":"check","id":"CHECK-2","for":["AC-9","AC-10"]}
 {"record":"check","id":"CHECK-3","for":["AC-9","AC-10","AC-11"]}
+{"record":"check","id":"CHECK-4","for":["AC-12"]}
+{"record":"check","id":"CHECK-5","for":["AC-13"]}
 ```
 
 Claims stay draft metadata: canonical claims validation/projection tooling is not installed. No projection success is claimed.

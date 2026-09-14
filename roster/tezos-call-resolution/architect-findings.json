@@ -1,0 +1,15 @@
+[
+  {
+    "severity": "CRITICAL",
+    "confidence": 5,
+    "path": "lib/arch_index/arch_index_cmt.ml",
+    "line": 2150,
+    "category": "correctness",
+    "summary": "Omitted labeled-argument slots create a forbidden computed-return TOP residual",
+    "evidence": "FR-007 requires eligible bodies to use fn_arity while preserving under/overapplication, and AC-6 requires the applied head and residual to respect syntactic arity (specs/tezos-call-resolution.md:58,75). The new local-module branch takes the body arity at lines 2172-2175, but nargs is List.length args at line 2150 and the overapplication residual is emitted from that comparison at lines 2264-2267. OCaml Typedtree retains an omitted optional/labeled argument as a None slot, so slot count is not supplied-argument count. The retained native fixture /tmp/arch-index-reviewer-label-qt01kV defines M.f ~a ~b with syntactic arity 2 and partial () = M.f ~b:1 2; its compiler evidence records two supplied expressions but three slots. My read-only query of its candidate.db found both the correct partial -> M.f MAY_ENUMERATED row and an additional partial -> *TOP* MAY_TOP/callback_param row. The fully supplied control also has the residual, so only the omitted-label case demonstrates the false residual. Existing tests at tezt/tests/local_module_targets.ml:104-109,183-196 cover positional partial/overapplication but not omitted labeled slots. This directly contradicts FR-007/AC-6; under the architect role, an acceptance-contract contradiction is critical even though it is conservative precision loss rather than an unsound exact target.",
+    "fix": "For known syntactic body arity, compare arity with the number of supplied expression arguments (Some entries), not the number of Typedtree slots. Add a native omitted-label partial case and a fully supplied overapplication control that assert both the resolved head's partial metadata and whether a computed-return TOP residual exists. Keep the correction local to saturation/residual accounting.",
+    "fingerprint": "lib/arch_index/arch_index_cmt.ml|local-module-arity-counts-omitted-label-slots",
+    "specialist": "architect",
+    "status": "OPEN"
+  }
+]
