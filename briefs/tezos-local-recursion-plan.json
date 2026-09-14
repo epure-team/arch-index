@@ -1,0 +1,16 @@
+{
+  "task": "tezos-local-recursion",
+  "mode": "full",
+  "schema_version": "1.0",
+  "steps": [
+    {"id":"step-1","skill":"roster-implement","inputs":["briefs/tezos-local-recursion-implementer.md","specs/tezos-local-recursion.md"],"outputs":["briefs/tezos-local-recursion-impl.md"],"hook":false},
+    {"id":"step-2","skill":"roster-review","inputs":["briefs/tezos-local-recursion-reviewer.md","briefs/tezos-local-recursion-impl.md"],"outputs":["briefs/tezos-local-recursion-review.json"],"hook":false},
+    {"id":"step-3","skill":"roster-qa","inputs":["briefs/tezos-local-recursion-qa-scope.md","briefs/tezos-local-recursion-review.json"],"outputs":["briefs/tezos-local-recursion-qa.md","briefs/tezos-local-recursion-qa-state.json"],"hook":false},
+    {"id":"step-4","skill":"roster-ship","inputs":["briefs/tezos-local-recursion-review.json","briefs/tezos-local-recursion-qa.md"],"outputs":["briefs/tezos-local-recursion-ship-gate.md"],"hook":false}
+  ],
+  "quality_gates": {
+    "build": "opam exec -- dune build",
+    "test": "opam exec -- dune exec tezt/tests/main.exe -- --no-color",
+    "lint": ""
+  }
+}
