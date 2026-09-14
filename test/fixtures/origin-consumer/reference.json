@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "revision": "fb9c8f3f685d751ee07a81c17fb1ca61860a7365+one-hop-alias-self-source-manifest-sha256:2f6feeb50adb5e0eef1898e83be623685afcc5529dbdbe8ffcf09eddc386b284",
+  "revision": "975c73b49def2813517b00c296006417d062d8b2+occurrence-fix-self-source-manifest-sha256:e8eef8003b1d5bf32ac1ae6b56249e279133d3ef06826984d75c23023f2f325d",
   "modules": [
     "lib/arch_index/arch_errors_config.ml",
     "lib/arch_index/arch_index.ml",
@@ -31,7 +31,7 @@
   "totals": {
     "modules": 25,
     "functions": 989,
-    "calls": 6276,
+    "calls": 6275,
     "origins": 564
   },
   "origin_groups": [

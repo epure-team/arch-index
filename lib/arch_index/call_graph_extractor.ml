@@ -347,8 +347,8 @@ let extract_calls_from_cmts ~project_dir fn_rows =
                         in
                         let callee_file =
                           let owned_names =
-                            if pc.edge_form = Some "value_alias" then local_module_names
-                            else local_invocation_names
+                            if pc.local_module_invocation then local_invocation_names
+                            else local_module_names
                           in
                           if Hashtbl.mem owned_names callee_name then
                             (* A proven body belongs to this CMT. LSP may not

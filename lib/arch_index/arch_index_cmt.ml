@@ -618,6 +618,7 @@ type pending_call = {
   caller_module : string; (* Module path, e.g. "src/foo.ml" *)
   caller_name : string; (* Function name *)
   head : call_head; (* target facts (resolution identity preserved) *)
+  local_module_invocation : bool; (* THIS occurrence used owned-module lookup *)
   partial : bool; (* under-saturated / returns-a-function → body deferred *)
   cond : bool; (* call block does NOT post-dominate entry (or is deferred) *)
   dead : bool;
@@ -1379,7 +1380,8 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels
     | Some i -> String.sub p (i + 1) (String.length p - i - 1)
     | None -> p
   in
-  let add_call ?(partial = false) ?is_head_of ?callee_ty ?edge_form head loc =
+  let add_call ?(partial = false) ?is_head_of ?callee_ty ?edge_form
+      ?(local_module_invocation = false) head loc =
     let line = loc.Location.loc_start.pos_lnum in
     let call_site = Printf.sprintf "%s:%d" src_path line in
     let c = !cur in
@@ -1402,7 +1404,7 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels
     in
     raw :=
       ( ord, c.cid, c.lblk, c.lcaller, head, partial, call_site, exn_scope,
-        errch_candidate, edge_form )
+        errch_candidate, edge_form, local_module_invocation )
       :: !raw
   in
   (* Current-context CFG shorthands. *)
@@ -1595,7 +1597,8 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels
                 let disp = match m with Some m -> m ^ "." ^ n | None -> n in
                 (match invocation_module_target p, alias_rewrite p with
                 | Some (name, _), _ ->
-                    add_call ~callee_ty:ae.exp_type (Head_enumerated name) loc
+                    add_call ~local_module_invocation:true ~callee_ty:ae.exp_type
+                      (Head_enumerated name) loc
                 | None, Some (m, n) ->
                     add_call ~callee_ty:ae.exp_type ~edge_form:"module_alias"
                       (Head_qualified (Some m, n)) loc
@@ -1631,7 +1634,7 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels
         match target, alias_rewrite path with
         | Some (name, _), _ ->
             let head = if edge_form = Some "value_alias" then Head_local name else Head_enumerated name in
-            add_call head loc
+            add_call ~local_module_invocation:invocation head loc
         | None, Some (m, n) -> add_call_aliased (Head_qualified (Some m, n)) loc
         | None, None ->
             if qualified_is_dynamic path then
@@ -2280,7 +2283,7 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels
                     let callee_module, callee_name = path_to_module_name path in
                     (match invocation_module_target path, alias_rewrite path with
                     | Some (name, _), _ ->
-                        add_call ~partial ~is_head_of:expr.exp_loc
+                        add_call ~local_module_invocation:true ~partial ~is_head_of:expr.exp_loc
                           ?callee_ty:!callee_ty_for_channel (Head_enumerated name)
                           expr.exp_loc
                     | None, Some (m, n) ->
@@ -2881,7 +2884,7 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels
   let calls =
     List.rev_map
       (fun ( ord, cid, block, caller, head, partial, call_site, exn_scope,
-             errch_candidate, edge_form ) ->
+             errch_candidate, edge_form, local_module_invocation ) ->
         let cond =
           match Hashtbl.find_opt verdicts cid with
           | Some v -> not (Arch_index_cfg.always_exec v block)
@@ -2911,6 +2914,7 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels
           caller_module;
           caller_name = caller;
           head;
+          local_module_invocation;
           partial;
           cond;
           dead;
