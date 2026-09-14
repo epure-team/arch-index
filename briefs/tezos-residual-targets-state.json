@@ -1,7 +1,7 @@
 {
   "task": "tezos-residual-targets",
   "mode": "full",
-  "current_phase": "qa",
+  "current_phase": "ship",
   "events": [
     {
       "phase": "question",
@@ -63,6 +63,12 @@
       "outcome": "GO",
       "at": "2026-09-14T17:37:55.194Z",
       "by": "roster-qa"
+    },
+    {
+      "phase": "ship",
+      "outcome": "COMPLETED",
+      "at": "2026-09-14T17:55:23.251Z",
+      "by": "roster-ship"
     }
   ]
 }
