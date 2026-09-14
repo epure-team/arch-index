@@ -959,6 +959,52 @@ let binding_name names ~prefix id =
   | Some name -> name
   | None -> qualify ~prefix (Ident.name id)
 
+let root_lambda_name caller (loc : Location.t) =
+  let p = loc.loc_start in
+  let line = p.pos_lnum and col = p.pos_cnum - p.pos_bol + 1 in
+  Printf.sprintf "%s.<fun:%d:%d>" caller line col
+
+type open_body_target = {
+  display_name : string;
+  body_name : string;
+  body_arity : int;
+  expected_body : Typedtree.expression;
+  mutable matching_bodies : int;
+  mutable expected_body_observed : bool;
+  mutable stored_body : bool;
+}
+
+(** Invocation-only companions for structural bindings of the exact form
+    [let x = let open Path in fun ...].  This deliberately does not widen
+    [local_fn_stamps]: the binding is still a value whose invocation is only a
+    MAY edge.  Exact compiler identity is retained as the table key. *)
+let build_open_body_targets (structure : Typedtree.structure) =
+  let binding_names = build_binding_names structure in
+  let targets = Hashtbl.create 16 in
+  iter_structure_items structure ~f:(fun ~prefix (it : Typedtree.structure_item) ->
+      match it.str_desc with
+      | Tstr_value (_, vbs) ->
+          List.iter
+            (fun (vb : Typedtree.value_binding) ->
+              match vb.vb_pat.pat_desc, vb.vb_expr.exp_desc with
+              | Tpat_var (id, _, _), Texp_open (od, body) -> (
+                  match od.open_expr.mod_desc, body.exp_desc with
+                  | Tmod_ident _, Texp_function _ ->
+                      let parent = binding_name binding_names ~prefix id in
+                      Hashtbl.replace targets (Ident.unique_name id)
+                        {display_name = Ident.name id;
+                         body_name = root_lambda_name parent body.exp_loc;
+                         body_arity = fn_arity body;
+                         expected_body = body;
+                         matching_bodies = 0;
+                         expected_body_observed = false;
+                         stored_body = false}
+                  | _ -> ())
+              | _ -> ())
+            vbs
+      | _ -> ()) ;
+  targets
+
 (** Pre-pass shared by the main indexer and the LSP fallback: the table of
     top-level bindings whose RHS is a real function body, mapping the binder's
     [Ident.unique_name] stamp to its syntactic arity. A same-module unqualified
@@ -1283,9 +1329,11 @@ let build_module_alias_stamps (structure : Typedtree.structure) =
     resolvable (MUST-candidate) call only if its stamp is in this set —
     otherwise it is a parameter / local binding / closure and is MAY_TOP.
     Returns a list of pending calls. *)
-let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels = [])
+let collect_calls_from_expr_with_open_bodies ?(canon_exn = fun p -> Path.name p)
+    ?(value_channels = [])
     ?(local_alias_stamps = Hashtbl.create 0) ?(module_alias_stamps = Hashtbl.create 0)
     ?(local_module_targets = Local_module_ids.empty)
+    ?(open_body_targets = Hashtbl.create 0)
     ~src_path ~caller_module ~caller_name
     ~local_fn_stamps (expr : Typedtree.expression) =
   (* Per-node CFG: every function — the top-level binding AND each nested
@@ -1452,9 +1500,8 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels
      [<caller>.<fun:LINE:COL>] with 1-based column and a [#N] in-marker ordinal
      on a same-position collision (ghost/ppx locs). *)
   let lambda_name (loc : Location.t) =
-    let p = loc.loc_start in
-    let line = p.pos_lnum and col = p.pos_cnum - p.pos_bol + 1 in
-    let base = Printf.sprintf "%s.<fun:%d:%d" (!cur).lcaller line col in
+    let root = root_lambda_name (!cur).lcaller loc in
+    let base = String.sub root 0 (String.length root - 1) in
     let n = (try Hashtbl.find markers base with Not_found -> 0) + 1 in
     Hashtbl.replace markers base n ;
     if n = 1 then base ^ ">" else Printf.sprintf "%s#%d>" base n
@@ -1472,6 +1519,9 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels
     match Hashtbl.find_opt local_fn_stamps (Ident.unique_name id) with
     | Some (name, _) -> name
     | None -> Ident.name id
+  in
+  let open_body_target id =
+    Hashtbl.find_opt open_body_targets (Ident.unique_name id)
   in
   (* The definition path of a same-module top-level ALIAS binder (see
      {!build_local_alias_stamps}), or [None] when this identifier is not one.
@@ -1868,6 +1918,14 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels
                  calls attribute to the node and MUST = post-dominates the
                  LAMBDA's entry). *)
               let name = lambda_name expr.exp_loc in
+              Hashtbl.iter
+                (fun _ target ->
+                  if name = target.body_name then (
+                    target.matching_bodies <- target.matching_bodies + 1 ;
+                    if expr == target.expected_body
+                       && fn_arity expr = target.body_arity
+                    then target.expected_body_observed <- true))
+                open_body_targets ;
               Hashtbl.replace lam_names expr.exp_loc name ;
               lambdas :=
                 {
@@ -2205,6 +2263,9 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels
                  noreturn/CFG accounting unchanged in this focused slice. *)
               let body_nargs =
                 match fn_expr.exp_desc with
+                | Texp_ident (Path.Pident id, _, _)
+                  when open_body_target id <> None ->
+                    List.length (List.filter_map snd args)
                 | Texp_ident (path, _, _) -> (
                     match invocation_module_target path with
                     | Some _ -> List.length (List.filter_map snd args)
@@ -2224,14 +2285,16 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels
                      | Some a -> a
                      | None -> arrow_arity fn_expr.exp_type)
                 | Texp_ident (Path.Pident id, _, _) -> (
-                    match lam_stamp id with
+                    match open_body_target id with
+                    | Some target -> target.body_arity
+                    | None -> (match lam_stamp id with
                     | Some (_, a) ->
                         (* head consumption of a stamped lambda: the head
                            classification emits its edge — suppress the generic
                            occurrence case for this loc. *)
                         Hashtbl.replace head_idents fn_expr.exp_loc () ;
                         a
-                    | None -> arrow_arity fn_expr.exp_type)
+                    | None -> arrow_arity fn_expr.exp_type))
                 | Texp_ident (path, _, _) -> (
                     match invocation_module_target path with
                     | Some (_, arity) -> arity
@@ -2263,7 +2326,13 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels
                     add_call ~partial ~is_head_of:expr.exp_loc ?callee_ty:!callee_ty_for_channel
                       (Head_local (local_fn_name id)) expr.exp_loc
                 | Texp_ident (Path.Pident id, _, _) -> (
-                    match lam_stamp id with
+                    match open_body_target id with
+                    | Some target ->
+                        add_call ~partial ~is_head_of:expr.exp_loc
+                          ?callee_ty:!callee_ty_for_channel
+                          ~edge_form:("__open_body:" ^ Ident.unique_name id)
+                          (Head_enumerated target.body_name) expr.exp_loc
+                    | None -> (match lam_stamp id with
                     | Some (node_name, _) ->
                         (* Head application of a let-bound literal: resolves to
                            the lambda node — MUST when unconditional+saturated,
@@ -2277,7 +2346,7 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels
                           ~is_head_of:expr.exp_loc
                           ?callee_ty:!callee_ty_for_channel
                           (Head_unknown (Ident.name id, Callback_param))
-                          expr.exp_loc)
+                          expr.exp_loc))
                 | Texp_ident (path, _, _) ->
                     note_seen_value_path (Path.name path) ;
                     let callee_module, callee_name = path_to_module_name path in
@@ -2936,6 +3005,13 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels
   in
   (calls, List.rev !lambdas, exn_by_node, errch_by_node)
 
+let collect_calls_from_expr ?canon_exn ?value_channels ?local_alias_stamps
+    ?module_alias_stamps ?local_module_targets ~src_path ~caller_module
+    ~caller_name ~local_fn_stamps expr =
+  collect_calls_from_expr_with_open_bodies ?canon_exn ?value_channels
+    ?local_alias_stamps ?module_alias_stamps ?local_module_targets ~src_path
+    ~caller_module ~caller_name ~local_fn_stamps expr
+
 (* -------------------------------------------------------------------------- *)
 (* Process a single .cmt file                                                 *)
 (* -------------------------------------------------------------------------- *)
@@ -3056,6 +3132,7 @@ let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
                   let pending_deps = ref [] in
                   let pending_type_usages = ref [] in
                   let local_fn_stamps = build_local_fn_stamps structure in
+                  let open_body_targets = build_open_body_targets structure in
                   let local_module_targets = build_local_module_targets ~local_fn_stamps structure in
                   let local_alias_stamps = build_local_alias_stamps structure in
                   let module_alias_stamps = build_module_alias_stamps structure in
@@ -3421,7 +3498,24 @@ let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
                                          drop so it can tell the two apart. *)
                                       record_dropped_node
                                         ~module_path:rel_path
-                                        ~name
+                                        ~name ;
+                                      (* A supported open-wrapped binding's
+                                         promoted root is unavailable whenever
+                                         its parent row is refused: collection
+                                         never runs for that binding, so record
+                                         the exact descriptor explicitly rather
+                                         than letting callers create a dangling
+                                         enumerated leaf. *)
+                                      (match vb.vb_pat.pat_desc with
+                                      | Tpat_var (id, _, _) -> (
+                                          match Hashtbl.find_opt open_body_targets
+                                                  (Ident.unique_name id) with
+                                          | Some target ->
+                                              record_dropped_node
+                                                ~module_path:rel_path
+                                                ~name:target.body_name
+                                          | None -> ())
+                                      | _ -> ())
                                   | Some function_id ->
                                       (* node name → functions row id, for the
                                          parent and (below) each lambda node *)
@@ -3445,7 +3539,7 @@ let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
                                       (* Collect calls (and promoted lambda nodes) from
                                          this function's body *)
                                       let calls, lam_nodes, exn_by_node, errch_by_node =
-                                        collect_calls_from_expr
+                                        collect_calls_from_expr_with_open_bodies
                                           ~canon_exn
                                           ~value_channels
                                           ~src_path:rel_path
@@ -3455,6 +3549,7 @@ let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
                                           ~local_alias_stamps
                                           ~module_alias_stamps
                                           ~local_module_targets
+                                          ~open_body_targets
                                           vb.vb_expr
                                       in
                                       (* Insert a synthetic functions row per nested
@@ -3486,7 +3581,13 @@ let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
                                               ()
                                           with
                                           | Some lam_id ->
-                                              Hashtbl.replace node_ids l.lam_name lam_id
+                                              Hashtbl.replace node_ids l.lam_name lam_id ;
+                                              Hashtbl.iter
+                                                (fun _ target ->
+                                                  if target.expected_body_observed
+                                                     && target.body_name = l.lam_name
+                                                  then target.stored_body <- true)
+                                                open_body_targets
                                           | None ->
                                               record_dropped_node
                                                 ~module_path:rel_path
@@ -3748,5 +3849,38 @@ let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
                       | _ -> ()
                   in
                   iter_structure_items structure ~f:process_item ;
+                  (* Resolve invocation-only descriptors only after every
+                     structural binding has been walked and every promoted
+                     lambda insert has succeeded or failed.  This supports
+                     forward references without treating a calculated name as
+                     proof that a body exists. *)
+                  pending_calls :=
+                    List.map
+                      (fun (c : pending_call) ->
+                        match c.edge_form with
+                        | Some marker when String.starts_with ~prefix:"__open_body:" marker ->
+                            let stamp = String.sub marker 12 (String.length marker - 12) in
+                            (match Hashtbl.find_opt open_body_targets stamp with
+                            | Some target
+                              when is_dropped_node ~module_path:rel_path
+                                     ~name:target.body_name ->
+                                {c with
+                                 head = Head_unknown (target.body_name, Dropped_node);
+                                 edge_form = None}
+                            | Some target
+                              when target.stored_body
+                                   && target.expected_body_observed
+                                   && target.matching_bodies = 1 ->
+                                {c with edge_form = None}
+                            | Some target ->
+                                {c with
+                                 head = Head_unknown (target.display_name, Callback_param);
+                                 edge_form = None}
+                            | None ->
+                                {c with
+                                 head = Head_unknown ("*TOP*", Callback_param);
+                                 edge_form = None})
+                        | _ -> c)
+                      !pending_calls ;
                   (!pending_calls, !pending_deps, !pending_type_usages))
       | _ -> notify "unsupported_annotation" ; ([], [], []))

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "revision": "975c73b49def2813517b00c296006417d062d8b2+occurrence-fix-self-source-manifest-sha256:e8eef8003b1d5bf32ac1ae6b56249e279133d3ef06826984d75c23023f2f325d",
+  "revision": "7f10fbc9a15e210f15114f7f8f399424a75fdcad+pristine-source-only",
   "modules": [
     "lib/arch_index/arch_errors_config.ml",
     "lib/arch_index/arch_index.ml",
@@ -30,9 +30,9 @@
   ],
   "totals": {
     "modules": 25,
-    "functions": 989,
-    "calls": 6275,
-    "origins": 564
+    "functions": 998,
+    "calls": 6335,
+    "origins": 570
   },
   "origin_groups": [
     {
@@ -45,7 +45,7 @@
       "channel": "exception",
       "form": "compare",
       "escapes": 1,
-      "count": 49
+      "count": 50
     },
     {
       "channel": "exception",
@@ -81,7 +81,7 @@
       "channel": "option",
       "form": "raise",
       "escapes": 1,
-      "count": 315
+      "count": 320
     },
     {
       "channel": "result",

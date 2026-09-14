@@ -1,0 +1,18 @@
+{
+  "task": "tezos-open-bodies",
+  "mode": "full",
+  "schema_version": "1.0",
+  "steps": [
+    {"id":"step-1","skill":"roster-implement","inputs":["briefs/tezos-open-bodies-implementer.md"],"outputs":["briefs/tezos-open-bodies-manifest.txt","roster/tezos-open-bodies/check-native.js"],"hook":false},
+    {"id":"step-2","skill":"roster-implement","inputs":["briefs/tezos-open-bodies-implementer.md"],"outputs":["lib/arch_index/arch_index_cmt.ml","tezt/tests/open_body_targets.ml"],"hook":false},
+    {"id":"step-3","skill":"roster-implement","inputs":["briefs/tezos-open-bodies-implementer.md"],"outputs":["roster/tezos-open-bodies/verify.js","briefs/tezos-open-bodies-impl.md","checks/origin-recurring-consumer.js"],"conditional_collateral":{"path":"checks/origin-recurring-consumer.js","exact_literals":["reference totals","sole allowed source assertion identity"]},"hook":false},
+    {"id":"step-4","skill":"roster-review","inputs":["briefs/tezos-open-bodies-reviewer.md","briefs/tezos-open-bodies-impl.md"],"outputs":["briefs/tezos-open-bodies-review.json"],"hook":false},
+    {"id":"step-5","skill":"roster-qa","inputs":["briefs/tezos-open-bodies-qa-scope.md","briefs/tezos-open-bodies-review.json"],"outputs":["briefs/tezos-open-bodies-qa.md"],"hook":false},
+    {"id":"step-6","skill":"roster-ship","inputs":["briefs/tezos-open-bodies-qa.md"],"outputs":["briefs/tezos-open-bodies-ship-gate.md"],"hook":false}
+  ],
+  "quality_gates": {
+    "build":"opam exec -- dune build",
+    "test":"opam exec -- dune exec tezt/tests/main.exe -- --no-color",
+    "lint":""
+  }
+}
