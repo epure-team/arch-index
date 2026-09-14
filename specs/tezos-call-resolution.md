@@ -90,6 +90,7 @@ Eight challenges (C-1–C-8) were raised by a fresh Sol pass and resolved before
 - AC-11 [US-2, C-8]: Only positive product gain plus all gates qualifies for keep; neutral instrumentation is excluded and each retained PR merges sequentially.
 - AC-12 [US-1, C-5, review round1]: A native omitted-label partial call retains its partial owned head without an invented return residual; its fully supplied overapplication control retains the residual.
 - AC-13 [US-2, C-8, review round1]: Isolated malformed/missing provenance, input, collection and witness cases exercise the actual refusal functions and cannot produce a successful keep result; real Tezos inputs remain untouched.
+- AC-14 [US-2, FR-015, review round2]: The current built producer's self-index module/function/call counts match the committed smoke golden byte-for-byte under the exact CI query; stale expectations fail locally, with no threshold or automatic refresh.
 
 ## Edge Cases
 
@@ -111,6 +112,7 @@ Commands below are implementation deliverables, not a claim they already exist o
 - CHECK-3 [AC-9, AC-10, AC-11]: `node roster/tezos-call-resolution/verify.js --baseline /tmp/arch-index-resolution-baseline-OmhcEs/baseline.db --witness improvement/2026-09-14-tezos-resolution/attempt1-reviewed-witness.json` → hash-locked fixed410 producer run, per-group relation/multiset comparison and report. The exact witness is generated from independently reviewed compiler evidence as documented in roster/tezos-call-resolution/uid-witness-report.md; missing evidence refuses. Baseline self-comparison uses `--self` without `--witness`. Actual keep additionally requires positive permitted gain and the full pipeline.
 - CHECK-4 [AC-12] (authentic-success-path, fail-closed-path): `node roster/tezos-call-resolution/check-labeled-arity.js` → self-contained native compiler/collector regression verifies supplied slots, partial head metadata and exact return-residual counts; 1 is an assertion failure, >=2 a setup error. Introduced on the round1 NO-GO bounce and must be observed red before the product fix.
 - CHECK-5 [AC-13] (fail-closed-path): `node roster/tezos-call-resolution/check-verifier-inputs.js` → isolated negative tests of provenance, input hashes, collection completeness and exact witness binding, with no writes to Tezos or retained baseline. Positive controls prevent vacuous refusal tests.
+- CHECK-6 [AC-14] (authentic-success-path): `node roster/tezos-call-resolution/check-self-index-smoke.js` → index the current built library into an owned temporary DB, execute the exact CI SQLite stats query and compare the committed golden byte-for-byte. Exit1 requires an actual mismatch after successful production/query; setup errors exit>=2. The checker never rewrites the golden and cleans only its own temporary DB.
 
 Full guard: `opam exec --switch=/home/mathias/dev/arch-index -- dune build --root .`, then `opam exec --switch=/home/mathias/dev/arch-index -- dune runtest --root . --force`, bundle verification and whitespace check. Exact report filenames, self-comparison mode, cleanup ownership and machine provenance binding are fixed by the implementation plan before checker construction. Verify MUST refuse a baseline lacking its matching recorded producer/corpus provenance; a naked DB path does not establish comparability.
 
@@ -146,11 +148,13 @@ Full guard: `opam exec --switch=/home/mathias/dev/arch-index -- dune build --roo
 {"record":"acceptance-criterion","id":"AC-11","for":["FR-015"]}
 {"record":"acceptance-criterion","id":"AC-12","for":["FR-007","FR-008"]}
 {"record":"acceptance-criterion","id":"AC-13","for":["FR-014"]}
+{"record":"acceptance-criterion","id":"AC-14","for":["FR-015"]}
 {"record":"check","id":"CHECK-1","for":["AC-1","AC-2","AC-3","AC-4","AC-5","AC-6","AC-7","AC-8"]}
 {"record":"check","id":"CHECK-2","for":["AC-9","AC-10"]}
 {"record":"check","id":"CHECK-3","for":["AC-9","AC-10","AC-11"]}
 {"record":"check","id":"CHECK-4","for":["AC-12"]}
 {"record":"check","id":"CHECK-5","for":["AC-13"]}
+{"record":"check","id":"CHECK-6","for":["AC-14"]}
 ```
 
 Claims stay draft metadata: canonical claims validation/projection tooling is not installed. No projection success is claimed.

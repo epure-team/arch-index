@@ -40,9 +40,19 @@ Review identity/member masking and flat attribution; native positive tests alone
 
 ## Identified out-of-scope
 
-The previously requested six-path extension is now approved and implemented; the diagnosis remains historical. No new scope expansion is proposed. Do not change historical gate results, Tezos inputs, schema, dependencies, held PR93 or unrelated worktrees. Product attempts delivered remain0/5; attempt1 awaits independent review/QA/CI, not yet discarded or kept.
+The previously requested six-path extension is approved and implemented; the diagnosis remains historical. Review round2's sole OPEN non-scope finding adds the exact test/fixtures/self-index-stats.txt path via roster-implement's loop-back union rule. This is CI oracle collateral, not a resolution-scope change; original manifest base/dirty entries remain pinned. Do not change historical gate results, Tezos inputs, schema, dependencies, held PR93 or unrelated worktrees. Product attempts delivered remain0/5; attempt1 awaits independent review/QA/CI, not yet discarded or kept.
 
 ## Ratchet
+
+Round2 NO-GO repair (completed, full327/327 PASS): finding
+`test/fixtures/self-index-stats.txt:2:integration#3f5e6e18` is assigned new
+`roster/tezos-call-resolution/check-self-index-smoke.js` (CHECK-6/AC-14).
+Red command: `node roster/tezos-call-resolution/check-self-index-smoke.js`.
+check_encodable: true. Self-contained current-producer/SQLite exact golden
+comparison with owned runtime DB cleanup; no automatic refresh or threshold.
+Genuine RED preceded the fixture edit; execution evidence is recorded
+in self-smoke-ratchet-evidence.md. Null pre_fix_sha remains honest dirty-tree
+metadata, not an automatically red-verified historical checkout.
 
 Round1 NO-GO repair (full guard now PASS326/326): all three observations of omitted-label
 arity share `roster/tezos-call-resolution/check-labeled-arity.js` (CHECK-4/AC-12).
@@ -94,3 +104,29 @@ No additional compatibility oracle movement. Existing round1 reviews remain
 historical NO-GO evidence. Round2 review, QA, exact-head hosted CI and merge are
 not yet approved;0/5 product attempts delivered. Unrelated dirt remains excluded
 from the task commit; do not misreport the whole checkout as clean.
+
+## Round2 repair completed — handoff for review round3
+
+The separate CI smoke golden is now25/980/6245, matching the exact current
+producer/SQLite output. CHECK6/AC14 reproduces that comparison locally with no
+threshold or runtime fixture rewrite. Sol observed genuine assertion RED before
+the golden-only update, then GREEN; the checker is registered in Tezt and its
+script/golden are explicit Dune dependencies. The required native titles are7.
+Root caught and corrected CI portability during integration: use the local opam
+switch only when present, otherwise inherited environment. Root independently
+ran that inherited path PASS and missing-producer control SETUP2. Cleanup failure
+also maps to SETUP2; subprocesses have bounded timeouts.
+
+Sol independently executed build0, native7/7, wrapper5 and full forced327/327.
+Root reran CHECK2(28), CHECK4 and CHECK5(39), all0, plus exact fixed410 candidate0
+at2026-09-14T07-00-21-646Z-candidate-2740926 and self0
+at2026-09-14T07-00-37-906Z-self-2741604. Canonical rows remain90e76d6...,
+795 relation gains (+400/+395), zero losses. No additional product/source change
+occurred; the existing UID witnesses and all refusal boundaries still apply.
+Bundle22/scope/whitespace pass. No formatter/coverage/claims tool is configured.
+
+Round2 review is durably NO-GO for this now-corrected golden; review round3 has
+not run. Prior strike requires full fan-out. Pristine committed-tree recalibration,
+QA and hosted exact-head CI/merge remain required before keep; still0/5 delivered.
+Removed only25MiB regenerable compiled artifacts from the owned round1 label
+diagnostic; its source/DB evidence and the necessary baseline remain retained.

@@ -1,8 +1,4 @@
 {
-  "task": "tezos-call-resolution",
-  "date": "2026-09-14T06:51:25.873Z",
-  "status": "NO-GO",
-  "auto_fixes_applied": [],
   "findings": [
     {
       "severity": "MEDIUM",
@@ -15,13 +11,13 @@
       "fix": "Use actual supplied expression arguments (Some entries), rather than all Typedtree slots, for the new known-body saturation/overapplication decision. Preserve the partial head and add a native omitted-label regression with a fully supplied overapplication control; assert the residual count and pending partial metadata. Keep unrelated CFG behavior scoped separately.",
       "fingerprint": "lib/arch_index/arch_index_cmt.ml:2174:correctness",
       "specialist": "reviewer",
-      "status": "RESOLVED",
+      "status": "OPEN",
       "fid": "lib/arch_index/arch_index_cmt.ml:2174:correctness#e6e59b53",
       "first_seen_round": 1,
-      "resolved_round": 2,
+      "resolved_round": null,
       "reopened_from_round": null,
       "reopened_at_round": null,
-      "check": "roster/tezos-call-resolution/check-labeled-arity.js",
+      "check": null,
       "check_encodable": true,
       "red_verified": null,
       "pre_fix_sha": null,
@@ -43,12 +39,12 @@
         "FR-007"
       ],
       "fid": "lib/arch_index/arch_index_cmt.ml:2150:spec#208245bb",
-      "status": "RESOLVED",
+      "status": "OPEN",
       "first_seen_round": 1,
-      "resolved_round": 2,
+      "resolved_round": null,
       "reopened_from_round": null,
       "reopened_at_round": null,
-      "check": "roster/tezos-call-resolution/check-labeled-arity.js",
+      "check": null,
       "check_encodable": true,
       "red_verified": null,
       "pre_fix_sha": null,
@@ -71,12 +67,12 @@
         "CHECK-2"
       ],
       "fid": "roster/tezos-call-resolution/check-comparison.js:116:spec#36ef3d4f",
-      "status": "RESOLVED",
+      "status": "OPEN",
       "first_seen_round": 1,
-      "resolved_round": 2,
+      "resolved_round": null,
       "reopened_from_round": null,
       "reopened_at_round": null,
-      "check": "roster/tezos-call-resolution/check-verifier-inputs.js",
+      "check": null,
       "check_encodable": true,
       "red_verified": null,
       "pre_fix_sha": null,
@@ -93,13 +89,13 @@
       "fix": "For known syntactic body arity, compare arity with the number of supplied expression arguments (Some entries), not the number of Typedtree slots. Add a native omitted-label partial case and a fully supplied overapplication control that assert both the resolved head's partial metadata and whether a computed-return TOP residual exists. Keep the correction local to saturation/residual accounting.",
       "fingerprint": "lib/arch_index/arch_index_cmt.ml:2150:correctness",
       "specialist": "architect",
-      "status": "RESOLVED",
+      "status": "OPEN",
       "fid": "lib/arch_index/arch_index_cmt.ml:2150:correctness#0e5e8ad3",
       "first_seen_round": 1,
-      "resolved_round": 2,
+      "resolved_round": null,
       "reopened_from_round": null,
       "reopened_at_round": null,
-      "check": "roster/tezos-call-resolution/check-labeled-arity.js",
+      "check": null,
       "check_encodable": true,
       "red_verified": null,
       "pre_fix_sha": null,
@@ -117,91 +113,28 @@
       "fingerprint": "test/fixtures/self-index-stats.txt:2:integration",
       "specialist": "reviewer",
       "status": "OPEN",
-      "fid": "test/fixtures/self-index-stats.txt:2:integration#3f5e6e18",
-      "first_seen_round": 2,
-      "resolved_round": null,
-      "reopened_from_round": null,
-      "reopened_at_round": null,
-      "check": null,
-      "check_encodable": true,
-      "red_verified": null,
-      "pre_fix_sha": null,
-      "check_blob": null
+      "fid": "test/fixtures/self-index-stats.txt:2:integration#3f5e6e18"
     }
   ],
   "cross_runtime_findings": [],
-  "summary": {
-    "critical": 0,
-    "high": 1,
-    "medium": 0,
-    "low": 0,
-    "auto_fixed": 0
+  "probable_duplicates": [],
+  "rejected": [],
+  "reobservations": [],
+  "dispositions": {
+    "reopened": [],
+    "pending_check": []
   },
-  "no_go_reason": {
-    "type": "code-plan-failure",
-    "cause": null,
-    "failed_acs": []
+  "warnings": [],
+  "stats": {
+    "input": 1,
+    "rejected": 0,
+    "cross_runtime": 0,
+    "reobservations": 0,
+    "reopened": 0,
+    "pending_check": 0,
+    "merged": 1,
+    "carried_forward": 4,
+    "probable_duplicates": 0
   },
-  "no_go_round": 2,
-  "round": 2,
-  "cycle": 1,
-  "rounds_audit": [
-    {
-      "round": 1,
-      "reviewed_sha": null,
-      "fix_sha": null,
-      "fix_sha_reason": "dirty-tree",
-      "specialists_run": [
-        {
-          "name": "reviewer",
-          "selection_reason": "Owner reviewer always runs; full first round"
-        },
-        {
-          "name": "spec-compliance",
-          "selection_reason": "Per-feature specification exists; full first round"
-        },
-        {
-          "name": "architect",
-          "selection_reason": "Public collector context and more than three modified files"
-        }
-      ],
-      "strike": false,
-      "trace_schema_version": "1.0"
-    },
-    {
-      "round": 2,
-      "reviewed_sha": null,
-      "fix_sha": null,
-      "fix_sha_reason": "dirty-tree",
-      "specialists_run": [
-        {
-          "name": "reviewer",
-          "selection_reason": "Owner always runs; all prior findings verified resolved; new required CI golden failure reproduced"
-        },
-        {
-          "name": "spec-compliance",
-          "selection_reason": "Own prior OPEN findings and public arity behavior repair require full fan-out"
-        },
-        {
-          "name": "architect",
-          "selection_reason": "Own prior OPEN finding and public arity behavior repair require full fan-out"
-        }
-      ],
-      "strike": true,
-      "trace_schema_version": "1.0"
-    }
-  ],
-  "cross_runtime": {
-    "opencode": {
-      "status": "degraded",
-      "reason": "timeout",
-      "config_digest": "opencode:fd1dbeaa7d0c6431",
-      "round": 1
-    }
-  },
-  "streak_override": null,
-  "mode": "full",
-  "escalation_needed": false,
-  "escalation_reason": null,
-  "normalized_by": "2.0.0"
+  "normalizer_version": "2.0.0"
 }

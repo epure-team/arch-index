@@ -1,0 +1,3 @@
+First normalization attempt exited 2 (input shape, not a review verdict):
+review-normalize: finding file must be a JSON array: roster/tezos-call-resolution/architect-round2-findings.json
+Architect supplied an envelope; its new_unresolved array is extracted without changing the raw report.

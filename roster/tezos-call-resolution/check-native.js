@@ -12,6 +12,7 @@ const titles = [
   'local structured modules: CMT identities and flat attribution stay file-local',
   'local structured modules: labeled arity ratchet',
   'local structured modules: verifier refusal coverage',
+  'local structured modules: self-index golden ratchet',
 ];
 function classify(status, output) {
   if (status === 0 && titles.every(title => output.split('\n').some(line =>
