@@ -18,8 +18,8 @@
   exit 0; output `attempt3-candidate-s0F4So`, 45,052 rows each side,
   +316 protocol relations, +0 Irmin, zero relation losses/unexplained changes.
   Candidate digest `9ab4e0b13457247fb93dc83bf80323fcc5cec67866a18f56995ac0ec4a20867e`.
-- CHECK-5 parser controls: exit 0. The complete CHECK-5 requires the calibrated
-  source tree to be committed and remains pending at this checkpoint.
+- CHECK-5 parser controls: exit 0. The complete CHECK-5 subsequently passed
+  after the calibrated source tree was committed as `a5ae981`.
 - Review bundle: exit 0, 22 SHA-matched files, version 1.6.0.
 - Whitespace: `git diff --check` exit 0. No formatter or coverage configured;
   neither is claimed to have passed.
@@ -30,6 +30,8 @@ under the same improvement evidence directory. Source-only cells are A=B
 25/989/6275 and C=D25/998/6335, ceiling538→541 within the unchanged524±25 band.
 The sole allowed assertion remains identical source with multiplicity one.
 
-This checkpoint is not implementation COMPLETED, KEEP, review GO, QA GO or
-delivery. Two of five attempts are delivered. Seven unrelated untracked paths
+After source commit `a5ae981`, CHECK-5 also exited0: exact self smoke, frozen
+policy and pristine attribution boundary all passed. Implementation is now
+COMPLETED; this is not KEEP, review GO, QA GO or delivery.
+Two of five attempts are delivered. Seven unrelated untracked paths
 remain deliberately untouched; no global clean-tree claim is made.
