@@ -1000,9 +1000,13 @@ module Local_module_ids = Map.Make (Ident)
 module Local_module_members = Map.Make (String)
 
 type local_module_exports = {
-  values : (string * int) option Local_module_members.t;
+  values : local_module_value option Local_module_members.t;
   modules : local_module_exports option Local_module_members.t;
 }
+
+and local_module_value =
+  | Direct_body of string * int
+  | One_hop_alias of string * int
 
 type local_module_targets = local_module_exports Local_module_ids.t
 
@@ -1011,9 +1015,7 @@ let build_local_module_targets ~local_fn_stamps structure =
   let empty =
     {values = Local_module_members.empty; modules = Local_module_members.empty}
   in
-  let value exports name =
-    Option.join (Local_module_members.find_opt name exports.values)
-  and child exports name =
+  let child exports name =
     Option.join (Local_module_members.find_opt name exports.modules)
   in
   let register id = function
@@ -1051,9 +1053,18 @@ let build_local_module_targets ~local_fn_stamps structure =
                 in
                 let values =
                   match vb.vb_pat.pat_desc with
-                  | Tpat_var (id, _, _) when is_function_rhs vb.vb_expr ->
-                      Local_module_members.add (Ident.name id)
-                        (Hashtbl.find_opt local_fn_stamps (Ident.unique_name id)) values
+                  | Tpat_var (id, _, _) -> (
+                      match vb.vb_expr.exp_desc with
+                      | _ when is_function_rhs vb.vb_expr ->
+                          Local_module_members.add (Ident.name id)
+                            (Option.map (fun (name, arity) -> Direct_body (name, arity))
+                               (Hashtbl.find_opt local_fn_stamps (Ident.unique_name id))) values
+                      | Texp_ident (Path.Pident rhs, _, _)
+                        when is_arrow_ty vb.vb_expr.exp_type ->
+                          Local_module_members.add (Ident.name id)
+                            (Option.map (fun (name, arity) -> One_hop_alias (name, arity))
+                               (Hashtbl.find_opt local_fn_stamps (Ident.unique_name rhs))) values
+                      | _ -> values)
                   | _ -> values
                 in
                 {exports with values})
@@ -1072,8 +1083,17 @@ let build_local_module_targets ~local_fn_stamps structure =
                 match si with
                 | Types.Sig_value (id, _, _) ->
                     let name = Ident.name id in
-                    let target = Option.bind included (fun e -> value e name) in
-                    {exports with values = Local_module_members.add name target exports.values}
+                    (* Includes preserve the owned export's provenance.  In
+                       particular, an inline structure's one-hop alias stays
+                       invocation-eligible while the direct-only lookup below
+                       still keeps point-free behaviour unchanged. *)
+                    let target =
+                      Option.bind included (fun e ->
+                          Option.join
+                            (Local_module_members.find_opt name e.values))
+                    in
+                    {exports with values = Local_module_members.add name
+                       target exports.values}
                 | Types.Sig_module (id, _, _, _, _) ->
                     let name = Ident.name id in
                     let owned = Option.bind included (fun e -> child e name) in
@@ -1098,13 +1118,38 @@ let local_module_target targets path =
   match path with
   | Path.Pdot (parent, name) ->
       Option.bind (owner parent) (fun exports ->
-          Option.join (Local_module_members.find_opt name exports.values))
+          Option.bind
+            (Option.join (Local_module_members.find_opt name exports.values))
+            (function
+              | Direct_body (target_name, arity) -> Some (target_name, arity)
+              | One_hop_alias _ -> None))
   | Path.Pident _ | Path.Papply _ | Path.Pextra_ty _ -> None
 
-let local_module_target_names targets =
+let local_module_invocation_target targets path =
+  let rec owner = function
+    | Path.Pident id -> Local_module_ids.find_opt id targets
+    | Path.Pdot (parent, name) ->
+        Option.bind (owner parent) (fun exports ->
+            Option.join (Local_module_members.find_opt name exports.modules))
+    | Path.Papply _ | Path.Pextra_ty _ -> None
+  in
+  match path with
+  | Path.Pdot (parent, name) ->
+      Option.bind (owner parent) (fun exports ->
+          Option.map
+            (function
+              | Direct_body (target_name, arity)
+              | One_hop_alias (target_name, arity) -> (target_name, arity))
+            (Option.join (Local_module_members.find_opt name exports.values)))
+  | Path.Pident _ | Path.Papply _ | Path.Pextra_ty _ -> None
+
+let local_module_target_names ?(invocation = false) targets =
   let rec collect exports acc =
     let acc = Local_module_members.fold
-        (fun _ target acc -> match target with Some (name, _) -> name :: acc | None -> acc)
+        (fun _ target acc -> match target with
+          | Some (Direct_body (name, _)) -> name :: acc
+          | Some (One_hop_alias (name, _)) when invocation -> name :: acc
+          | Some (One_hop_alias _) | None -> acc)
         exports.values acc in
     Local_module_members.fold
       (fun _ child acc -> match child with Some e -> collect e acc | None -> acc)
@@ -1441,6 +1486,9 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels
      callee's interface — its head stays MUST (documented residual). *)
   let is_arrow ty = is_arrow_ty ty in
   let module_target path = local_module_target local_module_targets path in
+  let invocation_module_target path =
+    local_module_invocation_target local_module_targets path
+  in
   (* Number of leading arrows in a function type = its (maximal) arity. Uses
      the raw type — no env-based expansion, which is unreliable on .cmt-restored
      environments (they do not carry manifest type declarations, so an alias
@@ -1545,7 +1593,7 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels
                    it. *)
                 let m, n = path_to_module_name p in
                 let disp = match m with Some m -> m ^ "." ^ n | None -> n in
-                (match module_target p, alias_rewrite p with
+                (match invocation_module_target p, alias_rewrite p with
                 | Some (name, _), _ ->
                     add_call ~callee_ty:ae.exp_type (Head_enumerated name) loc
                 | None, Some (m, n) ->
@@ -1563,7 +1611,7 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels
   in
   (* Emit a call to a function named by a resolved [Path.t] — e.g. a let*/and*
      bind operator, which is applied but is not a [Texp_apply] node. *)
-  let add_path_call ?edge_form (path : Path.t) loc =
+  let add_path_call ?edge_form ?(invocation=false) (path : Path.t) loc =
     (* An alias-rewritten head must be demoted (FR-011), but a caller that
        already named a form has said something narrower about the SITE — a
        point-free [let f = S.g] is a [value_alias] whether or not [S] is an
@@ -1579,7 +1627,8 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels
     | Path.Pident id -> add_call (Head_unknown (Ident.name id, Callback_param)) loc
     | _ ->
         let callee_module, callee_name = path_to_module_name path in
-        match module_target path, alias_rewrite path with
+        let target = if invocation then invocation_module_target path else module_target path in
+        match target, alias_rewrite path with
         | Some (name, _), _ ->
             let head = if edge_form = Some "value_alias" then Head_local name else Head_enumerated name in
             add_call head loc
@@ -2122,10 +2171,10 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels
               List.iter
                 (fun (b : Typedtree.binding_op) -> self.expr self b.bop_exp)
                 ands ;
-              add_path_call let_.bop_op_path let_.bop_loc ;
+              add_path_call ~invocation:true let_.bop_op_path let_.bop_loc ;
               List.iter
                 (fun (b : Typedtree.binding_op) ->
-                  add_path_call b.bop_op_path b.bop_loc)
+                  add_path_call ~invocation:true b.bop_op_path b.bop_loc)
                 ands ;
               let c = new_blk () in
               let join = new_blk () in
@@ -2154,7 +2203,7 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels
               let body_nargs =
                 match fn_expr.exp_desc with
                 | Texp_ident (path, _, _) -> (
-                    match module_target path with
+                    match invocation_module_target path with
                     | Some _ -> List.length (List.filter_map snd args)
                     | None -> nargs)
                 | _ -> nargs
@@ -2181,7 +2230,7 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels
                         a
                     | None -> arrow_arity fn_expr.exp_type)
                 | Texp_ident (path, _, _) -> (
-                    match module_target path with
+                    match invocation_module_target path with
                     | Some (_, arity) -> arity
                     | None -> arrow_arity fn_expr.exp_type)
                 | _ -> arrow_arity fn_expr.exp_type
@@ -2229,7 +2278,7 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels
                 | Texp_ident (path, _, _) ->
                     note_seen_value_path (Path.name path) ;
                     let callee_module, callee_name = path_to_module_name path in
-                    (match module_target path, alias_rewrite path with
+                    (match invocation_module_target path, alias_rewrite path with
                     | Some (name, _), _ ->
                         add_call ~partial ~is_head_of:expr.exp_loc
                           ?callee_ty:!callee_ty_for_channel (Head_enumerated name)

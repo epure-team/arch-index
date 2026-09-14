@@ -18,3 +18,10 @@ This is not yet the distinct retained-state DB/neutral replay setup for attempt2
 Neutral manifest fallback verifies its exact three-key shape, question digest
 and that all technical IDs occur in its questions. Canonical claims reconciler
 and local research-orientation resolver are absent; no execution claimed.
+
+Post-manifest implementation baseline guard also completed exit0,327 SUCCESS
+on unchanged product (08:07:44–08:10:52). Raw log:
+improvement/2026-09-14-tezos-resolution/attempt2-implement-baseline-guard.log,
+SHA2569e40e293cef3e49672a037a0089266a348c720b78764202a062c6a00a755d277.
+Controlled negative-check diagnostics in the log are expected test output,
+not a failed gate. No product edits preceded either full guard.

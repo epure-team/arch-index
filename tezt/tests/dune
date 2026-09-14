@@ -152,6 +152,17 @@
   ../../roster/tezos-call-resolution/check-labeled-arity.js
   ../../roster/tezos-call-resolution/check-verifier-inputs.js
   ../../roster/tezos-call-resolution/check-self-index-smoke.js
+  ../../roster/tezos-residual-targets/check-native.js
+  ../../roster/tezos-residual-targets/check-flat.js
+  ../../roster/tezos-residual-targets/check-comparison.js
+  ../../roster/tezos-residual-targets/check-witness.js
+  ../../roster/tezos-residual-targets/check-witness-inputs.js
+  ../../roster/tezos-residual-targets/alias-witness.ml
+  ../../roster/tezos-residual-targets/baseline.js
+  ../../roster/tezos-residual-targets/prepare-baseline.js
+  ../../roster/tezos-residual-targets/comparison.js
+  ../../roster/tezos-residual-targets/witness.js
+  ../../roster/tezos-residual-targets/run-probe.js
   ../../test/fixtures/self-index-stats.txt
   ../../roster/tezos-call-resolution/verify.js
   ../../roster/tezos-call-resolution/comparison.js

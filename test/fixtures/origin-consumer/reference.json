@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "revision": "12ab1fcbd7f4e0cea6b54ea7452b7d9f83338a97+arity-repair-self-source-manifest-sha256:11c9a290232226bd82b96e1c690675aef8a219a1bf338170d1eabaa70a042c75",
+  "revision": "fb9c8f3f685d751ee07a81c17fb1ca61860a7365+one-hop-alias-self-source-manifest-sha256:2f6feeb50adb5e0eef1898e83be623685afcc5529dbdbe8ffcf09eddc386b284",
   "modules": [
     "lib/arch_index/arch_errors_config.ml",
     "lib/arch_index/arch_index.ml",
@@ -30,9 +30,9 @@
   ],
   "totals": {
     "modules": 25,
-    "functions": 980,
-    "calls": 6245,
-    "origins": 561
+    "functions": 989,
+    "calls": 6276,
+    "origins": 564
   },
   "origin_groups": [
     {
@@ -81,7 +81,7 @@
       "channel": "option",
       "form": "raise",
       "escapes": 1,
-      "count": 312
+      "count": 315
     },
     {
       "channel": "result",

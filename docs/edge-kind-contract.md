@@ -107,6 +107,19 @@ general defunctorization or 0CFA. Native cases are in
 `tezt/tests/local_module_targets.ml`; the contract is in
 [`specs/tezos-call-resolution.md`](../specs/tezos-call-resolution.md).
 
+Within an already-owned structure, a qualified invocation can also follow one
+bare arrow-typed value alias directly to an existing same-CMT function body.
+Applications, callbacks and let-operators use that body's stored identity and
+syntactic arity. Alias declarations do not enter the body table or become
+`MUST` candidates. Alias chains, computed/partially applied RHSs, qualified RHSs
+and unqualified alias invocations are not resolved by this extension.
+
+Invocation lookup is separate from point-free emission: every existing
+`value_alias` fact, including unresolved exports and immediate-predecessor
+links, remains unchanged. This is a bounded identity rule, not a value-flow
+fixpoint. Tests: `tezt/tests/local_value_targets.ml`; contract:
+[`specs/tezos-residual-targets.md`](../specs/tezos-residual-targets.md).
+
 ### Lambda nodes
 
 Every `fun …`/`function` literal is promoted to a **synthetic function node** named

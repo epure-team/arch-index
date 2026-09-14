@@ -384,8 +384,16 @@ val build_local_module_targets :
     must be proven; Papply and Pextra_ty refuse. *)
 val local_module_target : local_module_targets -> Path.t -> (string * int) option
 
-(** Names whose same-file ownership is known, for flat attribution checks. *)
-val local_module_target_names : local_module_targets -> string list
+(** Invocation-only lookup: accepts one bare value-alias hop to an existing
+    same-CMT body. Point-free consumers must keep using [local_module_target]. *)
+val local_module_invocation_target :
+  local_module_targets -> Path.t -> (string * int) option
+
+(** Names whose same-file ownership is known, for flat attribution checks.
+    [invocation] includes one-hop alias targets; leave it false for point-free
+    edges to preserve their existing attribution. *)
+val local_module_target_names :
+  ?invocation:bool -> local_module_targets -> string list
 
 (** [build_local_alias_stamps structure] maps each same-unit top-level binding
     whose RHS is a bare arrow-typed identifier ([let t2 = t1]) to the definition
