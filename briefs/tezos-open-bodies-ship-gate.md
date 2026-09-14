@@ -31,3 +31,18 @@ Pre-push: normal non-force push, scoped report commit, rebase on verified main.
 Merge condition: exact PR head required build check SUCCESS, no bypass/admin,
 guarded rebase merge. Held PR93 and foreign worktrees stay untouched.
 PR/CI/merge pending at creation of this gate; no third KEEP recorded yet.
+
+## Delivery confirmation
+
+PR107 https://github.com/epure-team/arch-index/pull/107 rebase-merged at
+2026-09-14T22:37:34Z to05e4a8a7ba2d64ff08a15e268005f800e06ea4d7.
+Required build SUCCESS11m42s on exacthead fd0fff4a4b84812aace005b27206bf84808e5f83,
+CI https://github.com/epure-team/arch-index/actions/runs/34904021837.
+No admin/bypass/force; match-head guarded merge, remote feature branch deleted.
+The local fast-forward warning was resolved with a normal rebase only after
+git cherry-mark verified e8d072e already applied and git diff confirmed the
+merged tree exactly equals the checked PR head. Local main now matches origin.
+
+Attempt3 KEEP: retainedIrmin4781/protocol12046, +316protocol/0loss; cumulative
++409Irmin/+826protocol. Results.tsv and external roadmap updated after merge.
+Three of five iterations delivered; next two remain. No new general0CFA claim.
