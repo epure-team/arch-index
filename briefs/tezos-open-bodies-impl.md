@@ -4,6 +4,19 @@
 **Mode:** full
 **Status:** COMPLETED
 
+## Review-round-1 checker repair
+
+The initial implementation handoff below is historical; review then identified
+native residual-head reuse and insufficient non-vacuous preservation controls.
+Both are corrected in task-local checkers without product/Tezt/guard changes.
+CHECK6 is a new self-contained native admission regression: actual main RED
+before the minimal one-use-head Set correction, then GREEN. CHECK1 now compares
+old/current actual SQLite facts with configured value channels, full pending
+calls, exact site normalization and counted residuals, effectful computed opens,
+real partial/full/default/refutable applications and live/dead CFG controls.
+See `roster/tezos-open-bodies/review-round1-repair.md` and preserved raw findings.
+This is same-round correction, no waiver; final personal reviews/QA remain pending.
+
 ## Modified files
 
 Product commit `a5ae981` adds private invocation-only descriptors and post-insert
