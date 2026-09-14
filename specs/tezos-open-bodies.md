@@ -147,6 +147,7 @@ All commands use exit 0 for pass, exit 1 for an assertion failure, and exit 2 or
 - **CHECK-3** [AC-12]: `node roster/tezos-open-bodies/check-baseline.js --replay` → distinct pinned baseline, neutral replay, mismatch refusal, and no-overwrite assertions pass. **Status: implemented preparation gate; exact run results in baseline-preparation.md, no candidate gain.**
 - **CHECK-4** [AC-8, AC-10, AC-11]: `node roster/tezos-open-bodies/verify.js --witness improvement/2026-09-14-tezos-resolution/attempt3-reviewed-witness.json` → fixed410 candidate changes are exactly witnessed and all unwitnessed canonical rows and relations are preserved. **Status: required candidate comparison; not passed.**
 - **CHECK-5** [AC-13]: `node roster/tezos-open-bodies/check-self.js` → exact self-smoke, full guard policy, pristine attribution, and source-only-before-reference-refresh assertions pass. **Status: required implementation; not passed.**
+- **CHECK-6** [AC-9, AC-11]: `node roster/tezos-open-bodies/check-residual-witness.js` → real compiled same-line groups admit one mixed-group residual and two distinct overapplied-head residuals, but refuse reuse of a residual head even with sufficient canonical row capacity. **Status: main assertion RED before the round-1 correction, then GREEN; independent final gates pending.**
 
 ## Traceability
 
@@ -236,6 +237,7 @@ answers or individual human review of the following clauses are fabricated.
 {"record":"check","id":"CHECK-3","for":["AC-12"]}
 {"record":"check","id":"CHECK-4","for":["AC-8","AC-10","AC-11"]}
 {"record":"check","id":"CHECK-5","for":["AC-13"]}
+{"record":"check","id":"CHECK-6","for":["AC-9","AC-11"]}
 ```
 
 ## Entities

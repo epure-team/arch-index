@@ -166,8 +166,11 @@ function loadWitness(file, baseline, candidateSnapshot, manifest) {
       return {before:item.before,after:item.after};
     });
     for(const {expected,count} of groups.values())if(count!==expected)fail('insufficient exact capacity for printed-head line group');
+    const residualHeads=new Set();
     const residuals=value.residuals.map(item=>{if (!item || ['reviewed_by','reviewed_at','source_evidence'].some(k => typeof item[k] !== 'string' || !item[k].trim())) fail('missing residual review/source provenance');
       const i=item.head_index;if(!Number.isInteger(i)||i<0||i>=transitions.length)fail('residual head index');
+      if(residualHeads.has(i))fail('residual head occurrence reused');
+      residualHeads.add(i);
       const n=natives[i];if(n.supplied_some<=n.syntactic_arity||item.arity!==n.syntactic_arity||item.arguments!==n.supplied_some)fail('residual lacks exact native overapplication');
       take(after,positionKey(item.after),'candidate residual row');return {after:item.after,head:transitions[i],arity:item.arity,arguments:item.arguments};});
     return {transitions,residuals,sha256:sha256(raw)};
