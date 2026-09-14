@@ -1,0 +1,17 @@
+[
+  {
+    "severity": "HIGH",
+    "confidence": 5,
+    "path": "roster/tezos-open-bodies/witness.js",
+    "line": 169,
+    "category": "architecture",
+    "summary": "Residual witness capacity allowed repeated use of one overapplied native head when canonical transition rows were duplicated.",
+    "evidence": "Residual authorization used canonical transition capacity but did not consume head_index. cd3cb3c adds residualHeads uniqueness and CHECK-6 compiles genuine same-line duplicate groups to reject the reuse case.",
+    "fix": "Retain the per-head uniqueness guard and CHECK-6 regression control.",
+    "fingerprint": "open-body-residual-head-index-reuse",
+    "specialist": "architect",
+    "status": "RESOLVED",
+    "first_seen_round": 1,
+    "resolved_round": 1
+  }
+]
