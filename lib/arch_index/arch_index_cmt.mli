@@ -290,6 +290,10 @@ type pending_call = {
   caller_module : string;
   caller_name : string;
   head : call_head;
+  local_module_invocation : bool;
+      (** This occurrence was resolved by owned-module invocation lookup.
+          Unlike head/name membership, this excludes unrelated bare callbacks,
+          unqualified calls and point-free edges from alias-only attribution. *)
   partial : bool;
   cond : bool;
   dead : bool;

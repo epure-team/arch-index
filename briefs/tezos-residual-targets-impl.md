@@ -4,6 +4,55 @@
 **Mode:** full
 **Status:** COMPLETED
 
+## Review-round-1 repair (root gates passed; specialist gates pending)
+
+The completion below describes975c73b, not a final delivery verdict. Independent
+spec review found that alias-owned names changed three unrelated legacy flat
+forms (direct call, parameter call, bare callback). Its historical OPEN finding
+and native reproduction are preserved in spec-compliance-round1-report.md and
+spec-compliance-round1-findings.json. Standing user authority covers the bounded
+in-scope correction; no invariant is waived and no spec is weakened.
+
+pending_call now carries occurrence-specific local_module_invocation provenance,
+default false, set only by successful qualified invocation lookup. The flat
+extractor uses this flag, not head/name membership, for alias-only attribution.
+Root's permanent check-flat.js first failed with an assertion on the old product,
+then passed after the fix. The independent reproduction also passed: six legacy
+rows equal, four qualified controls retained, two point-free rows equal; see
+roster/tezos-residual-targets/spec-repair-confirmation.md.
+
+Build0 and CHECK1/2 passed after repair. CHECK1 now additionally asserts the flag
+for qualified application/callback/letop, point-free and return residual rows in
+both contexts. Full guard exit0:332/332 (16:52:22–16:56:10), raw log
+improvement/2026-09-14-tezos-resolution/attempt2-full-guard-3.log.
+CHECK3 frozen replay and CHECK5 exact25/989/6275 passed. CHECK4 exit0 in
+attempt2-2026-09-14T16-57-25-539Z-740371 confirms124gains/+9Irmin/+115protocol,
+zero loss/errors and the unchanged00f1769d... candidate digest on45052rows.
+Bundle22, scope and whitespace gates also exit0. Final committed-head specialist
+gates and pristine recalibration remain pending; no review GO is implied.
+
+Fresh independent C/D self measurements are25/989/6275/564 with every origin group
+equal across frozen/current producers (self-attribution-review-fix.md). Exact
+references were refreshed to these observations, conditional on another pristine
+four-cell check before shipping. No threshold changed. Sole assertion relocation
+1557->1559 preserves form/exception/x1 under the explicit user approval.
+Reference source-manifest digest e8eef8003b1d5bf32ac1ae6b56249e279133d3ef06826984d75c23023f2f325d
+is SHA256 of UTF8 JSON.stringify(run.provenance.sources), no newline, from
+attempt2-origin-occurrence-fix/run.json; root rehashed every source successfully.
+The initial consumer correctly rejected stale coordinates and coverage before
+this refresh. Pristine calibration975c73b remains historical, not evidence for
+the repaired bytes. Still1/5 iterations delivered.
+
+## Ratchet
+
+Finding spec:flat-alias-ownership-leaks-legacy-occurrences, raised round1:
+check roster/tezos-residual-targets/check-flat.js, check_encodable true.
+Red command: node roster/tezos-residual-targets/check-flat.js on975c73b product
+with the new permanent legacy assertions (actual exit1 before product edits).
+Green command: same command on the repaired working tree (actual exit0).
+This is a same-round repair; no mechanical convergence-gate red_verified claim
+has yet been made. Preserve its finding history even if final round1 is GO.
+
 ## Completion after approved scope extension
 
 User approved the coordinate-only self.allow refresh on resume. SOURCE_ONLY

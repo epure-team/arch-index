@@ -41,6 +41,9 @@ let root_body x = x
 module Bridge = struct let alias = root_body end
 let point_free = root_body
 let root_run () = Bridge.alias 3
+let direct_run () = root_body 3
+let unknown_run root_body = root_body 3
+let bare_callback xs = List.map root_body xs
 `;
   fs.writeFileSync(path.join(temporary, 'a.ml'), fixture('a'));
   fs.writeFileSync(path.join(temporary, 'b.ml'), fixture('b'));
@@ -93,7 +96,12 @@ let () =
   assert.equal(rootCalls.length, 2);
   assert.equal(rootCalls.find(row => row.caller_file === 'a.ml').callee_file, 'a.ml');
   assert.equal(rootCalls.find(row => row.caller_file === 'b.ml').callee_file, null);
-  assert.equal(rows.length, 6, 'flat fallback invents no nested caller coverage');
+  const legacyCalls = rows.filter(row =>
+    ['direct_run','unknown_run','bare_callback'].includes(row.caller) && row.callee === 'root_body');
+  assert.equal(legacyCalls.length, 6, 'all legacy ordinary controls are nonvacuous');
+  assert.ok(legacyCalls.every(row => row.callee_file === 'a.ml' && row.edge_form === null),
+    'qualified alias provenance must not change legacy direct, unknown or bare callback attribution');
+  assert.equal(rows.length, 14, 'flat fallback invents no nested caller coverage');
   console.log('PASS flat CMT alias attribution (same-file positive, foreign-homonym refusal)');
 } catch (error) {
   const assertion = error instanceof assert.AssertionError;

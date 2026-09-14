@@ -1,0 +1,2 @@
+{"schema_version":"1.0","ts":"2026-09-14T16:33:03.185Z","task":"tezos-residual-targets","round":1,"cycle":1,"event":"scope-gate","actor":"check-scope-diff.sh","outcome":"ran"}
+{"schema_version":"1.0","ts":"2026-09-14T16:42:23.924Z","task":"tezos-residual-targets","round":1,"cycle":1,"event":"specialist","actor":"reviewer","outcome":"ran"}

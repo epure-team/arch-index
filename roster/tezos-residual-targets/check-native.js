@@ -56,7 +56,7 @@ let () =
         ~src_path:"native.ml" ~caller_module:"native.ml" ~caller_name:(Ident.name id) vb.vb_expr in
       let render (p:C.pending_call) = let n,_ = C.pending_display p in
         let h = match p.head with C.Head_enumerated _ -> "enumerated" | C.Head_unknown (_,r) -> C.top_reason_to_string r | _ -> "other" in
-        \`Assoc ["callee",\`String n;"head",\`String h;"partial",\`Bool p.partial;"form",match p.edge_form with None -> \`Null | Some x -> \`String x] in
+        \`Assoc ["callee",\`String n;"head",\`String h;"partial",\`Bool p.partial;"owned_invocation",\`Bool p.local_module_invocation;"form",match p.edge_form with None -> \`Null | Some x -> \`String x] in
       rows := \`Assoc ["caller",\`String (Ident.name id);"context",\`Bool enabled;"calls",\`List (List.map render calls)] :: !rows
       ) [false;true]
     | _ -> ()) vbs | _ -> ()) s.str_items;
@@ -83,9 +83,9 @@ try {
  for(const enabled of [false,true]) {
   for (const [caller,target,unresolved,partial] of [['applied','Owned.base','Owned.alias',false],['partial','Owned.base','Owned.alias',true],['callback','Callback.base','Callback.alias',false],['inline_include','Inline.body','Inline.alias',false],['letop','Ops.bind','Ops.let*',false]]) {
    const callee=enabled?target:unresolved;
-   assert.deepEqual(calls(caller,enabled).filter(x=>x.callee===callee),[{callee,head:enabled?'enumerated':'module_param',partial,form:null}],`${caller} one-hop body target/${enabled}`);
+   assert.deepEqual(calls(caller,enabled).filter(x=>x.callee===callee),[{callee,head:enabled?'enumerated':'module_param',partial,owned_invocation:enabled,form:null}],`${caller} one-hop body target/${enabled}`);
   }
-  assert.deepEqual(calls('point_free',enabled).filter(x=>x.callee==='Owned.alias'),[{callee:'Owned.alias',head:'module_param',partial:false,form:'value_alias'}],'point-free remains historical');
+  assert.deepEqual(calls('point_free',enabled).filter(x=>x.callee==='Owned.alias'),[{callee:'Owned.alias',head:'module_param',partial:false,owned_invocation:false,form:'value_alias'}],'point-free remains historical');
   for(const [caller,target,unresolved,partial,residuals] of [
    ['required_hole','Hidden.f','Hidden.alias',true,0],
    ['required_full','Hidden.f','Hidden.alias',false,1],
@@ -94,10 +94,10 @@ try {
    ['hidden_partial','Hidden.tri','Hidden.tri_alias',enabled,0],
   ]) {
    const callee=enabled?target:unresolved, actual=calls(caller,enabled);
-   assert.deepEqual(actual.filter(x=>x.callee===callee),[{callee,head:enabled?'enumerated':'module_param',partial,form:null}],`${caller} exact pending metadata/${enabled}`);
+   assert.deepEqual(actual.filter(x=>x.callee===callee),[{callee,head:enabled?'enumerated':'module_param',partial,owned_invocation:enabled,form:null}],`${caller} exact pending metadata/${enabled}`);
    const returns=actual.filter(x=>x.callee==='*TOP*');
    assert.equal(returns.length,enabled?residuals:0,`${caller} exact return residual count/${enabled}`);
-   assert.ok(returns.every(x=>x.head==='callback_param'&&x.partial===false&&x.form===null));
+   assert.ok(returns.every(x=>x.head==='callback_param'&&x.partial===false&&x.owned_invocation===false&&x.form===null));
    assert.equal(actual.length,1+returns.length,`${caller} has no unaccounted native calls`);
   }
  }
