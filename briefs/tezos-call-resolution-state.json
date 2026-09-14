@@ -1,7 +1,7 @@
 {
   "task": "tezos-call-resolution",
   "mode": "full",
-  "current_phase": "qa",
+  "current_phase": "ship",
   "events": [
     {
       "phase": "question",
@@ -22,6 +22,7 @@
     {"phase":"implement","outcome":"COMPLETED","reason":"Round2 golden repair: authentic smoke RED/GREEN; full327/327, native7/7, all6 checks and fixed410/self pass. Exact CI oracle retained, no product changes. Ready for mandatory full-fanout review3.","by":"roster-implement","at":"2026-09-14"},
     {"phase":"review","outcome":"GO","reason":"Round3 full fan-out: no unresolved findings; all3 specialists independently ran full327 and all6 checks/fixed410+self. Gate0, strike false, no warnings; prior null pre_fix_sha retained honestly. Three new ratchets permanent in spec. QA and hostedCI/merge pending.","by":"roster-review","at":"2026-09-14"},
     {"phase":"qa","outcome":"NO-GO","reason":"Round1 setup wrapper127: /usr/bin/time absent, before build invocation. No later gates run. QA convergence0,1/5; retry with shell builtin timing, no source changes.","by":"roster-qa","at":"2026-09-14"},
-    {"phase":"qa","outcome":"GO","reason":"Round2: actual build/full327, six spec checks, fixed410+self and bundle/whitespace PASS. QA convergence0 resets qualifying count0; prior setup failure retained. Code-intel absent; cross-runtime provider skipped by unchanged review breaker. Ready to ship under standing authority.","by":"roster-qa","at":"2026-09-14"}
+    {"phase":"qa","outcome":"GO","reason":"Round2: actual build/full327, six spec checks, fixed410+self and bundle/whitespace PASS. QA convergence0 resets qualifying count0; prior setup failure retained. Code-intel absent; cross-runtime provider skipped by unchanged review breaker. Ready to ship under standing authority.","by":"roster-qa","at":"2026-09-14"},
+    {"phase":"ship","outcome":"COMPLETED","reason":"PR105 rebase merged after exact-head ab1043f required CI SUCCESS; main ace388f7a598dc762a6df6a3bac55de8d162361c synchronized, owned feature branch deleted, unrelated dirt preserved. Iteration1 KEEP;1/5 delivered.","by":"roster-ship","at":"2026-09-14T07:43:28Z"}
   ]
 }

@@ -29,3 +29,20 @@ Pristine CI recalibration0: self golden source-only25/956/6145→25/980/6245;
 ceiling537 remains inside unchanged524±25. All owned diagnostic worktrees cleaned.
 Hosted CI has not run yet: create PR, verify exact head and required checks,
 repair any in-scope failures, then rebase merge. No keep until that completes.
+
+## Completed delivery — 2026-09-14
+
+PR https://github.com/epure-team/arch-index/pull/105 merged by rebase at
+2026-09-14T07:43:28Z. Exact checked head:
+ab1043ffcbca417c04cfea92e1280d29e867f015. Required build SUCCESS (11m12s),
+credentials SUCCESS; conditional MCP and release SKIPPED, not claimed tested.
+CI: https://github.com/epure-team/arch-index/actions/runs/34818243455.
+Merge used --match-head-commit with that SHA, no admin bypass.
+Main is now ace388f7a598dc762a6df6a3bac55de8d162361c.
+
+GitHub CLI merged successfully but could not fast-forward local main because
+its earlier census handoff had been rebased by GitHub. Read-only cherry-mark
+confirmed patch equivalence; git rebase origin/main skipped that duplicate.
+Local main now equals origin/main, owned feature branch deleted, unrelated dirt
+unchanged. No owned disposable worktree remains. Baseline/proof data retained
+for the four remaining attempts. Iteration1 KEEP, delivered1/5.
