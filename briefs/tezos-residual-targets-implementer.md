@@ -22,7 +22,7 @@ Conditional exact self-oracle collateral only:
 test/fixtures/self-index-stats.txt, test/fixtures/origin-consumer/reference.json,
 checks/origin-recurring-consumer.js assertion coordinates.
 User approved on 2026-09-14 the additional exact coordinate-only refresh in
-test/fixtures/origin-consumer/self.allow: line1509 to1557 and corresponding
+test/fixtures/origin-consumer/self.allow: line1509 to1557, then1559 after the bounded repair, and corresponding
 enclosing lambda coordinates; preserve the sole assert/Assert_failure x1 entry.
 No new allowance or rule relaxation is authorized.
 No other files, no old task1 verifier/spec/witness edits; existing task1 scripts

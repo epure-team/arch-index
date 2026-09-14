@@ -1,0 +1,45 @@
+# Final owner review — round 1 / cycle 1
+
+Recommendation: approve from the owner-reviewer perspective, with no open reproducible finding. This is not the aggregate roster GO, QA, retention, merge, or attempt-3 authorization. The historical owner approval on 975c73b was disproved by the spec specialist's flat-attribution control and is not reused as approval evidence here.
+
+Reviewer: `/root/residual_owner_review`, 2026-09-14. Exact reviewed and independently tested HEAD: `436cbfc667a5f01880fd9c11f53242c8fffb6ed3`. Base: `fb9c8f3f685d751ee07a81c17fb1ca61860a7365`; the full branch diff against `origin/main` and the complete repair delta against 975c73b were also inspected. Scope is delegated to the coordinator's actual passing scope gate, not inferred here. No product/reference/source edits or worktrees were created by this reviewer. The seven pre-task untracked entries were unchanged. These two final reviewer artifacts were written only after the source-state-sensitive checks completed.
+
+## Review and historical finding disposition
+
+The review spans the complete changed product files/interfaces, executable checks, native witness probe, fixtures/registration and feature documents read across the initial review and repaired-head pass. The reviewer contract, reviewer/implementation briefs, complete feature spec, spec inputs/resolutions and UID-layering rule were read; the repaired implementation/ratchet, historical spec report and independent repair confirmation were read again. Historical friction-log output was too large to claim a complete read; its changed entries were inspected. No `.claude/patterns/` directory exists.
+
+The prior finding `spec:flat-alias-ownership-leaks-legacy-occurrences` is corrected on this head. The old global invocation-name membership test changed unrelated bare/direct/parameter occurrences when an alias introduced their display name. The new `pending_call.local_module_invocation` field is explicitly occurrence-specific (`lib/arch_index/arch_index_cmt.mli:293`), defaults false (`lib/arch_index/arch_index_cmt.ml:1384`), and is set only after a successful qualified callback lookup (`:1600`), invoked path lookup (`:1637`), or qualified application lookup (`:2286`). Bare callback enumeration at `:1581` remains unflagged; point-free and return residual paths keep the default. The tuple-to-record transfer preserves the bit at `:2887` and `:2917`.
+
+`lib/arch_index/call_graph_extractor.ml:350` now uses that bit to choose alias-capable names; unflagged occurrences retain the existing direct-only membership policy. The exact same-file symbol guard remains at `:354`. I personally ran the strengthened permanent regression through CHECK1: `roster/tezos-residual-targets/check-flat.js:99` observes six direct/parameter/bare-callback controls and asserts their original a.ml attribution and null form. The same checker asserts supported qualified same-file positives, missing-local/foreign-homonym refusals, unchanged point-free rows and an exact 14-row total. Thus this is not merely a head-constructor workaround: bare callbacks can remain enumerated without acquiring alias ownership. The spec specialist's earlier native RED and independent old-extractor/repaired-extractor GREEN remain attributed to that specialist, not claimed as my own executions. My repaired-head GREEN is the actual permanent native control.
+
+Other correctness and security dimensions were retained in the review:
+
+- Ownership remains same-CMT and Ident-keyed. Export masking precedes admission (`arch_index_cmt.ml:1049`); only a bare arrow-typed Pident targeting the existing body table becomes a one-hop alias (`:1063`). Direct-only lookup (`:1109`) excludes it, while invocation lookup (`:1129`) admits it. Chains, qualified/persistent RHSs, computed values and non-owned module roots do not gain admission. Existing body names/ordinal identity and actual syntactic arity are reused, not synthesized.
+- Supplied-argument counting remains confined to successful owned lookup (`arch_index_cmt.ml:2206`); actual body arity, partial metadata and one callback-param return residual remain covered by native controls. `check-native.js:86` and `:97` now assert the ownership bit alongside target/head/partial metadata; `:88` and `:100` assert false on point-free and residual controls. CFG, config-head, error-channel, immediate predecessor and unsupported forms remain on their existing paths.
+- Witness admission remains independently compiler-derived, not product-table-derived. The narrow signature UID branch requires one plain Resolved endpoint, no conflicting concrete binding and exactly one matching arrow signature declaration (`check-witness.js:183–194`). Native replay (`witness.js:73`), exact positioned paired heads, ordinary-form restrictions, distinct locators, counted multiset consumption and return-residual capacity prevent free-form or duplicate evidence admission. Positive and refusal controls were actually rerun.
+- Frozen provenance/schema/corpus identities and neutral-producer replay remain pinned. Candidate verification checks source state before completing (`verify.js:87`) and explicitly emits `retention_authorized:false` (`:107`). The comparator protects non-null forms (`comparison.js:9`), new MUST edges, relation losses and residual accounting. The full native comparison, not semantic witness review alone, was executed.
+- No new network/dependency/schema/configuration surface or cross-CMT resolver is introduced. Native helpers operate on explicit local inputs and owned temporary artifacts. Storage-rejection, unsupported-form and positive-consumer assertions remain nonvacuous. No independent security finding was identified.
+
+## Personally executed gates
+
+Commands were executed sequentially in the root checkout, each prefixed by `rtk proxy`. All actual exits were 0; no failed gate was retried or suppressed.
+
+| Gate | Exact command after `rtk proxy` | Exit | Observation |
+| --- | --- | ---: | --- |
+| Build | `opam exec --switch=/home/mathias/dev/arch-index -- dune build --root .` | 0 | Repaired head builds. |
+| Full suite | `opam exec --switch=/home/mathias/dev/arch-index -- dune runtest --root . --force` | 0 | All 332 Tezt cases, 16:59:32–17:03:14, plus unit/check suites. |
+| Bundle | `node scripts/review-bundle-verify.js` | 0 | 22 SHA-matched files, bundle 1.6.0. |
+| Whitespace | `git diff --check` | 0 | No diagnostic. |
+| CHECK1 | `node roster/tezos-residual-targets/check-native.js` | 0 | Native contexts and pending metadata; all 5 Tezt cases, including repaired forced-flat controls. |
+| CHECK2 | `node roster/tezos-residual-targets/check-comparison.js` | 0 | 38 assertions; 3 positive native consumers/12 refusals; paired admission positive/10 refusals. |
+| CHECK3 | `node roster/tezos-residual-targets/prepare-baseline.js --check` | 0 | Frozen replay 45,052 rows; Irmin 4,772/protocol 11,615. |
+| CHECK4 | `node roster/tezos-residual-targets/verify.js --witness improvement/2026-09-14-tezos-resolution/attempt2-reviewed-witness.json` | 0 | 124 paired gains, +9 Irmin/+115 protocol; zero losses/errors; 45,052 rows each side. |
+| CHECK5 | `node roster/tezos-call-resolution/check-self-index-smoke.js` | 0 | Exact 25 modules/989 functions/6,275 calls. |
+
+CHECK4 durable output: `improvement/2026-09-14-tezos-resolution/attempt2-2026-09-14T17-04-52-249Z-801080/`. Baseline digest: `90e76d6b40b2d7f108fcc25523f85de1cb533a98565a8a7d6d284c1654939d4b`; candidate digest: `00f1769d6db7f6ee91ee51becabccd7b4ce13975acb6610c95ace69a7f620e9b`. Classification remains candidate, retention unauthorized.
+
+Raw command results are in this reviewer's execution transcript, including full-suite session 83692 (completion chunk cd14fc), CHECK1 session 91536, CHECK2 session 93448, CHECK3 session 90092 and CHECK4 session 86636. Full-suite tool display was truncated; the actual process exit and final 332/332 success were observed. No separate raw log is claimed. Controlled assertion/setup/injected-cleanup diagnostics and existing Tezt temporary-directory warnings were emitted by the passing suite; no foreign temporary directories were removed.
+
+The revised self references and source-only attribution evidence were reviewed. The coordinator separately reports exact-head pristine calibration exit 0 (golden A=B 25/980/6245, C=D 25/989/6275; ceilings A=B 537, C=D 538 within unchanged 524±25). That separate execution is not counted as personally run here. Aggregate normalization/convergence, other specialists, cross-runtime review and downstream QA/delivery remain the coordinator's responsibility. No formatter, coverage collector or managed claims projection is claimed to have run.
+
+Coverage remains FR-001–FR-017 / AC-1–AC-13 through the inspected implementation and CHECK1–5: owned admission, identity/shadowing, arity/residuals, legacy preservation, flat/rejection behavior, frozen provenance, independent witness, counted comparison/refusals, and self/retention boundaries. The historical finding is retained in its original artifacts; this final findings array contains only currently open owner findings and is `[]`.

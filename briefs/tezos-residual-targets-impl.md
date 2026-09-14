@@ -4,7 +4,23 @@
 **Mode:** full
 **Status:** COMPLETED
 
-## Review-round-1 repair (root gates passed; specialist gates pending)
+## Current handoff: review and QA GO, hosted delivery pending
+
+Product436cbfc is validated by all three personally executing reviewers,
+the actual normalization/convergence gate (round1 GO) and fresh root QA
+(round1 GO,332/332 and CHECK1..5). Fresh pristine four-cell calibration is
+SOURCE_ONLY and all owned calibration worktrees/builds were removed.
+QA fixed410 output attempt2-2026-09-14T17-35-08-875Z-1047006 confirms124gains,
++9Irmin/+115protocol,zero loss/errors,unchanged45052rows/candidate digest.
+The sole critical finding is fixed, not waived; historical RED and resolved
+history are preserved. Crossruntime timed out120s/degraded, notPASS;
+mechanical red_verified remains null for the uncommitted-tree RED setup.
+See review.json, qa.md and roster/tezos-residual-targets/review-round1-summary.md.
+Only exact-head hosted CI and rebase merge remain before retention. Still1/5
+delivered. The sections below are chronological historical handoffs, including
+their then-pending obligations; they do not override this current status.
+
+## Historical review-round-1 repair handoff
 
 The completion below describes975c73b, not a final delivery verdict. Independent
 spec review found that alias-owned names changed three unrelated legacy flat

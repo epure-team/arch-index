@@ -1,0 +1,60 @@
+{
+  "task": "tezos-residual-targets",
+  "date": "2026-09-14T17:28:09.899Z",
+  "status": "GO",
+  "auto_fixes_applied": [],
+  "findings": [],
+  "cross_runtime_findings": [],
+  "summary": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "auto_fixed": 0
+  },
+  "no_go_reason": {
+    "type": null,
+    "cause": null,
+    "failed_acs": []
+  },
+  "no_go_round": 0,
+  "round": 1,
+  "cycle": 1,
+  "rounds_audit": [
+    {
+      "round": 1,
+      "reviewed_sha": null,
+      "fix_sha": null,
+      "fix_sha_reason": "dirty-tree",
+      "specialists_run": [
+        {
+          "name": "reviewer",
+          "selection_reason": "Owner always runs; personally re-reviewed repaired436cbfc and executed all gates"
+        },
+        {
+          "name": "spec-compliance",
+          "selection_reason": "Feature spec present; independent native RED and fixed-head full gates confirm same-round repair"
+        },
+        {
+          "name": "architect",
+          "selection_reason": "Public pending-call API and more than three changed files; reused planner disclosed, personally executed all gates"
+        }
+      ],
+      "strike": false,
+      "trace_schema_version": "1.0"
+    }
+  ],
+  "cross_runtime": {
+    "opencode": {
+      "status": "degraded",
+      "reason": "timeout",
+      "config_digest": "opencode:76f897c73342fdbf",
+      "round": 1
+    }
+  },
+  "streak_override": null,
+  "mode": "full",
+  "escalation_needed": false,
+  "escalation_reason": null,
+  "normalized_by": "2.0.0"
+}
