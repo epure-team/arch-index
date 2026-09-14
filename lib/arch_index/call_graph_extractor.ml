@@ -240,9 +240,11 @@ let extract_calls_from_cmts ~project_dir fn_rows =
   else begin
     (* name -> file_path index for resolving callee files *)
     let name_to_file : (string, string) Hashtbl.t = Hashtbl.create 512 in
+    let same_file_rows = Hashtbl.create 512 in
     List.iter
       (fun (r : Lsp_extractor.fn_row) ->
-        Hashtbl.replace name_to_file r.name r.file_path)
+        Hashtbl.replace name_to_file r.name r.file_path ;
+        Hashtbl.replace same_file_rows (r.file_path, r.name) ())
       fn_rows ;
     let cmt_files = Arch_index_cmt.find_cmt_files build_dir in
     let cmt_only =
@@ -270,6 +272,12 @@ let extract_calls_from_cmts ~project_dir fn_rows =
                     let local_fn_stamps =
                       Arch_index_cmt.build_local_fn_stamps structure
                     in
+                    let local_module_targets =
+                      Arch_index_cmt.build_local_module_targets ~local_fn_stamps structure
+                    in
+                    let local_module_names = Hashtbl.create 16 in
+                    List.iter (fun name -> Hashtbl.replace local_module_names name ())
+                      (Arch_index_cmt.local_module_target_names local_module_targets) ;
                     (* Same-module top-level ALIAS binders ([let t2 = t1]).
                        Kept out of [local_fn_stamps] on purpose — see
                        [build_local_alias_stamps]. Threaded here too so an
@@ -317,6 +325,7 @@ let extract_calls_from_cmts ~project_dir fn_rows =
                                         ~local_fn_stamps
                                         ~local_alias_stamps
                                         ~module_alias_stamps
+                                        ~local_module_targets
                                         vb.vb_expr
                                     in
                                     (* Flat path: lambda-attributed calls flow
@@ -333,7 +342,13 @@ let extract_calls_from_cmts ~project_dir fn_rows =
                           Arch_index_cmt.pending_display pc
                         in
                         let callee_file =
-                          Hashtbl.find_opt name_to_file callee_name
+                          if Hashtbl.mem local_module_names callee_name then
+                            (* A proven body belongs to this CMT. LSP may not
+                               have supplied its qualified/ordinal name; an
+                               unrelated file's homonym cannot fill that gap. *)
+                            if Hashtbl.mem same_file_rows (rel_src, callee_name)
+                            then Some rel_src else None
+                          else Hashtbl.find_opt name_to_file callee_name
                         in
                         {
                           caller_name = pc.caller_name;

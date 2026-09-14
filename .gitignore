@@ -15,3 +15,6 @@ _opam/
 # Roster pipeline control files — session state, never committed
 briefs/ACTIVE_TASK
 briefs/*-manifest.txt
+
+# Bounded improvement-loop measurement outputs
+improvement/

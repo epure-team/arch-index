@@ -278,7 +278,8 @@ type call_head =
   | Head_qualified of string option * string
       (** resolved qualified [(module, name)] — MUST candidate / external leaf *)
   | Head_enumerated of string
-      (** named local fn passed as a callback → bounded candidate set *)
+      (** named local callback or identity-proven local structured-module body;
+          bounded candidate, never a MUST promotion *)
   | Head_unknown of string * top_reason
       (** unknowable target (param / computed / dynamic root / residual), plus WHY *)
 
@@ -370,6 +371,22 @@ val binding_name : (string, string) Hashtbl.t -> prefix:string -> Ident.t -> str
 val build_local_fn_stamps :
   Typedtree.structure -> (string, string * int) Hashtbl.t
 
+(** Per-CMT concrete structure ownership, rooted in actual module binders.
+    Member selection follows source-order exports and masks; aliases,
+    parameters, applications and unpacks never become owners. *)
+type local_module_targets
+
+val build_local_module_targets :
+  local_fn_stamps:(string, string * int) Hashtbl.t ->
+  Typedtree.structure -> local_module_targets
+
+(** Existing stored body names and syntactic arities only. Every Pdot owner
+    must be proven; Papply and Pextra_ty refuse. *)
+val local_module_target : local_module_targets -> Path.t -> (string * int) option
+
+(** Names whose same-file ownership is known, for flat attribution checks. *)
+val local_module_target_names : local_module_targets -> string list
+
 (** [build_local_alias_stamps structure] maps each same-unit top-level binding
     whose RHS is a bare arrow-typed identifier ([let t2 = t1]) to the definition
     path it is indexed under. Deliberately DISJOINT in meaning from
@@ -404,12 +421,16 @@ val build_module_alias_stamps : Typedtree.structure -> (string, string) Hashtbl.
     [module_alias_stamps] (default: empty — every module-alias-rooted head stays
     ⊤, i.e. today's behaviour) is {!build_module_alias_stamps}'s table for the
     same structure; a head it resolves is emitted qualified and carries
-    [edge_form = "module_alias"], which the kind matrix demotes. *)
+    [edge_form = "module_alias"], which the kind matrix demotes.
+    [local_module_targets] is optional same-CMT structure ownership; absence
+    declines every new local-module candidate. Proven ordinary heads are
+    [Head_enumerated]; point-free heads retain [Head_local] and [value_alias]. *)
 val collect_calls_from_expr :
   ?canon_exn:(Path.t -> string) ->
   ?value_channels:Arch_errors_config.channel list ->
   ?local_alias_stamps:(string, string) Hashtbl.t ->
   ?module_alias_stamps:(string, string) Hashtbl.t ->
+  ?local_module_targets:local_module_targets ->
   src_path:string ->
   caller_module:string ->
   caller_name:string ->
