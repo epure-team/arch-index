@@ -12,3 +12,10 @@
 {"schema_version":"1.0","ts":"2026-09-14T06:48:36.104Z","task":"tezos-call-resolution","round":2,"cycle":1,"event":"specialist","actor":"reviewer-tui","outcome":"skipped","detail":"No TUI surface in the scoped change"}
 {"schema_version":"1.0","ts":"2026-09-14T06:50:28.698Z","task":"tezos-call-resolution","round":2,"cycle":1,"event":"specialist","actor":"architect","outcome":"ran"}
 {"schema_version":"1.0","ts":"2026-09-14T06:51:08.069Z","task":"tezos-call-resolution","round":2,"cycle":1,"event":"normalizer","actor":"review-normalize.js","outcome":"ran"}
+{"schema_version":"1.0","ts":"2026-09-14T07:02:46.142Z","task":"tezos-call-resolution","round":3,"cycle":1,"event":"scope-gate","actor":"check-scope-diff.sh","outcome":"ran"}
+{"schema_version":"1.0","ts":"2026-09-14T07:09:10.176Z","task":"tezos-call-resolution","round":3,"cycle":1,"event":"specialist","actor":"reviewer","outcome":"ran"}
+{"schema_version":"1.0","ts":"2026-09-14T07:09:10.298Z","task":"tezos-call-resolution","round":3,"cycle":1,"event":"specialist","actor":"code-quality-auditor","outcome":"skipped","detail":"No KB properties exist"}
+{"schema_version":"1.0","ts":"2026-09-14T07:09:10.421Z","task":"tezos-call-resolution","round":3,"cycle":1,"event":"specialist","actor":"reviewer-tui","outcome":"skipped","detail":"No TUI surface changed"}
+{"schema_version":"1.0","ts":"2026-09-14T07:14:30.651Z","task":"tezos-call-resolution","round":3,"cycle":1,"event":"specialist","actor":"spec-compliance","outcome":"ran"}
+{"schema_version":"1.0","ts":"2026-09-14T07:16:08.686Z","task":"tezos-call-resolution","round":3,"cycle":1,"event":"specialist","actor":"architect","outcome":"ran"}
+{"schema_version":"1.0","ts":"2026-09-14T07:16:08.952Z","task":"tezos-call-resolution","round":3,"cycle":1,"event":"normalizer","actor":"review-normalize.js","outcome":"ran"}

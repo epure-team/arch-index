@@ -1,11 +1,11 @@
 {
   "mode": "full",
-  "no_go_round": 2,
+  "no_go_round": 0,
   "max_rounds": 5,
   "legacy_no_go_round": false,
-  "round": 2,
+  "round": 3,
   "legacy_round": false,
-  "current_round_strike": true,
+  "current_round_strike": false,
   "config": {
     "max_rounds": 5,
     "strikes": 2,
@@ -38,11 +38,17 @@
       "fingerprint": "lib/arch_index/arch_index_cmt.ml:2150:correctness",
       "red_verified": null,
       "flagged": "no pre_fix_sha recorded (uncommitted-tree task, FR-034)"
+    },
+    {
+      "check": "roster/tezos-call-resolution/check-self-index-smoke.js",
+      "fingerprint": "test/fixtures/self-index-stats.txt:2:integration",
+      "red_verified": null,
+      "flagged": "no pre_fix_sha recorded (uncommitted-tree task, FR-034)"
     }
   ],
   "trace": {
     "obligated": true,
-    "lines_seen": 14,
+    "lines_seen": 21,
     "schema_version": "1.0",
     "skipped": false
   }
