@@ -22,7 +22,7 @@ Conditional exact self-oracle collateral only:
 test/fixtures/self-index-stats.txt, test/fixtures/origin-consumer/reference.json,
 checks/origin-recurring-consumer.js assertion coordinates.
 User-approved 2026-09-14 collateral: test/fixtures/origin-consumer/self.allow,
-only unchanged assertion line/lambda coordinates (1509 to1557); preserve the
+only unchanged assertion line/lambda coordinates (1509 to1557, then1559 after the bounded repair); preserve the
 sole assert/Assert_failure x1 entry and the existing rule.
 No other files, no old task1 verifier/spec/witness edits; existing task1 scripts
 may be imported read-only. Preserve user dirt, PR93, Tezos and foreign worktrees.

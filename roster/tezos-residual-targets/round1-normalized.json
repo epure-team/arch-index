@@ -1,0 +1,43 @@
+{
+  "findings": [
+    {
+      "severity": "CRITICAL",
+      "confidence": 1,
+      "path": "lib/arch_index/call_graph_extractor.ml",
+      "line": 348,
+      "category": "spec",
+      "summary": "Invocation ownership leaks into unchanged unqualified and parameter flat calls",
+      "evidence": "Native compiled control at HEAD 975c73b49def2813517b00c296006417d062d8b2: existing check-flat fixture extended with direct_run () = root_body 3, unknown_run root_body = root_body 3, bare_callback xs = List.map root_body xs. Old fb9c8f3 extractor and current extractor linked against the same current collector. All three b.ml rows change callee_file from a.ml to NULL although none uses a qualified alias. Native pending probe separately confirms unchanged heads (direct Head_local, unknown callback_param, bare callback Head_enumerated) with ownership context off/on. Equality assertion exits 1 after successful native setup; build exits 0. Alias-owned target-name membership applies to every ordinary row, so introducing Bridge.alias = root_body changes unrelated existing facts.",
+      "fix": "Carry occurrence-level owned-target provenance from the collector to the flat consumer and apply the new alias attribution only to supported qualified invocation occurrences. Preserve legacy direct, parameter and bare-callback rows and existing point-free behavior; add the native three-form regression controls. A Head_enumerated-only guard is insufficient because bare local callbacks have that head too.",
+      "fingerprint": "lib/arch_index/call_graph_extractor.ml:348:spec",
+      "specialist": "spec-compliance",
+      "acs": [
+        "FR-007",
+        "AC-5"
+      ],
+      "fid": "lib/arch_index/call_graph_extractor.ml:348:spec#4f0c9ba3",
+      "status": "OPEN"
+    }
+  ],
+  "cross_runtime_findings": [],
+  "probable_duplicates": [],
+  "rejected": [],
+  "reobservations": [],
+  "dispositions": {
+    "reopened": [],
+    "pending_check": []
+  },
+  "warnings": [],
+  "stats": {
+    "input": 1,
+    "rejected": 0,
+    "cross_runtime": 0,
+    "reobservations": 0,
+    "reopened": 0,
+    "pending_check": 0,
+    "merged": 1,
+    "carried_forward": 0,
+    "probable_duplicates": 0
+  },
+  "normalizer_version": "2.0.0"
+}

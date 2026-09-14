@@ -1,2 +1,10 @@
 {"schema_version":"1.0","ts":"2026-09-14T16:33:03.185Z","task":"tezos-residual-targets","round":1,"cycle":1,"event":"scope-gate","actor":"check-scope-diff.sh","outcome":"ran"}
 {"schema_version":"1.0","ts":"2026-09-14T16:42:23.924Z","task":"tezos-residual-targets","round":1,"cycle":1,"event":"specialist","actor":"reviewer","outcome":"ran"}
+{"schema_version":"1.0","ts":"2026-09-14T17:08:25.040Z","task":"tezos-residual-targets","round":1,"cycle":1,"event":"specialist","actor":"reviewer","outcome":"ran"}
+{"schema_version":"1.0","ts":"2026-09-14T17:20:05.674Z","task":"tezos-residual-targets","round":1,"cycle":1,"event":"specialist","actor":"spec-compliance","outcome":"ran"}
+{"schema_version":"1.0","ts":"2026-09-14T17:20:05.813Z","task":"tezos-residual-targets","round":1,"cycle":1,"event":"specialist","actor":"code-quality-auditor","outcome":"skipped","detail":"No kb/properties.md or kb glossary installed"}
+{"schema_version":"1.0","ts":"2026-09-14T17:20:05.943Z","task":"tezos-residual-targets","round":1,"cycle":1,"event":"specialist","actor":"reviewer-tui","outcome":"skipped","detail":"No TUI scope in this OCaml CMT resolution feature"}
+{"schema_version":"1.0","ts":"2026-09-14T17:27:08.199Z","task":"tezos-residual-targets","round":1,"cycle":1,"event":"specialist","actor":"architect","outcome":"ran"}
+{"schema_version":"1.0","ts":"2026-09-14T17:27:08.498Z","task":"tezos-residual-targets","round":1,"cycle":1,"event":"scope-gate","actor":"check-scope-diff.sh","outcome":"ran"}
+{"schema_version":"1.0","ts":"2026-09-14T17:27:08.781Z","task":"tezos-residual-targets","round":1,"cycle":1,"event":"normalizer","actor":"review-normalize.js","outcome":"ran"}
+{"schema_version":"1.0","ts":"2026-09-14T17:28:09.794Z","task":"tezos-residual-targets","round":1,"cycle":1,"event":"normalizer","actor":"review-normalize.js","outcome":"ran"}

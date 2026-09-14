@@ -23,7 +23,7 @@ test/fixtures/self-index-stats.txt, test/fixtures/origin-consumer/reference.json
 checks/origin-recurring-consumer.js assertion coordinates.
 User-approved 2026-09-14 collateral: test/fixtures/origin-consumer/self.allow,
 only the unchanged assertion's exact line/lambda coordinate replacement
-(1509 to1557); no additional entry, rule change or count relaxation.
+(1509 to1557, then1559 after the bounded repair); no additional entry, rule change or count relaxation.
 No other files, no old task1 verifier/spec/witness edits; existing task1 scripts
 may be imported read-only. Preserve user dirt, PR93, Tezos and foreign worktrees.
 
