@@ -83,6 +83,30 @@ The walker (`arch_index_cmt.ml`, `collect_calls_from_expr`) lowers each body ont
 - **Deferred bodies** — `lazy` thunks, object methods, and un-applied functor bodies walk in
   isolated (entry-unreachable) blocks: recorded, demoted, never dropped.
 
+### OCaml local structured-module targets
+
+A qualified head through a module declared as a concrete structure in the same
+CMT can now reach that structure's indexed function body. The root is selected
+by compiler binder identity; member names are interpreted only inside proven
+owners. Source-order export masks, literal includes and signature constraints
+are respected, and targets use the existing stored names, including shadowing
+ordinals. Nested structures and concrete structures inside functor definitions
+are definition-level targets, not expanded runtime functor instances.
+
+These new ordinary edges remain `MAY_ENUMERATED`, never newly `MUST`.
+Point-free bindings keep `edge_form='value_alias'` and do not count as calls.
+Syntactic body arity preserves partial applications and computed-return TOP
+residuals; a rejected target row remains `MAY_TOP/dropped_node`.
+
+Parameters, local module aliases, application results, unpacks and unproven
+intermediate owners are still refused by this new resolver. Existing persistent
+module-alias handling is unchanged. The flat CMT fallback receives the same
+ownership context but attributes a target file only when its exact stored name
+has a same-file symbol row; it does not gain nested caller coverage. This is not
+general defunctorization or 0CFA. Native cases are in
+`tezt/tests/local_module_targets.ml`; the contract is in
+[`specs/tezos-call-resolution.md`](../specs/tezos-call-resolution.md).
+
 ### Lambda nodes
 
 Every `fun …`/`function` literal is promoted to a **synthetic function node** named

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "revision": "b98fcd06bcc98a94c0627b454d846fd01d54fa0d+worktree-sha256:bd0ae4c17b961cc77d409a91809a454b51e12536fc9292cdea3155cc9b44ebc1",
+  "revision": "ea8e5b4269985e779020a92a5054bc0678f5edb6+worktree-sha256:971a30b6d62d83082ae6a2d8d0d4a82301329fdbc648835b7576d1d9524e2ef9",
   "modules": [
     "lib/arch_index/arch_errors_config.ml",
     "lib/arch_index/arch_index.ml",
@@ -30,9 +30,9 @@
   ],
   "totals": {
     "modules": 25,
-    "functions": 956,
-    "calls": 6145,
-    "origins": 554
+    "functions": 980,
+    "calls": 6241,
+    "origins": 561
   },
   "origin_groups": [
     {
@@ -81,7 +81,7 @@
       "channel": "option",
       "form": "raise",
       "escapes": 1,
-      "count": 305
+      "count": 312
     },
     {
       "channel": "result",

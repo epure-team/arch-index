@@ -199,9 +199,9 @@ function withoutRunMetadata(rows_) { return rows_.map(row => { const out = {...r
 function compatibility() {
   [indexer, queryBinary].forEach(assertSetupProbe); const expected = JSON.parse(fs.readFileSync(path.join(root, 'roster/functor-instance-resolution/compatibility-rich-baseline.json'), 'utf8'));
   const verdicts = [
-    {args:['raises','execute'], stdout:'[{"verdict":"execute: UNBOUNDED (⊤): {}"},\n{"verdict":"  reason: may_top_edge fixture.ml:7"},\n{"verdict":"  reason: may_top_edge fixture.ml:8"}]\n'},
+    {args:['raises','execute'], stdout:'[{"verdict":"execute: UNBOUNDED (⊤): {}"},\n{"verdict":"  reason: may_top_edge fixture.ml:8"}]\n'},
     {args:['unreachable','execute','check'], stdout:'[{"verdict":"REACHABLE (may-reach): execute -> check"}]\n'},
-    {args:['may-fail','check','--channel','exception'], stdout:'[{"exception":"Helper.Failure","via":"-","how":"direct"}]\n[{"verdict":"check: UNBOUNDED (⊤): {Helper.Failure}"},\n{"verdict":"  reason: may_top_edge fixture.ml:7"}]\n'}
+    {args:['may-fail','check','--channel','exception'], stdout:'[{"exception":"Helper.Failure","via":"-","how":"direct"}]\n[{"verdict":"check: BOUNDED: {Helper.Failure}"}]\n'}
   ];
   temp(dir => {
     const rich = path.join(dir, 'rich');
@@ -222,7 +222,9 @@ function compatibility() {
         assert.deepEqual(canonical(withoutRunMetadata(rows(db, statement))), canonical(baseline), `${key}, reindex pass ${pass}`);
       }
       assert.equal(expected.conditions.length, 0, 'constant false is not a stored condition premise');
+      assert(expected.calls.some(c => c.callee_name === 'A.run' && c.callee_id === 1 && c.kind === 'MAY_ENUMERATED' && c.top_reason === null && c.top_anchor === null));
       assert(expected.calls.some(c => c.callee_name === 'X.run' && c.kind === 'MAY_TOP'));
+      assert(expected.calls.some(c => c.callee_name === 'M.run' && c.kind === 'MAY_TOP'));
       assert(expected.exn_origins.length > 0 && expected.call_exn_scopes.length > 0);
       const before = hash(db);
       for (const oracle of verdicts) {

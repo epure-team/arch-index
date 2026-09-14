@@ -606,8 +606,8 @@ type call_head =
       (** Resolved qualified path [(module, name)] with a persistent root —
           a MUST candidate (external leaf or in-index) when unconditional. *)
   | Head_enumerated of string
-      (** A named local function passed as a function-typed ARGUMENT: the
-          callee (e.g. [List.map]) may invoke it → bounded candidate set. *)
+      (** A named local callback, or a body selected through proven local
+          structure ownership. Both are bounded candidates, never MUST. *)
   | Head_unknown of string * top_reason
       (** Unknowable target: applied parameter/local closure, computed head,
           dynamic-root qualified path (functor/first-class-module), or an
@@ -994,6 +994,125 @@ let build_local_fn_stamps (structure : Typedtree.structure) =
       | _ -> ()) ;
   local_fn_stamps
 
+(* Roots use compiler identity, while member names select exports only AFTER
+   their owner is proven. This context never leaves the CMT that built it. *)
+module Local_module_ids = Map.Make (Ident)
+module Local_module_members = Map.Make (String)
+
+type local_module_exports = {
+  values : (string * int) option Local_module_members.t;
+  modules : local_module_exports option Local_module_members.t;
+}
+
+type local_module_targets = local_module_exports Local_module_ids.t
+
+let build_local_module_targets ~local_fn_stamps structure =
+  let roots = ref Local_module_ids.empty in
+  let empty =
+    {values = Local_module_members.empty; modules = Local_module_members.empty}
+  in
+  let value exports name =
+    Option.join (Local_module_members.find_opt name exports.values)
+  and child exports name =
+    Option.join (Local_module_members.find_opt name exports.modules)
+  in
+  let register id = function
+    | Some exports -> roots := Local_module_ids.add id exports !roots
+    | None -> ()
+  in
+  let rec module_expr (me : Typedtree.module_expr) =
+    match me.mod_desc with
+    | Tmod_structure s -> Some (structure_exports s)
+    | Tmod_constraint (inner, _, _, _) -> module_expr inner
+    | Tmod_functor (_, body) ->
+        (* Discover concrete binders INSIDE the definition, without making
+           the functor or any application of it a concrete owner. *)
+        ignore (module_expr body) ;
+        None
+    | Tmod_ident _ | Tmod_apply _ | Tmod_apply_unit _ | Tmod_unpack _ -> None
+  and binding exports (mb : Typedtree.module_binding) =
+    match mb.mb_id with
+    | None -> exports
+    | Some id ->
+        let owned = module_expr mb.mb_expr in
+        register id owned ;
+        {exports with modules = Local_module_members.add (Ident.name id) owned exports.modules}
+  and structure_exports (s : Typedtree.structure) =
+    List.fold_left
+      (fun exports (item : Typedtree.structure_item) ->
+        match item.str_desc with
+        | Tstr_value (_, vbs) ->
+            List.fold_left
+              (fun exports (vb : Typedtree.value_binding) ->
+                let values =
+                  List.fold_left
+                    (fun values id -> Local_module_members.add (Ident.name id) None values)
+                    exports.values (Typedtree.pat_bound_idents vb.vb_pat)
+                in
+                let values =
+                  match vb.vb_pat.pat_desc with
+                  | Tpat_var (id, _, _) when is_function_rhs vb.vb_expr ->
+                      Local_module_members.add (Ident.name id)
+                        (Hashtbl.find_opt local_fn_stamps (Ident.unique_name id)) values
+                  | _ -> values
+                in
+                {exports with values})
+              exports vbs
+        | Tstr_primitive vd ->
+            {exports with values = Local_module_members.add (Ident.name vd.val_id) None exports.values}
+        | Tstr_module mb -> binding exports mb
+        | Tstr_recmodule mbs -> List.fold_left binding exports mbs
+        | Tstr_include incl ->
+            let included = module_expr incl.incl_mod in
+            (* incl_type names are the actual exported names, including fresh
+               module binders. An opaque include installs masks, never guesses
+               a body from another structure bearing the same display name. *)
+            List.fold_left
+              (fun exports si ->
+                match si with
+                | Types.Sig_value (id, _, _) ->
+                    let name = Ident.name id in
+                    let target = Option.bind included (fun e -> value e name) in
+                    {exports with values = Local_module_members.add name target exports.values}
+                | Types.Sig_module (id, _, _, _, _) ->
+                    let name = Ident.name id in
+                    let owned = Option.bind included (fun e -> child e name) in
+                    register id owned ;
+                    {exports with modules = Local_module_members.add name owned exports.modules}
+                | _ -> exports)
+              exports incl.incl_type
+        | _ -> exports)
+      empty s.str_items
+  in
+  ignore (structure_exports structure) ;
+  !roots
+
+let local_module_target targets path =
+  let rec owner = function
+    | Path.Pident id -> Local_module_ids.find_opt id targets
+    | Path.Pdot (parent, name) ->
+        Option.bind (owner parent) (fun exports ->
+            Option.join (Local_module_members.find_opt name exports.modules))
+    | Path.Papply _ | Path.Pextra_ty _ -> None
+  in
+  match path with
+  | Path.Pdot (parent, name) ->
+      Option.bind (owner parent) (fun exports ->
+          Option.join (Local_module_members.find_opt name exports.values))
+  | Path.Pident _ | Path.Papply _ | Path.Pextra_ty _ -> None
+
+let local_module_target_names targets =
+  let rec collect exports acc =
+    let acc = Local_module_members.fold
+        (fun _ target acc -> match target with Some (name, _) -> name :: acc | None -> acc)
+        exports.values acc in
+    Local_module_members.fold
+      (fun _ child acc -> match child with Some e -> collect e acc | None -> acc)
+      exports.modules acc
+  in
+  Local_module_ids.fold (fun _ exports acc -> collect exports acc) targets []
+  |> List.sort_uniq String.compare
+
 (** Companion to {!build_local_fn_stamps} for the one construct that table
     cannot hold: a top-level binding whose RHS is itself a bare arrow-typed
     identifier — [let t2 = t1], where [t1] is another such binder. Maps the
@@ -1120,6 +1239,7 @@ let build_module_alias_stamps (structure : Typedtree.structure) =
     Returns a list of pending calls. *)
 let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels = [])
     ?(local_alias_stamps = Hashtbl.create 0) ?(module_alias_stamps = Hashtbl.create 0)
+    ?(local_module_targets = Local_module_ids.empty)
     ~src_path ~caller_module ~caller_name
     ~local_fn_stamps (expr : Typedtree.expression) =
   (* Per-node CFG: every function — the top-level binding AND each nested
@@ -1320,6 +1440,7 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels
      partial application whose result arrow hides behind an alias in the
      callee's interface — its head stays MUST (documented residual). *)
   let is_arrow ty = is_arrow_ty ty in
+  let module_target path = local_module_target local_module_targets path in
   (* Number of leading arrows in a function type = its (maximal) arity. Uses
      the raw type — no env-based expansion, which is unreliable on .cmt-restored
      environments (they do not carry manifest type declarations, so an alias
@@ -1424,11 +1545,13 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels
                    it. *)
                 let m, n = path_to_module_name p in
                 let disp = match m with Some m -> m ^ "." ^ n | None -> n in
-                (match alias_rewrite p with
-                | Some (m, n) ->
+                (match module_target p, alias_rewrite p with
+                | Some (name, _), _ ->
+                    add_call ~callee_ty:ae.exp_type (Head_enumerated name) loc
+                | None, Some (m, n) ->
                     add_call ~callee_ty:ae.exp_type ~edge_form:"module_alias"
                       (Head_qualified (Some m, n)) loc
-                | None ->
+                | None, None ->
                     let reason =
                       if qualified_is_dynamic p then Module_param else Callback_param
                     in
@@ -1456,9 +1579,12 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels
     | Path.Pident id -> add_call (Head_unknown (Ident.name id, Callback_param)) loc
     | _ ->
         let callee_module, callee_name = path_to_module_name path in
-        match alias_rewrite path with
-        | Some (m, n) -> add_call_aliased (Head_qualified (Some m, n)) loc
-        | None ->
+        match module_target path, alias_rewrite path with
+        | Some (name, _), _ ->
+            let head = if edge_form = Some "value_alias" then Head_local name else Head_enumerated name in
+            add_call head loc
+        | None, Some (m, n) -> add_call_aliased (Head_qualified (Some m, n)) loc
+        | None, None ->
             if qualified_is_dynamic path then
               let disp =
                 match callee_module with
@@ -2043,6 +2169,10 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels
                         Hashtbl.replace head_idents fn_expr.exp_loc () ;
                         a
                     | None -> arrow_arity fn_expr.exp_type)
+                | Texp_ident (path, _, _) -> (
+                    match module_target path with
+                    | Some (_, arity) -> arity
+                    | None -> arrow_arity fn_expr.exp_type)
                 | _ -> arrow_arity fn_expr.exp_type
               in
               (* Under-saturated (partial) application → builds a closure, the
@@ -2088,13 +2218,17 @@ let collect_calls_from_expr ?(canon_exn = fun p -> Path.name p) ?(value_channels
                 | Texp_ident (path, _, _) ->
                     note_seen_value_path (Path.name path) ;
                     let callee_module, callee_name = path_to_module_name path in
-                    (match alias_rewrite path with
-                    | Some (m, n) ->
+                    (match module_target path, alias_rewrite path with
+                    | Some (name, _), _ ->
+                        add_call ~partial ~is_head_of:expr.exp_loc
+                          ?callee_ty:!callee_ty_for_channel (Head_enumerated name)
+                          expr.exp_loc
+                    | None, Some (m, n) ->
                         add_call ~partial ~is_head_of:expr.exp_loc
                           ?callee_ty:!callee_ty_for_channel ~edge_form:"module_alias"
                           (Head_qualified (Some m, n))
                           expr.exp_loc
-                    | None ->
+                    | None, None ->
                     if qualified_is_dynamic path then
                       let disp =
                         match callee_module with
@@ -2858,6 +2992,7 @@ let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
                   let pending_deps = ref [] in
                   let pending_type_usages = ref [] in
                   let local_fn_stamps = build_local_fn_stamps structure in
+                  let local_module_targets = build_local_module_targets ~local_fn_stamps structure in
                   let local_alias_stamps = build_local_alias_stamps structure in
                   let module_alias_stamps = build_module_alias_stamps structure in
                   let binding_names = build_binding_names structure in
@@ -3255,6 +3390,7 @@ let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
                                           ~local_fn_stamps
                                           ~local_alias_stamps
                                           ~module_alias_stamps
+                                          ~local_module_targets
                                           vb.vb_expr
                                       in
                                       (* Insert a synthetic functions row per nested

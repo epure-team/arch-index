@@ -92,3 +92,18 @@ Root reran the three recorded query commands with the current query executable;
 all exited0 and their exact visible outputs match the baseline above. These are
 intermediate integration results, not final-head evidence or the completed
 compatibility CHECK-4. Repeat after the final code and independent checker land.
+
+## Local structured-module resolution recalibration (2026-09-14)
+
+The reviewed local-module capability changes only the two calls through the
+fixture's concrete `module A = struct ... end`: `A.run` at lines 7 and 9 now
+targets the existing `A.run` body (function ID 1) as `MAY_ENUMERATED`, with null
+TOP fields. The functor parameter call `X.run` at line 4 and application-result
+call `M.run` at line 8 remain `MAY_TOP` with `module_param`; every other selected
+table row and contract is unchanged.
+
+Consequently, `raises execute` retains only the line-8 TOP reason, and
+`may-fail check --channel exception` becomes bounded while retaining its direct
+`Helper.Failure` origin. This is an explicit capability-specific successor
+oracle. It does not rewrite the historical pre-feature observations above or
+weaken the checker's exact-table and exact-query comparisons.

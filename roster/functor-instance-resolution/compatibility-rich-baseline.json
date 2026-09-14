@@ -248,12 +248,12 @@
     {
       "id": 6,
       "caller_id": 3,
-      "callee_id": null,
+      "callee_id": 1,
       "callee_name": "A.run",
       "call_site": "fixture.ml:7",
-      "kind": "MAY_TOP",
-      "top_reason": "module_param",
-      "top_anchor": "fixture.ml:7",
+      "kind": "MAY_ENUMERATED",
+      "top_reason": null,
+      "top_anchor": null,
       "edge_form": null
     },
     {
@@ -281,12 +281,12 @@
     {
       "id": 9,
       "caller_id": 5,
-      "callee_id": null,
+      "callee_id": 1,
       "callee_name": "A.run",
       "call_site": "fixture.ml:9",
-      "kind": "MAY_TOP",
-      "top_reason": "module_param",
-      "top_anchor": "fixture.ml:9",
+      "kind": "MAY_ENUMERATED",
+      "top_reason": null,
+      "top_anchor": null,
       "edge_form": null
     },
     {
