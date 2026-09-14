@@ -278,6 +278,10 @@ let extract_calls_from_cmts ~project_dir fn_rows =
                     let local_module_names = Hashtbl.create 16 in
                     List.iter (fun name -> Hashtbl.replace local_module_names name ())
                       (Arch_index_cmt.local_module_target_names local_module_targets) ;
+                    let local_invocation_names = Hashtbl.create 16 in
+                    List.iter (fun name -> Hashtbl.replace local_invocation_names name ())
+                      (Arch_index_cmt.local_module_target_names ~invocation:true
+                         local_module_targets) ;
                     (* Same-module top-level ALIAS binders ([let t2 = t1]).
                        Kept out of [local_fn_stamps] on purpose — see
                        [build_local_alias_stamps]. Threaded here too so an
@@ -342,7 +346,11 @@ let extract_calls_from_cmts ~project_dir fn_rows =
                           Arch_index_cmt.pending_display pc
                         in
                         let callee_file =
-                          if Hashtbl.mem local_module_names callee_name then
+                          let owned_names =
+                            if pc.edge_form = Some "value_alias" then local_module_names
+                            else local_invocation_names
+                          in
+                          if Hashtbl.mem owned_names callee_name then
                             (* A proven body belongs to this CMT. LSP may not
                                have supplied its qualified/ordinal name; an
                                unrelated file's homonym cannot fill that gap. *)

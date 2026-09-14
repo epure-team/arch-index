@@ -52,10 +52,10 @@ async function authentic() {
   try {
     const production=await runConsumer({root,out:path.join(productionParent,'output')});
     assert.equal(production.exit,0); assert.equal(production.run.status,'held');
-    assert.deepEqual(production.run.coverage.current.totals,{modules:25,functions:980,calls:6245,origins:561});
+    assert.deepEqual(production.run.coverage.current.totals,{modules:25,functions:989,calls:6276,origins:564});
     assert.deepEqual(production.run.coverage.deltas,[]);
     const allowed=fs.readFileSync(path.join(root,'test/fixtures/origin-consumer/self.allow'),'utf8').split(/\r?\n/).filter(x=>x&&!x.startsWith('#'));
-    assert.deepEqual(allowed,['collect_calls_from_expr.<fun:1495:21>.<fun:1506:36> | lib/arch_index/arch_index_cmt.ml:1509 | assert | Assert_failure | x1']);
+    assert.deepEqual(allowed,['collect_calls_from_expr.<fun:1543:21>.<fun:1554:36> | lib/arch_index/arch_index_cmt.ml:1557 | assert | Assert_failure | x1']);
   } finally { fs.rmSync(productionParent,{recursive:true,force:true}); }
   const f = fixture();
   try {

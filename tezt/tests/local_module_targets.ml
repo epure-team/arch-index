@@ -181,12 +181,13 @@ let register_boundaries () =
           "constrained", "Constrained.f"; "recursive_call", "Recursive.f";
           "Make.call", "Make.Body.f"; "callback", "Local.f";
           "letop", "Ops.let*"; "partial", "Arity.add";
-          "over", "Arity.make"; "conditional", "Local.f"; "dead", "Local.f" ] ;
+          "over", "Arity.make"; "conditional", "Local.f"; "dead", "Local.f";
+          "value_alias_call", "Value_alias.base" ] ;
       List.iter (fun caller ->
           Batch.eq_int b ~msg:("LOCAL_MODULE_ASSERTION: unsupported owner retains module_param " ^ caller)
             (count (Printf.sprintf
               "SELECT count(*) FROM calls c JOIN functions f ON f.id=c.caller_id WHERE f.name='%s' AND c.kind='MAY_TOP' AND c.callee_id IS NULL AND c.top_reason='module_param' AND c.top_anchor IS NOT NULL" caller)) 1)
-        [ "Decoy.run_param"; "pattern_call"; "value_alias_call"; "opaque_call";
+        [ "Decoy.run_param"; "pattern_call"; "opaque_call";
           "Make.param_call"; "Make.Body.f"; "applied_call"; "alias_call"; "unpack_call" ] ;
       Batch.eq_int b ~msg:"LOCAL_MODULE_ASSERTION: earlier direct value binding retains its ordinal identity"
         (count "SELECT count(*) FROM calls c JOIN functions f ON f.id=c.caller_id JOIN functions t ON t.id=c.callee_id WHERE f.name='Values.old' AND t.name='Values.f#1' AND f.module_id=t.module_id") 1 ;

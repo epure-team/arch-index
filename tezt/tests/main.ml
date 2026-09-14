@@ -106,6 +106,7 @@ let () =
   Phantom_option_origins.register () ;
   Module_alias_heads.register () ;
   Local_module_targets.register () ;
+  Local_value_targets.register () ;
   Report.register () ;
   Actionable_review_reports.register () ;
   Origin_recurring_consumer.register () ;
