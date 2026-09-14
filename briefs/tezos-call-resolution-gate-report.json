@@ -1,11 +1,11 @@
 {
   "mode": "full",
-  "no_go_round": 1,
+  "no_go_round": 2,
   "max_rounds": 5,
   "legacy_no_go_round": false,
-  "round": 1,
+  "round": 2,
   "legacy_round": false,
-  "current_round_strike": false,
+  "current_round_strike": true,
   "config": {
     "max_rounds": 5,
     "strikes": 2,
@@ -14,10 +14,35 @@
   "cause": null,
   "warnings": [],
   "violations": [],
-  "checks": [],
+  "checks": [
+    {
+      "check": "roster/tezos-call-resolution/check-labeled-arity.js",
+      "fingerprint": "lib/arch_index/arch_index_cmt.ml:2174:correctness",
+      "red_verified": null,
+      "flagged": "no pre_fix_sha recorded (uncommitted-tree task, FR-034)"
+    },
+    {
+      "check": "roster/tezos-call-resolution/check-labeled-arity.js",
+      "fingerprint": "lib/arch_index/arch_index_cmt.ml:2150:spec",
+      "red_verified": null,
+      "flagged": "no pre_fix_sha recorded (uncommitted-tree task, FR-034)"
+    },
+    {
+      "check": "roster/tezos-call-resolution/check-verifier-inputs.js",
+      "fingerprint": "roster/tezos-call-resolution/check-comparison.js:116:spec",
+      "red_verified": null,
+      "flagged": "no pre_fix_sha recorded (uncommitted-tree task, FR-034)"
+    },
+    {
+      "check": "roster/tezos-call-resolution/check-labeled-arity.js",
+      "fingerprint": "lib/arch_index/arch_index_cmt.ml:2150:correctness",
+      "red_verified": null,
+      "flagged": "no pre_fix_sha recorded (uncommitted-tree task, FR-034)"
+    }
+  ],
   "trace": {
     "obligated": true,
-    "lines_seen": 7,
+    "lines_seen": 14,
     "schema_version": "1.0",
     "skipped": false
   }

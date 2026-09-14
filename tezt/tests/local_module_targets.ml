@@ -266,4 +266,5 @@ let register () =
         Test.fail "LOCAL_MODULE_SETUP: %s exit %d\n%s\n%s" name code stdout stderr ;
       Lwt.return_unit)
     ["labeled arity ratchet", "check-labeled-arity.js";
-     "verifier refusal coverage", "check-verifier-inputs.js"]
+     "verifier refusal coverage", "check-verifier-inputs.js";
+     "self-index golden ratchet", "check-self-index-smoke.js"]

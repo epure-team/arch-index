@@ -1,0 +1,15 @@
+[
+  {
+    "severity": "HIGH",
+    "confidence": 5,
+    "path": "test/fixtures/self-index-stats.txt",
+    "line": 2,
+    "category": "integration",
+    "summary": "The required CI self-index smoke gate still uses the pre-feature golden counts",
+    "evidence": "At reviewed HEAD d4d945543e977617352f901138aa275ea4d33f8b, .github/workflows/ci.yml:130-140 runs the built OCaml producer over _build/default/lib/arch_index, queries exact modules/functions/calls counts, then diffs this file. Personally executed that producer and the equivalent exact SQLite query in a fresh owned temporary directory: both commands exited 0, yielding modules:25/functions:980/calls:6245. This golden still expects modules:25/functions:956/calls:6145; the exact comparison failed exit 1 with 'CI self-index exact golden mismatch'. The new counts agree with the independently refreshed origin-consumer reference, but that six-file recalibration never updated this separate CI oracle. The full 326-test suite passes because it does not execute this standalone CI golden comparison. Consequently the required CI job will deterministically fail before ship. HIGH denotes a required integration gate failure, not a semantic call-target defect; the mismatch originated with the original ownership feature and remains in the repaired head.",
+    "fix": "Review and refresh only this self-index golden from the current built producer, following docs/adr/001-self-index-golden.md; retain the exact CI comparison and all product/refusal behavior. Rerun the smoke producer/query/golden comparison and required gates. Add this finding path to repair scope through the existing review-return process rather than changing CI or weakening its check.",
+    "fingerprint": "test/fixtures/self-index-stats.txt|local-module-resolution-ci-self-golden-stale",
+    "specialist": "reviewer",
+    "status": "OPEN"
+  }
+]

@@ -1,0 +1,33 @@
+{
+  "task": "tezos-call-resolution",
+  "round": 2,
+  "cycle": 1,
+  "specialist": "architect",
+  "prior_resolutions": [
+    {
+      "fid": "lib/arch_index/arch_index_cmt.ml:2174:correctness#e6e59b53",
+      "status": "RESOLVED",
+      "evidence": "CHECK-4 passes with an omitted required label remaining partial and producing no return residual."
+    },
+    {
+      "fid": "lib/arch_index/arch_index_cmt.ml:2150:spec#208245bb",
+      "status": "RESOLVED",
+      "evidence": "CHECK-4 covers omitted required and optional labels in both collector contexts."
+    },
+    {
+      "fid": "lib/arch_index/arch_index_cmt.ml:2150:correctness#0e5e8ad3",
+      "status": "RESOLVED",
+      "evidence": "The same Some-slot invariant now controls partial and residual accounting only for proven owned heads."
+    },
+    {
+      "fid": "roster/tezos-call-resolution/check-comparison.js:116:spec#36ef3d4f",
+      "status": "RESOLVED",
+      "evidence": "CHECK-5 passes 39 actual validator positive/negative assertions, including declared-run ownership."
+    }
+  ],
+  "new_unresolved": [],
+  "risk": {
+    "level": "medium",
+    "summary": "The corrected feature architecture is low risk; the independently reported required CI self-index golden mismatch remains a ship-blocking integration issue and is not duplicated here."
+  }
+}
