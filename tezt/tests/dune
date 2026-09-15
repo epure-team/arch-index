@@ -150,6 +150,8 @@
   ../../roster/functor-binding-resolution/inventory_probe.ml
   ../../roster/functor-binding-resolution/collection_failure_probe.ml
   ../../roster/tezos-call-resolution/check-labeled-arity.js
+  ../../roster/ocaml-data-preservation/check-effects.js
+  ../../roster/ocaml-data-preservation/check-cmt-copies.js
   ../../roster/tezos-call-resolution/check-verifier-inputs.js
   ../../roster/tezos-call-resolution/check-self-index-smoke.js
   ../../roster/tezos-residual-targets/check-native.js

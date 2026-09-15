@@ -72,6 +72,134 @@ let create_test_db () =
   ignore (Sqlite3.db_close db);
   path
 
+let sqlite_exec db sql =
+  match Sqlite3.exec db sql with
+  | Sqlite3.Rc.OK -> ()
+  | rc -> fail (Printf.sprintf "SQL %s: %s" (Sqlite3.Rc.to_string rc) (Sqlite3.errmsg db))
+
+let query_ints path sql =
+  let db = Sqlite3.db_open path in
+  Fun.protect ~finally:(fun () -> ignore (Sqlite3.db_close db)) (fun () ->
+    let values = ref [] in
+    let rc = Sqlite3.exec_no_headers db sql ~cb:(function
+      | [| Some value |] -> values := int_of_string value :: !values
+      | _ -> fail "unexpected query shape")
+    in
+    if rc <> Sqlite3.Rc.OK then fail (Sqlite3.errmsg db);
+    List.rev !values)
+
+let test_source_aware_main_schema () =
+  let path = Filename.temp_file "arch_effects_main" ".db" in
+  Fun.protect ~finally:(fun () -> Sys.remove path) (fun () ->
+    let db = Sqlite3.db_open path in
+    sqlite_exec db "CREATE TABLE modules(id INTEGER PRIMARY KEY, path TEXT NOT NULL)";
+    sqlite_exec db "CREATE TABLE functions(id INTEGER PRIMARY KEY, module_id INTEGER, name TEXT NOT NULL)";
+    sqlite_exec db "INSERT INTO modules VALUES(1,'src/dir/../a.ml'),(2,'src/b.ml')";
+    sqlite_exec db "INSERT INTO functions VALUES(11,1,'f'),(22,2,'f')";
+    ignore (Sqlite3.db_close db);
+    let open EI in
+    let mk file kind =
+      { er_function_name = "f"; er_file_path = Some file;
+        er_value_kind = kind; er_target = None; er_soundness = Sound;
+        er_producer = "test" }
+    in
+    (match ED.write_effects ~db_path:path [mk "src/./a.ml" HeapRef; mk "src/b.ml" HashTbl] with
+     | Error msg -> fail msg | Ok (2, 0) -> () | Ok _ -> fail "wrong counts");
+    check (list int) "exact path selects each homonym" [11; 22]
+      (query_ints path "SELECT function_id FROM function_effects ORDER BY id"))
+
+let test_complete_payload_identity () =
+  let path = create_test_db () in
+  Fun.protect ~finally:(fun () -> Sys.remove path) (fun () ->
+    let open EI in
+    let mk soundness target =
+      { er_function_name = "f"; er_file_path = None; er_value_kind = HeapRef;
+        er_target = target; er_soundness = soundness; er_producer = "test" }
+    in
+    (match ED.write_effects ~db_path:path
+       [mk Sound None; mk Candidate None; mk Sound (Some "")] with
+     | Error msg -> fail msg | Ok (3, 0) -> () | Ok _ -> fail "distinct payloads collapsed");
+    (match ED.write_effects ~db_path:path [mk Sound None] with
+     | Error msg -> fail msg | Ok (0, 1) -> () | Ok _ -> fail "exact reload not duplicate");
+    check (list int) "three payloads survive" [3]
+      (query_ints path "SELECT count(*) FROM function_effects"))
+
+let test_alternative_flat_and_stale_repair () =
+  let path = Filename.temp_file "arch_effects_alt" ".db" in
+  Fun.protect ~finally:(fun () -> Sys.remove path) (fun () ->
+    let db = Sqlite3.db_open path in
+    sqlite_exec db "CREATE TABLE functions(id INTEGER PRIMARY KEY,name TEXT,file_path TEXT)";
+    sqlite_exec db "INSERT INTO functions VALUES(7,'f','a.ml')";
+    sqlite_exec db "CREATE TABLE function_effects(id INTEGER PRIMARY KEY,function_id INTEGER,function_name TEXT NOT NULL,file_path TEXT,value_kind TEXT NOT NULL,target TEXT,is_direct INTEGER NOT NULL,soundness TEXT NOT NULL,producer TEXT)";
+    sqlite_exec db "INSERT INTO function_effects VALUES(41,999,'f','a.ml','HeapRef',NULL,1,'sound','test')";
+    ignore (Sqlite3.db_close db);
+    let open EI in
+    let r = { er_function_name="f"; er_file_path=Some "./a.ml"; er_value_kind=HeapRef; er_target=None; er_soundness=Sound; er_producer="test" } in
+    (* Lexically equivalent path finds the payload row only when payload storage
+       itself is canonicalized by the producer. Test stale repair with exact input. *)
+    let r = { r with er_file_path=Some "a.ml" } in
+    (match ED.write_effects ~db_path:path [r] with Error s -> fail s | Ok (1,0) -> () | Ok _ -> fail "repair count");
+    check (list int) "row id retained and association repaired" [41;7]
+      (query_ints path "SELECT id FROM function_effects UNION ALL SELECT function_id FROM function_effects");
+    (match ED.write_effects ~db_path:path [r] with Error s -> fail s | Ok (0,1) -> () | Ok _ -> fail "reload count"));
+  let ambiguous = Filename.temp_file "arch_effects_ambiguous" ".db" in
+  Fun.protect ~finally:(fun () -> Sys.remove ambiguous) (fun () ->
+    let db = Sqlite3.db_open ambiguous in
+    sqlite_exec db "CREATE TABLE functions(id INTEGER PRIMARY KEY,name TEXT,file_path TEXT)";
+    sqlite_exec db "INSERT INTO functions VALUES(7,'f','a.ml')";
+    ignore (Sqlite3.db_close db);
+    let open EI in
+    let r = { er_function_name="f"; er_file_path=None; er_value_kind=HeapRef; er_target=None; er_soundness=Sound; er_producer="test" } in
+    (match ED.write_effects ~db_path:ambiguous [r] with Error s -> fail s | Ok (1,0) -> () | Ok _ -> fail "initial association");
+    let db = Sqlite3.db_open ambiguous in
+    sqlite_exec db "INSERT INTO functions VALUES(8,'f','b.ml')";
+    ignore (Sqlite3.db_close db);
+    (match ED.write_effects ~db_path:ambiguous [r] with Error s -> fail s | Ok (1,0) -> () | Ok _ -> fail "ambiguity repair count");
+    check (list int) "new ambiguity clears obsolete association" [1]
+      (query_ints ambiguous "SELECT function_id IS NULL FROM function_effects"));
+  let flat = create_test_db () in
+  Fun.protect ~finally:(fun () -> Sys.remove flat) (fun () ->
+    let open EI in
+    let r = { er_function_name="missing"; er_file_path=Some "x.ml"; er_value_kind=HeapRef; er_target=None; er_soundness=Sound; er_producer="test" } in
+    (match ED.write_effects ~db_path:flat [r] with Error s -> fail s | Ok (1,0) -> () | Ok _ -> fail "flat count");
+    check (list int) "flat association remains NULL" [1]
+      (query_ints flat "SELECT function_id IS NULL FROM function_effects"))
+
+let test_batch_failure_rolls_back () =
+  let path = create_test_db () in
+  Fun.protect ~finally:(fun () -> Sys.remove path) (fun () ->
+    let db = Sqlite3.db_open path in
+    sqlite_exec db "CREATE TRIGGER reject_second BEFORE INSERT ON function_effects WHEN NEW.function_name='bad' BEGIN SELECT RAISE(ABORT,'injected failure'); END";
+    ignore (Sqlite3.db_close db);
+    let open EI in
+    let mk name = { er_function_name=name; er_file_path=None; er_value_kind=HeapRef; er_target=None; er_soundness=Sound; er_producer="test" } in
+    (match ED.write_effects ~db_path:path [mk "good"; mk "bad"] with Error _ -> () | Ok _ -> fail "injected SQL error reported success");
+    check (list int) "earlier row rolled back" [0]
+      (query_ints path "SELECT count(*) FROM function_effects"))
+
+let test_producer_explicit_root_and_shadowing () =
+  let root = Filename.temp_file "arch_effects_producer" "" in
+  Sys.remove root;
+  let q = Filename.quote in
+  let run command = if Sys.command command <> 0 then fail ("command failed: " ^ command) in
+  run ("mkdir -p " ^ q (Filename.concat root "src") ^ " " ^ q (Filename.concat root "obj/deep"));
+  Fun.protect ~finally:(fun () -> ignore (Sys.command ("rm -rf -- " ^ q root))) (fun () ->
+    let source = Filename.concat root "src/effect.ml" in
+    let oc = open_out source in
+    output_string oc "let f t = Hashtbl.replace t 1 2\nlet f t = Hashtbl.replace t 3 4\n";
+    close_out oc;
+    let before = Sys.getcwd () in
+    Fun.protect ~finally:(fun () -> Sys.chdir before) (fun () ->
+      Sys.chdir root;
+      run "ocamlc -w -32 -bin-annot -c src/effect.ml -o obj/deep/effect.cmo");
+    let records = Arch_effects.Ocaml_effects_extractor.extract_effects
+      ~source_root:root ~build_dir:(Some (Filename.concat root "obj")) in
+    let names = List.map (fun r -> r.EI.er_function_name) records in
+    let paths = List.map (fun r -> r.EI.er_file_path) records in
+    check (list string) "typedtree order numbers earlier shadow" ["f#1"; "f"] names;
+    check (list (option string)) "relative metadata uses explicit root"
+      [Some "src/effect.ml"; Some "src/effect.ml"] paths)
+
 let test_write_effects_happy () =
   let path = create_test_db () in
   Fun.protect ~finally:(fun () -> Sys.remove path) (fun () ->
@@ -159,9 +287,16 @@ let () =
     "effects_db", [
       test_case "write_effects_happy"   `Quick test_write_effects_happy;
       test_case "write_effects_missing" `Quick test_write_effects_missing_db;
+      test_case "source_aware_main_schema" `Quick test_source_aware_main_schema;
+      test_case "complete_payload_identity" `Quick test_complete_payload_identity;
+      test_case "alternative_flat_stale_repair" `Quick test_alternative_flat_and_stale_repair;
+      test_case "batch_failure_rolls_back" `Quick test_batch_failure_rolls_back;
     ];
     "effects_load", [
       test_case "load_happy"   `Quick test_effects_load_happy;
       test_case "load_bad_json" `Quick test_effects_load_bad_json;
+    ];
+    "ocaml_producer", [
+      test_case "explicit_root_and_shadowing" `Quick test_producer_explicit_root_and_shadowing;
     ];
   ]

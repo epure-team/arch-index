@@ -309,7 +309,12 @@ let must_null_composition_query =
    Snapshot1930c1a8acdd725a0cd9a59951eafe1cd9dd97c993bb42aed13b4570b1c27530;
    calibration/alias-curried/evidence.json records source-only growth with
    matching grouped calls/origin coverage per corpus. Headroom remains25. *)
-let clean_measured = 524
+(* User-approved 2026-09-15, effects data preservation / exact CMT copies:
+   pristine A=B545, C=D554. Base drift21 plus task source growth9; both
+   engines agree on complete grouped call rows within each corpus.
+   No headroom, query or floor change, and no resolution-gain claim.
+   Evidence: roster/ocaml-data-preservation/calibration-attribution.md. *)
+let clean_measured = 554
 
 let headroom = 25
 

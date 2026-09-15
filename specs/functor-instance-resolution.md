@@ -310,6 +310,17 @@ validation/projection is unavailable and is not claimed.
 {"record":"check","id":"CHECK-4","for":["AC-1","AC-2","AC-6","AC-9"]}
 ```
 
+## Exact-copy lifecycle amendment (2026-09-15)
+
+`specs/ocaml-data-preservation.md` admits graph reuse **before** attempting a
+duplicate module insertion: same run/root, resolved source/compiler unit, full
+artifact bytes, and a successfully extracted representative graph. Each selected
+copy or symlink path still receives its own catalogue/binding collection and
+outcome. This is not borrowed success after a rejected insertion: C-3, FR-014,
+AC-5 and EC-2 continue to require `dropped_module` for an actually rejected
+insertion, including nonidentical same-source artifacts. The lifecycle check
+covers both successful exact-copy reuse and the nonidentical rejection control.
+
 ## Entities
 
 - FunctorCatalogueInput: one exact discovered CMT path selection and its collection outcome in this run, not a unique physical program.

@@ -1,7 +1,8 @@
 -- Migration: add effects / mutation tracking + value-kind taxonomy
 -- Capability A: effects/mutators-of (Phase 1)
 -- Apply with: sqlite3 <db> < effects-schema-migration.sql
--- Safe to re-run: all CREATE TABLE/INDEX use IF NOT EXISTS.
+-- Re-running preserves rows; rebuilding the identity index refuses duplicates.
+-- The migration API wraps this script in a transaction.
 
 -- =============================================================================
 -- Value-kind taxonomy
@@ -75,13 +76,18 @@ CREATE INDEX IF NOT EXISTS idx_fn_effects_kind   ON function_effects(value_kind)
 CREATE INDEX IF NOT EXISTS idx_fn_effects_fnid   ON function_effects(function_id);
 CREATE INDEX IF NOT EXISTS idx_fn_effects_direct ON function_effects(is_direct);
 
--- Idempotency: identity of an effect row is (function, file, kind, target,
--- producer, direct/transitive). NULL file_path/target/producer fold to '' so
--- re-loading the same NDJSON stream is a no-op (writers use INSERT OR IGNORE,
--- which conflicts on this index instead of duplicating every row).
-CREATE UNIQUE INDEX IF NOT EXISTS fn_effects_identity
-  ON function_effects(function_name, COALESCE(file_path, ''), value_kind,
-                      COALESCE(target, ''), COALESCE(producer, ''), is_direct);
+-- Complete payload identity. The boolean NULL markers keep SQL NULL distinct
+-- from an explicitly supplied empty string. Replacing the obsolete index does
+-- not touch rows; if exact duplicates already exist, CREATE UNIQUE INDEX fails
+-- and the surrounding migration transaction rolls back without deletion.
+DROP INDEX IF EXISTS fn_effects_identity;
+CREATE UNIQUE INDEX fn_effects_identity
+  ON function_effects(function_name,
+                      COALESCE(file_path, ''), file_path IS NULL,
+                      value_kind,
+                      COALESCE(target, ''), target IS NULL,
+                      COALESCE(producer, ''), producer IS NULL,
+                      is_direct, soundness);
 
 -- =============================================================================
 -- Purity / pure flag (per-function summary; derived from function_effects)

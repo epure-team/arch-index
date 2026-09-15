@@ -470,6 +470,10 @@ type pending_type_usage = {
   position : int option;
 }
 
+type graph_reuse
+(** Exact-copy graph evidence scoped to one index run. *)
+val create_graph_reuse : unit -> graph_reuse
+
 (** Process a .cmt file: index modules, functions, types.
     Returns (pending_calls, pending_deps, pending_type_usages) for later resolution.
     
@@ -510,5 +514,6 @@ val process_cmt :
   ?producer_run_id:int option ->
   ?on_implementation:(artifact:string -> source:string -> compiler_unit:string -> module_id:int -> Typedtree.structure -> unit) ->
   ?on_catalogue_outcome:(artifact:string -> outcome:string -> unit) ->
+  ?graph_reuse:graph_reuse ->
   string ->
   pending_call list * pending_dep list * pending_type_usage list
