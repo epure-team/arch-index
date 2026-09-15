@@ -1,4 +1,10 @@
-# Review round1 coverage correction — root GREEN, independent verification pending
+# Review round1 coverage correction — independently verified
+
+Final owner, architect and spec-compliance personal gate runs on ae50e6d all
+passed build/full340/bundle/diff and CHECK1–6. The MEDIUM finding is RESOLVED in
+round1; the historical observations below retain their original timing. See the
+three sibling reviewer/architect/spec-compliance reports for exact evidence and
+independence boundaries. Overall convergence, QA and delivery are separate gates.
 
 The owner reviewer independently ran build/full340, CHECK1–6, bundle and diff
 on3181262: all exit0. Raw evidence is in
