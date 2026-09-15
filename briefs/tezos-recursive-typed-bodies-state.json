@@ -1,7 +1,7 @@
 {
   "task": "tezos-recursive-typed-bodies",
   "mode": "full",
-  "current_phase": "review",
+  "current_phase": "qa",
   "events": [
     {
       "phase": "question",
@@ -50,6 +50,13 @@
       "outcome": "GO",
       "by": "roster-review",
       "reason": "Round1 cycle1: three independent actual full342/CHECK1–6 passes, no product findings, scope/normalizer/convergence PASS. Two aggregate reviewer state claims corrected and discarded, not evidence; main QA must capture actual pre/post automatically. OpenCode timed out: DEGRADED, not PASS. Standing autonomy covers routine gate."
+    },
+    {
+      "phase": "qa",
+      "outcome": "GO",
+      "at": "2026-09-15T07:35:00Z",
+      "by": "roster-qa",
+      "reason": "Round1 cycle1: thirteen sequential gates exit0, full342, CHECK1–6 PASS, automatically captured actual pre/post state and current producer unchanged. Code-intel skipped no block; cross-runtime skipped review breaker. QA convergence exit0. Exact-head CI/guarded merge still required; no fifth KEEP."
     }
   ]
 }
