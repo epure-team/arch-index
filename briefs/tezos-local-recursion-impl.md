@@ -97,3 +97,15 @@ general0CFA and functor expansion remain excluded. No Tezos source changes,
 corpus expansion, old-spec parser repair, heldPR93 action or foreign cleanup.
 No installed OCaml specialist/CWR/hooks/KB/context pack; scoped Sol/Terra workers
 and manual roster chain used under standing autonomy. No quiz answers invented.
+
+## Same-round review correction
+
+Owner/spec reviewers found a MEDIUM non-vacuity/omitted-output gap in the paired
+preservation oracle, not a product defect. The two task-local test files now
+compare module/dependency/type/rebind shape and exercise positive mutation/deref
+and catch/reexport facts on both predecessor/current. Root coverage RED exit1
+(2025ms) precedes root CHECK1 GREEN exit0 (28544ms, source stable); details in
+roster/tezos-local-recursion/review-coverage-gap.md. No product, schema, pinned
+native witness, calibration reference or prior assertion changed. The earlier
+full340 results above describe the pre-enrichment test state; independent final
+review and subsequent QA must execute the final gate set anew.

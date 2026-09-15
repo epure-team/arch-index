@@ -3,10 +3,23 @@
 const assert=require('node:assert/strict'),fs=require('node:fs'),os=require('node:os'),path=require('node:path'),cp=require('node:child_process');
 const {probeRecords}=require('./run-probe.js');
 const root=path.resolve(__dirname,'../..');let temporary;
-const source=`type ('a,'r) cont = ('a -> 'r) -> 'r
+const source=`module S = Stdlib
+module Exported_shape = struct
+  type record_shape = { mutable value : int }
+  type variant_shape = Variant of int
+end
+include Exported_shape
+exception Local
+exception Alias = Local
+type local_token = Token of int
+let typed (x : local_token) : local_token = x
+let alias_call n = S.abs n
+let caught n = try if n < 0 then raise Local else n with Local -> 0
+type ('a,'r) cont = ('a -> 'r) -> 'r
 let side_effect n = if n < 0 then failwith "negative" else n
 let result_origin () = Error "origin"
 let basic n = let rec aux x = if x=0 then 0 else aux (x-1) in aux n
+let effects r n = let rec aux x = if x=0 then !r else (r := !r + 1; aux (x-1)) in aux n
 let annotated n = let rec aux = (fun x -> if x=0 then 0 else aux (x-1) : int -> int) in aux n
 let pattern_annotated n = let rec aux : int -> int = fun x -> if x=0 then 0 else aux (x-1) in aux n
 let nested n = let rec aux x = let invoke y = if y=0 then 0 else aux (y-1) in invoke x in aux n
@@ -94,14 +107,42 @@ try{
   opam(['ocamlfind','ocamlopt','-linkpkg','-package',packages,...inc,lib('arch_io/arch_io.cmxa'),lib('jsonrpc_client/jsonrpc_client.cmxa'),lib('arch_index/arch_index.cmxa'),obj,file,'-o',`preserve_${label}`]);
   preserved[label]=JSON.parse(run(path.join(temporary,`preserve_${label}`),[path.join(root,'architecture-schema.sql'),temporary,path.join(temporary,'native.cmt')]));
  }
- for(const k of ['pending','functions','carriers','scopes','origins'])assert.ok(preserved.current[k].length>0,`${k} non-vacuous`);
+ for(const k of ['pending','functions','carriers','scopes','catches','origins'])assert.ok(preserved.current[k].length>0,`${k} non-vacuous`);
+ const requiredPreservationArray=(snapshot,label,key)=>{
+  assert.ok(Array.isArray(snapshot[key]),`${label} ${key} preservation array present`);
+  assert.ok(snapshot[key].length>0,`${label} ${key} preservation set non-vacuous`);
+  return snapshot[key];
+ };
+ for(const [label,snapshot] of Object.entries(preserved)){
+  const modules=requiredPreservationArray(snapshot,label,'modules');
+  const deps=requiredPreservationArray(snapshot,label,'deps');
+  const rebinds=requiredPreservationArray(snapshot,label,'rebinds');
+  const typeUsages=requiredPreservationArray(snapshot,label,'type_usages');
+  const types=requiredPreservationArray(snapshot,label,'types');
+  const fields=requiredPreservationArray(snapshot,label,'fields');
+  const constructors=requiredPreservationArray(snapshot,label,'constructors');
+  const catches=requiredPreservationArray(snapshot,label,'catches');
+  assert.ok(modules.every(row=>Array.isArray(row)&&row.length===6),'module preservation rows retain semantic fields');
+  assert.ok(deps.every(row=>Array.isArray(row)&&row.length===5),'dependency preservation rows retain semantic fields');
+  assert.ok(deps.some(row=>Array.isArray(row)&&row[2]==='alias'),'module-alias dependency is preserved');
+  assert.ok(deps.some(row=>Array.isArray(row)&&row[2]==='include'),'include dependency is preserved');
+  assert.ok(rebinds.every(row=>Array.isArray(row)&&row.length===2),'exception rebind facts are complete');
+  assert.ok(typeUsages.every(row=>Array.isArray(row)&&row.length===5),'type-usage facts retain owner and position');
+  assert.ok(types.every(row=>Array.isArray(row)&&row.length===8),'type preservation rows retain semantic fields');
+  assert.ok(fields.every(row=>Array.isArray(row)&&row.length===5),'field preservation rows retain semantic fields');
+  assert.ok(constructors.every(row=>Array.isArray(row)&&row.length===5),'constructor preservation rows retain semantic fields');
+  assert.ok(catches.every(row=>Array.isArray(row)&&row.length===6),`${label} exception catch facts are complete`);
+  assert.ok(snapshot.functions.some(row=>Array.isArray(row)&&Number(row[16])>0),`${label} mutation effects non-vacuous`);
+  assert.ok(snapshot.functions.some(row=>Array.isArray(row)&&Number(row[17])>0),`${label} dereference effects non-vacuous`);
+  assert.ok(snapshot.pending.some(row=>Array.isArray(row)&&row[13]==='module_alias'),`${label} module_alias reexport edge preserved`);
+ }
  assert.ok(preserved.current.pending.some(r=>r[7]===true),'conditional pending fact');assert.ok(preserved.current.pending.some(r=>r[8]===true),'dead pending fact');
  assert.ok(preserved.current.carriers.some(r=>r[1]==='result'),'configured result carrier');assert.ok(preserved.current.scopes.some(r=>r[8]==='result'),'result scope');assert.ok(preserved.current.origins.some(r=>r[9]==='result'),'result origin');
  const {admissions:currentAdmissions,pending:currentPending,...currentPreserved}=preserved.current,{admissions:oldAdmissions,pending:oldPending,...oldPreserved}=preserved.old;
  assert.deepEqual(currentPreserved,oldPreserved,'complete stored rich preservation before admitted target assertion');
  validatePending(oldPending,currentPending,eligible);
  const consumer=fs.readFileSync(path.join(root,'lib/arch_index/call_graph_extractor.ml'),'utf8');fs.writeFileSync(path.join(temporary,'flat_old.ml'),consumer.replaceAll('Arch_index_cmt','Old_cmt'));fs.writeFileSync(path.join(temporary,'flat_current.ml'),consumer.replaceAll('Arch_index_cmt','Current_cmt'));
- const names=['basic','annotated','pattern_annotated','nested','default_self','optional','refutable','partial','overapplied','alias_hidden','mutual','nonrecursive','shadowed','wrapped','rhs_escape','stacked','structural_nonfunction','channel','dead','collision'];
+ const names=['typed','alias_call','caught','basic','effects','annotated','pattern_annotated','nested','default_self','optional','refutable','partial','overapplied','alias_hidden','mutual','nonrecursive','shadowed','wrapped','rhs_escape','stacked','structural_nonfunction','channel','dead','collision'];
  const ocamlNames='['+names.map(n=>`"${n}"`).join(';')+']';
  fs.writeFileSync(path.join(temporary,'flat_probe.ml'),`let row name : Arch_index__Lsp_extractor.fn_row={name;file_path="native.ml";line_start=0;line_end=0;name_char=0;exported=true;signature=None;summary=None}\nlet render (c:Flat_old.call_row)=String.concat "\\031" [c.caller_name;c.caller_file;c.callee_name;Option.value ~default:"<null>" c.callee_file;c.call_site;Option.value ~default:"<null>" c.edge_form]\nlet render2 (c:Flat_current.call_row)=String.concat "\\031" [c.caller_name;c.caller_file;c.callee_name;Option.value ~default:"<null>" c.callee_file;c.call_site;Option.value ~default:"<null>" c.edge_form]\nlet ()=let rs=List.map row ${ocamlNames} in let a=Flat_old.extract_calls_from_cmts ~project_dir:Sys.argv.(1) rs|>List.map render|>List.sort compare and b=Flat_current.extract_calls_from_cmts ~project_dir:Sys.argv.(1) rs|>List.map render2|>List.sort compare in print_endline(Yojson.Basic.to_string(\`List[\`List(List.map(fun x->\`String x)a);\`List(List.map(fun x->\`String x)b)]))`);
  for(const f of ['flat_old.ml','flat_current.ml'])opam(['ocamlfind','ocamlopt','-package',packages,...inc,'-open','Arch_index__','-c',f]);opam(['ocamlfind','ocamlopt','-linkpkg','-package',packages,...inc,lib('arch_io/arch_io.cmxa'),lib('jsonrpc_client/jsonrpc_client.cmxa'),lib('arch_index/arch_index.cmxa'),'old_cmt.cmx','current_cmt.cmx','flat_old.cmx','flat_current.cmx','flat_probe.ml','-o','flat_probe']);
