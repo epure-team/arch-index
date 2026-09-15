@@ -1,6 +1,27 @@
 # Ship gate — tezos-recursive-typed-bodies
 
-Status: READY FOR PR; not merged, not retained.
+Status: SHIPPED — PR109 merged and fifth iteration retained.
+
+## Delivery confirmation — 2026-09-15
+
+https://github.com/epure-team/arch-index/pull/109 rebase-merged at07:49:06UTC,
+merge a8114dc307ef2288aa6faabc375938ee19546ff3. Required build SUCCESS12m37s,
+CI34942465129 on exact head3400e32b2867f305ae54cf7c65ed4c50f34ca4cb;
+required-check query exit0, PR CLEAN, guarded --match-head-commit merge exit0.
+Merged and checked trees both074494fac835e0158e2cac3eb7c76d52cf1ae078.
+Local main fast-forwarded; feature branch removed locally and remotely.
+MCP/release skipped by CI, not verified. Local fixed410 corpus evidence is separate.
+
+results.tsv now records fifth KEEP: 4849 Irmin / 12171 protocol, +0/+14 over
+PR108, zero loss, 45052 rows. Canonical candidate digest:
+1799c07fd3eb87d4bca433b15b7daeb47f466f90cb098541372e1dd9dd7bac7a.
+Loop complete: five kept, zero discarded, cumulative +477 Irmin/+951 protocol
+over 4372/11220. No sixth attempt. External roadmap updated with final metrics.
+No owned fifth worktree to remove; root build retained as active build, audit
+evidence intentionally retained. Seven unrelated user files and foreign worktrees
+unchanged. Final delivery records are local documentation, not new product code.
+
+## Historical pre-push gate
 
 Fifth and final authorized attempt. Standing user authorization explicitly covers
 autonomous Roster, PR, CI corrections and guarded rebase merge; no quiz answers

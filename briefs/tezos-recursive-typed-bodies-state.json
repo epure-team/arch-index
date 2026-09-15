@@ -1,7 +1,7 @@
 {
   "task": "tezos-recursive-typed-bodies",
   "mode": "full",
-  "current_phase": "qa",
+  "current_phase": "ship",
   "events": [
     {
       "phase": "question",
@@ -57,6 +57,13 @@
       "at": "2026-09-15T07:35:00Z",
       "by": "roster-qa",
       "reason": "Round1 cycle1: thirteen sequential gates exit0, full342, CHECK1–6 PASS, automatically captured actual pre/post state and current producer unchanged. Code-intel skipped no block; cross-runtime skipped review breaker. QA convergence exit0. Exact-head CI/guarded merge still required; no fifth KEEP."
+    },
+    {
+      "phase": "ship",
+      "outcome": "COMPLETED",
+      "at": "2026-09-15T07:50:44Z",
+      "by": "roster-ship",
+      "reason": "PR109 guarded rebase-merged a8114dc at07:49:06UTC after required CI34942465129 SUCCESS on exact3400e32; checked and merged trees identical. Local main resynced, feature branch deleted, unrelated files preserved. Fifth KEEP +14 protocol/zero loss; results and external roadmap updated. Five-of-five loop complete, no sixth attempt."
     }
   ]
 }
