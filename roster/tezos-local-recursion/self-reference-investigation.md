@@ -1,5 +1,10 @@
 # Exact source-only reference refresh
 
+Historical diagnostic record. Implementation and three final personal review
+gate sets subsequently passed; see the implementation brief and review reports.
+The four-path authorization and raw evidence below remain immutable. QA and
+delivery are separate gates; the old pending wording describes the diagnostic stage.
+
 The first full340 run returned338PASS/2FAIL: self golden and authentic origin
 consumer. All four new native tests passed. The raw log is
 improvement/2026-09-14-tezos-resolution/attempt4-full-green1.log.

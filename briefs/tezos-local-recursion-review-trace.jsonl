@@ -1,0 +1,10 @@
+{"schema_version":"1.0","ts":"2026-09-15T00:26:09.421Z","task":"tezos-local-recursion","round":1,"cycle":1,"event":"scope-gate","actor":"check-scope-diff.sh","outcome":"ran"}
+{"schema_version":"1.0","ts":"2026-09-15T00:43:27.833Z","task":"tezos-local-recursion","round":1,"cycle":1,"event":"scope-gate","actor":"check-scope-diff.sh","outcome":"ran"}
+{"schema_version":"1.0","ts":"2026-09-15T01:14:16.679Z","task":"tezos-local-recursion","round":1,"cycle":1,"event":"scope-gate","actor":"check-scope-diff.sh","outcome":"ran"}
+{"schema_version":"1.0","ts":"2026-09-15T01:14:16.817Z","task":"tezos-local-recursion","round":1,"cycle":1,"event":"specialist","actor":"reviewer","outcome":"ran"}
+{"schema_version":"1.0","ts":"2026-09-15T01:14:16.958Z","task":"tezos-local-recursion","round":1,"cycle":1,"event":"specialist","actor":"architect","outcome":"ran"}
+{"schema_version":"1.0","ts":"2026-09-15T01:14:17.091Z","task":"tezos-local-recursion","round":1,"cycle":1,"event":"specialist","actor":"spec-compliance","outcome":"ran"}
+{"schema_version":"1.0","ts":"2026-09-15T01:14:17.227Z","task":"tezos-local-recursion","round":1,"cycle":1,"event":"specialist","actor":"code-quality-auditor","outcome":"skipped","detail":"no kb/properties.md installed"}
+{"schema_version":"1.0","ts":"2026-09-15T01:14:17.362Z","task":"tezos-local-recursion","round":1,"cycle":1,"event":"specialist","actor":"reviewer-tui","outcome":"skipped","detail":"no TUI scope"}
+{"schema_version":"1.0","ts":"2026-09-15T01:14:17.494Z","task":"tezos-local-recursion","round":1,"cycle":1,"event":"cross-runtime","actor":"opencode","outcome":"ran","detail":"degraded non-conforming-output; actual journal retained"}
+{"schema_version":"1.0","ts":"2026-09-15T01:14:17.635Z","task":"tezos-local-recursion","round":1,"cycle":1,"event":"normalizer","actor":"review-normalize.js","outcome":"ran"}

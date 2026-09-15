@@ -1,0 +1,67 @@
+{
+  "task": "tezos-local-recursion",
+  "date": "2026-09-15T01:14:25Z",
+  "status": "GO",
+  "auto_fixes_applied": [
+    {
+      "path": "roster/tezos-local-recursion/native-preservation-probe.ml",
+      "line": 95,
+      "category": "spec",
+      "description": "Same-round MEDIUM FR-009/AC-15 coverage correction in 60bf7ab: retain rich semantic families and require authentic nonempty mutation/deref/reexport/type controls; independent final gates pass."
+    }
+  ],
+  "findings": [],
+  "cross_runtime_findings": [],
+  "summary": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "auto_fixed": 1
+  },
+  "no_go_reason": {
+    "type": null,
+    "cause": null,
+    "failed_acs": []
+  },
+  "no_go_round": 0,
+  "round": 1,
+  "cycle": 1,
+  "rounds_audit": [
+    {
+      "round": 1,
+      "reviewed_sha": null,
+      "fix_sha": null,
+      "fix_sha_reason": "dirty-tree",
+      "specialists_run": [
+        {
+          "name": "reviewer",
+          "selection_reason": "Owner always runs; independently audited core implementation and executed build/full340/CHECK1–6 on ae50e6d"
+        },
+        {
+          "name": "architect",
+          "selection_reason": "More than three files changed; independent product architecture review and personal final build/full340/CHECK1–6"
+        },
+        {
+          "name": "spec-compliance",
+          "selection_reason": "Feature spec present; independent witness/capacity review and personal final build/full340/CHECK1–6; authorship limits documented"
+        }
+      ],
+      "strike": false,
+      "trace_schema_version": "1.0"
+    }
+  ],
+  "cross_runtime": {
+    "opencode": {
+      "status": "degraded",
+      "reason": "non-conforming-output",
+      "config_digest": "opencode:76f897c73342fdbf",
+      "round": 1
+    }
+  },
+  "streak_override": null,
+  "mode": "full",
+  "escalation_needed": false,
+  "escalation_reason": null,
+  "normalized_by": "2.0.0"
+}
