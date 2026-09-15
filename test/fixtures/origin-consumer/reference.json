@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "revision": "7f10fbc9a15e210f15114f7f8f399424a75fdcad+pristine-source-only",
+  "revision": "a951936d93227415c8e016493e63701e850e65d4+pristine-source-only",
   "modules": [
     "lib/arch_index/arch_errors_config.ml",
     "lib/arch_index/arch_index.ml",
@@ -30,9 +30,9 @@
   ],
   "totals": {
     "modules": 25,
-    "functions": 998,
-    "calls": 6335,
-    "origins": 570
+    "functions": 1004,
+    "calls": 6389,
+    "origins": 580
   },
   "origin_groups": [
     {
@@ -45,7 +45,7 @@
       "channel": "exception",
       "form": "compare",
       "escapes": 1,
-      "count": 50
+      "count": 52
     },
     {
       "channel": "exception",
@@ -81,7 +81,7 @@
       "channel": "option",
       "form": "raise",
       "escapes": 1,
-      "count": 320
+      "count": 328
     },
     {
       "channel": "result",
