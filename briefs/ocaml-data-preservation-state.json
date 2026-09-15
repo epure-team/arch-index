@@ -1,12 +1,13 @@
 {
   "task": "ocaml-data-preservation",
   "mode": "full",
-  "current_phase": "implement",
+  "current_phase": "review",
   "events": [{"phase":"question","outcome":"COMPLETED","by":"roster-question","reason":"Fresh Sol text-only questions; seven neutral questions with canonical manifest. Standing autonomous authorization covers routine approval; no fabricated answers. Stage1 of new five-stage plan."},
     {"phase":"research","outcome":"COMPLETED","by":"roster-research","reason":"Four independent blind CLI research roles completed; seven questions synthesized with coverage gaps. Baseline full guard exit0 and two separate runtime reproductions recorded."},
     {"phase":"intake","outcome":"VALIDATED","by":"roster-intake","reason":"User accepted proposed exact-copy stage1 / independently compiled variants stage4 split with ok ok continue. Routine gates under standing autonomy; no invented quiz answers."},
     {"phase":"spec","outcome":"VALIDATED","by":"roster-spec","reason":"Independent research, clarification, challenge and formalizer completed. Three stories, twelve requirements/ACs, three specified checks; routine gate under standing autonomy, no test pass or formal proof yet."},
     {"phase":"plan","outcome":"COMPLETED","by":"roster-plan","reason":"Independent sequential Sol/Terra voices; validated vertical-slice plan and role briefs. One PR for stage1. Manual chain because CWR/templates absent."},
     {"phase":"implement","outcome":"PARTIAL","by":"roster-implement","reason":"Awaiting explicit scope extension for measured MUST-null reference recalibration; review, QA and ship remain unstarted."},
-    {"phase":"implement","outcome":"COMPLETED","by":"roster-implement","reason":"User approved exact ratchet scope extension; measured golden references updated without policy weakening. Full forced suite344/344 exit0, CHECK1–3 and bundle/hygiene exit0. Independent review and QA still required."}]
+    {"phase":"implement","outcome":"COMPLETED","by":"roster-implement","reason":"User approved exact ratchet scope extension; measured golden references updated without policy weakening. Full forced suite344/344 exit0, CHECK1–3 and bundle/hygiene exit0. Independent review and QA still required."},
+    {"phase":"review","outcome":"GO","at":"2026-09-15T19:53:17.206Z","by":"roster-review","reason":"Three independent corrected-source gate passes; same-round NULL defect fixed; full convergence exit0 with traces. Three MEDIUM coverage debts and INFO wording advisory retained; OpenCode timeout degraded. Routine gates covered by user autonomy."}]
 }

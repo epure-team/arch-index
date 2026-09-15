@@ -1,0 +1,77 @@
+{
+  "task": "ocaml-data-preservation",
+  "date": "2026-09-15T19:52:41.572Z",
+  "status": "GO",
+  "auto_fixes_applied": [
+    {
+      "path": "lib/arch_effects/effects_db.ml",
+      "line": 39,
+      "category": "correctness",
+      "description": "Scoped same-round repair under autonomous authorization: ignore NULL source candidates for exact-path lookup; genuine CHECK1 RED then GREEN."
+    }
+  ],
+  "findings": [],
+  "cross_runtime_findings": [],
+  "summary": {
+    "critical": 0,
+    "high": 0,
+    "medium": 3,
+    "low": 0,
+    "info": 1,
+    "auto_fixed": 1,
+    "resolved_critical": 1
+  },
+  "no_go_reason": {
+    "type": null,
+    "cause": null,
+    "failed_acs": []
+  },
+  "no_go_round": 0,
+  "round": 1,
+  "cycle": 1,
+  "rounds_audit": [
+    {
+      "round": 1,
+      "reviewed_sha": "126a0086d1a7016139ac26fa466d676ad889e292",
+      "reviewed_source_sha": "10d75e2ea6bc3e35b7dbdb35c7621a29719a27d2",
+      "fix_sha": null,
+      "fix_sha_reason": "dirty-tree",
+      "specialists_run": [
+        {
+          "name": "reviewer",
+          "selection_reason": "Owner reviewer always runs; personally built, full344 and CHECK1–3 on corrected HEAD"
+        },
+        {
+          "name": "architect",
+          "selection_reason": "Public modules and more than three changed files; personally built, full344 and CHECK1–3 on corrected source"
+        },
+        {
+          "name": "spec-compliance",
+          "selection_reason": "Full mode feature spec exists; personally built, full344 and CHECK1–3 on corrected HEAD"
+        }
+      ],
+      "strike": false,
+      "trace_schema_version": "1.0"
+    }
+  ],
+  "cross_runtime": {
+    "opencode": {
+      "status": "degraded",
+      "reason": "timeout",
+      "config_digest": "opencode:fd1dbeaa7d0c6431",
+      "round": 1
+    }
+  },
+  "streak_override": null,
+  "mode": "full",
+  "escalation_needed": false,
+  "escalation_reason": null,
+  "normalized_by": "2.0.0",
+  "advisories_artifact": "roster/ocaml-data-preservation/review-normalized.json",
+  "limitations": [
+    "Three MEDIUM test-coverage gaps remain explicit debt; no missing implementation established.",
+    "OpenCode timed out; no supplementary pass claimed.",
+    "pre_fix_sha null because foreign untracked files prevent globally clean tree; same-round resolution, no machine red_verified claim.",
+    "Standing autonomous authorization covers routine human gates; no fabricated quiz answers."
+  ]
+}

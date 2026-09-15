@@ -81,7 +81,9 @@ without name fallback. Build/CHECK1–3/hygiene pass; the architect independentl
 ran the full forced suite on corrected source,344/344 exit0, and all other gates.
 Fresh same-corpus old/new-engine comparison remains23329 rows and MUST-null554.
 See `roster/ocaml-data-preservation/review-fixes.md`. Final reviewer/spec addenda
-are still required before the review verdict; no new upstream phase is claimed.
+now independently confirm full344/344 and CHECK1–3 on commit10d75e2.
+Formal review convergence and QA remain downstream gates; no new upstream phase
+is claimed.
 
 ## Remaining limitations
 

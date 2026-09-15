@@ -1,0 +1,63 @@
+[
+  {
+    "severity": "CRITICAL",
+    "confidence": 5,
+    "path": "lib/arch_effects/effects_db.ml",
+    "line": 72,
+    "category": "spec",
+    "summary": "A nullable-path homonym aborts exact alternative-schema association",
+    "evidence": "ids_at_normalized_path requires every same-name candidate path to be TEXT before comparing it. With (1,'f',NULL) and (2,'f','a.ml'), loading f/a.ml exits nonzero with 'non-text function path' instead of associating ID 2. CHECK-1 lacks this valid nullable candidate case.",
+    "fix": "Ignore NULL candidate paths for a supplied-path lookup, retain exact lexical normalization for non-NULL candidates, and add the reproduced regression.",
+    "fingerprint": "spec:ocaml-data-preservation:null-alt-homonym-exact-path",
+    "specialist": "spec-compliance",
+    "acs": ["FR-001", "AC-1", "AC-4"],
+    "status": "RESOLVED",
+    "first_seen_round": 1,
+    "resolved_round": 1,
+    "check": null,
+    "red_verified": null,
+    "pre_fix_sha": null
+  },
+  {
+    "severity": "MEDIUM",
+    "confidence": 5,
+    "path": "lib/arch_effects/ocaml_effects_extractor.ml",
+    "line": 106,
+    "category": "spec",
+    "summary": "Several producer source-path distinctions are implemented but untested",
+    "evidence": "CHECK-1 covers relative, contained-absolute and unresolved-parent metadata, but has no assertion for missing cmt_sourcefile, absolute outside-root metadata, or literal underscores required by FR-003.",
+    "fix": "Add focused compiled producer fixtures for the three uncovered distinctions without broadening source relocation behavior.",
+    "fingerprint": "spec:ocaml-data-preservation:producer-path-coverage",
+    "specialist": "spec-compliance",
+    "acs": ["FR-003", "AC-1"],
+    "status": "OPEN"
+  },
+  {
+    "severity": "MEDIUM",
+    "confidence": 5,
+    "path": "lib/arch_effects/effects_db.ml",
+    "line": 94,
+    "category": "spec",
+    "summary": "Bind and commit SQL failure paths are implemented but untested",
+    "evidence": "FR-008 requires preparation, bind, step and commit errors to fail atomically. Tests cover preparation/index refusal, step/trigger, repair, malformed input and input I/O, but no bind- or commit-failure injection was found.",
+    "fix": "Add deterministic bind and commit failure probes that assert rollback, nonzero status and absence of a success summary.",
+    "fingerprint": "spec:ocaml-data-preservation:bind-commit-untested",
+    "specialist": "spec-compliance",
+    "acs": ["FR-008", "AC-9"],
+    "status": "OPEN"
+  },
+  {
+    "severity": "MEDIUM",
+    "confidence": 3,
+    "path": "lib/arch_effects/ocaml_effects_extractor.ml",
+    "line": 219,
+    "category": "spec",
+    "summary": "Equal-location declaration ordering lacks a native test",
+    "evidence": "The producer iterates Typedtree declaration lists and ordinary shadow fixtures verify f#1 then f, but no equal-location/ghost-location fixture was found for AC-6's explicit boundary.",
+    "fix": "Add a typedtree fixture with repeated supported top-level bindings sharing locations and assert declaration-order identities.",
+    "fingerprint": "spec:ocaml-data-preservation:equal-location-order-untested",
+    "specialist": "spec-compliance",
+    "acs": ["FR-004", "AC-6"],
+    "status": "OPEN"
+  }
+]
