@@ -1,7 +1,7 @@
 # Architect report — ocaml-data-preservation
 
-**Specialist:** architect  
-**Reviewed head:** `126a0086d1a7016139ac26fa466d676ad889e292` plus the two authorized NULL-path corrections  
+**Specialist:** architect
+**Reviewed head:** `126a0086d1a7016139ac26fa466d676ad889e292` plus the two authorized NULL-path corrections
 **Overall architecture risk:** LOW
 
 ## Findings
