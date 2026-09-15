@@ -33,3 +33,29 @@ retains the calibration object; owned diagnostic worktrees/builds are removed.
 Push normally, no force. Required build must be SUCCESS on exact PR head before
 match-head guarded rebase merge. No admin/bypass. HeldPR93 and foreign worktrees
 are excluded. No fourth KEEP until actual merge. PR/CI/merge pending at writing.
+
+## Delivery confirmation
+
+PR108 https://github.com/epure-team/arch-index/pull/108 rebase-merged at
+2026-09-15T01:45:05Z to4a952441fcd7648d20e68b5c6348de1b3fe85522.
+Required build SUCCESS11m00 on exacthead24711ef44cfc341f60a4584bf65a406764df5282;
+CI https://github.com/epure-team/arch-index/actions/runs/34917720591.
+MCP and release were explicitly skipped. No bypass/admin/force; match-head guard.
+Merged tree exactly matches checked head (git diff --quiet exit0).
+
+Local main initially retained one prior delivery-doc commit82c5a81; git cherry
+proved it already applied upstream, then normal rebase resynchronized main to
+origin/main. Feature branch removed. Seven unrelated user files preserved;
+zero owned calibration worktrees remain. Failed QA temporary directory/processes
+were already cleaned by the test runner; raw small logs remain as audit evidence.
+
+Attempt4 KEEP: retainedIrmin4849/protocol12157, +68/+111 this iteration, zero loss.
+Cumulative gain vs original baseline:+477Irmin/+937protocol. Results and external
+roadmap updated after merge. Four of the exact five iterations delivered; fifth
+not started at this record. Intermittent unrelated LSP risk remains disclosed.
+
+Post-ship hygiene: all9 ledger phases have matching friction entries. The skill's
+uncompiled .js path is absent and direct .ts execution is incompatible here;
+the existing dist/scripts/check-friction-shape.js validated66 current entries,
+210 older entries skipped, exit0. No tool install or upstream edit was needed.
+Harness/metabolism/KB are absent; the pre-existing user cost file was not touched.
