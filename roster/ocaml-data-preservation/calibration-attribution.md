@@ -22,8 +22,9 @@ Equality is checked on complete grouped call-row digests, module and origin
 coverage and external groups, not just counts. Source growth adds nine measured
 rows; another21 were already present at base versus the old524 reference.
 This is not a resolution gain. No attribution of the pre-existing21 to individual
-merges is claimed. The calibration source snapshot predates only the approved
-reference/comment and subsequent documentation/checker changes, not product logic.
+merges is claimed. At the initial implementation handoff, subsequent changes were
+limited to approved references/comments and documentation/checkers. The later
+review correction to product logic is qualified separately below.
 
 Review subsequently added only two SQL NULL-candidate filters in effects_db and
 their CHECK1 cases. After that fix, fresh same-current-corpus old/new-engine

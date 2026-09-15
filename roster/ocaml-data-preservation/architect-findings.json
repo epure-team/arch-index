@@ -1,0 +1,15 @@
+[
+  {
+    "severity": "INFO",
+    "confidence": 5,
+    "path": "specs/ocaml-data-preservation.md",
+    "line": 104,
+    "category": "architecture",
+    "summary": "FR-012 uses stored-graph wording broader than the frozen extraction-return eligibility boundary",
+    "evidence": "The implementation admits a representative after process_cmt returns without increasing statement_failures (lib/arch_index/arch_index_cmt.ml:3175 and 4075-4080). Pending calls, dependencies, and type usages are persisted later by Arch_index.run. Read together with Clarifications/C11 and the ExactCmtGraphReuse entity, eligibility is intentionally bounded to successful graph extraction, while functor catalogue and binding markers certify their independent per-artifact inventories rather than whole-callgraph persistence. No implementation violation is established, but FR-012's phrase 'successfully stored representative graph' can be misread as including deferred graph tables.",
+    "fix": "Clarify FR-012 with the already-frozen C11 boundary: eligibility follows process_cmt extraction return without increased statement failures; catalogue and binding markers do not certify deferred callgraph persistence. No product change is required.",
+    "fingerprint": "architect:ocaml-data-preservation:fr012-extraction-wording",
+    "specialist": "architect",
+    "acs": ["FR-012", "AC-12"]
+  }
+]
