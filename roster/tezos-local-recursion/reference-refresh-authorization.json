@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "authority": "standing user autonomy; conditional exact source-only reference refresh",
+  "base": "05e4a8a7ba2d64ff08a15e268005f800e06ea4d7",
+  "candidate": "a951936d93227415c8e016493e63701e850e65d4",
+  "golden": {"A": [25, 998, 6335], "B": [25, 998, 6335], "C": [25, 1004, 6389], "D": [25, 1004, 6389]},
+  "ceiling": {"A": 541, "B": 541, "C": 544, "D": 544, "pin": 524, "headroom": 25},
+  "origins": {"A": 570, "B": 570, "C": 580, "D": 580},
+  "sole_assertion": "unchanged split_last source, relocated from1609 to1631; multiplicity remains1",
+  "references": {
+    "test/fixtures/self-index-stats.txt": {"before": "622de7817d08fac45a139d34e349e906444400cc85ec9e15ac1b0b37dc91c274", "after": "ece868f3f1e7ccbf2dc3fa2af8dc920b19eba44d0ab617cba766427117422776"},
+    "test/fixtures/origin-consumer/reference.json": {"before": "34a13bbfb5125e5f1984dde60196afde6a8b87e6481753c3e9d5fa0d73156292", "after": "72cb7ee2c2b8531fed656e4be0baabf181e15c4eea7055630a1bf052274a3962"},
+    "test/fixtures/origin-consumer/self.allow": {"before": "d07e35ed9347d3b88b361eff8f5dff9e354ac3a9d99e06775be79357b67191fc", "after": "0be2b61d97266cde8f6749795fdc2e2b695dcabb633d09c29b62c21547c97577"},
+    "checks/origin-recurring-consumer.js": {"before": "25d93fac9fc2a2f80bfb6a13b7d1be675f6e172f7831ca62cf179fe8430d064a", "after": "0bac606093f59af7d16cee49e068d4f4b8349b35fd24ffc4258e2a0fedf91f86"}
+  },
+  "evidence": {
+    "improvement/2026-09-14-tezos-resolution/attempt4-self-reference-N1yBlb/provenance.json": "c17c350548437bd344281f1a3c5c4799ab14f6d7d55b907dec18115a4818bdf8",
+    "improvement/2026-09-14-tezos-resolution/attempt4-self-reference-N1yBlb/recalibrate-explain.log": "c1a40e0488e23bef9ccdb0afd5aa74e16a54c7ff7bb0bb343d652a9ec30c647d",
+    "improvement/2026-09-14-tezos-resolution/attempt4-origin-attribution-wSBKDP/provenance.json": "cf337698c6219cf3bf94c4f0be6f2b09fb9d059b60018b2d818b7fe04fb59b24",
+    "improvement/2026-09-14-tezos-resolution/attempt4-origin-attribution-wSBKDP/observations.json": "70321dc666ff0135fec44008e55e033a6fb286627cdf3e2c18f2054875414d7b"
+  }
+}

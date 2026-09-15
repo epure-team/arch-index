@@ -974,6 +974,15 @@ type open_body_target = {
   mutable stored_body : bool;
 }
 
+type recursive_body_target = {
+  recursive_display_name : string;
+  recursive_expected_body : Typedtree.expression;
+  recursive_body_arity : int;
+  mutable recursive_body_name : string option;
+  mutable recursive_observation_count : int;
+  mutable recursive_body_stored : bool;
+}
+
 (** Invocation-only companions for structural bindings of the exact form
     [let x = let open Path in fun ...].  This deliberately does not widen
     [local_fn_stamps]: the binding is still a value whose invocation is only a
@@ -1334,6 +1343,7 @@ let collect_calls_from_expr_with_open_bodies ?(canon_exn = fun p -> Path.name p)
     ?(local_alias_stamps = Hashtbl.create 0) ?(module_alias_stamps = Hashtbl.create 0)
     ?(local_module_targets = Local_module_ids.empty)
     ?(open_body_targets = Hashtbl.create 0)
+    ?recursive_body_targets
     ~src_path ~caller_module ~caller_name
     ~local_fn_stamps (expr : Typedtree.expression) =
   (* Per-node CFG: every function — the top-level binding AND each nested
@@ -1522,6 +1532,18 @@ let collect_calls_from_expr_with_open_bodies ?(canon_exn = fun p -> Path.name p)
   in
   let open_body_target id =
     Hashtbl.find_opt open_body_targets (Ident.unique_name id)
+  in
+  (* Exact recursive binders are visible only while their own RHS is being
+     walked.  This stack is deliberately independent of [local_lam_stamps]:
+     ordinary let-bound literals are still registered only after their RHS,
+     while an inner recursive RHS may continue to refer to an active outer
+     binder by compiler identity. *)
+  let active_recursive_rhs = ref [] in
+  let recursive_body_target id =
+    List.find_map
+      (fun (active_id, target) ->
+        if Ident.same active_id id then Some target else None)
+      !active_recursive_rhs
   in
   (* The definition path of a same-module top-level ALIAS binder (see
      {!build_local_alias_stamps}), or [None] when this identifier is not one.
@@ -1918,6 +1940,13 @@ let collect_calls_from_expr_with_open_bodies ?(canon_exn = fun p -> Path.name p)
                  calls attribute to the node and MUST = post-dominates the
                  LAMBDA's entry). *)
               let name = lambda_name expr.exp_loc in
+              List.iter
+                (fun (_, target) ->
+                  if expr == target.recursive_expected_body then (
+                    target.recursive_observation_count <-
+                      target.recursive_observation_count + 1 ;
+                    target.recursive_body_name <- Some name))
+                !active_recursive_rhs ;
               Hashtbl.iter
                 (fun _ target ->
                   if name = target.body_name then (
@@ -1943,7 +1972,7 @@ let collect_calls_from_expr_with_open_bodies ?(canon_exn = fun p -> Path.name p)
               cur := c ;
               !walk_fn_body_ref expr ;
               cur := saved
-          | Texp_let (_, vbs, body) ->
+          | Texp_let (rec_flag, vbs, body) ->
               (* Single-literal [Tpat_var] binding RHSs: the BINDING is not an
                  occurrence (a never-referenced lambda gets no edge). Each RHS
                  walk assigns the literal's node name; the binder's stamp is
@@ -1959,7 +1988,24 @@ let collect_calls_from_expr_with_open_bodies ?(canon_exn = fun p -> Path.name p)
                   | Tpat_var _, Texp_function _ ->
                       Hashtbl.replace binding_literals vb.vb_expr.exp_loc ()
                   | _ -> ()) ;
-                  default_iterator.value_binding self vb ;
+                  (match recursive_body_targets, rec_flag, vbs,
+                         vb.vb_pat.pat_desc, vb.vb_expr.exp_desc with
+                  | Some targets, Recursive, [_], Tpat_var (id, _, _), Texp_function _ ->
+                      let target =
+                        { recursive_display_name = Ident.name id;
+                          recursive_expected_body = vb.vb_expr;
+                          recursive_body_arity = fn_arity vb.vb_expr;
+                          recursive_body_name = None;
+                          recursive_observation_count = 0;
+                          recursive_body_stored = false }
+                      in
+                      Hashtbl.replace targets (Ident.unique_name id) target ;
+                      let saved = !active_recursive_rhs in
+                      active_recursive_rhs := (id, target) :: saved ;
+                      Fun.protect
+                        ~finally:(fun () -> active_recursive_rhs := saved)
+                        (fun () -> default_iterator.value_binding self vb)
+                  | _ -> default_iterator.value_binding self vb) ;
                   (match (vb.vb_pat.pat_desc, vb.vb_expr.exp_desc) with
                   | Tpat_var (id, _, _), Texp_function _ -> (
                       match Hashtbl.find_opt lam_names vb.vb_expr.exp_loc with
@@ -2264,6 +2310,9 @@ let collect_calls_from_expr_with_open_bodies ?(canon_exn = fun p -> Path.name p)
               let body_nargs =
                 match fn_expr.exp_desc with
                 | Texp_ident (Path.Pident id, _, _)
+                  when recursive_body_target id <> None ->
+                    List.length (List.filter_map snd args)
+                | Texp_ident (Path.Pident id, _, _)
                   when open_body_target id <> None ->
                     List.length (List.filter_map snd args)
                 | Texp_ident (path, _, _) -> (
@@ -2285,7 +2334,9 @@ let collect_calls_from_expr_with_open_bodies ?(canon_exn = fun p -> Path.name p)
                      | Some a -> a
                      | None -> arrow_arity fn_expr.exp_type)
                 | Texp_ident (Path.Pident id, _, _) -> (
-                    match open_body_target id with
+                    match recursive_body_target id with
+                    | Some target -> target.recursive_body_arity
+                    | None -> (match open_body_target id with
                     | Some target -> target.body_arity
                     | None -> (match lam_stamp id with
                     | Some (_, a) ->
@@ -2294,7 +2345,7 @@ let collect_calls_from_expr_with_open_bodies ?(canon_exn = fun p -> Path.name p)
                            occurrence case for this loc. *)
                         Hashtbl.replace head_idents fn_expr.exp_loc () ;
                         a
-                    | None -> arrow_arity fn_expr.exp_type))
+                    | None -> arrow_arity fn_expr.exp_type)))
                 | Texp_ident (path, _, _) -> (
                     match invocation_module_target path with
                     | Some (_, arity) -> arity
@@ -2326,7 +2377,17 @@ let collect_calls_from_expr_with_open_bodies ?(canon_exn = fun p -> Path.name p)
                     add_call ~partial ~is_head_of:expr.exp_loc ?callee_ty:!callee_ty_for_channel
                       (Head_local (local_fn_name id)) expr.exp_loc
                 | Texp_ident (Path.Pident id, _, _) -> (
-                    match open_body_target id with
+                    match recursive_body_target id with
+                    | Some target ->
+                        let name =
+                          Option.value target.recursive_body_name
+                            ~default:target.recursive_display_name
+                        in
+                        add_call ~partial ~is_head_of:expr.exp_loc
+                          ?callee_ty:!callee_ty_for_channel
+                          ~edge_form:("__recursive_body:" ^ Ident.unique_name id)
+                          (Head_enumerated name) expr.exp_loc
+                    | None -> (match open_body_target id with
                     | Some target ->
                         add_call ~partial ~is_head_of:expr.exp_loc
                           ?callee_ty:!callee_ty_for_channel
@@ -2346,7 +2407,7 @@ let collect_calls_from_expr_with_open_bodies ?(canon_exn = fun p -> Path.name p)
                           ~is_head_of:expr.exp_loc
                           ?callee_ty:!callee_ty_for_channel
                           (Head_unknown (Ident.name id, Callback_param))
-                          expr.exp_loc))
+                          expr.exp_loc)))
                 | Texp_ident (path, _, _) ->
                     note_seen_value_path (Path.name path) ;
                     let callee_module, callee_name = path_to_module_name path in
@@ -2396,7 +2457,21 @@ let collect_calls_from_expr_with_open_bodies ?(canon_exn = fun p -> Path.name p)
                    applied to the (unknown) returned function value — a residual
                    call to an unknowable target. Record it as ⊤ so [unreachable]
                    stays sound. *)
-                if head_arity > 0 && body_nargs > head_arity then
+                (* A hidden arrow alias can make the old type-based arity
+                   smaller than the observed literal arity. Preserve its
+                   existing conservative residual as well; target refinement
+                   must not silently delete another pending call. *)
+                let legacy_recursive_overapplication =
+                  match fn_expr.exp_desc with
+                  | Texp_ident (Path.Pident id, _, _)
+                    when recursive_body_target id <> None ->
+                      let legacy_arity = arrow_arity fn_expr.exp_type in
+                      legacy_arity > 0 && nargs > legacy_arity
+                  | _ -> false
+                in
+                if (head_arity > 0 && body_nargs > head_arity)
+                   || legacy_recursive_overapplication
+                then
                   add_call (Head_unknown ("*TOP*", Callback_param)) expr.exp_loc ;
                 add_arg_escapes args expr.exp_loc
               in
@@ -3133,6 +3208,7 @@ let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
                   let pending_type_usages = ref [] in
                   let local_fn_stamps = build_local_fn_stamps structure in
                   let open_body_targets = build_open_body_targets structure in
+                  let recursive_body_targets = Hashtbl.create 16 in
                   let local_module_targets = build_local_module_targets ~local_fn_stamps structure in
                   let local_alias_stamps = build_local_alias_stamps structure in
                   let module_alias_stamps = build_module_alias_stamps structure in
@@ -3550,6 +3626,7 @@ let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
                                           ~module_alias_stamps
                                           ~local_module_targets
                                           ~open_body_targets
+                                          ~recursive_body_targets
                                           vb.vb_expr
                                       in
                                       (* Insert a synthetic functions row per nested
@@ -3587,7 +3664,14 @@ let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
                                                   if target.expected_body_observed
                                                      && target.body_name = l.lam_name
                                                   then target.stored_body <- true)
-                                                open_body_targets
+                                                open_body_targets ;
+                                              Hashtbl.iter
+                                                (fun _ target ->
+                                                  match target.recursive_body_name with
+                                                  | Some name when name = l.lam_name ->
+                                                      target.recursive_body_stored <- true
+                                                  | _ -> ())
+                                                recursive_body_targets
                                           | None ->
                                               record_dropped_node
                                                 ~module_path:rel_path
@@ -3876,6 +3960,37 @@ let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
                                 {c with
                                  head = Head_unknown (target.display_name, Callback_param);
                                  edge_form = None}
+                            | None ->
+                                {c with
+                                 head = Head_unknown ("*TOP*", Callback_param);
+                                 edge_form = None})
+                        | Some marker
+                          when String.starts_with ~prefix:"__recursive_body:" marker ->
+                            let prefix = "__recursive_body:" in
+                            let stamp =
+                              String.sub marker (String.length prefix)
+                                (String.length marker - String.length prefix)
+                            in
+                            (match Hashtbl.find_opt recursive_body_targets stamp with
+                            | Some target -> (
+                                match target.recursive_body_name with
+                                | Some name
+                                  when is_dropped_node ~module_path:rel_path ~name ->
+                                    {c with
+                                     head = Head_unknown (name, Dropped_node);
+                                     edge_form = None}
+                                | Some name
+                                  when target.recursive_body_stored
+                                       && target.recursive_observation_count = 1 ->
+                                    {c with
+                                     head = Head_enumerated name;
+                                     edge_form = None}
+                                | _ ->
+                                    {c with
+                                     head =
+                                       Head_unknown
+                                         (target.recursive_display_name, Callback_param);
+                                     edge_form = None})
                             | None ->
                                 {c with
                                  head = Head_unknown ("*TOP*", Callback_param);
