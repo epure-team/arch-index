@@ -75,8 +75,8 @@ let ids_at_normalized_path db sql name wanted = statement db sql (fun st ->
 let association db schema r =
   let found = match schema, r.er_file_path with
     | Flat, _ -> []
-    | Main, Some p -> ids_at_normalized_path db "SELECT f.id,m.path FROM functions f JOIN modules m ON m.id=f.module_id WHERE f.name=?1" r.er_function_name p
-    | Alternative, Some p -> ids_at_normalized_path db "SELECT id,file_path FROM functions WHERE name=?1" r.er_function_name p
+    | Main, Some p -> ids_at_normalized_path db "SELECT f.id,m.path FROM functions f JOIN modules m ON m.id=f.module_id WHERE f.name=?1 AND m.path IS NOT NULL" r.er_function_name p
+    | Alternative, Some p -> ids_at_normalized_path db "SELECT id,file_path FROM functions WHERE name=?1 AND file_path IS NOT NULL" r.er_function_name p
     | Main, None -> ids db "SELECT f.id FROM functions f JOIN modules m ON m.id=f.module_id WHERE f.name=?1" (fun st -> text db st 1 r.er_function_name)
     | Alternative, None -> ids db "SELECT id FROM functions WHERE name=?1" (fun st -> text db st 1 r.er_function_name) in
   match found with [id] -> Some id | xs ->

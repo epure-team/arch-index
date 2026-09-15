@@ -25,6 +25,13 @@ This is not a resolution gain. No attribution of the pre-existing21 to individua
 merges is claimed. The calibration source snapshot predates only the approved
 reference/comment and subsequent documentation/checker changes, not product logic.
 
+Review subsequently added only two SQL NULL-candidate filters in effects_db and
+their CHECK1 cases. After that fix, fresh same-current-corpus old/new-engine
+comparison passes:23329 canonical call rows, SHA256
+`afb93ae5fe948981382b42b9ba5776487324a31cbae4a4fc64a69ebfce3d591a`,
+MUST-null554. This is a fresh single-corpus equality check, not a new pristine
+2x2 run. The architect's full forced suite also passes344/344 on the fixed source.
+
 The full integrated suite subsequently exposed the two pre-existing self-index
 references still pinned to1004 functions/6389 calls/580 origins. Their updates are
 already within the implementation manifest's measured-source-growth permission:

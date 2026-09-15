@@ -71,7 +71,19 @@ the commit: a documented dirty-tree exception, not a claim of globally clean git
 Final-head required CI must be green before merge.
 No later stage starts before stage1 merge.
 
-## Not claimed
+## Same-round review correction
+
+Root reproduced a schema-valid NULL-path homonym aborting exact-path lookup.
+CHECK1 was extended for both main and alternative source columns, proven RED
+exit1, then fixed by two SQL `IS NOT NULL` candidate filters. It also verifies
+that removing the exact candidate clears the old association and retains payload,
+without name fallback. Build/CHECK1–3/hygiene pass; the architect independently
+ran the full forced suite on corrected source,344/344 exit0, and all other gates.
+Fresh same-corpus old/new-engine comparison remains23329 rows and MUST-null554.
+See `roster/ocaml-data-preservation/review-fixes.md`. Final reviewer/spec addenda
+are still required before the review verdict; no new upstream phase is claimed.
+
+## Remaining limitations
 
 No formal proof, complete-effects guarantee, effect-resolution gain, CI corpus
 availability, coverage percentage, installed formatter or full lint. No silent
