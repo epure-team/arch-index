@@ -1,0 +1,20 @@
+{
+  "task": "ocaml-data-preservation",
+  "date": "2026-09-15T20:07:16.852Z",
+  "status": "GO",
+  "round": 1,
+  "cycle": 1,
+  "qa_no_go_round": 0,
+  "max_qa_rounds_at_emission": 5,
+  "escalation": null,
+  "cross_runtime": {},
+  "rounds_audit": [
+    {
+      "round": 1,
+      "date": "2026-09-15T20:07:16.852Z",
+      "verdict": "GO",
+      "causes": [],
+      "qualifying": false
+    }
+  ]
+}
