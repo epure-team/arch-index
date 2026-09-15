@@ -2,8 +2,8 @@
 
 Authorized 2026-09-15: "ok go en roster autonome pour chaque étape".
 
-1. **ACTIVE — ocaml-data-preservation**: #26 effects identity/source paths and proven exact-copy CMT duplicates (#68 partial). User approved moving independently compiled variants to stage 4. Full Roster; baseline already captured.
-2. **PENDING — ocaml-cfa-foundation**: function-value domain, constraints, terminating worklist, literals/aliases end-to-end and provenance.
+1. **SHIPPED — ocaml-data-preservation**: PR110 merged2026-09-15, main7cd4ccb; #26 closed, #68 partial. Full Roster review/QA GO; required exact-head CI build35017888487 passed12m30s before guarded rebase merge. User approved independently compiled variants in stage4.
+2. **NEXT — ocaml-cfa-foundation**: function-value domain, constraints, terminating worklist, literals/aliases end-to-end and provenance.
 3. **PENDING — ocaml-cfa-propagation**: arguments, returns, captures, recursion and partial applications within specified subset.
 4. **PENDING — ocaml-functor-targets**: concrete actual member correspondence using functor-bindings, explicit supported application identities, and independently compiled same-source variant handling deferred from stage 1 by explicit user approval.
 5. **PENDING — ocaml-cfa-qualification**: query integration/limits, useful-query benchmark, Irmin/protocol precision and resource costs.

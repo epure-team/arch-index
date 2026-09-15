@@ -1,7 +1,7 @@
 {
   "task": "ocaml-data-preservation",
   "mode": "full",
-  "current_phase": "qa",
+  "current_phase": "ship",
   "events": [
     {
       "phase": "question",
@@ -58,6 +58,13 @@
       "at": "2026-09-15T20:08:25.968Z",
       "by": "roster-qa",
       "reason": "Final serial full344/344, CHECK1–3, bundle and hygiene exit0; exact pre/post source and three binary identities equal. QA convergence0; OpenCode skipped by shared breaker. User autonomy covers routine gate."
+    },
+    {
+      "phase": "ship",
+      "outcome": "COMPLETED",
+      "at": "2026-09-15T20:23:58.317Z",
+      "by": "roster-ship",
+      "reason": "PR110 rebase-merged at2026-09-15T20:22:43Z after required CI build35017888487 success on exact a770f5a. Main7cd4ccb tree-identical, local main resynced; issue26 closed,68 partial."
     }
   ]
 }
