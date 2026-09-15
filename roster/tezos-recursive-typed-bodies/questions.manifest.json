@@ -1,0 +1,19 @@
+{
+  "digests": {
+    "questions": "d78e97c0ab918edf097c36db279e698aac398a520fdf797eb7201db34759b3fe"
+  },
+  "questions": [
+    "Comment les liaisons locales récursives singleton utilisant un type localement abstrait sont-elles représentées dans le Typedtree, notamment lorsque leur RHS immédiat n’est pas Texp_function ?",
+    "Quelles identités de binders, occurrences d’appel et portées récursives sont actuellement conservées pour ces liaisons dans lib/arch_index/arch_index_cmt.ml ?",
+    "Comment l’implémentation actuelle détermine-t-elle l’arité syntaxique et le nombre d’arguments effectivement fournis à leurs appels ?",
+    "Comment les corps de fonctions locaux sont-ils associés aux fonctions synthétiques effectivement stockées, y compris en cas de positions source identiques ?",
+    "Quelle classification conservative est actuellement produite lorsque l’identité, le corps, l’arité ou le stockage ne peuvent pas être établis sans ambiguïté ?",
+    "Quelles métadonnées d’appel, de contrôle, d’exception, de canal et de graphe plat accompagnent actuellement ces occurrences dans le corpus Tezos figé identifié par roster/functor-instance-resolution/tezos-irmin-candidate/manifest-410.tsv ?",
+    "[ecosystem] Dans OCaml 5.3.0, quelles formes exactes de Typedtree et d’exp_extra représentent les annotations à types localement abstraits autour d’un corps fonctionnel ?",
+    "[ecosystem] Quelles garanties documentées OCaml 5.3.0 fournit-il sur Ident, Uid, les positions et l’information d’arité présentes dans les artefacts CMT pour ces constructions ?"
+  ],
+  "technical_ids": [
+    "lib/arch_index/arch_index_cmt.ml",
+    "roster/functor-instance-resolution/tezos-irmin-candidate/manifest-410.tsv"
+  ]
+}
