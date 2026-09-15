@@ -29,3 +29,11 @@ field/constructor/rebind/catch families plus a module_alias edge. Every existing
 assertion and output field remains. SQL read errors now fail instead of silently
 ending a result set. Native target, full paired rich/flat comparison and four
 actual Tezt storage/exclusion tests all pass. Independent final review remains.
+
+The immutable calibration commit a951936d93227415c8e016493e63701e850e65d4 is
+retained by the local-only refs/roster/tezos-local-recursion/calibration reference
+so Git garbage collection cannot delete CHECK5's evidence object. No worktree,
+build tree, branch movement or remote publication accompanies this reference.
+Cross-runtime probe actually ran106.379s: degraded/non-conforming-output,
+digest opencode:76f897c73342fdbf. Its response is discarded, never counted as GO;
+the authentic invocation journal is briefs/tezos-local-recursion-xruntime.jsonl.
