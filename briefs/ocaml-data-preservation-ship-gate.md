@@ -24,8 +24,13 @@ Human push/merge/quiz gates: covered by explicit user authorization for autonomo
 Roster per stage, PR creation, required-green CI and merge. No fabricated answers.
 Only a guarded rebase merge matching the exact verified PR head is authorized.
 
-PR not yet created at this record. Required remote check: `build`; strict branch
-protection enabled. Local QA does not substitute for this remote result.
+Initial record preceded PR creation. Delivery confirmation: PR110 merged
+2026-09-15T20:22:43Z after required `build` passed12m30s in run35017888487 on
+exact heada770f5ae9652d4635f6a74c20b8e9a9722c316b8. Guarded rebase merge produced
+main7cd4ccbd94d8908ddb2dae970451d879d6f0442c, verified tree-identical.
+Local main resynced via rebase: its sole prior documentation commit was
+patch-equivalent and skipped, after fast-forward correctly refused divergence.
+Issue26 confirmed CLOSED. No product worktree/build cleanup remains for this stage.
 
 ## Summary
 
@@ -39,7 +44,7 @@ protection enabled. Local QA does not substitute for this remote result.
 - [x] Final QA full344/344 and CHECK1–3, source/binary identity stable.
 - [x] Fixed410 Tezos replay:45052 canonical rows; Irmin4849/protocol12171 unchanged.
 - [x] Scope, bundle, review/QA convergence and diff hygiene.
-- [ ] Required GitHub CI `build` on exact final PR head, before guarded merge.
+- [x] Required GitHub CI `build` on exact final PR head, before guarded merge.
 
 Closes #26
 
