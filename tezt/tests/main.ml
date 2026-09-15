@@ -108,6 +108,7 @@ let () =
   Local_module_targets.register () ;
   Open_body_targets.register () ;
   Local_recursion_targets.register () ;
+  Recursive_open_body_targets.register () ;
   Local_value_targets.register () ;
   Report.register () ;
   Actionable_review_reports.register () ;

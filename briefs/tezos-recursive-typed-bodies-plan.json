@@ -1,0 +1,16 @@
+{
+  "task": "tezos-recursive-typed-bodies",
+  "mode": "full",
+  "schema_version": "1.0",
+  "steps": [
+    {"id":"step-1","skill":"roster-implement","inputs":["briefs/tezos-recursive-typed-bodies-implementer.md","specs/tezos-recursive-typed-bodies.md"],"outputs":["briefs/tezos-recursive-typed-bodies-impl.md"],"hook":false},
+    {"id":"step-2","skill":"roster-review","inputs":["briefs/tezos-recursive-typed-bodies-reviewer.md","briefs/tezos-recursive-typed-bodies-impl.md"],"outputs":["briefs/tezos-recursive-typed-bodies-review.json"],"hook":false},
+    {"id":"step-3","skill":"roster-qa","inputs":["briefs/tezos-recursive-typed-bodies-qa-scope.md","briefs/tezos-recursive-typed-bodies-review.json"],"outputs":["briefs/tezos-recursive-typed-bodies-qa.md"],"hook":false},
+    {"id":"step-4","skill":"roster-ship","inputs":["briefs/tezos-recursive-typed-bodies-review.json","briefs/tezos-recursive-typed-bodies-qa.md"],"outputs":["briefs/tezos-recursive-typed-bodies-ship-gate.md"],"hook":false}
+  ],
+  "quality_gates": {
+    "build": "rtk proxy opam exec -- dune build",
+    "test": "rtk proxy opam exec -- dune exec tezt/tests/main.exe -- --no-color",
+    "lint": ""
+  }
+}

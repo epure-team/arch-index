@@ -1989,12 +1989,20 @@ let collect_calls_from_expr_with_open_bodies ?(canon_exn = fun p -> Path.name p)
                       Hashtbl.replace binding_literals vb.vb_expr.exp_loc ()
                   | _ -> ()) ;
                   (match recursive_body_targets, rec_flag, vbs,
-                         vb.vb_pat.pat_desc, vb.vb_expr.exp_desc with
-                  | Some targets, Recursive, [_], Tpat_var (id, _, _), Texp_function _ ->
+                         vb.vb_pat.pat_desc, vb.vb_expr with
+                  | Some targets, Recursive, [_], Tpat_var (id, _, _),
+                    ({exp_desc = Texp_function _; _} as recursive_body)
+                  | Some targets, Recursive, [_], Tpat_var (id, _, _),
+                    {exp_desc = Texp_open
+                       ({open_expr = {mod_desc = Tmod_ident _; _}; _},
+                        ({exp_desc = Texp_function _; _} as recursive_body)); _} ->
+                      (* Keep the original inner object and ordinary traversal.
+                         Path-open admission is private to recursive self-heads;
+                         it does not widen either ordinary binding table. *)
                       let target =
                         { recursive_display_name = Ident.name id;
-                          recursive_expected_body = vb.vb_expr;
-                          recursive_body_arity = fn_arity vb.vb_expr;
+                          recursive_expected_body = recursive_body;
+                          recursive_body_arity = fn_arity recursive_body;
                           recursive_body_name = None;
                           recursive_observation_count = 0;
                           recursive_body_stored = false }
