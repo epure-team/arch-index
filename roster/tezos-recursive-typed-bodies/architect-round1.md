@@ -1,7 +1,7 @@
 # Architect round 1 — tezos-recursive-typed-bodies
 
-**Review target:** `d954303f7059f0a60b6bee3e463060508dd20eee`  
-**Findings:** none (`architect-round1.json` is the empty standard-finding array).  
+**Review target:** `d954303f7059f0a60b6bee3e463060508dd20eee`
+**Findings:** none (`architect-round1.json` is the empty standard-finding array).
 **Architecture risk:** low for the reviewed change; this is not a pipeline GO, CI, formal-verification, or human-approval claim.
 
 ## Architecture assessment
