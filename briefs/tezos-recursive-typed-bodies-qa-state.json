@@ -1,0 +1,12 @@
+{
+  "task": "tezos-recursive-typed-bodies",
+  "date": "2026-09-15T07:32:19Z",
+  "status": "GO",
+  "round": 1,
+  "cycle": 1,
+  "qa_no_go_round": 0,
+  "rounds_audit": [{"round":1,"date":"2026-09-15T07:32:19Z","verdict":"GO","causes":[],"qualifying":false}],
+  "cross_runtime": {},
+  "max_qa_rounds_at_emission": 5,
+  "escalation": null
+}
