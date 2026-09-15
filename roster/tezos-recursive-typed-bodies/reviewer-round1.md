@@ -1,8 +1,8 @@
 # Independent reviewer round 1 — tezos-recursive-typed-bodies
 
-**Date:** 2026-09-15  
-**Reviewer:** roster owner (`reviewer`)  
-**Target HEAD:** `d954303f7059f0a60b6bee3e463060508dd20eee`  
+**Date:** 2026-09-15
+**Reviewer:** roster owner (`reviewer`)
+**Target HEAD:** `d954303f7059f0a60b6bee3e463060508dd20eee`
 **Recommendation:** approve for the next pipeline phase; no concrete reviewer finding.
 
 This is an independent code-review recommendation only. It is not a final
