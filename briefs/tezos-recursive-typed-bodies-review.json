@@ -1,0 +1,73 @@
+{
+  "task": "tezos-recursive-typed-bodies",
+  "date": "2026-09-15T07:23:45.751Z",
+  "status": "GO",
+  "auto_fixes_applied": [
+    {
+      "path": "roster/tezos-recursive-typed-bodies/architect-round1.md",
+      "line": 55,
+      "category": "documentation",
+      "description": "Correct two consecutive post-state captures misreported as full-sweep pre/post; disclose initial EPERM"
+    },
+    {
+      "path": "roster/tezos-recursive-typed-bodies/spec-compliance-round1.md",
+      "line": 104,
+      "category": "documentation",
+      "description": "Discard manually copied pre/post constant equality and frozen/current producer confusion; require automatic main QA capture"
+    }
+  ],
+  "findings": [],
+  "cross_runtime_findings": [],
+  "summary": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "auto_fixed": 2
+  },
+  "no_go_reason": {
+    "type": null,
+    "cause": null,
+    "failed_acs": []
+  },
+  "no_go_round": 0,
+  "round": 1,
+  "cycle": 1,
+  "rounds_audit": [
+    {
+      "round": 1,
+      "reviewed_sha": null,
+      "fix_sha": null,
+      "fix_sha_reason": "dirty-tree",
+      "specialists_run": [
+        {
+          "name": "reviewer",
+          "selection_reason": "Owner reviewer always runs; full342 and CHECK1–6 personally executed"
+        },
+        {
+          "name": "architect",
+          "selection_reason": "More than three changed files; full342 and CHECK1–6 personally executed"
+        },
+        {
+          "name": "spec-compliance",
+          "selection_reason": "Per-feature spec present; full342 and CHECK1–6 personally executed"
+        }
+      ],
+      "strike": false,
+      "trace_schema_version": "1.0"
+    }
+  ],
+  "cross_runtime": {
+    "opencode": {
+      "status": "degraded",
+      "reason": "timeout",
+      "config_digest": "opencode:fd1dbeaa7d0c6431",
+      "round": 1
+    }
+  },
+  "streak_override": null,
+  "mode": "full",
+  "escalation_needed": false,
+  "escalation_reason": null,
+  "normalized_by": "2.0.0"
+}
