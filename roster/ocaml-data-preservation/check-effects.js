@@ -79,6 +79,25 @@ try {
     fail('unresolved parent segments must not alias a root-local source');
   assert.match(parentLoad.stderr,/unmatched function f at \.\.\/\.\.\/safe\.ml/);
 
+  // A missing candidate source is not malformed schema and cannot hide an
+  // exact match on another homonym. Nor may it authorize a name-only fallback.
+  for (const mainSchema of [false,true]) {
+    const nullable=path.join(tmp,`nullable-${mainSchema}.db`);
+    sql(nullable,mainSchema
+      ? "CREATE TABLE modules(id INTEGER PRIMARY KEY,path TEXT); CREATE TABLE functions(id INTEGER PRIMARY KEY,module_id INTEGER,name TEXT); INSERT INTO modules VALUES(1,NULL),(2,'a.ml'); INSERT INTO functions VALUES(1,1,'f'),(2,2,'f');"
+      : "CREATE TABLE functions(id INTEGER PRIMARY KEY,name TEXT,file_path TEXT); INSERT INTO functions VALUES(1,'f',NULL),(2,'f','a.ml');");
+    const effect={type:'effect',function_name:'f',file_path:'a.ml',value_kind:'HeapRef',soundness:'sound',producer:'check'};
+    const exact=spawnSync(loader,[nullable,'--migration',migration],{input:JSON.stringify(effect)+'\n',encoding:'utf8'});
+    assert.equal(exact.status,0,`NULL-path homonym must not hide exact match: ${exact.stderr}`);
+    assert.equal(sql(nullable,'SELECT function_id FROM function_effects'),'2');
+    sql(nullable,'DELETE FROM functions WHERE id=2');
+    const missing=spawnSync(loader,[nullable],{input:JSON.stringify(effect)+'\n',encoding:'utf8'});
+    assert.equal(missing.status,0,missing.stderr);
+    assert.match(missing.stderr,/unmatched function f at a\.ml/);
+    assert.equal(sql(nullable,'SELECT count(*) FROM function_effects'),'1');
+    assert.equal(sql(nullable,'SELECT function_id IS NULL FROM function_effects'),'1');
+  }
+
   const payloads=path.join(tmp,'payloads.db');
   sql(payloads,'CREATE TABLE functions(name TEXT)');
   const same={type:'effect',function_name:'p',file_path:'p.ml',value_kind:'HeapRef',target:null,soundness:'sound',producer:'check'};
