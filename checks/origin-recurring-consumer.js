@@ -52,7 +52,7 @@ async function authentic() {
   try {
     const production=await runConsumer({root,out:path.join(productionParent,'output')});
     assert.equal(production.exit,0); assert.equal(production.run.status,'held');
-    assert.deepEqual(production.run.coverage.current.totals,{modules:25,functions:1004,calls:6389,origins:580});
+    assert.deepEqual(production.run.coverage.current.totals,{modules:25,functions:1013,calls:6425,origins:583});
     assert.deepEqual(production.run.coverage.deltas,[]);
     const allowed=fs.readFileSync(path.join(root,'test/fixtures/origin-consumer/self.allow'),'utf8').split(/\r?\n/).filter(x=>x&&!x.startsWith('#'));
     assert.deepEqual(allowed,['collect_calls_from_expr_with_open_bodies.<fun:1617:21>.<fun:1628:36> | lib/arch_index/arch_index_cmt.ml:1631 | assert | Assert_failure | x1']);

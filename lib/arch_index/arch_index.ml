@@ -620,6 +620,7 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
   let all_pending_calls = ref [] in
   let all_pending_deps = ref [] in
   let all_pending_type_usages = ref [] in
+  let graph_reuse = create_graph_reuse () in
   List.iter
     (fun path ->
       let record_missing_outcome default =
@@ -663,6 +664,7 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
             ~value_channels
             ~stmt_carrier
             ~producer_run_id
+            ~graph_reuse
             ~on_implementation:(fun ~artifact ~source ~compiler_unit ~module_id structure ->
               match producer_run_id with
               | None -> ()

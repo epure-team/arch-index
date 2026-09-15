@@ -60,6 +60,7 @@ let load ?(allow_skip = false) ~db_path ic =
      silently dropping input then reporting Ok would let a partial/garbled load
      look successful. Pass [~allow_skip:true] for deliberately lossy imports. *)
   let n_parse_skipped = ref 0 in
+  let input_error = ref None in
   let line_num = ref 0 in
   (try
     while true do
@@ -72,9 +73,13 @@ let load ?(allow_skip = false) ~db_path ic =
         | None -> ()
         | Some r -> records := r :: !records
     done
-  with End_of_file -> ());
+  with
+  | End_of_file -> ()
+  | Sys_error msg -> input_error := Some msg);
   let recs = List.rev !records in
-  if (not allow_skip) && !n_parse_skipped > 0 then
+  if !input_error <> None then
+    Error ("input read failed: " ^ Option.get !input_error)
+  else if (not allow_skip) && !n_parse_skipped > 0 then
     Error (Printf.sprintf
       "%d malformed NDJSON record(s) skipped — refusing a lossy load; \
        pass --allow-skip to import the parseable records anyway"

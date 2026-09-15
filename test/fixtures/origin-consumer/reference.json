@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "revision": "a951936d93227415c8e016493e63701e850e65d4+pristine-source-only",
+  "revision": "c10d1a4f2bee4f72907fe6ce88cdc0338153398d+data-preservation-pristine-source-only",
   "modules": [
     "lib/arch_index/arch_errors_config.ml",
     "lib/arch_index/arch_index.ml",
@@ -30,9 +30,9 @@
   ],
   "totals": {
     "modules": 25,
-    "functions": 1004,
-    "calls": 6389,
-    "origins": 580
+    "functions": 1013,
+    "calls": 6425,
+    "origins": 583
   },
   "origin_groups": [
     {
@@ -81,7 +81,7 @@
       "channel": "option",
       "form": "raise",
       "escapes": 1,
-      "count": 328
+      "count": 331
     },
     {
       "channel": "result",

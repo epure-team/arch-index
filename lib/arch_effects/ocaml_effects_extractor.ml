@@ -89,6 +89,34 @@ let path_to_string p =
   in
   aux p
 
+let normalize_path path =
+  let absolute = not (Filename.is_relative path) in
+  let rec fold acc = function
+    | [] -> List.rev acc
+    | ("" | ".") :: rest -> fold acc rest
+    | ".." :: rest ->
+      (match acc with
+       | parent :: tail when parent <> ".." -> fold tail rest
+       | _ -> if absolute then fold acc rest else fold (".." :: acc) rest)
+    | segment :: rest -> fold (segment :: acc) rest
+  in
+  let body = String.concat "/" (fold [] (String.split_on_char '/' path)) in
+  if absolute then "/" ^ body else if body = "" then "." else body
+
+let source_path ~source_root = function
+  | None -> None
+  | Some source when Filename.is_relative source -> Some (normalize_path source)
+  | Some source ->
+    let source_root =
+      if Filename.is_relative source_root then Filename.concat (Sys.getcwd ()) source_root
+      else source_root
+    in
+    let root = normalize_path source_root and source = normalize_path source in
+    let prefix = if root = "/" then "/" else root ^ "/" in
+    if String.starts_with ~prefix source then
+      Some (String.sub source (String.length prefix) (String.length source - String.length prefix))
+    else Some source
+
 (* ── file scanning ───────────────────────────────────────────────────────── *)
 
 let find_cmt_files build_dir =
@@ -127,37 +155,17 @@ let extract_from_cmt ~source_root cmt_path =
   | _, Some info -> (
     match info.cmt_annots with
     | Implementation structure ->
-      (* Resolve source path relative to source_root *)
-      let src_path =
-        match info.cmt_sourcefile with
-        | Some f ->
-          let abs = if Filename.is_relative f then
-              Filename.concat (Filename.dirname cmt_path) f
-            else f
-          in
-          let prefix = source_root ^ "/" in
-          if String.length abs > String.length prefix
-             && String.sub abs 0 (String.length prefix) = prefix
-          then String.sub abs (String.length prefix)
-                 (String.length abs - String.length prefix)
-          else abs
-        | None -> cmt_path
-      in
-      let fp = Some src_path in
+      let fp = source_path ~source_root info.cmt_sourcefile in
 
       (* Walk value bindings, tracking current function name *)
       let open Tast_iterator in
 
       (* Process a top-level value binding *)
-      let process_vb (vb : Typedtree.value_binding) =
+      let process_vb fn_name (vb : Typedtree.value_binding) =
         (* UNQUALIFIED, matching arch_index_cmt's functions.name / callee_name
            convention — effects-of/pure-fns join these names exactly, and a
            qualified "Efxtest.f" never matches the callgraph's "f"
            (briefs/selftest-effects-failure-investigation.md). *)
-        let fn_name = match vb.vb_pat.pat_desc with
-          | Tpat_var (id, _, _) -> Ident.name id
-          | _ -> "<anon>"
-        in
         (* Walk the expression for mutations *)
         let iter = {
           default_iterator with
@@ -199,16 +207,33 @@ let extract_from_cmt ~source_root cmt_path =
         | _ -> false
       in
 
+      let totals = Hashtbl.create 16 and seen = Hashtbl.create 16 in
+      List.iter (fun (item : Typedtree.structure_item) -> match item.str_desc with
+        | Tstr_value (_, vbs) -> List.iter (fun (vb : Typedtree.value_binding) ->
+            match vb.vb_pat.pat_desc with
+            | Tpat_var (id, _, _) ->
+              let name = Ident.name id in
+              Hashtbl.replace totals name (1 + Option.value ~default:0 (Hashtbl.find_opt totals name))
+            | _ -> ()) vbs
+        | _ -> ()) structure.str_items;
       List.iter (fun (item : Typedtree.structure_item) ->
         match item.str_desc with
         | Tstr_value (_, vbs) ->
           List.iter (fun (vb : Typedtree.value_binding) ->
+            let fn_name = match vb.vb_pat.pat_desc with
+              | Tpat_var (id, _, _) ->
+                let base = Ident.name id in
+                let ordinal = 1 + Option.value ~default:0 (Hashtbl.find_opt seen base) in
+                Hashtbl.replace seen base ordinal;
+                if ordinal = Option.value ~default:1 (Hashtbl.find_opt totals base)
+                then base else Printf.sprintf "%s#%d" base ordinal
+              | _ -> "<anon>" in
             (* Detect module-level mutable bindings *)
             (match vb.vb_pat.pat_desc with
              | Tpat_var (id, _, _) when is_ref_init vb.vb_expr ->
-               add (Ident.name id) fp GlobalVar (Some (Ident.name id))
+               add fn_name fp GlobalVar (Some (Ident.name id))
              | _ -> ());
-            process_vb vb
+            process_vb fn_name vb
           ) vbs
         | _ -> ()
       ) structure.str_items

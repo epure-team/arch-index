@@ -64,19 +64,20 @@ function runLifecycleChecks(h) {
     fs.mkdirSync(first); fs.mkdirSync(second);
     fs.copyFileSync(seed, path.join(first, 'catalogue.cmt'));
     fs.copyFileSync(seed, path.join(second, 'catalogue.cmt'));
-    const collisionDb = path.join(dir, 'collision.db'); indexExpectedIncomplete(copies, collisionDb);
+    const collisionDb = path.join(dir, 'collision.db'); indexDir(copies, collisionDb);
     const collision = rows(collisionDb, 'SELECT artifact,outcome FROM functor_catalogue_inputs ORDER BY artifact');
     assert.equal(collision.length, 2);
-    assert.deepEqual(collision.map(x => x.outcome).sort(), ['collected', 'dropped_module']);
-    const dropped = collision.find(x => x.outcome === 'dropped_module');
-    assert.equal(rows(collisionDb, `SELECT count(*) n FROM functor_applications WHERE artifact=${h.quote(dropped.artifact)}`)[0].n, 0);
-    assert.equal(rows(collisionDb, "SELECT count(*) n FROM comment_db_meta WHERE key='functor_catalogue_contract'")[0].n, 0);
-    assertRefusal(queryRun(collisionDb), 'NOT_COLLECTED', 3);
+    assert.deepEqual(collision.map(x => x.outcome), ['collected', 'collected']);
+    for (const input of collision)
+      assert.equal(rows(collisionDb, `SELECT count(*) n FROM functor_applications WHERE artifact=${h.quote(input.artifact)}`)[0].n, 19);
+    assert.equal(rows(collisionDb, "SELECT count(*) n FROM comment_db_meta WHERE key='functor_catalogue_contract'")[0].n, 1);
+    assert.equal(queryRun(collisionDb).status, 0);
+    const removedArtifact = path.join(second, 'catalogue.cmt');
     fs.unlinkSync(path.join(second, 'catalogue.cmt'));
     indexDir(copies, collisionDb);
     const reindexed = rows(collisionDb, 'SELECT artifact,outcome FROM functor_catalogue_inputs ORDER BY artifact');
     assert.deepEqual(reindexed.map(x => x.outcome), ['collected']);
-    assert.equal(rows(collisionDb, `SELECT count(*) n FROM functor_catalogue_inputs WHERE artifact=${h.quote(dropped.artifact)}`)[0].n, 0);
+    assert.equal(rows(collisionDb, `SELECT count(*) n FROM functor_catalogue_inputs WHERE artifact=${h.quote(removedArtifact)}`)[0].n, 0);
     assert.equal(rows(collisionDb, "SELECT value FROM comment_db_meta WHERE key='functor_catalogue_contract'")[0].value, 'v1');
     fs.unlinkSync(path.join(first, 'catalogue.cmt'));
     fs.writeFileSync(path.join(first, 'catalogue.cmt'), 'now unreadable');
@@ -89,11 +90,28 @@ function runLifecycleChecks(h) {
     fs.mkdirSync(target, {recursive:true}); fs.mkdirSync(link, {recursive:true});
     fs.copyFileSync(seed, path.join(target, 'catalogue.cmt'));
     fs.symlinkSync(path.join(target, 'catalogue.cmt'), path.join(link, 'catalogue.cmt'));
-    const symlinkDb = path.join(dir, 'symlink.db'); indexExpectedIncomplete(symlinks, symlinkDb);
+    const symlinkDb = path.join(dir, 'symlink.db'); indexDir(symlinks, symlinkDb);
     const symlinkInputs = rows(symlinkDb, 'SELECT artifact,outcome FROM functor_catalogue_inputs ORDER BY artifact');
     assert.equal(symlinkInputs.length, 2);
-    assert.deepEqual(symlinkInputs.map(x => x.outcome).sort(), ['collected', 'dropped_module']);
+    assert.deepEqual(symlinkInputs.map(x => x.outcome), ['collected', 'collected']);
     assert(symlinkInputs.some(x => x.artifact.includes('/link/catalogue.cmt')), 'symlink string must remain selected');
+
+    // A readable same-source artifact with different bytes is NOT a copy.
+    // Retain the rejected-insertion control independently of the new reuse path.
+    const conflicts = path.join(dir, 'conflicts'); fs.mkdirSync(conflicts);
+    fs.copyFileSync(seed, path.join(conflicts, 'catalogue.cmt'));
+    fs.mkdirSync(path.join(conflicts, 'variant'));
+    const altered = path.join(conflicts, 'variant/catalogue.cmt');
+    const changed = probeJson(typedtree, ['ghost-valid', '--input', seed, '--output', altered]);
+    assert.equal(changed.ok, true); assert(changed.changed > 0);
+    assert(!fs.readFileSync(seed).equals(fs.readFileSync(altered)));
+    const conflictDb = path.join(dir, 'conflict.db'); indexExpectedIncomplete(conflicts, conflictDb);
+    const conflictInputs = rows(conflictDb, 'SELECT artifact,outcome FROM functor_catalogue_inputs');
+    assert.deepEqual(conflictInputs.map(x=>x.outcome).sort(), ['collected','dropped_module']);
+    const dropped = conflictInputs.find(x=>x.outcome==='dropped_module');
+    assert.equal(rows(conflictDb, `SELECT count(*) n FROM functor_applications WHERE artifact=${h.quote(dropped.artifact)}`)[0].n,0);
+    assert.equal(rows(conflictDb, "SELECT count(*) n FROM comment_db_meta WHERE key='functor_catalogue_contract'")[0].n,0);
+    assertRefusal(queryRun(conflictDb), 'NOT_COLLECTED', 3);
 
     const empty = path.join(dir, 'empty'); fs.mkdirSync(empty);
     const emptyDb = path.join(empty, 'result.db'); indexDir(empty, emptyDb);

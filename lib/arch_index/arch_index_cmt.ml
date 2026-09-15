@@ -3099,6 +3099,62 @@ let collect_calls_from_expr ?canon_exn ?value_channels ?local_alias_stamps
 (* Process a single .cmt file                                                 *)
 (* -------------------------------------------------------------------------- *)
 
+(* A cache belongs to one invocation of [run], never to the process. Keep only
+   the representative path and SHA-256, not all typedtrees/artifact bytes. On a
+   hit we reread both artifacts and compare their full bytes; the digest binds
+   the representative to the bytes seen when its graph was extracted. *)
+type graph_representative = {artifact : string; fingerprint : string; module_id : int}
+type graph_reuse = (string * string * string, graph_representative) Hashtbl.t
+
+let create_graph_reuse () = Hashtbl.create 64
+
+let artifact_bytes path =
+  try
+    let channel = open_in_bin path in
+    Fun.protect ~finally:(fun () -> close_in_noerr channel) (fun () ->
+      Some (really_input_string channel (in_channel_length channel)))
+  with Sys_error _ | End_of_file -> None
+
+let artifact_fingerprint bytes = Digestif.SHA256.(to_hex (digest_string bytes))
+
+let reusable_graph cache key path bytes =
+  match bytes, Hashtbl.find_opt cache key with
+  | Some bytes, Some representative ->
+      (match artifact_bytes representative.artifact, artifact_bytes path with
+      | Some previous, Some current
+        when previous = bytes && current = bytes
+             && artifact_fingerprint previous = representative.fingerprint ->
+          Some representative.module_id
+      | _ -> None)
+  | _ -> None
+
+let%test_unit "graph reuse rejects changed bytes and different run/root/unit" =
+  let original = Filename.temp_file "arch-cmt-representative-" ".cmt" in
+  let copy = Filename.temp_file "arch-cmt-copy-" ".cmt" in
+  let write path bytes =
+    let channel = open_out_bin path in
+    Fun.protect ~finally:(fun () -> close_out_noerr channel)
+      (fun () -> output_string channel bytes)
+  in
+  Fun.protect ~finally:(fun () -> Sys.remove original; Sys.remove copy) (fun () ->
+    let key = ("root", "source.ml", "Source") in
+    let cache = create_graph_reuse () in
+    write original "indexed bytes"; write copy "indexed bytes";
+    Hashtbl.add cache key
+      {artifact=original; fingerprint=artifact_fingerprint "indexed bytes"; module_id=7};
+    assert (reusable_graph cache key copy (Some "indexed bytes") = Some 7);
+    assert (reusable_graph (create_graph_reuse ()) key copy (Some "indexed bytes") = None);
+    List.iter (fun different ->
+      assert (reusable_graph cache different copy (Some "indexed bytes") = None))
+      [("other-root","source.ml","Source");("root","other.ml","Source");("root","source.ml","Other")];
+    write original "changed bytes";
+    assert (reusable_graph cache key copy (Some "indexed bytes") = None);
+    write copy "changed bytes";
+    assert (reusable_graph cache key copy (Some "changed bytes") = None);
+    write original "indexed bytes";
+    assert (reusable_graph cache key copy (Some "indexed bytes") = None);
+    assert (reusable_graph cache key copy None = None))
+
 (** Process a .cmt file: index modules, functions, types.
     Returns (pending_calls, pending_deps, pending_type_usages) for later resolution.
     
@@ -3109,12 +3165,14 @@ let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
     ~exposed_tbl ~doc_tbl ~module_quint_tbl ~stmt_mod ~stmt_fn ~stmt_ty
     ~stmt_fld ~stmt_ctor ~stmt_scope ~stmt_catch ~stmt_origin ~stmt_rebind
     ?(value_channels = []) ?stmt_carrier ?(producer_run_id = None) ?on_implementation
-    ?on_catalogue_outcome path =
+    ?on_catalogue_outcome ?graph_reuse path =
   let notify outcome =
     match on_catalogue_outcome with
     | None -> ()
     | Some callback -> (try callback ~artifact:path ~outcome with _ -> ())
   in
+  let initial_bytes = Option.bind graph_reuse (fun _ -> artifact_bytes path) in
+  let failures_before = statement_failures () in
   let read =
     try Cmt_format.read path
     with exn -> notify "unreadable" ; raise exn
@@ -3145,6 +3203,22 @@ let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
                   else src_path
                 else src_path
               in
+              let collect module_id =
+                (match on_implementation with
+                | None -> ()
+                | Some callback ->
+                    (try callback ~artifact:path ~source:rel_path ~compiler_unit:modname ~module_id structure
+                     with exn ->
+                       notify "collection_failed" ;
+                       Arch_io.eprintf "Warning: functor catalogue collection failed for %s: %s\n" path (Printexc.to_string exn))) ;
+                record_unit ~unit_name:modname ~rel_path
+              in
+              let key = (project_root, rel_path, modname) in
+              match Option.bind graph_reuse (fun cache -> reusable_graph cache key path initial_bytes) with
+              | Some module_id ->
+                  collect module_id ;
+                  ([], [], [])
+              | None ->
               (* Count code lines (excludes comments and blank lines) *)
               let lines = count_code_lines src_path in
               (* Check if .mli exists *)
@@ -3202,14 +3276,7 @@ let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
                   notify "dropped_module" ;
                   ([], [], [])
               | Some module_id ->
-                  (match on_implementation with
-                  | None -> ()
-                  | Some callback ->
-                      (try callback ~artifact:path ~source:rel_path ~compiler_unit:modname ~module_id structure
-                       with exn ->
-                         notify "collection_failed" ;
-                         Arch_io.eprintf "Warning: functor catalogue collection failed for %s: %s\n" path (Printexc.to_string exn))) ;
-                  record_unit ~unit_name:modname ~rel_path ;
+                  collect module_id ;
                   (* Collect calls, module deps, and type usages from value bindings *)
                   let pending_calls = ref [] in
                   let pending_deps = ref [] in
@@ -4005,5 +4072,12 @@ let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
                                  edge_form = None})
                         | _ -> c)
                       !pending_calls ;
+                  (match graph_reuse, initial_bytes with
+                  | Some cache, Some bytes
+                    when statement_failures () = failures_before
+                         && artifact_bytes path = Some bytes ->
+                      Hashtbl.replace cache key
+                        {artifact = path; fingerprint = artifact_fingerprint bytes; module_id}
+                  | _ -> ()) ;
                   (!pending_calls, !pending_deps, !pending_type_usages))
       | _ -> notify "unsupported_annotation" ; ([], [], []))

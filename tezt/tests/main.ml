@@ -139,6 +139,7 @@ let () =
   Qualified_library_scoping.register_linked_homonym_residual () ;
   Qualified_library_scoping.register_unwrapped_unlinked_residual () ;
   Must_null_ceiling.register () ;
+  Data_preservation.register () ;
   Query_limits.register () ;
   Exn_raise_sets.register () ;
   Error_channels.register () ;
