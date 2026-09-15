@@ -1,0 +1,29 @@
+{
+  "task": "tezos-local-recursion",
+  "date": "2026-09-15T01:30:05Z",
+  "status": "GO",
+  "round": 2,
+  "cycle": 1,
+  "qa_no_go_round": 0,
+  "rounds_audit": [
+    {
+      "round": 1,
+      "date": "2026-09-15T01:20:07Z",
+      "verdict": "NO-GO",
+      "causes": [
+        "gate-failure"
+      ],
+      "qualifying": true
+    },
+    {
+      "round": 2,
+      "date": "2026-09-15T01:30:05Z",
+      "verdict": "GO",
+      "causes": [],
+      "qualifying": false
+    }
+  ],
+  "cross_runtime": {},
+  "max_qa_rounds_at_emission": 5,
+  "escalation": null
+}
