@@ -42,3 +42,14 @@ review/QA correction was validated before this gate.
 
 Push the feature branch, open the Stage-3 PR, require exact-head green CI, then
 rebase-merge and resynchronize local `main` before Stage 4.
+
+## Outcome
+
+- PR: #112 — https://github.com/epure-team/arch-index/pull/112
+- Tested head: `9c3e9bf680347c490db1f8316d2238b3890f9072`
+- Required CI: run `35126214642`, `build` SUCCESS
+- Merge: guarded rebase merge at 2026-09-16T17:21:21Z
+- Main: `0eb588720e6fc564e291280e376ed7678484dfcf`
+- Remote feature branch: deleted
+- Local main: synchronized to `origin/main`
+- Main-worktree Dune artifacts: cleaned after merge
