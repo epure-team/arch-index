@@ -84,6 +84,13 @@
       "at": "2026-09-16T18:33:00+02:00",
       "by": "roster-implement",
       "reason": "Round-3 revalidation timeout was reproduced and classified as setup rather than a CFA assertion: the flat fixture now rejects partial LSP diagnostics, uses a 60-second default budget and preserves setup exit 2 through the review ratchet. The one-second control exits 2; normal ratchet, full suite 345/345, CHECK1 517 and CHECK2 pass."
+    },
+    {
+      "phase": "review",
+      "outcome": "GO",
+      "at": "2026-09-16T18:55:00+02:00",
+      "by": "roster-review",
+      "reason": "Round 3 final owner, architecture and spec-compliance fanout independently passed build, full345, CHECK1/2/3, review ratchet and timeout setup classification on d04edfb. The convergence gate passed with no strike, warnings or violations."
     }
   ]
 }
