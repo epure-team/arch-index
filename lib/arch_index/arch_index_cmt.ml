@@ -683,9 +683,9 @@ let expand_cfa_value (call : pending_call)
        head = Head_enumerated name;
        partial = call.partial || (arity > 0 && supplied < arity);
        edge_form = None}) targets in
-  let reason = function
-    | "dropped_node" -> Dropped_node
-    | _ -> Callback_param
+  let reason : Arch_index_cfa.reason -> top_reason = function
+    | Arch_index_cfa.Callback_param -> Callback_param
+    | Arch_index_cfa.Dropped_node -> Dropped_node
   in
   let unknown_required =
     omitted_slots > 0 || List.exists (fun (_, arity) -> arity <= 0) targets
@@ -755,7 +755,9 @@ let%test "CFA expansion retains omitted-slot uncertainty and one residual" =
      edge_form = Some "__cfa:1"}
   in
   let omitted = expand_cfa_value call (["one", 1], [], 1, 1, false) in
-  let over = expand_cfa_value call (["one", 1], ["opaque"], 2, 0, false) in
+  let over =
+    expand_cfa_value call (["one", 1], [Arch_index_cfa.Callback_param], 2, 0, false)
+  in
   List.length omitted = 2 && List.length over = 3
 
 (** A synthetic function node for a nested [fun …]/[function] literal:

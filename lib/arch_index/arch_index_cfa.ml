@@ -1,6 +1,13 @@
 module String_set = Set.Make (String)
 
-type value = {targets : String_set.t; reasons : String_set.t}
+type reason = Callback_param | Dropped_node
+
+module Reason_set = Set.Make (struct
+  type t = reason
+  let compare = Stdlib.compare
+end)
+
+type value = {targets : String_set.t; reasons : Reason_set.t}
 type cell = int
 
 type t = {
@@ -11,7 +18,7 @@ type t = {
   queued : (cell, unit) Hashtbl.t;
 }
 
-let bottom = {targets = String_set.empty; reasons = String_set.empty}
+let bottom = {targets = String_set.empty; reasons = Reason_set.empty}
 
 let create () =
   {
@@ -20,6 +27,15 @@ let create () =
     outgoing = Hashtbl.create 32;
     queue = Queue.create ();
     queued = Hashtbl.create 32;
+  }
+
+let clone t =
+  {
+    next = t.next;
+    values = Hashtbl.copy t.values;
+    outgoing = Hashtbl.copy t.outgoing;
+    queue = Queue.copy t.queue;
+    queued = Hashtbl.copy t.queued;
   }
 
 let fresh t =
@@ -38,7 +54,7 @@ let update t cell value =
   if
     not
       (String_set.equal previous.targets value.targets
-      && String_set.equal previous.reasons value.reasons)
+      && Reason_set.equal previous.reasons value.reasons)
   then (
     Hashtbl.replace t.values cell value ;
     enqueue t cell)
@@ -49,7 +65,7 @@ let seed_target t cell target =
 
 let seed_reason t cell reason =
   let value = Hashtbl.find t.values cell in
-  update t cell {value with reasons = String_set.add reason value.reasons}
+  update t cell {value with reasons = Reason_set.add reason value.reasons}
 
 let copy t ~src ~dst =
   let successors = Option.value (Hashtbl.find_opt t.outgoing src) ~default:[] in
@@ -59,7 +75,7 @@ let copy t ~src ~dst =
 let join left right =
   {
     targets = String_set.union left.targets right.targets;
-    reasons = String_set.union left.reasons right.reasons;
+    reasons = Reason_set.union left.reasons right.reasons;
   }
 
 let solve t =
