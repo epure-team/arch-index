@@ -692,7 +692,12 @@ let expand_cfa_value (call : pending_call)
   in
   let unknowns =
     List.map (fun r ->
-        {call with head = Head_unknown ("*TOP*", reason r); edge_form = None}) reasons
+        let name =
+          match call.head with
+          | Head_unknown (name, _) -> name
+          | _ -> "*TOP*"
+        in
+        {call with head = Head_unknown (name, reason r); edge_form = None}) reasons
     @
     if unknown_required then
       [{call with head = Head_unknown ("*TOP*", Callback_param); edge_form = None}]
@@ -724,6 +729,12 @@ let expand_cfa_calls ?(preserve_cfa_provenance = false) session calls =
                (Arch_index_cfa_cmt.value_of_call session)
            with
           | None ->
+              [{call with edge_form = None}]
+          | Some ([], [Arch_index_cfa.Callback_param], _, 0, false) ->
+              (* A callback-only result is exactly the historical unresolved
+                 occurrence.  Preserve its source spelling and flat
+                 attribution instead of laundering it through private CFA
+                 provenance. *)
               [{call with edge_form = None}]
           | Some value ->
               let expanded = expand_cfa_value call value in
@@ -1448,7 +1459,7 @@ let collect_calls_from_expr_with_open_bodies ?(canon_exn = fun p -> Path.name p)
      forces [cond] while guaranteeing the calls are still recorded. *)
   let carrier_of ty = Arch_index_errch.carrier_channel_of_type ~channels:value_channels ty in
   let next_ctx_id = ref 0 in
-  let new_ctx caller channel =
+  let new_ctx ?cfa_parent caller channel body =
     let id = !next_ctx_id in
     incr next_ctx_id ;
     {
@@ -1458,13 +1469,17 @@ let collect_calls_from_expr_with_open_bodies ?(canon_exn = fun p -> Path.name p)
       lhandlers = [];
       ldeferred = [];
       lcaller = caller;
-      lcfa_owner = Option.map Arch_index_cfa_cmt.fresh_owner cfa_session;
+      lcfa_owner =
+        Option.map
+          (fun session ->
+            Arch_index_cfa_cmt.fresh_owner ?parent:cfa_parent session ~body)
+          cfa_session;
       lexn = Arch_index_exn.create ();
       lchannel = channel;
       lerrch = Arch_index_errch.create ();
     }
   in
-  let root_ctx = new_ctx caller_name (carrier_of expr.exp_type) in
+  let root_ctx = new_ctx caller_name (carrier_of expr.exp_type) expr in
   let all_ctxs = ref [root_ctx] in
   let cur = ref root_ctx in
   (* raw record: (ord, ctx id, block, caller, head, partial, site, exn_scope,
@@ -2065,7 +2080,10 @@ let collect_calls_from_expr_with_open_bodies ?(canon_exn = fun p -> Path.name p)
               if not (Hashtbl.mem binding_literals expr.exp_loc) then
                 add_call ~callee_ty:expr.exp_type (Head_enumerated name) expr.exp_loc ;
               let saved = !cur in
-              let c = new_ctx name (carrier_of expr.exp_type) in
+              let c =
+                new_ctx ?cfa_parent:(!cur).lcfa_owner name
+                  (carrier_of expr.exp_type) expr
+              in
               all_ctxs := c :: !all_ctxs ;
               cur := c ;
               !walk_fn_body_ref expr ;
@@ -2080,6 +2098,17 @@ let collect_calls_from_expr_with_open_bodies ?(canon_exn = fun p -> Path.name p)
                  become enumerated occurrence edges. Stamps are unique per
                  binder (fresh Ident per [let]), so shadowing/rebinding create
                  new stamps and no eviction is needed. *)
+              let cfa_group_supported =
+                match rec_flag with
+                | Asttypes.Nonrecursive -> true
+                | Asttypes.Recursive ->
+                    List.for_all
+                      (fun (binding : Typedtree.value_binding) ->
+                        match binding.vb_pat.pat_desc, binding.vb_expr.exp_desc with
+                        | Tpat_var (id, _, _), Texp_function _ -> Ident.name id <> "_"
+                        | _ -> false)
+                      vbs
+              in
               List.iter
                 (fun (vb : Typedtree.value_binding) ->
                   (match (vb.vb_pat.pat_desc, vb.vb_expr.exp_desc) with
@@ -2147,9 +2176,11 @@ let collect_calls_from_expr_with_open_bodies ?(canon_exn = fun p -> Path.name p)
                         ~binder:id ~source
                   | _ -> ()) ;
                   (match cfa_session, (!cur).lcfa_owner, rec_flag, vb.vb_pat.pat_desc with
-                  | Some session, Some owner, Asttypes.Nonrecursive, Tpat_var (id, _, _) ->
+                  | Some session, Some owner, _, Tpat_var (id, _, _)
+                    when cfa_group_supported ->
                       (match vb.vb_expr.exp_desc with
-                      | Texp_function _ | Texp_ifthenelse _ | Texp_match _ | Texp_sequence _ ->
+                      | Texp_function _ | Texp_ifthenelse _ | Texp_match _ | Texp_sequence _
+                      | Texp_apply _ ->
                           Arch_index_cfa_cmt.register_local_expr session ~owner ~binder:id vb.vb_expr
                       | _ -> ())
                   | _ -> ()) ;
@@ -2424,7 +2455,6 @@ let collect_calls_from_expr_with_open_bodies ?(canon_exn = fun p -> Path.name p)
                  defeats type inspection on a .cmt-restored env; otherwise use
                  the callee's type arrow arity. *)
               let nargs = List.length args in
-              let supplied_nargs = List.length (List.filter_map snd args) in
               (* Omitted labeled slots are not supplied expressions. Only the
                  new owned-body path uses this count; leave legacy head and
                  noreturn/CFG accounting unchanged in this focused slice. *)
@@ -2501,6 +2531,14 @@ let collect_calls_from_expr_with_open_bodies ?(canon_exn = fun p -> Path.name p)
                 (head_arity > 0 && body_nargs > head_arity)
                 || legacy_recursive_overapplication
               in
+              let cfa_application_token =
+                match cfa_session, (!cur).lcfa_owner with
+                | Some session, Some owner ->
+                    Some
+                      (Arch_index_cfa_cmt.register_application session ~owner
+                         ~application:expr ~head:fn_expr ~args ~legacy_residual)
+                | _ -> None
+              in
               (* The call fires AFTER its arguments evaluate, so the head (and
                  the residual/escape records) belong to the block reached AFTER
                  descending into fn + args: if an argument diverges
@@ -2538,29 +2576,17 @@ let collect_calls_from_expr_with_open_bodies ?(canon_exn = fun p -> Path.name p)
                         add_call ~partial ~is_head_of:expr.exp_loc ?callee_ty:!callee_ty_for_channel
                           (Head_local node_name) expr.exp_loc
                     | None ->
-                        match cfa_session, (!cur).lcfa_owner with
-                        | Some session, Some owner -> (
-                            match
-                              Arch_index_cfa_cmt.register_call session ~owner ~binder:id
-                                ~head:fn_expr
-                                ~supplied:supplied_nargs
-                                ~omitted_slots:(nargs - supplied_nargs)
-                                ~legacy_residual
-                            with
-                            | Some token ->
-                                (* This token is a session-private physical
-                                   occurrence id.  It is consumed by the
-                                   whole-CMT finalizer and never reaches the
-                                   calls table. *)
-                                add_call ~partial ~is_head_of:expr.exp_loc
-                                  ?callee_ty:!callee_ty_for_channel
-                                  ~edge_form:(cfa_marker_prefix ^ string_of_int token)
-                                  (Head_unknown (Ident.name id, Callback_param)) expr.exp_loc
-                            | None ->
-                                add_call ~partial ~is_head_of:expr.exp_loc
-                                  ?callee_ty:!callee_ty_for_channel
-                                  (Head_unknown (Ident.name id, Callback_param)) expr.exp_loc)
-                        | _ ->
+                        match cfa_application_token with
+                        | Some token ->
+                            (* This token is a session-private physical
+                               occurrence id.  It is consumed by the
+                               whole-CMT finalizer and never reaches the calls
+                               table. *)
+                            add_call ~partial ~is_head_of:expr.exp_loc
+                              ?callee_ty:!callee_ty_for_channel
+                              ~edge_form:(cfa_marker_prefix ^ string_of_int token)
+                              (Head_unknown (Ident.name id, Callback_param)) expr.exp_loc
+                        | None ->
                           add_call
                             ~partial
                             ~is_head_of:expr.exp_loc
@@ -2597,10 +2623,8 @@ let collect_calls_from_expr_with_open_bodies ?(canon_exn = fun p -> Path.name p)
                         (Head_qualified (callee_module, callee_name))
                         expr.exp_loc)
                 | (Texp_ifthenelse _ | Texp_match _ | Texp_sequence _) -> (
-                    match cfa_session, (!cur).lcfa_owner with
-                    | Some session, Some owner ->
-                        let token = Arch_index_cfa_cmt.register_expr_call session ~owner fn_expr
-                          ~head:fn_expr ~supplied:supplied_nargs ~omitted_slots:(nargs-supplied_nargs) ~legacy_residual in
+                    match cfa_application_token with
+                    | Some token ->
                         add_call ~partial ~is_head_of:expr.exp_loc ?callee_ty:!callee_ty_for_channel
                           ~edge_form:(cfa_marker_prefix ^ string_of_int token) (Head_unknown ("*TOP*", Callback_param)) expr.exp_loc
                     | _ -> add_call ~partial ~is_head_of:expr.exp_loc ?callee_ty:!callee_ty_for_channel (Head_unknown ("*TOP*", Callback_param)) expr.exp_loc)

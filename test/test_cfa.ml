@@ -129,6 +129,40 @@ let test_clone_isolation () =
   check_snapshot "original remains unchanged"
     [|[], []; [], []|] (snapshot domain [|source; sink|])
 
+let test_target_activation () =
+  let domain = C.create () in
+  let head = C.fresh domain
+  and actual = C.fresh domain
+  and formal = C.fresh domain
+  and returned = C.fresh domain
+  and result = C.fresh domain in
+  C.seed_target domain actual "argument" ;
+  C.seed_target domain returned "returned" ;
+  C.on_target domain head (fun active target ->
+    if target = "callee" then (
+      C.copy active ~src:actual ~dst:formal ;
+      C.copy active ~src:returned ~dst:result)) ;
+  C.seed_target domain head "callee" ;
+  C.solve domain ;
+  check_snapshot "late candidate activates finite call constraints"
+    [|["callee"], []; ["argument"], []; ["argument"], [];
+      ["returned"], []; ["returned"], []|]
+    (snapshot domain [|head; actual; formal; returned; result|])
+
+let test_residual_flow () =
+  let domain = C.create () in
+  let source = C.fresh domain and sink = C.fresh domain in
+  C.seed_residual domain source {target = "curried"; consumed = 1} ;
+  C.copy domain ~src:source ~dst:sink ;
+  C.solve domain ;
+  let residuals = (C.value domain sink).residuals |> C.Residual_set.elements in
+  Alcotest.(check int) "one finite residual" 1 (List.length residuals) ;
+  match residuals with
+  | [{target; consumed}] ->
+      Alcotest.(check string) "underlying target" "curried" target ;
+      Alcotest.(check int) "consumed prefix" 1 consumed
+  | _ -> Alcotest.fail "unexpected residual set"
+
 let test_long_chain () =
   let size = 2000 in
   let edges = List.init (size - 1) (fun i -> Copy (i, i + 1)) in
@@ -174,4 +208,6 @@ let () =
         Alcotest.test_case "bottom, unknown and duplicate reasons" `Quick test_bottom_and_unknown;
         Alcotest.test_case "late seeds, copies and repeated solve" `Quick test_late_updates;
         Alcotest.test_case "clone isolation" `Quick test_clone_isolation;
+        Alcotest.test_case "target-triggered constraints" `Quick test_target_activation;
+        Alcotest.test_case "finite residual flow" `Quick test_residual_flow;
         Alcotest.test_case "long chain" `Quick test_long_chain]]

@@ -13,7 +13,8 @@ let fixture_files =
     ("local_alias.ml", read_file (fixture_path "local_alias.ml"));
     ("named_joins.ml", read_file (fixture_path "named_joins.ml"));
     ("literal_values.ml", read_file (fixture_path "literal_values.ml"));
-    ("metadata.ml", read_file (fixture_path "metadata.ml")) ]
+    ("metadata.ml", read_file (fixture_path "metadata.ml"));
+    ("higher_order.ml", read_file (fixture_path "higher_order.ml")) ]
 
 let count db sql = Db.with_db db (fun conn -> Db.int conn sql)
 
@@ -42,6 +43,19 @@ let check_session_lifecycle build_dir =
             | _ -> None) bindings
       | _ -> [])
   in
+  let application = ref None in
+  let open Tast_iterator in
+  let iterator =
+    {
+      default_iterator with
+      expr = (fun self (expr : Typedtree.expression) ->
+        (match !application, expr.exp_desc with
+        | None, Texp_apply _ -> application := Some expr
+        | _ -> ()) ;
+        default_iterator.expr self expr);
+    }
+  in
+  iterator.structure iterator structure ;
   let binder, body, source =
     match roots with
     | (binder, body) :: (source, _) :: _ -> binder, body, source
@@ -49,7 +63,7 @@ let check_session_lifecycle build_dir =
   in
   let names = M.build_binding_names structure in
   let session = C.create ~binding_name:(M.binding_name names) ~fn_arity:M.fn_arity structure in
-  let owner = C.fresh_owner session in
+  let owner = C.fresh_owner session ~body in
   let token =
     C.register_expr_call session ~owner body ~head:body ~supplied:1
       ~omitted_slots:0 ~legacy_residual:false
@@ -74,7 +88,7 @@ let check_session_lifecycle build_dir =
   | None -> Test.fail "OCAML_CFA_LIFECYCLE_ASSERTION: injected finalize fault absent") ;
   expect_invalid "query after failed finalize" "CFA CMT session not finalized"
     (fun () -> ignore (C.value_of_call session token)) ;
-  ignore (C.fresh_owner session) ;
+  ignore (C.fresh_owner session ~body) ;
   C.finalize session ;
   let snapshot () = C.value_of_call session token in
   let initial = snapshot () in
@@ -82,7 +96,7 @@ let check_session_lifecycle build_dir =
   if snapshot () <> initial then
     Test.fail "OCAML_CFA_LIFECYCLE_ASSERTION: repeated finalize changed query result" ;
   let mutations =
-    [ "fresh_owner", (fun () -> ignore (C.fresh_owner session));
+    [ "fresh_owner", (fun () -> ignore (C.fresh_owner session ~body));
       "notify_stored_root", (fun () ->
         C.notify_stored_root session ~binder ~body
           ~canonical_name:(M.binding_name names ~prefix:"" binder));
@@ -98,7 +112,14 @@ let check_session_lifecycle build_dir =
           ~omitted_slots:0 ~legacy_residual:false));
       "register_expr_call", (fun () ->
         ignore (C.register_expr_call session ~owner body ~head:body ~supplied:1
-          ~omitted_slots:0 ~legacy_residual:false)) ]
+          ~omitted_slots:0 ~legacy_residual:false));
+      "register_application", (fun () ->
+        match !application with
+        | Some ({exp_desc = Texp_apply (head, args); _} as application) ->
+            ignore
+              (C.register_application session ~owner ~application ~head ~args
+                 ~legacy_residual:false)
+        | _ -> Test.fail "OCAML_CFA_LIFECYCLE_SETUP: application absent") ]
   in
   List.iter (fun (label, mutation) ->
     expect_invalid label invalid_message mutation ;
@@ -284,7 +305,8 @@ let check_literal_identity build_dir =
   let first = List.hd names and second = List.nth names 1 in
   let run label notifications expected_names expected_reasons =
     let session = create () in
-    let owner = C.fresh_owner session and wrong_owner = C.fresh_owner session in
+    let owner = C.fresh_owner session ~body:cloned_branch
+    and wrong_owner = C.fresh_owner session ~body:cloned_branch in
     let call1 = {invocation with exp_loc = ghost}
     and call2 = {invocation with exp_loc = ghost} in
     expect "same-position application objects remain distinct" (call1 != call2) ;
@@ -482,25 +504,84 @@ let register () =
             WHERE caller.name='local_run' AND c.edge_form IS NULL")
         1 ;
       Batch.eq_int b
-        ~msg:"OCAML_CFA_ASSERTION: capture does not close through another callable"
+        ~msg:"OCAML_CFA_PROPAGATION_RED: saturated identity result reaches its target"
+        (count rich
+           "SELECT count(*) FROM calls c \
+            JOIN functions caller ON caller.id=c.caller_id \
+            JOIN functions target ON target.id=c.callee_id \
+            WHERE caller.name='ho_run' AND target.name='ho_target' \
+              AND caller.module_id=target.module_id \
+              AND c.call_site LIKE '%higher_order.ml:6' \
+              AND c.kind='MAY_ENUMERATED' AND c.edge_form IS NULL")
+        1 ;
+      Batch.eq_int b
+        ~msg:"OCAML_CFA_PROPAGATION_ASSERTION: open-world identity keeps its frontier"
+        (count rich
+           "SELECT count(*) FROM calls c JOIN functions caller ON caller.id=c.caller_id \
+            WHERE caller.name='ho_run' AND c.kind='MAY_TOP' AND c.edge_form IS NULL")
+        1 ;
+      List.iter
+        (fun (caller, line) ->
+          Batch.eq_int b
+            ~msg:("OCAML_CFA_PROPAGATION_RED: shared formal/result merge at " ^ caller)
+            (count rich
+               (Printf.sprintf
+                  "SELECT count(*) FROM calls c \
+                   JOIN functions source ON source.id=c.caller_id \
+                   JOIN functions target ON target.id=c.callee_id \
+                   WHERE source.name='%s' AND target.name IN ('merge_a','merge_b') \
+                     AND source.module_id=target.module_id \
+                     AND c.call_site LIKE '%%higher_order.ml:%d' \
+                     AND c.kind='MAY_ENUMERATED' AND c.edge_form IS NULL"
+                  caller line))
+            2)
+        [("merge_run_a", 14); ("merge_run_b", 18)] ;
+      Batch.eq_int b
+        ~msg:"OCAML_CFA_PROPAGATION_ASSERTION: direct identity calls stay singular"
+        (count rich
+           "SELECT count(*) FROM calls c JOIN functions source ON source.id=c.caller_id \
+            WHERE source.name IN ('merge_run_a','merge_run_b') \
+              AND c.callee_name='merge_identity' AND c.edge_form IS NULL")
+        2 ;
+      Batch.eq_int b
+        ~msg:"OCAML_CFA_RECURSION_RED: mutual return cycle converges to target"
+        (count rich
+           "SELECT count(*) FROM calls c \
+            JOIN functions source ON source.id=c.caller_id \
+            JOIN functions target ON target.id=c.callee_id \
+            WHERE source.name='rec_run' AND target.name='rec_target' \
+              AND source.module_id=target.module_id \
+              AND c.call_site LIKE '%higher_order.ml:27' \
+              AND c.kind='MAY_ENUMERATED' AND c.edge_form IS NULL")
+        1 ;
+      Batch.eq_int b
+        ~msg:"OCAML_CFA_RESIDUAL_RED: staged application retains target at both stages"
+        (count rich
+           "SELECT count(*) FROM calls c \
+            JOIN functions source ON source.id=c.caller_id \
+            JOIN functions target ON target.id=c.callee_id \
+            WHERE source.name='staged_run' AND target.name='staged_target' \
+              AND source.module_id=target.module_id \
+              AND c.kind='MAY_ENUMERATED' AND c.edge_form IS NULL")
+        2 ;
+      Batch.eq_int b
+        ~msg:"OCAML_CFA_CAPTURE_RED: exact lexical alias capture reaches target"
+        (count rich
+           "SELECT count(*) FROM calls c JOIN functions caller ON caller.id=c.caller_id \
+            JOIN functions target ON target.id=c.callee_id \
+            WHERE caller.name LIKE 'capture_outer.<fun:%' \
+              AND target.name='local_root' AND c.kind='MAY_ENUMERATED'")
+        1 ;
+      Batch.eq_int b
+        ~msg:"OCAML_CFA_CAPTURE_ASSERTION: exact lexical capture is closed"
         (count rich
            "SELECT count(*) FROM calls c JOIN functions caller ON caller.id=c.caller_id \
             WHERE caller.name LIKE 'capture_outer.<fun:%' \
               AND c.kind='MAY_TOP' AND c.top_reason='callback_param'")
-        1 ;
-      Batch.eq_int b
-        ~msg:"OCAML_CFA_ASSERTION: capture emits no bounded local_root target"
-        (count rich
-           "SELECT count(*) FROM calls c JOIN functions caller ON caller.id=c.caller_id \
-            JOIN functions target ON target.id=c.callee_id \
-            WHERE caller.name LIKE 'capture_outer.<fun:%' AND target.name='local_root'")
         0 ;
       Batch.eq_int b
-        ~msg:"OCAML_CFA_ASSERTION: initializer capture stays unbounded too"
-        (count rich
-           "SELECT count(*) FROM calls c JOIN functions caller ON caller.id=c.caller_id \
-            WHERE caller.name LIKE 'initializer_outer.<fun:%' \
-              AND c.kind='MAY_TOP' AND c.top_reason='callback_param'")
+        ~msg:"OCAML_CFA_CAPTURE_RED: initializer lexical capture reaches target"
+        (count rich "SELECT count(*) FROM calls c JOIN functions caller ON caller.id=c.caller_id JOIN functions target ON target.id=c.callee_id WHERE caller.name LIKE 'initializer_outer.<fun:%' AND target.name='local_root' AND c.kind='MAY_ENUMERATED'")
         1 ;
       Batch.eq_int b
         ~msg:"OCAML_CFA_ASSERTION: a unit alias stays visible in a nested lambda"
