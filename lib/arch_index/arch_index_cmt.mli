@@ -324,6 +324,23 @@ type pending_call = {
           is MAY_ENUMERATED like any other bounded candidate; what this records
           is that no call happens at the site, which is what a caller-count
           consumer needs. [None] for every ordinary call. *)
+  occurrence_ordinal : int;
+  functor_target_proofs : functor_target_proof list;
+}
+
+and functor_target_proof = {
+  artifact : string;
+  application_ordinal : int;
+  declaration_key : string;
+  formal_position : int;
+  formal_key : string;
+  actual_root_key : string;
+  actual_path : string list;
+  member_path : string list;
+  source_caller_name : string;
+  occurrence_ordinal : int;
+  call_location : string;
+  target_name : string;
 }
 
 (** Flat [(name, module)] display of a pending call's callee, for kind-less
@@ -518,6 +535,7 @@ val process_cmt :
   ?stmt_carrier:Sqlite3.stmt ->
   ?producer_run_id:int option ->
   ?on_implementation:(artifact:string -> source:string -> compiler_unit:string -> module_id:int -> Typedtree.structure -> unit) ->
+  ?on_graph_reuse:(artifact:string -> representative:string -> unit) ->
   ?on_catalogue_outcome:(artifact:string -> outcome:string -> unit) ->
   ?graph_reuse:graph_reuse ->
   string ->

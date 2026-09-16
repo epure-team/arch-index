@@ -87,7 +87,7 @@ let schema_path =
    twice in two hours. The fix is to assign the version AT MERGE, not at write;
    until then, a number taken from a grep is a guess, and the roadmap owner
    assigns. *)
-let current_schema_version = "1.15"
+let current_schema_version = "1.16"
 
 (* The flat schema (runner.ml's own inline 3-table [schema_sql]) — distinct
    version identity from [current_schema_version] above: the two schemas are

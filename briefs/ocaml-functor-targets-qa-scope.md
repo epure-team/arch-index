@@ -14,7 +14,7 @@ rtk proxy node roster/ocaml-functor-targets/check-native.js
 rtk proxy node roster/ocaml-functor-targets/check-tezos.js
 
 # Focused authentic coverage
-opam exec -- dune exec --root . tezt/tests/main.exe -- --file tezt/tests --job-count 1 --title-regex 'functor|CFA'
+opam exec -- dune exec --root . tezt/tests/main.exe -- --job-count 1 --match 'functor|CFA'
 
 # Existing independent functor contracts
 rtk proxy node scripts/check-functor-bindings.js inventory
@@ -27,7 +27,7 @@ rtk proxy node roster/ocaml-cfa-foundation/check-cmt.js
 rtk proxy node roster/ocaml-cfa-foundation/check-tezos.js
 
 # Full deterministic suite, single job
-opam exec -- dune exec --root . tezt/tests/main.exe -- --file tezt/tests --job-count 1
+opam exec -- dune exec --root . tezt/tests/main.exe -- --job-count 1
 
 # Repository hygiene
 rtk git diff --check

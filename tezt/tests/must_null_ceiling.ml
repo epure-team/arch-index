@@ -314,7 +314,17 @@ let must_null_composition_query =
    engines agree on complete grouped call rows within each corpus.
    No headroom, query or floor change, and no resolution-gain claim.
    Evidence: roster/ocaml-data-preservation/calibration-attribution.md. *)
-let clean_measured = 554
+(* 2026-09-16, authenticated functor-member targets: fresh pristine 2x2
+   calibration gives A=B576 and C=D587. Thus 22 rows were already present in
+   the approved Stage-3 base inside the old headroom, and this task adds a net
+   11 source rows. The per-corpus engines agree exactly, so target resolution
+   changes no existing same-CMT classification. New rows are external calls
+   from arch_index.ml (Sqlite3), arch_index_bindings.ml (Ident/Sqlite3/Yojson),
+   arch_index_cmt.ml (compiler-libs/Yojson/Digestif), and the authentic Tezt
+   fixtures (Arch_tezt/compiler-libs/Lwt). Query, floor and headroom stay
+   unchanged. Evidence: improvement/2026-09-16-ocaml-functor-targets/
+   self-calibration/evidence.json. *)
+let clean_measured = 587
 
 let headroom = 25
 

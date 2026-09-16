@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "revision": "b5a52f3dbb131dcc2b1ae3206003328c5547e1b3+cfa-let-family-overlay-2x2-2026-09-16",
+  "revision": "093eac12152a08d8a5eaf84a9dc5aeb61df981c3+functor-target-correspondence-2026-09-16",
   "modules": [
     "lib/arch_index/arch_errors_config.ml",
     "lib/arch_index/arch_index.ml",
@@ -32,9 +32,9 @@
   ],
   "totals": {
     "modules": 27,
-    "functions": 1143,
-    "calls": 7066,
-    "origins": 614
+    "functions": 1200,
+    "calls": 7356,
+    "origins": 641
   },
   "origin_groups": [
     {
@@ -47,13 +47,13 @@
       "channel": "exception",
       "form": "compare",
       "escapes": 1,
-      "count": 56
+      "count": 61
     },
     {
       "channel": "exception",
       "form": "failwith",
       "escapes": 1,
-      "count": 28
+      "count": 30
     },
     {
       "channel": "exception",
@@ -77,13 +77,13 @@
       "channel": "exception",
       "form": "reraise",
       "escapes": 1,
-      "count": 8
+      "count": 10
     },
     {
       "channel": "option",
       "form": "raise",
       "escapes": 1,
-      "count": 354
+      "count": 372
     },
     {
       "channel": "result",

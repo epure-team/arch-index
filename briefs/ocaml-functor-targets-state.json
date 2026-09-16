@@ -1,7 +1,7 @@
 {
   "task": "ocaml-functor-targets",
   "mode": "full",
-  "current_phase": "plan",
+  "current_phase": "review",
   "events": [
     {
       "phase": "question",
@@ -35,6 +35,13 @@
       "at": "2026-09-16T20:46:14+02:00",
       "by": "roster-plan",
       "reason": "Two independent planning voices converged on a direct-proof-first vertical plan; the user repeated the finish-roadmap directive after the three-question validation quiz, approving durable SQLite witnesses and a Stage4 pinned positive-gain gate."
+    },
+    {
+      "phase": "implement",
+      "outcome": "COMPLETED",
+      "at": "2026-09-16T20:05:00+02:00",
+      "by": "roster-implement",
+      "reason": "Authenticated additive functor-member targets, durable witnesses, exact-copy/variant reconciliation and three independent gates are green; full Tezt is 351/351 and pinned410 adds seven witnessed Irmin relations with zero loss or new MUST."
     }
   ]
 }

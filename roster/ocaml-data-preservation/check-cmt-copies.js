@@ -61,8 +61,10 @@ function main() {
       assert.equal(inputs.length,2); assert(inputs.every(x => x.outcome === 'collected'));
       assert.equal(new Set(inputs.map(x=>x.module_id)).size,1);
       assert.deepEqual(rows(db,'SELECT outcome FROM functor_binding_inputs ORDER BY artifact'), [{outcome:'collected'},{outcome:'collected'}]);
+      assert.deepEqual(rows(db,'SELECT outcome,expected_witnesses FROM functor_target_inputs ORDER BY artifact'), [{outcome:'collected',expected_witnesses:1},{outcome:'collected',expected_witnesses:1}]);
       assert.equal(marker(db,'functor_catalogue_contract'),1);
       assert.equal(marker(db,'functor_binding_contract'),1);
+      assert.equal(marker(db,'functor_target_contract'),1);
       for (const table of ['functor_applications','functor_declarations','functor_bindings']) {
         const perArtifact = inputs.map(x => rows(db, `SELECT * FROM ${table} WHERE artifact='${x.artifact.replaceAll("'","''")}'`).map(row=> {
           delete row.artifact; delete row.producer_run_id; return JSON.stringify(row);
@@ -70,6 +72,11 @@ function main() {
         assert(perArtifact[0].length > 0, `${table} nonempty`);
         assert.deepEqual(perArtifact[0],perArtifact[1], `${table} must be collected independently per path`);
       }
+      const witnessSets = inputs.map(x => rows(db, `SELECT * FROM functor_target_witnesses WHERE artifact='${x.artifact.replaceAll("'","''")}'`).map(row=> {
+        delete row.artifact; delete row.producer_run_id; return JSON.stringify(row);
+      }).sort());
+      assert.equal(witnessSets[0].length,1,'functor target witness nonempty');
+      assert.deepEqual(witnessSets[0],witnessSets[1],'exact copies retain independent provenance over one canonical call');
     };
     collected(copied);
     fs.unlinkSync(b); fs.symlinkSync(a,b);
@@ -83,9 +90,19 @@ function main() {
     ok(compiler, ['-bin-annot','-c','fixture.ml','-o','_build/default/second/fixture.cmo'], {cwd:temporary});
     assert(!fs.readFileSync(a).equals(fs.readFileSync(b)), 'independently compiled negative premise');
     const conflict=path.join(temporary,'conflict.db');
-    assert.equal(index(conflict).status,1,'nonidentical same-source artifact still rejected');
-    assert.deepEqual(rows(conflict,'SELECT outcome FROM functor_catalogue_inputs ORDER BY outcome'), [{outcome:'collected'},{outcome:'dropped_module'}]);
-    assert.equal(marker(conflict,'functor_catalogue_contract'),0);
+    assert.equal(index(conflict).status,0,'unique same-source variant must reconcile');
+    assert.deepEqual(graph(conflict),baseline,'same-source variants preserve one canonical graph');
+    collected(conflict);
+    const reversedRoot=path.join(temporary,'reversed');
+    const reversedFirst=path.join(reversedRoot,'first');
+    const reversedSecond=path.join(reversedRoot,'second');
+    fs.mkdirSync(reversedFirst,{recursive:true}); fs.mkdirSync(reversedSecond,{recursive:true});
+    fs.copyFileSync(b,path.join(reversedFirst,'fixture.cmt'));
+    fs.copyFileSync(a,path.join(reversedSecond,'fixture.cmt'));
+    const reversed=path.join(temporary,'reversed.db');
+    assert.equal(index(reversed,reversedRoot).status,0,'reversed variant discovery must reconcile');
+    assert.deepEqual(graph(reversed),baseline,'variant discovery order must not change canonical graph rows');
+    collected(reversed);
     fs.copyFileSync(a,b);
     const failureSchema=path.join(temporary,'failed-graph.sql');
     fs.writeFileSync(failureSchema,fs.readFileSync(schema,'utf8')+"\nCREATE TRIGGER reject_target BEFORE INSERT ON functions WHEN NEW.name='target' BEGIN SELECT RAISE(ABORT,'injected graph failure'); END;\n");
@@ -113,7 +130,7 @@ function main() {
     assert.equal(index(emptyDb,empty).status,0);
     assert.equal(rows(emptyDb,'SELECT * FROM functor_catalogue_inputs').length,0);
     assert.equal(marker(emptyDb,'functor_catalogue_contract'),0);
-    console.log('CHECK2 PASS: exact copies, symlinks, graph equality, separate inventories, conflicts, failures and fresh runs');
+    console.log('CHECK2 PASS: exact copies, symlinks, graph equality, separate inventories, variants, order, failures and fresh runs');
   } finally { fs.rmSync(temporary,{recursive:true}); }
 }
 try { main(); }

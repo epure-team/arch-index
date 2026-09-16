@@ -41,7 +41,7 @@ syntax warnings only and never evidence of target resolution.
 ## Build and inspect
 
 Rebuild the project's CMT artifacts first, then run the OCaml producer with the
-main schema (version 1.14). Existing databases need a full reindex; reading an old
+main schema (version 1.16). Existing databases need a full reindex; reading an old
 database does not migrate or collect anything.
 
 ```sh
@@ -76,3 +76,52 @@ JSON always includes the second array, even when it is `[]`. All persisted rows
 are checked before applying the limit. Refusals have empty stdout, with diagnosis
 precedence `UNSUPPORTED_SCHEMA`, then `NOT_COLLECTED` (including available failure
 counts), then `INCONSISTENT_CATALOGUE`. Operational database failures exit 2.
+
+## Authenticated formal-member targets
+
+The main CMT producer can add a bounded target when the same artifact proves the
+whole chain from a collected functor application to a named formal slot, a
+supported local named actual module, and a direct or invocation-safe one-hop
+member body. For example, a body call `X.f` plus a matched local `F(A)` may add
+`A.f` as `MAY_ENUMERATED`.
+
+This is additive evidence, not defunctorization or a closed-world result. The
+original `X.f` `MAY_TOP/module_param` row remains, no application-specific body
+or function is cloned, and the correspondence never creates or upgrades a
+`MUST` edge. Persistent and cross-unit actuals, `Path.Papply`, module aliases,
+anonymous structures, unpacked modules, opaque members, multi-hop aliases, and
+Shapes/UID reconciliation remain outside this contract. The flat LSP producer
+does not infer these targets.
+
+`functor_target_inputs` records the outcome and expected witness count for every
+selected artifact. `functor_target_witnesses` retains each positive proof even
+when several applications deduplicate to the same canonical call row. A witness
+links the application ordinal, declaration/formal position and key, actual and
+member paths, physical caller occurrence, candidate call row, and target
+function row. `functor_target_contract=v1` is written only after every selected
+input and every expected witness passes the complete foreign-key and semantic
+join validation. Missing, partial, corrupt, or failed target provenance remains
+unmarked rather than appearing as an empty successful result.
+
+Diagnostic SQL can inspect the supported subset:
+
+```sql
+SELECT cm.path AS caller_path, caller.name AS caller, c.call_site,
+       tm.path AS target_path, target.name AS target,
+       w.artifact, w.application_ordinal, w.formal_position,
+       w.actual_path, w.member_path
+FROM functor_target_witnesses w
+JOIN calls c ON c.id = w.candidate_call_id
+JOIN functions caller ON caller.id = c.caller_id
+JOIN modules cm ON cm.id = caller.module_id
+JOIN functions target ON target.id = w.target_function_id
+JOIN modules tm ON tm.id = target.module_id
+ORDER BY caller_path, caller, c.call_site, target, w.artifact,
+         w.application_ordinal;
+```
+
+On the fixed 410-artifact Tezos/Irmin corpus, the Stage-4 gate compares against
+the frozen Stage-3 snapshot and currently attributes seven new resolved
+relations in Irmin and none in the protocol slice, with zero relation loss and
+zero new `MUST`. These are corpus observations for the supported local subset;
+they are not a completeness, whole-program, or performance claim.

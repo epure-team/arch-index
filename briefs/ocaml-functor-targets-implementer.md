@@ -68,12 +68,12 @@ opam exec -- dune build --root .
 rtk proxy node roster/ocaml-functor-targets/check-cmt.js
 rtk proxy node roster/ocaml-functor-targets/check-native.js
 rtk proxy node roster/ocaml-functor-targets/check-tezos.js
-opam exec -- dune exec --root . tezt/tests/main.exe -- --file tezt/tests --job-count 1 --title-regex 'functor|CFA'
+opam exec -- dune exec --root . tezt/tests/main.exe -- --job-count 1 --match 'functor|CFA'
 rtk proxy node scripts/check-functor-bindings.js inventory
 rtk proxy node scripts/check-functor-bindings.js lifecycle
 rtk proxy node scripts/check-functor-bindings.js query
 rtk proxy node scripts/check-functor-bindings.js compatibility
-opam exec -- dune exec --root . tezt/tests/main.exe -- --file tezt/tests --job-count 1
+opam exec -- dune exec --root . tezt/tests/main.exe -- --job-count 1
 ```
 
 No standalone lint/format command is documented. Run `git diff --check`. Every new
