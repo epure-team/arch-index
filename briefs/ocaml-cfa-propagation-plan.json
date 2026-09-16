@@ -1,0 +1,52 @@
+{
+  "task": "ocaml-cfa-propagation",
+  "mode": "full",
+  "schema_version": "1.0",
+  "steps": [
+    {
+      "id": "step-1",
+      "skill": "roster-implement",
+      "inputs": [
+        "briefs/ocaml-cfa-propagation-implementer.md",
+        "specs/ocaml-cfa-propagation.md"
+      ],
+      "outputs": ["briefs/ocaml-cfa-propagation-implementation.md"],
+      "hook": false
+    },
+    {
+      "id": "step-2",
+      "skill": "roster-review",
+      "inputs": [
+        "briefs/ocaml-cfa-propagation-reviewer.md",
+        "briefs/ocaml-cfa-propagation-implementation.md"
+      ],
+      "outputs": ["briefs/ocaml-cfa-propagation-review.md"],
+      "hook": false
+    },
+    {
+      "id": "step-3",
+      "skill": "roster-qa",
+      "inputs": [
+        "briefs/ocaml-cfa-propagation-qa-scope.md",
+        "briefs/ocaml-cfa-propagation-review.md"
+      ],
+      "outputs": ["briefs/ocaml-cfa-propagation-qa.md"],
+      "hook": false
+    },
+    {
+      "id": "step-4",
+      "skill": "roster-ship",
+      "inputs": [
+        "briefs/ocaml-cfa-propagation-review.md",
+        "briefs/ocaml-cfa-propagation-qa.md"
+      ],
+      "outputs": ["briefs/ocaml-cfa-propagation-ship.md"],
+      "hook": false
+    }
+  ],
+  "quality_gates": {
+    "build": "opam exec -- dune build --root .",
+    "test": "eval \"$(opam env)\" && dune test --root .",
+    "lint": ""
+  }
+}
