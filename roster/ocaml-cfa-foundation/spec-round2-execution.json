@@ -1,0 +1,21 @@
+{
+  "specialist": "spec-compliance",
+  "round": 2,
+  "cycle": 1,
+  "head": "791d1f9ac8947edc13a2101b0e86cfa9bced1f3f",
+  "executor": "root in spec-compliance-auditor role; independent Terra read-only prep; delegated execution unavailable after thread-limit errors",
+  "commands": [
+    {"command": "rtk proxy opam exec -- dune build", "exit": 0},
+    {"command": "rtk proxy node roster/ocaml-cfa-foundation/check-domain.js", "exit": 0, "cases": 517},
+    {"command": "rtk proxy node roster/ocaml-cfa-foundation/check-cmt.js", "exit": 0},
+    {"command": "rtk proxy node roster/ocaml-cfa-foundation/check-tezos.js", "exit": 0, "report": "improvement/2026-09-15-ocaml-cfa/check3-1789558319040-472195.json"},
+    {"command": "rtk proxy node roster/ocaml-cfa-foundation/check-domain-test.js", "exit": 0},
+    {"command": "rtk proxy node roster/ocaml-cfa-foundation/check-tezos-test.js", "exit": 0},
+    {"command": "rtk proxy node roster/ocaml-cfa-foundation/calibrate-self-test.js", "exit": 0}
+  ],
+  "check2_controls": {"assertion": 1, "setup": 2, "compiler_marker": 2, "empty_success": 2},
+  "context_input_digests": "3/3 unchanged, personally checked",
+  "full_suite": {"executed_in_this_role": false, "reason": "Same-product owner reviewer independently ran345/345; root implementation also ran345/345. Formal QA follows separately."},
+  "findings": 0,
+  "report": "roster/ocaml-cfa-foundation/spec-round2-report.md"
+}

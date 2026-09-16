@@ -1,7 +1,7 @@
 {
   "task": "ocaml-cfa-foundation",
   "mode": "full",
-  "current_phase": "implement",
+  "current_phase": "review",
   "events": [
     {
       "phase": "question",
@@ -72,6 +72,13 @@
       "at": "2026-09-16",
       "by": "roster-implement",
       "reason": "Opaque-root-alias uncertainty repaired with authentic CHECK2 RED/GREEN; calibration BASE-overlay regression corrected RED/GREEN. Fresh 2x2 exact-array equality attributes6808 calls to source only; approved references migrated without exemption changes. Final full345/345 exit0; CHECK1/2/3, pure controls, bundle, scope and hygiene pass. Round2 review pending."
+    },
+    {
+      "phase": "review",
+      "outcome": "GO",
+      "at": "2026-09-16",
+      "by": "roster-review",
+      "reason": "Round2/cycle1 HIGH corrected and CHECK2 linked. Owner and architect personally executed gates; root spec role executed after independent prep/thread-limit. Full convergence/trace pass, two medium/one low advisories retained, null pre_fix_sha flagged, OpenCode skipped-degraded. Routine gate delegated; QA next."
     }
   ]
 }

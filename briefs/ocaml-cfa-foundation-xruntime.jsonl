@@ -1,1 +1,2 @@
 {"ts":"2026-09-16T10:39:11.505Z","task":"ocaml-cfa-foundation","cycle_round":1,"cycle":1,"runtime":"opencode","digest":"opencode:fd1dbeaa7d0c6431","outcome":"degraded","reason":"timeout","duration_s":120.08,"runtime_exit":124,"prompt_digest":"fd0258ceca3dc764"}
+{"ts":"2026-09-16T11:33:43.919Z","task":"ocaml-cfa-foundation","cycle_round":2,"cycle":1,"runtime":"opencode","digest":"opencode:fd1dbeaa7d0c6431","outcome":"skipped-degraded","reason":"runtime degraded this cycle with unchanged digest (D-2/E-5)","duration_s":0,"runtime_exit":null}
