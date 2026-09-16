@@ -6,7 +6,8 @@ const path = require('node:path');
 
 const root = path.resolve(__dirname, '../..');
 const checker = path.join(root, 'roster/ocaml-cfa-foundation/check-cmt.js');
-const result = cp.spawnSync(process.execPath, [checker], {
+const args = process.argv.slice(2);
+const result = cp.spawnSync(process.execPath, [checker, ...args], {
   cwd: root,
   encoding: 'utf8',
   timeout: 180000,

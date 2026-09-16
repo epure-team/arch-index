@@ -2105,10 +2105,24 @@ let collect_calls_from_expr_with_open_bodies ?(canon_exn = fun p -> Path.name p)
                     List.for_all
                       (fun (binding : Typedtree.value_binding) ->
                         match binding.vb_pat.pat_desc, binding.vb_expr.exp_desc with
-                        | Tpat_var (id, _, _), Texp_function _ -> Ident.name id <> "_"
+                        | Tpat_var (id, _, _), _ ->
+                            Ident.name id <> "_"
+                            && Arch_index_cfa_cmt.supported_callable binding.vb_expr
                         | _ -> false)
                       vbs
               in
+              (match cfa_session, (!cur).lcfa_owner, rec_flag with
+              | Some session, Some owner, Asttypes.Recursive
+                when cfa_group_supported ->
+                  List.iter
+                    (fun (binding : Typedtree.value_binding) ->
+                      match binding.vb_pat.pat_desc with
+                      | Tpat_var (id, _, _) ->
+                          Arch_index_cfa_cmt.register_local_expr session ~owner
+                            ~binder:id binding.vb_expr
+                      | _ -> ())
+                    vbs
+              | _ -> ()) ;
               List.iter
                 (fun (vb : Typedtree.value_binding) ->
                   (match (vb.vb_pat.pat_desc, vb.vb_expr.exp_desc) with
@@ -2176,7 +2190,8 @@ let collect_calls_from_expr_with_open_bodies ?(canon_exn = fun p -> Path.name p)
                         ~binder:id ~source
                   | _ -> ()) ;
                   (match cfa_session, (!cur).lcfa_owner, rec_flag, vb.vb_pat.pat_desc with
-                  | Some session, Some owner, _, Tpat_var (id, _, _)
+                  | Some session, Some owner, Asttypes.Nonrecursive,
+                    Tpat_var (id, _, _)
                     when cfa_group_supported ->
                       (match vb.vb_expr.exp_desc with
                       | Texp_function _ | Texp_ifthenelse _ | Texp_match _ | Texp_sequence _
@@ -2622,7 +2637,7 @@ let collect_calls_from_expr_with_open_bodies ?(canon_exn = fun p -> Path.name p)
                         ?callee_ty:!callee_ty_for_channel
                         (Head_qualified (callee_module, callee_name))
                         expr.exp_loc)
-                | (Texp_ifthenelse _ | Texp_match _ | Texp_sequence _) -> (
+                | (Texp_ifthenelse _ | Texp_match _ | Texp_sequence _ | Texp_apply _) -> (
                     match cfa_application_token with
                     | Some token ->
                         add_call ~partial ~is_head_of:expr.exp_loc ?callee_ty:!callee_ty_for_channel

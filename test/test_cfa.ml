@@ -163,6 +163,20 @@ let test_residual_flow () =
       Alcotest.(check int) "consumed prefix" 1 consumed
   | _ -> Alcotest.fail "unexpected residual set"
 
+let test_iterative_watcher_chain () =
+  let size = 20_000 in
+  let domain = C.create () in
+  let cells = Array.init size (fun _ -> C.fresh domain) in
+  for index = 0 to size - 2 do
+    C.on_target domain cells.(index) (fun active target ->
+      C.seed_target active cells.(index + 1) target)
+  done ;
+  C.seed_target domain cells.(0) "iterative" ;
+  C.solve domain ;
+  Alcotest.(check (list string)) "watcher chain reaches the last cell"
+    ["iterative"]
+    (C.String_set.elements (C.value domain cells.(size - 1)).targets)
+
 let test_long_chain () =
   let size = 2000 in
   let edges = List.init (size - 1) (fun i -> Copy (i, i + 1)) in
@@ -210,4 +224,5 @@ let () =
         Alcotest.test_case "clone isolation" `Quick test_clone_isolation;
         Alcotest.test_case "target-triggered constraints" `Quick test_target_activation;
         Alcotest.test_case "finite residual flow" `Quick test_residual_flow;
+        Alcotest.test_case "iterative watcher chain" `Quick test_iterative_watcher_chain;
         Alcotest.test_case "long chain" `Quick test_long_chain]]

@@ -21,6 +21,7 @@ const title = 'OCaml CFA: a same-CMT alias chain reaches its actual target';
 const assertionMarkers = [
   'OCAML_CFA_ASSERTION:', 'OCAML_CFA_RED:', 'OCAML_CFA_LITERAL_',
   'OCAML_CFA_METADATA', 'OCAML_CFA_ARITY', 'OCAML_CFA_RESIDUAL',
+  'OCAML_CFA_PROPAGATION_', 'OCAML_CFA_RECURSION_', 'OCAML_CFA_CAPTURE_',
   'OCAML_CFA_CHANNELS', 'OCAML_CFA_CONSUMER_ASSERTION:',
   'OCAML_CFA_IDENTITY_ASSERTION:'
 ];
@@ -47,13 +48,19 @@ const selftests = {
   },
   '--selftest-empty-success': {status: 0, stdout: ''}
 };
+for (const family of ['PROPAGATION', 'RECURSION', 'CAPTURE']) {
+  selftests[`--selftest-${family.toLowerCase()}`] = {
+    status: 1,
+    stdout: `[error] OCAML_CFA_${family}_ASSERTION: controlled\n[FAILURE] ${title}\n`,
+  };
+}
 if (args.length === 1 && Object.hasOwn(selftests, args[0])) {
   const code = classifyResult(selftests[args[0]]);
   process.stderr.write(`CHECK2_SELFTEST: ${args[0]} classified ${code}\n`);
   process.exit(code);
 }
 if (args.length !== 0)
-  setup('usage: check-cmt.js [--selftest-assertion|--selftest-setup|--selftest-compiler-marker|--selftest-empty-success]');
+  setup('usage: check-cmt.js [--selftest-assertion|--selftest-setup|--selftest-compiler-marker|--selftest-empty-success|--selftest-propagation|--selftest-recursion|--selftest-capture]');
 
 const build = cp.spawnSync(
   'opam',

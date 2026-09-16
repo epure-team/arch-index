@@ -28,9 +28,15 @@ type t = {
   watchers : (cell, (t -> string -> unit) list) Hashtbl.t;
   reason_watchers : (cell, (t -> reason -> unit) list) Hashtbl.t;
   residual_watchers : (cell, (t -> residual -> unit) list) Hashtbl.t;
+  notifications : notification Queue.t;
   queue : cell Queue.t;
   queued : (cell, unit) Hashtbl.t;
 }
+
+and notification =
+  | Target_notification of (t -> string -> unit) * string
+  | Reason_notification of (t -> reason -> unit) * reason
+  | Residual_notification of (t -> residual -> unit) * residual
 
 let bottom = {
   targets = String_set.empty;
@@ -46,6 +52,7 @@ let create () =
     watchers = Hashtbl.create 32;
     reason_watchers = Hashtbl.create 32;
     residual_watchers = Hashtbl.create 32;
+    notifications = Queue.create ();
     queue = Queue.create ();
     queued = Hashtbl.create 32;
   }
@@ -58,6 +65,7 @@ let clone t =
     watchers = Hashtbl.copy t.watchers;
     reason_watchers = Hashtbl.copy t.reason_watchers;
     residual_watchers = Hashtbl.copy t.residual_watchers;
+    notifications = Queue.copy t.notifications;
     queue = Queue.copy t.queue;
     queued = Hashtbl.copy t.queued;
   }
@@ -86,19 +94,23 @@ let update t cell value =
     String_set.iter
       (fun target ->
         if not (String_set.mem target previous.targets) then
-          List.iter (fun watcher -> watcher t target)
+          List.iter
+            (fun watcher -> Queue.add (Target_notification (watcher, target)) t.notifications)
             (Option.value (Hashtbl.find_opt t.watchers cell) ~default:[]))
       value.targets ;
     Reason_set.iter
       (fun reason ->
         if not (Reason_set.mem reason previous.reasons) then
-          List.iter (fun watcher -> watcher t reason)
+          List.iter
+            (fun watcher -> Queue.add (Reason_notification (watcher, reason)) t.notifications)
             (Option.value (Hashtbl.find_opt t.reason_watchers cell) ~default:[]))
       value.reasons ;
     Residual_set.iter
       (fun residual ->
         if not (Residual_set.mem residual previous.residuals) then
-          List.iter (fun watcher -> watcher t residual)
+          List.iter
+            (fun watcher ->
+              Queue.add (Residual_notification (watcher, residual)) t.notifications)
             (Option.value (Hashtbl.find_opt t.residual_watchers cell) ~default:[]))
       value.residuals)
 
@@ -122,17 +134,24 @@ let copy t ~src ~dst =
 let on_target t cell watcher =
   let existing = Option.value (Hashtbl.find_opt t.watchers cell) ~default:[] in
   Hashtbl.replace t.watchers cell (watcher :: existing) ;
-  String_set.iter (watcher t) (Hashtbl.find t.values cell).targets
+  String_set.iter
+    (fun target -> Queue.add (Target_notification (watcher, target)) t.notifications)
+    (Hashtbl.find t.values cell).targets
 
 let on_reason t cell watcher =
   let existing = Option.value (Hashtbl.find_opt t.reason_watchers cell) ~default:[] in
   Hashtbl.replace t.reason_watchers cell (watcher :: existing) ;
-  Reason_set.iter (watcher t) (Hashtbl.find t.values cell).reasons
+  Reason_set.iter
+    (fun reason -> Queue.add (Reason_notification (watcher, reason)) t.notifications)
+    (Hashtbl.find t.values cell).reasons
 
 let on_residual t cell watcher =
   let existing = Option.value (Hashtbl.find_opt t.residual_watchers cell) ~default:[] in
   Hashtbl.replace t.residual_watchers cell (watcher :: existing) ;
-  Residual_set.iter (watcher t) (Hashtbl.find t.values cell).residuals
+  Residual_set.iter
+    (fun residual ->
+      Queue.add (Residual_notification (watcher, residual)) t.notifications)
+    (Hashtbl.find t.values cell).residuals
 
 let join left right =
   {
@@ -142,13 +161,19 @@ let join left right =
   }
 
 let solve t =
-  while not (Queue.is_empty t.queue) do
-    let src = Queue.take t.queue in
-    Hashtbl.remove t.queued src ;
-    let source = Hashtbl.find t.values src in
-    List.iter
-      (fun dst -> update t dst (join (Hashtbl.find t.values dst) source))
-      (Option.value (Hashtbl.find_opt t.outgoing src) ~default:[])
+  while not (Queue.is_empty t.notifications && Queue.is_empty t.queue) do
+    if not (Queue.is_empty t.notifications) then
+      match Queue.take t.notifications with
+      | Target_notification (watcher, target) -> watcher t target
+      | Reason_notification (watcher, reason) -> watcher t reason
+      | Residual_notification (watcher, residual) -> watcher t residual
+    else
+      let src = Queue.take t.queue in
+      Hashtbl.remove t.queued src ;
+      let source = Hashtbl.find t.values src in
+      List.iter
+        (fun dst -> update t dst (join (Hashtbl.find t.values dst) source))
+        (Option.value (Hashtbl.find_opt t.outgoing src) ~default:[])
   done
 
 let value t cell = Hashtbl.find t.values cell

@@ -31,3 +31,32 @@ let staged_target x y = x + y
 let staged_run x y =
   let partial = staged_target x in
   partial y
+
+let direct_staged_run x = (ho_identity ho_target) x
+
+let rec direct_pick f n = if n = 0 then f else direct_pick f (n - 1)
+
+let direct_rec_run x =
+  let picked = direct_pick rec_target 0 in
+  picked x
+
+let local_rec_run x =
+  let rec local_left f n = local_right f n
+  and local_right f n = if n = 0 then f else local_left f (n - 1) in
+  let picked = local_left rec_target 0 in
+  picked x
+
+let rec mixed_good f n = if n = 0 then f else mixed_good f (n - 1)
+and mixed_bad = function value -> value
+
+let mixed_group_run x =
+  let picked = mixed_good rec_target 0 in
+  picked x
+
+let over_make () =
+  let returned = fun _ -> ho_target in
+  returned
+
+let over_downstream x =
+  let picked = over_make () x in
+  picked x
