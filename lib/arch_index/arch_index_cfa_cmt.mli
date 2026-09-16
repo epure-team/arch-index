@@ -35,5 +35,10 @@ val register_expr_call : t -> owner:owner -> Typedtree.expression -> head:Typedt
 
 val finalize : t -> unit
 
+module For_tests : sig
+  val finalize_with_after_staging_hook : t -> (unit -> unit) -> unit
+end
+
 val value_of_call :
-  t -> int -> ((string * int) list * string list * int * int * bool) option
+  t -> int ->
+  ((string * int) list * Arch_index_cfa.reason list * int * int * bool) option

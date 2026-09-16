@@ -17,6 +17,95 @@ let fixture_files =
 
 let count db sql = Db.with_db db (fun conn -> Db.int conn sql)
 
+let check_session_lifecycle build_dir =
+  let module C = Arch_index__Arch_index_cfa_cmt in
+  let module M = Arch_index__Arch_index_cmt in
+  let rec find root =
+    Sys.readdir root |> Array.to_list |> List.find_map (fun entry ->
+      let path = Filename.concat root entry in
+      if Sys.is_directory path then find path
+      else if entry = "metadata.cmt" then Some path else None)
+  in
+  let structure =
+    match Option.bind (find build_dir) (fun path -> snd (Cmt_format.read path)) with
+    | Some {Cmt_format.cmt_annots = Cmt_format.Implementation structure; _} -> structure
+    | _ -> Test.fail "OCAML_CFA_LIFECYCLE_SETUP: metadata implementation CMT absent"
+  in
+  let roots =
+    structure.str_items |> List.concat_map (fun item ->
+      match item.Typedtree.str_desc with
+      | Typedtree.Tstr_value (_, bindings) ->
+          List.filter_map (fun binding ->
+            match binding.Typedtree.vb_pat.pat_desc, binding.vb_expr.exp_desc with
+            | Typedtree.Tpat_var (id, _, _), Typedtree.Texp_function _ ->
+                Some (id, binding.vb_expr)
+            | _ -> None) bindings
+      | _ -> [])
+  in
+  let binder, body, source =
+    match roots with
+    | (binder, body) :: (source, _) :: _ -> binder, body, source
+    | _ -> Test.fail "OCAML_CFA_LIFECYCLE_SETUP: two root functions required"
+  in
+  let names = M.build_binding_names structure in
+  let session = C.create ~binding_name:(M.binding_name names) ~fn_arity:M.fn_arity structure in
+  let owner = C.fresh_owner session in
+  let token =
+    C.register_expr_call session ~owner body ~head:body ~supplied:1
+      ~omitted_slots:0 ~legacy_residual:false
+  in
+  let invalid_message = "CFA CMT session already finalized" in
+  let expect_invalid label expected thunk =
+    match (try thunk () ; None with Invalid_argument message -> Some message) with
+    | Some message when String.starts_with ~prefix:expected message -> ()
+    | Some message ->
+        Test.fail "OCAML_CFA_LIFECYCLE_ASSERTION: %s raised Invalid_argument %S" label message
+    | None -> Test.fail "OCAML_CFA_LIFECYCLE_ASSERTION: %s did not reject" label
+  in
+  expect_invalid "pre-finalize query" "CFA CMT session not finalized"
+    (fun () -> ignore (C.value_of_call session token)) ;
+  C.notify_stored_root session ~binder ~body
+    ~canonical_name:(M.binding_name names ~prefix:"" binder) ;
+  (match
+     try C.For_tests.finalize_with_after_staging_hook session (fun () -> raise Exit) ; None
+     with Exit -> Some ()
+   with
+  | Some () -> ()
+  | None -> Test.fail "OCAML_CFA_LIFECYCLE_ASSERTION: injected finalize fault absent") ;
+  expect_invalid "query after failed finalize" "CFA CMT session not finalized"
+    (fun () -> ignore (C.value_of_call session token)) ;
+  ignore (C.fresh_owner session) ;
+  C.finalize session ;
+  let snapshot () = C.value_of_call session token in
+  let initial = snapshot () in
+  C.finalize session ;
+  if snapshot () <> initial then
+    Test.fail "OCAML_CFA_LIFECYCLE_ASSERTION: repeated finalize changed query result" ;
+  let mutations =
+    [ "fresh_owner", (fun () -> ignore (C.fresh_owner session));
+      "notify_stored_root", (fun () ->
+        C.notify_stored_root session ~binder ~body
+          ~canonical_name:(M.binding_name names ~prefix:"" binder));
+      "notify_rejected_root", (fun () -> C.notify_rejected_root session ~binder ~body);
+      "observe_literal", (fun () ->
+        C.observe_literal session ~owner ~expr:body ~name:"late" ~arity:1);
+      "notify_stored_literal", (fun () -> C.notify_stored_literal session ~name:"late");
+      "register_local_alias", (fun () ->
+        C.register_local_alias session ~owner ~binder ~source);
+      "register_local_expr", (fun () -> C.register_local_expr session ~owner ~binder body);
+      "register_call", (fun () ->
+        ignore (C.register_call session ~owner ~binder ~head:body ~supplied:1
+          ~omitted_slots:0 ~legacy_residual:false));
+      "register_expr_call", (fun () ->
+        ignore (C.register_expr_call session ~owner body ~head:body ~supplied:1
+          ~omitted_slots:0 ~legacy_residual:false)) ]
+  in
+  List.iter (fun (label, mutation) ->
+    expect_invalid label invalid_message mutation ;
+    if snapshot () <> initial then
+      Test.fail "OCAML_CFA_LIFECYCLE_ASSERTION: %s changed finalized state" label)
+    mutations
+
 let check_metadata_pending build_dir =
   let module C = Arch_index__Arch_index_cfa_cmt in
   let module M = Arch_index__Arch_index_cmt in
@@ -109,6 +198,7 @@ let check_metadata_pending build_dir =
 
 let check_literal_identity build_dir =
   let module C = Arch_index__Arch_index_cfa_cmt in
+  let module R = Arch_index__Arch_index_cfa in
   let module M = Arch_index__Arch_index_cmt in
   let open Typedtree in
   let expect label condition =
@@ -218,24 +308,24 @@ let check_literal_identity build_dir =
   run "accepted" (fun owner _ observe store -> both owner observe ; store first ; store second)
     names [] ;
   run "missing observation" (fun _ _ _ store -> store first ; store second)
-    [] ["dropped_node"] ;
+    [] [R.Dropped_node] ;
   run "missing storage" (fun owner _ observe _ -> both owner observe)
-    [] ["dropped_node"] ;
+    [] [R.Dropped_node] ;
   run "wrong owner" (fun _ wrong observe store -> both wrong observe ; store first ; store second)
-    [] ["dropped_node"] ;
+    [] [R.Dropped_node] ;
   run "wrong physical bodies" (fun owner _ observe store ->
     observe owner {yes_copy with exp_loc = ghost} first ;
     observe owner {no_copy with exp_loc = ghost} second ; store first ; store second)
-    [] ["dropped_node"] ;
+    [] [R.Dropped_node] ;
   run "late duplicate name" (fun owner _ observe store ->
     observe owner yes_copy first ; store first ; observe owner no_copy first ; store first)
-    [] ["dropped_node"] ;
+    [] [R.Dropped_node] ;
   run "late conflicting owner" (fun owner wrong observe store ->
     both owner observe ; store first ; store second ; observe wrong yes_copy first)
-    [second] ["dropped_node"] ;
+    [second] [R.Dropped_node] ;
   run "late conflicting name" (fun owner _ observe store ->
     both owner observe ; store first ; store second ; observe owner yes_copy second)
-    [second] ["dropped_node"]
+    [second] [R.Dropped_node]
 
 let register () =
   Test.register ~__FILE__
@@ -534,6 +624,7 @@ let register () =
         (count rich "SELECT count(*) FROM calls c JOIN functions f ON f.id=c.caller_id JOIN call_exn_scopes l ON l.call_id=c.id JOIN exn_scopes s ON s.id=l.scope_id WHERE f.name='scoped' AND c.callee_name IN ('meta_one','meta_cases') AND s.channel='result'") 2) ;
   check_metadata_pending fixture.build_dir ;
   check_literal_identity fixture.build_dir ;
+  check_session_lifecycle fixture.build_dir ;
   let reaches_code, reaches_output = query_raw rich ["reaches"; "unique_run"; "f"] in
   if reaches_code <> 0 then
     Test.fail "OCAML_CFA_SETUP: arch-query reaches exited %d: %s" reaches_code reaches_output ;
