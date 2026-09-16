@@ -150,12 +150,12 @@ let register_resolution () =
                   owner owner))
             1 ;
           Batch.eq_int b
-            ~msg:("LOCAL_RECURSION_ASSERTION: " ^ owner ^ " self-head reaches its own stored root as MAY_ENUMERATED only")
+            ~msg:("LOCAL_RECURSION_ASSERTION: " ^ owner ^ " self-head stages reach their own stored root as MAY_ENUMERATED only")
             (count db
                (Printf.sprintf
                   "SELECT count(*) FROM calls c JOIN functions f ON f.id=c.caller_id WHERE f.name LIKE '%s.<fun:%%' AND f.name NOT LIKE '%s.<fun:%%.<fun:%%' AND c.callee_id=f.id AND c.kind='MAY_ENUMERATED' AND c.top_reason IS NULL AND c.top_anchor IS NULL"
                   owner owner))
-            1 ;
+            (if owner = "partial" then 2 else 1) ;
           Batch.eq_int b
             ~msg:("LOCAL_RECURSION_ASSERTION: " ^ owner ^ " self-head never becomes MUST")
             (count db
@@ -201,15 +201,15 @@ let register_resolution () =
            "SELECT count(*) FROM calls c JOIN functions f ON f.id=c.caller_id WHERE f.name LIKE 'pattern_annotated.<fun:%' AND c.callee_name='aux' AND c.callee_id IS NULL AND c.top_reason='callback_param'")
         1 ;
       Batch.eq_int b
-        ~msg:"LOCAL_RECURSION_ASSERTION: mutual RHS invocations remain callback TOP"
+        ~msg:"LOCAL_RECURSION_ASSERTION: supported mutual RHS invocations no longer remain callback TOP"
         (count db
            "SELECT count(*) FROM calls c JOIN functions f ON f.id=c.caller_id WHERE f.name LIKE 'mutual.<fun:%' AND c.callee_id IS NULL AND c.kind='MAY_TOP' AND c.top_reason='callback_param'")
-        1 ;
+        0 ;
       Batch.eq_int b
-        ~msg:"LOCAL_RECURSION_ASSERTION: mutual legacy traversal retains its one bounded cross-literal edge"
+        ~msg:"LOCAL_RECURSION_ASSERTION: mutual traversal resolves both bounded cross-literal edges"
         (count db
            "SELECT count(*) FROM calls c JOIN functions caller ON caller.id=c.caller_id JOIN functions target ON target.id=c.callee_id WHERE caller.name LIKE 'mutual.<fun:%' AND target.name LIKE 'mutual.<fun:%' AND caller.id<>target.id AND c.kind='MAY_ENUMERATED'")
-        1 ;
+        2 ;
       Batch.eq_int b
         ~msg:"LOCAL_RECURSION_ASSERTION: nonrecursive continuation call keeps its existing resolved literal target"
         (count db

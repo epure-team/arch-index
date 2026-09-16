@@ -1,5 +1,8 @@
 let meta_one x = Ok x
 let meta_two x y = Ok (x + y)
+let meta_returned x =
+  let returned = fun y -> Ok (x + y) in
+  returned
 let meta_tuple (x, y) = Ok (x + y)
 let meta_cases = function x -> Ok x
 let meta_labeled ~x y = Ok (x + y)
@@ -23,3 +26,6 @@ let match_guard choose x =
 let scoped choose x =
   let picked = if choose then meta_one else meta_cases in
   try match picked x with Error _ -> Ok 0 | Ok value -> Ok value with Exit -> Ok 1
+let mixed_arity choose x =
+  let picked = if choose then meta_returned else meta_two in
+  picked x

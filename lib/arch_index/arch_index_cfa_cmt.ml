@@ -19,6 +19,7 @@ type callable = {
   body : Typedtree.expression;
   result : Arch_index_cfa.cell;
   mutable target : string option;
+  mutable residuals : Arch_index_cfa.residual array option;
 }
 
 type application_result = {
@@ -88,6 +89,29 @@ let%test "CFA owners are session-local tokens" =
        {session = 2; serial = 0; parent_owner = None})
 
 let next_session = ref 0
+
+let supported_formal_shape (param : Typedtree.function_param) =
+  match param.fp_partial, param.fp_arg_label, param.fp_kind with
+  | Typedtree.Total, (Asttypes.Nolabel | Asttypes.Labelled _),
+    Tparam_pat {pat_desc = Tpat_var (binder, _, _); _} ->
+      Ident.name binder <> "_"
+  | _ -> false
+
+let supported_callable (expr : Typedtree.expression) =
+  match expr.exp_desc with
+  | Texp_function (params, Tfunction_body _) ->
+      List.for_all supported_formal_shape params
+  | _ -> false
+
+let install_callable_target callable target =
+  match callable.target, callable.residuals with
+  | Some existing, Some _ when existing = target -> ()
+  | _ ->
+      callable.target <- Some target ;
+      callable.residuals <-
+        Some
+          (Array.init (List.length callable.formals) (fun consumed ->
+               {Arch_index_cfa.target; consumed}))
 
 type transfer_policy = {
   lookup : Ident.t -> Arch_index_cfa.cell option;
@@ -166,10 +190,10 @@ let create ~binding_name ~fn_arity (structure : Typedtree.structure) =
         cell
   in
   let supported_formal (param : Typedtree.function_param) =
-    match param.fp_partial, param.fp_arg_label, param.fp_kind with
-    | Typedtree.Total, ((Asttypes.Nolabel | Asttypes.Labelled _) as label),
+    match param.fp_arg_label, param.fp_kind with
+    | ((Asttypes.Nolabel | Asttypes.Labelled _) as label),
       Tparam_pat {pat_desc = Tpat_var (binder, _, _); _}
-      when Ident.name binder <> "_" ->
+      when supported_formal_shape param ->
         Some {label; binder; cell = cell binder}
     | _ -> None
   in
@@ -183,7 +207,8 @@ let create ~binding_name ~fn_arity (structure : Typedtree.structure) =
             let formals = List.filter_map supported_formal params in
             if List.length formals = List.length params then
               callables :=
-                {expr; formals; body; result = Arch_index_cfa.fresh domain; target = None}
+                {expr; formals; body; result = Arch_index_cfa.fresh domain;
+                 target = None; residuals = None}
                 :: !callables
         | Texp_apply _ ->
             application_results :=
@@ -222,7 +247,8 @@ let create ~binding_name ~fn_arity (structure : Typedtree.structure) =
                   List.for_all
                     (fun (binding : Typedtree.value_binding) ->
                       match binding.vb_pat.pat_desc, binding.vb_expr.exp_desc with
-                      | Tpat_var (id, _, _), Texp_function _ -> Ident.name id <> "_"
+                      | Tpat_var (id, _, _), _ ->
+                          Ident.name id <> "_" && supported_callable binding.vb_expr
                       | _ -> false)
                     bindings
             in
@@ -244,7 +270,7 @@ let create ~binding_name ~fn_arity (structure : Typedtree.structure) =
                         List.iter
                           (fun (callable : callable) ->
                             if callable.expr == binding.vb_expr then
-                              callable.target <- Some name)
+                              install_callable_target callable name)
                           !callables ;
                         Hashtbl.replace eligible (Ident.unique_name id) () ;
                         Hashtbl.replace owners (Ident.unique_name id) None ;
@@ -295,7 +321,7 @@ let observe_literal t ~owner ~expr ~name ~arity =
           literal.observed <- Some (name, arity) ;
           List.iter
             (fun (callable : callable) ->
-              if callable.expr == expr then callable.target <- Some name)
+              if callable.expr == expr then install_callable_target callable name)
             t.callables
       | Some expected when same_owner expected owner ->
           (match literal.observed with
@@ -303,7 +329,7 @@ let observe_literal t ~owner ~expr ~name ~arity =
               literal.observed <- Some (name, arity) ;
               List.iter
                 (fun (callable : callable) ->
-                  if callable.expr == expr then callable.target <- Some name)
+                  if callable.expr == expr then install_callable_target callable name)
                 t.callables
           | Some prior when prior = (name, arity) -> ()
           | Some _ -> literal.ambiguous <- true)
@@ -315,7 +341,7 @@ let observe_literal t ~owner ~expr ~name ~arity =
         :: t.literals ;
       List.iter
         (fun (callable : callable) ->
-          if callable.expr == expr then callable.target <- Some name)
+          if callable.expr == expr then install_callable_target callable name)
         t.callables
 
 let notify_stored_literal t ~name =
@@ -497,20 +523,26 @@ let register_application t ~owner ~application ~head ~args ~legacy_residual =
         let remaining = List.filteri (fun index _ -> index >= consumed) callable.formals in
         let rec connect count formals actuals =
           match formals, actuals with
-          | _, [] | [], _ -> Some count
+          | _, [] -> `Matched count
+          | [], _ :: _ -> `Overapplied
           | formal :: formals, (label, Some actual) :: actuals
             when same_label formal.label label ->
               Arch_index_cfa.copy domain ~src:actual ~dst:formal.cell ;
               connect (count + 1) formals actuals
-          | _ -> None
+          | _ -> `Unsupported
         in
         (match connect 0 remaining actuals with
-        | None ->
+        | `Unsupported | `Overapplied ->
             Arch_index_cfa.seed_reason domain result Arch_index_cfa.Callback_param
-        | Some newly_consumed ->
+        | `Matched newly_consumed ->
             let total = consumed + newly_consumed in
             if total < List.length callable.formals then
-              Arch_index_cfa.seed_residual domain result {target; consumed = total}
+              match callable.residuals with
+              | Some residuals ->
+                  Arch_index_cfa.seed_residual domain result residuals.(total)
+              | None ->
+                  Arch_index_cfa.seed_reason domain result
+                    Arch_index_cfa.Callback_param
             else Arch_index_cfa.copy domain ~src:callable.result ~dst:result)
   in
   Arch_index_cfa.on_target t.domain head_cell
@@ -564,6 +596,16 @@ let finalize t = finalize_with_hook ~before_solve:(fun () -> ()) t
 module For_tests = struct
   let finalize_with_after_staging_hook t hook =
     finalize_with_hook ~before_solve:hook t
+
+  let residual_identity_count t =
+    List.fold_left
+      (fun count callable ->
+        count
+        +
+        match callable.residuals with
+        | None -> 0
+        | Some residuals -> Array.length residuals)
+      0 t.callables
 end
 
 let value_of_call t token =

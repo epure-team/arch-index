@@ -49,6 +49,13 @@
       "at": "2026-09-16T16:00:10+02:00",
       "by": "roster-review",
       "reason": "Round 1 found two CRITICAL spec violations, three HIGH correctness findings, and two MEDIUM robustness/checker findings; convergence gate passed and routed the task back to implementation."
+    },
+    {
+      "phase": "implement",
+      "outcome": "COMPLETED",
+      "at": "2026-09-16T16:40:49+02:00",
+      "by": "roster-implement",
+      "reason": "Round-1 loop-back corrected all seven findings and added one runnable review ratchet. Full suite 345/345, CHECK1 517 cases, authentic CHECK2 plus exit controls, two identical self-index 2x2 calibrations, and pinned410 CHECK3 passed with +70 Irmin/+256 protocol relations, zero relation losses, and zero new MUST rows."
     }
   ]
 }

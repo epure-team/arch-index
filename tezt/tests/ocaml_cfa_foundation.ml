@@ -68,6 +68,13 @@ let check_session_lifecycle build_dir =
     C.register_expr_call session ~owner body ~head:body ~supplied:1
       ~omitted_slots:0 ~legacy_residual:false
   in
+  (match !application with
+  | Some ({exp_desc = Texp_apply (head, args); _} as application) ->
+      ignore
+        (C.register_application session ~owner ~application ~head ~args
+           ~legacy_residual:false)
+  | _ -> Test.fail "OCAML_CFA_LIFECYCLE_SETUP: application absent") ;
+  let residual_identities = C.For_tests.residual_identity_count session in
   let invalid_message = "CFA CMT session already finalized" in
   let expect_invalid label expected thunk =
     match (try thunk () ; None with Invalid_argument message -> Some message) with
@@ -90,6 +97,9 @@ let check_session_lifecycle build_dir =
     (fun () -> ignore (C.value_of_call session token)) ;
   ignore (C.fresh_owner session ~body) ;
   C.finalize session ;
+  if C.For_tests.residual_identity_count session <> residual_identities then
+    Test.fail
+      "OCAML_CFA_LIFECYCLE_ASSERTION: solve allocated a residual identity" ;
   let snapshot () = C.value_of_call session token in
   let initial = snapshot () in
   C.finalize session ;
@@ -167,6 +177,12 @@ let check_metadata_pending build_dir =
     c.caller_name = caller && match c.head with M.Head_enumerated name -> name = callee | _ -> false) calls in
   let require label predicate = if not predicate then Test.fail "OCAML_CFA_METADATA_ASSERTION: %s" label in
   let exactly count rows = List.length rows = count in
+  let mixed_one = selected "mixed_arity" "meta_returned"
+  and mixed_two = selected "mixed_arity" "meta_two" in
+  require "mixed arity keeps both candidates"
+    (exactly 1 mixed_one && exactly 1 mixed_two) ;
+  require "mixed arity copies source partiality"
+    (List.for_all (fun c -> c.M.partial) (mixed_one @ mixed_two)) ;
   require "same-line occurrences remain four physical expanded rows"
     (List.length (List.filter (fun c -> c.M.caller_name = "same_line" && match c.head with M.Head_enumerated ("meta_one" | "meta_cases") -> true | _ -> false) calls) = 4) ;
   let conditional = selected "conditional" "meta_one" @ selected "conditional" "meta_cases" in
@@ -565,6 +581,66 @@ let register () =
               AND c.kind='MAY_ENUMERATED' AND c.edge_form IS NULL")
         2 ;
       Batch.eq_int b
+        ~msg:"OCAML_CFA_PROPAGATION_RED: direct application-result head reaches target"
+        (count rich
+           "SELECT count(*) FROM calls c \
+            JOIN functions source ON source.id=c.caller_id \
+            JOIN functions target ON target.id=c.callee_id \
+            WHERE source.name='direct_staged_run' AND target.name='ho_target' \
+              AND source.module_id=target.module_id \
+              AND c.call_site LIKE '%higher_order.ml:35' \
+              AND c.kind='MAY_ENUMERATED' AND c.edge_form IS NULL")
+        2 ;
+      List.iter
+        (fun (caller, line) ->
+          Batch.eq_int b
+            ~msg:("OCAML_CFA_RECURSION_RED: " ^ caller ^ " reaches target")
+            (count rich
+               (Printf.sprintf
+                  "SELECT count(*) FROM calls c \
+                   JOIN functions source ON source.id=c.caller_id \
+                   JOIN functions target ON target.id=c.callee_id \
+                   WHERE source.name='%s' AND target.name='rec_target' \
+                     AND source.module_id=target.module_id \
+                     AND c.call_site LIKE '%%higher_order.ml:%d' \
+                     AND c.kind='MAY_ENUMERATED' AND c.edge_form IS NULL"
+                  caller line))
+            1)
+        [("direct_rec_run", 41); ("local_rec_run", 47)] ;
+      Batch.eq_int b
+        ~msg:"OCAML_CFA_RECURSION_ASSERTION: mixed recursive group stays open"
+        (count rich
+           "SELECT count(*) FROM calls c \
+            JOIN functions source ON source.id=c.caller_id \
+            JOIN functions target ON target.id=c.callee_id \
+            WHERE source.name='mixed_group_run' AND target.name='rec_target' \
+              AND c.call_site LIKE '%higher_order.ml:54' \
+              AND c.kind='MAY_ENUMERATED' AND c.edge_form IS NULL")
+        0 ;
+      Batch.eq_int b
+        ~msg:"OCAML_CFA_RECURSION_ASSERTION: mixed recursive group retains TOP"
+        (count rich
+           "SELECT count(*) FROM calls c JOIN functions source ON source.id=c.caller_id \
+            WHERE source.name='mixed_group_run' AND c.kind='MAY_TOP' \
+              AND c.top_reason='callback_param' AND c.edge_form IS NULL")
+        1 ;
+      Batch.eq_int b
+        ~msg:"OCAML_CFA_RESIDUAL_ASSERTION: overapplied result does not leak raw return"
+        (count rich
+           "SELECT count(*) FROM calls c JOIN functions source ON source.id=c.caller_id \
+            JOIN functions target ON target.id=c.callee_id \
+            WHERE source.name='over_downstream' \
+              AND target.name LIKE 'over_make.<fun:%' \
+              AND c.kind='MAY_ENUMERATED' AND c.edge_form IS NULL")
+        0 ;
+      Batch.eq_int b
+        ~msg:"OCAML_CFA_RESIDUAL_ASSERTION: overapplied result remains callback-open"
+        (count rich
+           "SELECT count(*) FROM calls c JOIN functions source ON source.id=c.caller_id \
+            WHERE source.name='over_downstream' AND c.kind='MAY_TOP' \
+              AND c.top_reason='callback_param' AND c.edge_form IS NULL")
+        2 ;
+      Batch.eq_int b
         ~msg:"OCAML_CFA_CAPTURE_RED: exact lexical alias capture reaches target"
         (count rich
            "SELECT count(*) FROM calls c JOIN functions caller ON caller.id=c.caller_id \
@@ -697,6 +773,8 @@ let register () =
         (count rich "SELECT count(*) FROM calls c JOIN functions f ON f.id=c.caller_id WHERE f.name='overapply' AND c.callee_name IN ('meta_over','meta_over2') AND c.kind='MAY_ENUMERATED' AND c.top_reason IS NULL AND c.top_anchor IS NULL") 2 ;
       Batch.eq_int b ~msg:"OCAML_CFA_RESIDUAL: opaque frontier and overapplication residual stay independent"
         (count rich "SELECT count(*) FROM calls c JOIN functions f ON f.id=c.caller_id WHERE f.name='overapply' AND c.kind='MAY_TOP' AND c.top_reason='callback_param'") 2 ;
+      Batch.eq_int b ~msg:"OCAML_CFA_ARITY: authentic mixed candidates remain distinct"
+        (count rich "SELECT count(*) FROM calls c JOIN functions f ON f.id=c.caller_id WHERE f.name='mixed_arity' AND c.callee_name IN ('meta_returned','meta_two') AND c.kind='MAY_ENUMERATED'") 2 ;
       Batch.eq_int b ~msg:"OCAML_CFA_METADATA: match c_guard and RHS calls both retain candidates"
         (count rich "SELECT count(*) FROM calls c JOIN functions f ON f.id=c.caller_id WHERE f.name='match_guard' AND c.callee_name IN ('meta_one','meta_cases') AND c.kind='MAY_ENUMERATED'") 4 ;
       Batch.eq_int b ~msg:"OCAML_CFA_CHANNELS: expanded candidates keep exception scope"

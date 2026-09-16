@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "revision": "60cc88be2db717b0c4727b1206ab666570585df1+cfa-propagation-source-overlay-2x2-2026-09-16",
+  "revision": "c9ce0fc3094db44793dc2ad79b6067cebdd3e66e+cfa-propagation-review-fixes-overlay-2x2-2026-09-16",
   "modules": [
     "lib/arch_index/arch_errors_config.ml",
     "lib/arch_index/arch_index.ml",
@@ -32,9 +32,9 @@
   ],
   "totals": {
     "modules": 27,
-    "functions": 1132,
-    "calls": 7026,
-    "origins": 613
+    "functions": 1142,
+    "calls": 7061,
+    "origins": 614
   },
   "origin_groups": [
     {
@@ -59,7 +59,7 @@
       "channel": "exception",
       "form": "index",
       "escapes": 1,
-      "count": 106
+      "count": 107
     },
     {
       "channel": "exception",
