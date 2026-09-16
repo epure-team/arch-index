@@ -91,6 +91,13 @@
       "at": "2026-09-16T18:55:00+02:00",
       "by": "roster-review",
       "reason": "Round 3 final owner, architecture and spec-compliance fanout independently passed build, full345, CHECK1/2/3, review ratchet and timeout setup classification on d04edfb. The convergence gate passed with no strike, warnings or violations."
+    },
+    {
+      "phase": "qa",
+      "outcome": "GO",
+      "at": "2026-09-16T19:06:00+02:00",
+      "by": "roster-qa",
+      "reason": "QA round 1 passed build, forced full345, CHECK1 517, authentic CHECK2, pinned410 CHECK3, review ratchet and one-second setup classification on 81d23cc; no TUI or code-intel scope and OpenCode remained skipped-degraded."
     }
   ]
 }

@@ -1,0 +1,27 @@
+{
+  "task": "ocaml-cfa-propagation",
+  "date": "2026-09-16T19:06:00+02:00",
+  "status": "GO",
+  "cycle": 1,
+  "round": 1,
+  "qa_no_go_round": 0,
+  "max_qa_rounds_at_emission": 5,
+  "escalation": null,
+  "rounds_audit": [
+    {
+      "round": 1,
+      "date": "2026-09-16",
+      "verdict": "GO",
+      "causes": [],
+      "qualifying": false
+    }
+  ],
+  "cross_runtime": {
+    "opencode": {
+      "status": "skipped-degraded",
+      "reason": "runtime degraded during review with unchanged runtime version",
+      "config_digest": "opencode:76f897c73342fdbf",
+      "source": "review-go"
+    }
+  }
+}
