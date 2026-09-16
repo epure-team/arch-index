@@ -146,8 +146,9 @@ let hop3 = hop2
    ident), so admitting it there makes [nargs < head_arity] false for every
    application, and [arity_partial] — two arguments to a 3-ary target, whose
    body has NOT run — was emitted as MUST. Verified by building it that way:
-   [arity_partial -> arity_alias] came out [MUST]; with the tables kept separate
-   it is [MAY_TOP]. *)
+   [arity_partial -> arity_alias] came out [MUST]. CFA now follows the alias to
+   the actual target while retaining partiality, so the sound result is one
+   [MAY_ENUMERATED] edge to [arity_mk], never MUST and never TOP. *)
 type unary = int -> int
 
 let arity_mk (a : int) (b : int) : unary = fun c -> a + b + c
@@ -219,17 +220,24 @@ let register_local_slice () =
          becomes MUST — a proof-carrying claim that a body ran when it did
          not. *)
       Batch.eq_string b
-        ~msg:"an under-saturated application THROUGH an alias is never MUST (alias binders stay out of local_fn_stamps)"
+        ~msg:"an under-saturated application through an alias resolves to the actual target as MAY_ENUMERATED"
         (String.concat ","
            (Db.with_db db (fun c ->
                 Db.rows c
-                  "SELECT COALESCE(c.kind,'NULL') FROM calls c \
+                  "SELECT c.callee_name || '/' || c.kind FROM calls c \
                    JOIN functions cf ON c.caller_id=cf.id \
-                   WHERE cf.name='arity_partial' AND c.callee_name='arity_alias'")
+                   WHERE cf.name='arity_partial' ORDER BY c.callee_name,c.kind")
             |> List.map (function
                  | [x] -> Db.to_string ~sql:"arity_partial" x
                  | _ -> Test.fail "unexpected row shape")))
-        "MAY_TOP" ;
+        "arity_mk/MAY_ENUMERATED" ;
+      Batch.eq_int b
+        ~msg:"the refined under-saturated alias call is neither MUST nor TOP"
+        (Db.with_db db (fun c ->
+             Db.int c
+               "SELECT count(*) FROM calls c JOIN functions cf ON c.caller_id=cf.id \
+                WHERE cf.name='arity_partial' AND (c.kind='MUST' OR c.kind='MAY_TOP')"))
+        0 ;
       List.iter
         (fun (caller, callee, kind, resolved) ->
           Batch.check b
@@ -535,20 +543,21 @@ let register_query_readers () =
       in
       (* Derived by hand BEFORE running, from the fixture: the only edges into
          pfa_a functions with a resolved callee_id and edge_form IS NULL are
-         [caller]->[raiser] and [via_open]/[qualified_alias]... which are
-         aliases. So exactly one non-alias resolved in-module edge remains.
+         [caller]->[raiser] and the CFA-refined ordinary application
+         [arity_partial]->[arity_mk]. [via_open]/[qualified_alias] are aliases.
+         So exactly two non-alias resolved in-module edges remain.
          All seven alias edges are excluded — the premise guard above asserts
          that seven were emitted. Counting them instead would inflate this
          number well past 1, since [raiser] would gain [alias], [chain_target]
          [hop1], [hop1] [hop2], and [hop2] [hop3], each an alias binder that
-         invokes nothing. The assertion is on the excluded value, 1. *)
+         invokes nothing. The assertion is on the excluded value, 2. *)
       (match module_fan_in with
       | None ->
           Batch.check b ~msg:("god-modules reported a pfa_a row; output was:\n" ^ gm) false
       | Some n ->
           Batch.eq_int b
             ~msg:"god-modules counts the application but none of the seven alias bindings"
-            n 1) ;
+            n 2) ;
       (* LOW-3 / CHECK-2. The vocabulary is closed by a CHECK constraint, and a
          constraint nothing tries to violate is a constraint nobody knows is
          armed. Precedent: the identical assertion for an out-of-vocabulary

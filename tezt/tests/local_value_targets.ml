@@ -121,7 +121,15 @@ let register_rich () =
     List.iter (fun caller ->
       Batch.eq_int b ~msg:("LOCAL_VALUE_ASSERTION: refused form remains TOP " ^ caller)
         (count (Printf.sprintf "SELECT count(*) FROM calls c JOIN functions f ON f.id=c.caller_id WHERE f.name='%s' AND c.kind='MAY_TOP' AND c.callee_id IS NULL" caller)) 1)
-      ["chain"; "computed"; "persistent"; "qualified"; "partial_rhs"; "unqualified"; "Shadow.run"] ;
+      ["chain"; "computed"; "persistent"; "qualified"; "partial_rhs"; "Shadow.run"] ;
+    (* Stage2 CFA refines the root-level plain-variable alias only.  The
+       nested-module and computed forms above retain their existing refusals. *)
+    Batch.eq_int b ~msg:"LOCAL_VALUE_ASSERTION: root alias invocation reaches its actual CFA target"
+      (resolved count "unqualified" "local_base") 1 ;
+    Batch.eq_int b ~msg:"LOCAL_VALUE_ASSERTION: root CFA refinement adds neither MUST nor an old TOP"
+      (count "SELECT count(*) FROM calls c JOIN functions f ON f.id=c.caller_id WHERE f.name='unqualified' AND c.edge_form IS NULL AND c.kind IN ('MUST','MAY_TOP')") 0 ;
+    Batch.eq_int b ~msg:"LOCAL_VALUE_ASSERTION: root alias keeps its immediate predecessor independently"
+      (count "SELECT count(*) FROM calls c JOIN functions f ON f.id=c.caller_id JOIN functions t ON t.id=c.callee_id WHERE f.name='local_alias' AND t.name='local_base' AND f.module_id=t.module_id AND c.kind='MAY_ENUMERATED' AND c.edge_form='value_alias'") 1 ;
     Batch.eq_int b ~msg:"LOCAL_VALUE_ASSERTION: later mask resolves only its direct replacement body"
       (resolved count "masked" "Mask.alias") 1) ;
   Lwt.return_unit

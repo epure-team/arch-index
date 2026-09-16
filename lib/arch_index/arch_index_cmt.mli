@@ -330,6 +330,10 @@ type pending_call = {
     consumers (the LSP fallback path). *)
 val pending_display : pending_call -> string * string option
 
+val expand_cfa_calls :
+  ?preserve_cfa_provenance:bool ->
+  Arch_index_cfa_cmt.t -> pending_call list -> pending_call list
+
 (** A synthetic function node for a nested [fun …]/[function] literal
     ([parent.<fun:LINE:COL>], chained through enclosing nodes, [#N] in-marker
     ordinal on a same-position collision). Its body's calls are attributed to
@@ -443,6 +447,7 @@ val collect_calls_from_expr :
   ?local_alias_stamps:(string, string) Hashtbl.t ->
   ?module_alias_stamps:(string, string) Hashtbl.t ->
   ?local_module_targets:local_module_targets ->
+  ?cfa_session:Arch_index_cfa_cmt.t ->
   src_path:string ->
   caller_module:string ->
   caller_name:string ->

@@ -120,6 +120,38 @@ links, remains unchanged. This is a bounded identity rule, not a value-flow
 fixpoint. Tests: `tezt/tests/local_value_targets.ml`; contract:
 [`specs/tezos-residual-targets.md`](../specs/tezos-residual-targets.md).
 
+### Same-CMT finite function-value flow
+
+The stage2 inclusion solver extends **root** and **same-callable** nonrecursive
+plain-variable bindings with alias chains, collector-promoted literals, and
+`if`/`match`/sequence-result joins. Nested-module alias rules above are not
+generalized by this extension. A value contains two independent sets: known
+function targets and unknown reasons. Joining an opaque callback with a known
+function retains both; an invoked empty value remains unknown.
+
+New application candidates are ordinary `MAY_ENUMERATED` rows (`edge_form=NULL`,
+NULL TOP fields), never new `MUST` rows. Point-free declarations retain their
+immediate-predecessor `value_alias` rows and caller-query exclusion. Existing
+resolved static handling takes precedence. Candidate expansion preserves each
+physical occurrence and its metadata, even when two calls share a source line.
+Authoritative body arity determines conservative partiality; omitted labels or
+unknown arity keep an unknown contribution. Overapplication adds or retains one
+returned-function residual per occurrence, independently of an opaque frontier.
+
+One OCaml5.3 CMT is finalized after actual collector names and stored bodies
+have been reconciled. Binder identity and physical expressions, not positions,
+identify flow. Missing, rejected or conflicting literal evidence remains
+`dropped_node`. Flat output requires a unique faithful same-file caller/target;
+otherwise the new flow produces `*TOP*` with no callee file. Flat does not acquire
+main's kind/reason or proof-query contract.
+
+This is a finite inclusion foundation, **not complete interprocedural 0CFA**:
+argument/formal, call-result/return, capture, recursive binding, partial-closure,
+general pattern and functor substitution transfer remain excluded. See
+[`specs/ocaml-cfa-foundation.md`](../specs/ocaml-cfa-foundation.md) and the native
+`tezt/tests/ocaml_cfa_foundation.ml` controls. Frozen Tezos measurements are
+reported separately from semantic fixture qualification.
+
 ### Lambda nodes
 
 Every `fun …`/`function` literal is promoted to a **synthetic function node** named
@@ -131,10 +163,11 @@ block → `MUST`; every other occurrence (argument, record/tuple/ref store, retu
 conditional invocation) → `MAY_ENUMERATED`; a literal bound and never referenced gets **no** edge
 (honestly dead). This paragraph is about **`fun …`/`function` literal** bindings only: a binding is
 tracked in `local_lam_stamps` iff its pattern is a plain `Tpat_var` and its RHS is a single
-`Texp_function` literal (`arch_index_cmt.ml:1176-1183`). Bindings that are not that shape —
-a conditional RHS, a tuple pattern, or a `Tpat_alias` **pattern-alias** (`let (p as x) = fun …`) —
-are not tracked, and calls through them stay `MAY_TOP` (`top_reason = 'callback_param'`, which
-folds in this `pattern_bound` sub-case; `arch_index_cmt.ml:537-548`). *"Alias" here is the OCaml
+`Texp_function` literal. The separate finite-flow extension above can enumerate
+conditional RHS literals, without turning those new candidates into `MUST`.
+A tuple pattern or a `Tpat_alias` **pattern-alias** (`let (p as x) = fun …`)
+remains unsupported and calls through it stay `MAY_TOP`
+(`top_reason = 'callback_param'`). *"Alias" here is the OCaml
 pattern form `p as x`, and is unrelated to `edge_form = 'value_alias'`*, which is a point-free
 **identifier** RHS (`let f = M.g`), is tracked, resolves to a `callee_id`, and is `MAY_ENUMERATED`
 rather than `MAY_TOP`. The two are different constructs that share an English word — the same
@@ -257,7 +290,7 @@ never silently stored or dropped:
 
 | Reason | Producer | Meaning |
 |---|---|---|
-| `callback_param` | OCaml | A function-typed parameter or local closure invoked/passed onward — the target could be anything the caller was given. Also covers, for now: a local `let`-bound lambda whose pattern was a tuple/alias/conditional binding rather than a plain identifier (`pattern_bound` in the roadmap's own vocabulary) — the CMT walker cannot yet distinguish these two structurally; see `lib/arch_index/arch_index_cmt.ml`'s own comment on `top_reason` for what tracking a future item would need to add to split them — AND a genuinely computed function value with no binding site at all (an anonymous application head, or the residual callee of an over-application). All three are "a callable value whose origin this walker did not track," read broadly under the roadmap's own "closure" wording. |
+| `callback_param` | OCaml | An opaque function parameter, unsupported capture/pattern value, invoked bottom, unsupported computed value, or returned-function overapplication residual. Supported same-CMT aliases and branch-result flow can retain known candidates beside this reason; the unknown contribution is not absorbed by those candidates. Tuple and pattern-alias bindings remain unsupported. |
 | `module_param` | OCaml | A qualified path whose root is a non-persistent ident — a functor argument or first-class module value. |
 | `dropped_node` | OCaml | The callee's own row, or its whole compilation unit, was intentionally rejected this run (a genuine SQL-constraint rejection, not "not found") — its body exists but was never read, so the honest answer is ⊤, never a resolved leaf. |
 | `ambiguous_unit` | OCaml | The reference names an INDEXED unit, but more than one distinct function answers to it and nothing in a `.cmt` says which one the caller was linked against. Distinct from an external leaf (no indexed unit at all), which keeps its `MUST` — conflating the two trades a precision problem for a soundness-shaped ⊤ flood. Rare, and measured on external corpora rather than only in-repo: this repo's own unit-name registry has **0** collided names among its 88 units (round-5 review; an earlier revision of this row cited "1 ambiguous unit name in 93", which does not reproduce — see `arch_index_cmt.ml`'s own comment on `unit_paths`), so no `ambiguous_unit` row is possible here today; a full run emits **0** such rows on octez-manager (58 553 calls) and **1** on proto_alpha/lib_protocol (73 588 calls). The single proto_alpha row is a test helper forwarding to the protocol module of the same basename (`test/helpers/script_big_map.ml:8`), where both readings define the referenced function — the honest two-answer case, not a resolver gap. |

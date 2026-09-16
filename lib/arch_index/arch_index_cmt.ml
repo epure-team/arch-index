@@ -670,6 +670,94 @@ let pending_display (p : pending_call) =
   | Head_local n | Head_enumerated n | Head_unknown (n, _) -> (n, None)
   | Head_qualified (m, n) -> (n, m)
 
+let cfa_marker_prefix = "__cfa:"
+let cfa_expanded_marker = "__cfa:expanded"
+
+let expand_cfa_value (call : pending_call)
+    (targets, reasons, supplied, omitted_slots, legacy_residual) =
+  (* This is intentionally per candidate.  A mixed-arity value may produce one
+     partial and one saturated edge from the same physical application;
+     collapsing with [List.exists] would copy the stronger fact onto both rows. *)
+  let bounded = List.map (fun (name, arity) ->
+      {call with
+       head = Head_enumerated name;
+       partial = call.partial || (arity > 0 && supplied < arity);
+       edge_form = None}) targets in
+  let reason = function
+    | "dropped_node" -> Dropped_node
+    | _ -> Callback_param
+  in
+  let unknown_required =
+    omitted_slots > 0 || List.exists (fun (_, arity) -> arity <= 0) targets
+  in
+  let unknowns =
+    List.map (fun r ->
+        {call with head = Head_unknown ("*TOP*", reason r); edge_form = None}) reasons
+    @
+    if unknown_required then
+      [{call with head = Head_unknown ("*TOP*", Callback_param); edge_form = None}]
+    else []
+  in
+  let residual =
+    if not legacy_residual
+       && List.exists (fun (_, arity) -> arity > 0 && supplied > arity) targets
+    then
+      [{call with head = Head_unknown ("*TOP*", Callback_param); edge_form = None}]
+    else []
+  in
+  if bounded = [] && unknowns = [] then
+    (* A bottom value is an invoked unresolved CFA contribution.  Main keeps
+       the source binder spelling; flat recognizes the private provenance and
+       renders its mandated [*TOP*] tuple at serialization time. *)
+    [{call with edge_form = None}]
+  else bounded @ unknowns @ residual
+
+let expand_cfa_calls ?(preserve_cfa_provenance = false) session calls =
+  List.concat_map
+    (fun (call : pending_call) ->
+      match call.edge_form with
+      | Some marker when String.starts_with ~prefix:cfa_marker_prefix marker ->
+          let token_text = String.sub marker (String.length cfa_marker_prefix)
+              (String.length marker - String.length cfa_marker_prefix) in
+          (match
+             Option.bind (int_of_string_opt token_text)
+               (Arch_index_cfa_cmt.value_of_call session)
+           with
+          | None ->
+              [{call with edge_form = None}]
+          | Some value ->
+              let expanded = expand_cfa_value call value in
+              if preserve_cfa_provenance then
+                List.map (fun c -> {c with edge_form = Some cfa_expanded_marker}) expanded
+              else expanded)
+      | _ -> [call]) calls
+
+let%test "CFA expansion keeps partiality per candidate" =
+  let call =
+    {caller_module = "x.ml"; caller_name = "run";
+     head = Head_unknown ("*TOP*", Callback_param); local_module_invocation = false;
+     partial = false; cond = false; dead = false; call_site = "x.ml:1";
+     exn_scope = None; errch_scope = None; errch_propagates = None;
+     edge_form = Some "__cfa:0"}
+  in
+  match expand_cfa_value call (["one", 1; "two", 2], [], 1, 0, false) with
+  | [one; two] ->
+      one.head = Head_enumerated "one" && not one.partial
+      && two.head = Head_enumerated "two" && two.partial
+  | _ -> false
+
+let%test "CFA expansion retains omitted-slot uncertainty and one residual" =
+  let call =
+    {caller_module = "x.ml"; caller_name = "run";
+     head = Head_unknown ("*TOP*", Callback_param); local_module_invocation = false;
+     partial = false; cond = false; dead = false; call_site = "x.ml:1";
+     exn_scope = None; errch_scope = None; errch_propagates = None;
+     edge_form = Some "__cfa:1"}
+  in
+  let omitted = expand_cfa_value call (["one", 1], [], 1, 1, false) in
+  let over = expand_cfa_value call (["one", 1], ["opaque"], 2, 0, false) in
+  List.length omitted = 2 && List.length over = 3
+
 (** A synthetic function node for a nested [fun …]/[function] literal:
     [lam_name] chains through every enclosing node
     ([parent.<fun:LINE:COL>], 1-based column, [#N] in-marker ordinal on a
@@ -694,6 +782,7 @@ type lctx = {
          default. They must stay unreachable (that is what demotes their calls
          to conditional) while not counting as dead code. *)
   lcaller : string; (* attribution: top-level name or lambda chain *)
+  lcfa_owner : Arch_index_cfa_cmt.owner option;
   lexn : Arch_index_exn.acc;
       (* exception origins / handler scopes of THIS node: a lambda literal gets
          a fresh, empty accumulator, so a parent's [try] never covers its body *)
@@ -1342,6 +1431,7 @@ let collect_calls_from_expr_with_open_bodies ?(canon_exn = fun p -> Path.name p)
     ?(value_channels = [])
     ?(local_alias_stamps = Hashtbl.create 0) ?(module_alias_stamps = Hashtbl.create 0)
     ?(local_module_targets = Local_module_ids.empty)
+    ?cfa_session
     ?(open_body_targets = Hashtbl.create 0)
     ?recursive_body_targets
     ~src_path ~caller_module ~caller_name
@@ -1366,6 +1456,7 @@ let collect_calls_from_expr_with_open_bodies ?(canon_exn = fun p -> Path.name p)
       lhandlers = [];
       ldeferred = [];
       lcaller = caller;
+      lcfa_owner = Option.map Arch_index_cfa_cmt.fresh_owner cfa_session;
       lexn = Arch_index_exn.create ();
       lchannel = channel;
       lerrch = Arch_index_errch.create ();
@@ -1940,6 +2031,11 @@ let collect_calls_from_expr_with_open_bodies ?(canon_exn = fun p -> Path.name p)
                  calls attribute to the node and MUST = post-dominates the
                  LAMBDA's entry). *)
               let name = lambda_name expr.exp_loc in
+              (match cfa_session, (!cur).lcfa_owner with
+              | Some session, Some owner ->
+                  Arch_index_cfa_cmt.observe_literal session ~owner ~expr ~name
+                    ~arity:(fn_arity expr)
+              | _ -> ()) ;
               List.iter
                 (fun (_, target) ->
                   if expr == target.recursive_expected_body then (
@@ -2039,6 +2135,20 @@ let collect_calls_from_expr_with_open_bodies ?(canon_exn = fun p -> Path.name p)
                           match Hashtbl.find_opt let_head_call (Ident.unique_name aliased) with
                           | Some ord -> Hashtbl.replace let_head_call (Ident.unique_name id) ord
                           | None -> ())
+                      | _ -> ())
+                  | _ -> ()) ;
+                  (match cfa_session, (!cur).lcfa_owner, rec_flag,
+                         vb.vb_pat.pat_desc, vb.vb_expr.exp_desc with
+                  | Some session, Some owner, Asttypes.Nonrecursive,
+                    Tpat_var (id, _, _), Texp_ident (Path.Pident source, _, _) ->
+                      Arch_index_cfa_cmt.register_local_alias session ~owner
+                        ~binder:id ~source
+                  | _ -> ()) ;
+                  (match cfa_session, (!cur).lcfa_owner, rec_flag, vb.vb_pat.pat_desc with
+                  | Some session, Some owner, Asttypes.Nonrecursive, Tpat_var (id, _, _) ->
+                      (match vb.vb_expr.exp_desc with
+                      | Texp_function _ | Texp_ifthenelse _ | Texp_match _ | Texp_sequence _ ->
+                          Arch_index_cfa_cmt.register_local_expr session ~owner ~binder:id vb.vb_expr
                       | _ -> ())
                   | _ -> ()) ;
                   (* Sinks (specs/error-channels.md "Sinks"): [let _ = E in …]
@@ -2312,6 +2422,7 @@ let collect_calls_from_expr_with_open_bodies ?(canon_exn = fun p -> Path.name p)
                  defeats type inspection on a .cmt-restored env; otherwise use
                  the callee's type arrow arity. *)
               let nargs = List.length args in
+              let supplied_nargs = List.length (List.filter_map snd args) in
               (* Omitted labeled slots are not supplied expressions. Only the
                  new owned-body path uses this count; leave legacy head and
                  noreturn/CFG accounting unchanged in this focused slice. *)
@@ -2372,6 +2483,22 @@ let collect_calls_from_expr_with_open_bodies ?(canon_exn = fun p -> Path.name p)
                  [record_head]. [Some _] (the default) is the unchanged
                  slice-2 behaviour. *)
               let callee_ty_for_channel = ref (Some fn_expr.exp_type) in
+              (* Keep the existing type-based residual when it was already
+                 emitted.  Deferred CFA expansion can add the one missing
+                 residual for a candidate whose authoritative syntactic arity
+                 exposes an over-application hidden by the head type. *)
+              let legacy_recursive_overapplication =
+                match fn_expr.exp_desc with
+                | Texp_ident (Path.Pident id, _, _)
+                  when recursive_body_target id <> None ->
+                    let legacy_arity = arrow_arity fn_expr.exp_type in
+                    legacy_arity > 0 && nargs > legacy_arity
+                | _ -> false
+              in
+              let legacy_residual =
+                (head_arity > 0 && body_nargs > head_arity)
+                || legacy_recursive_overapplication
+              in
               (* The call fires AFTER its arguments evaluate, so the head (and
                  the residual/escape records) belong to the block reached AFTER
                  descending into fn + args: if an argument diverges
@@ -2409,13 +2536,35 @@ let collect_calls_from_expr_with_open_bodies ?(canon_exn = fun p -> Path.name p)
                         add_call ~partial ~is_head_of:expr.exp_loc ?callee_ty:!callee_ty_for_channel
                           (Head_local node_name) expr.exp_loc
                     | None ->
-                        (* Parameter / local / shadowing binding → unknowable. *)
-                        add_call
-                          ~partial
-                          ~is_head_of:expr.exp_loc
-                          ?callee_ty:!callee_ty_for_channel
-                          (Head_unknown (Ident.name id, Callback_param))
-                          expr.exp_loc)))
+                        match cfa_session, (!cur).lcfa_owner with
+                        | Some session, Some owner -> (
+                            match
+                              Arch_index_cfa_cmt.register_call session ~owner ~binder:id
+                                ~head:fn_expr
+                                ~supplied:supplied_nargs
+                                ~omitted_slots:(nargs - supplied_nargs)
+                                ~legacy_residual
+                            with
+                            | Some token ->
+                                (* This token is a session-private physical
+                                   occurrence id.  It is consumed by the
+                                   whole-CMT finalizer and never reaches the
+                                   calls table. *)
+                                add_call ~partial ~is_head_of:expr.exp_loc
+                                  ?callee_ty:!callee_ty_for_channel
+                                  ~edge_form:(cfa_marker_prefix ^ string_of_int token)
+                                  (Head_unknown (Ident.name id, Callback_param)) expr.exp_loc
+                            | None ->
+                                add_call ~partial ~is_head_of:expr.exp_loc
+                                  ?callee_ty:!callee_ty_for_channel
+                                  (Head_unknown (Ident.name id, Callback_param)) expr.exp_loc)
+                        | _ ->
+                          add_call
+                            ~partial
+                            ~is_head_of:expr.exp_loc
+                            ?callee_ty:!callee_ty_for_channel
+                            (Head_unknown (Ident.name id, Callback_param))
+                            expr.exp_loc)) )
                 | Texp_ident (path, _, _) ->
                     note_seen_value_path (Path.name path) ;
                     let callee_module, callee_name = path_to_module_name path in
@@ -2445,6 +2594,14 @@ let collect_calls_from_expr_with_open_bodies ?(canon_exn = fun p -> Path.name p)
                         ?callee_ty:!callee_ty_for_channel
                         (Head_qualified (callee_module, callee_name))
                         expr.exp_loc)
+                | (Texp_ifthenelse _ | Texp_match _ | Texp_sequence _) -> (
+                    match cfa_session, (!cur).lcfa_owner with
+                    | Some session, Some owner ->
+                        let token = Arch_index_cfa_cmt.register_expr_call session ~owner fn_expr
+                          ~head:fn_expr ~supplied:supplied_nargs ~omitted_slots:(nargs-supplied_nargs) ~legacy_residual in
+                        add_call ~partial ~is_head_of:expr.exp_loc ?callee_ty:!callee_ty_for_channel
+                          ~edge_form:(cfa_marker_prefix ^ string_of_int token) (Head_unknown ("*TOP*", Callback_param)) expr.exp_loc
+                    | _ -> add_call ~partial ~is_head_of:expr.exp_loc ?callee_ty:!callee_ty_for_channel (Head_unknown ("*TOP*", Callback_param)) expr.exp_loc)
                 | Texp_function _ -> (
                     (* Immediately-applied literal (beta-redex): the head IS
                        the lambda node named during the descent — a resolved
@@ -2469,17 +2626,7 @@ let collect_calls_from_expr_with_open_bodies ?(canon_exn = fun p -> Path.name p)
                    smaller than the observed literal arity. Preserve its
                    existing conservative residual as well; target refinement
                    must not silently delete another pending call. *)
-                let legacy_recursive_overapplication =
-                  match fn_expr.exp_desc with
-                  | Texp_ident (Path.Pident id, _, _)
-                    when recursive_body_target id <> None ->
-                      let legacy_arity = arrow_arity fn_expr.exp_type in
-                      legacy_arity > 0 && nargs > legacy_arity
-                  | _ -> false
-                in
-                if (head_arity > 0 && body_nargs > head_arity)
-                   || legacy_recursive_overapplication
-                then
+                if legacy_residual then
                   add_call (Head_unknown ("*TOP*", Callback_param)) expr.exp_loc ;
                 add_arg_escapes args expr.exp_loc
               in
@@ -3089,10 +3236,10 @@ let collect_calls_from_expr_with_open_bodies ?(canon_exn = fun p -> Path.name p)
   (calls, List.rev !lambdas, exn_by_node, errch_by_node)
 
 let collect_calls_from_expr ?canon_exn ?value_channels ?local_alias_stamps
-    ?module_alias_stamps ?local_module_targets ~src_path ~caller_module
+    ?module_alias_stamps ?local_module_targets ?cfa_session ~src_path ~caller_module
     ~caller_name ~local_fn_stamps expr =
   collect_calls_from_expr_with_open_bodies ?canon_exn ?value_channels
-    ?local_alias_stamps ?module_alias_stamps ?local_module_targets ~src_path
+    ?local_alias_stamps ?module_alias_stamps ?local_module_targets ?cfa_session ~src_path
     ~caller_module ~caller_name ~local_fn_stamps expr
 
 (* -------------------------------------------------------------------------- *)
@@ -3288,6 +3435,11 @@ let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
                   let local_alias_stamps = build_local_alias_stamps structure in
                   let module_alias_stamps = build_module_alias_stamps structure in
                   let binding_names = build_binding_names structure in
+                  let cfa_session =
+                    Arch_index_cfa_cmt.create
+                      ~binding_name:(fun ~prefix id -> binding_name binding_names ~prefix id)
+                      ~fn_arity structure
+                  in
                   (* Exception identity (specs/exn-raise-sets.md): the idents a
                      structure item of THIS unit declares — exceptions,
                      extension constructors, modules — map to the module-
@@ -3650,6 +3802,8 @@ let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
                                       record_dropped_node
                                         ~module_path:rel_path
                                         ~name ;
+                                      Arch_index_cfa_cmt.notify_rejected_root cfa_session
+                                        ~binder:id ~body:vb.vb_expr ;
                                       (* A supported open-wrapped binding's
                                          promoted root is unavailable whenever
                                          its parent row is refused: collection
@@ -3668,6 +3822,8 @@ let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
                                           | None -> ())
                                       | _ -> ())
                                   | Some function_id ->
+                                      Arch_index_cfa_cmt.notify_stored_root cfa_session
+                                        ~binder:id ~body:vb.vb_expr ~canonical_name:name ;
                                       (* node name → functions row id, for the
                                          parent and (below) each lambda node *)
                                       let node_ids = Hashtbl.create 4 in
@@ -3700,6 +3856,7 @@ let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
                                           ~local_alias_stamps
                                           ~module_alias_stamps
                                           ~local_module_targets
+                                          ~cfa_session
                                           ~open_body_targets
                                           ~recursive_body_targets
                                           vb.vb_expr
@@ -3734,6 +3891,8 @@ let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
                                           with
                                           | Some lam_id ->
                                               Hashtbl.replace node_ids l.lam_name lam_id ;
+                                              Arch_index_cfa_cmt.notify_stored_literal cfa_session
+                                                ~name:l.lam_name ;
                                               Hashtbl.iter
                                                 (fun _ target ->
                                                   if target.expected_body_observed
@@ -4008,6 +4167,10 @@ let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
                       | _ -> ()
                   in
                   iter_structure_items structure ~f:process_item ;
+                  (* One CMT session: all binding/collector outcomes are now
+                     known.  Only now may deferred heads read the closure. *)
+                  Arch_index_cfa_cmt.finalize cfa_session ;
+                  pending_calls := expand_cfa_calls cfa_session !pending_calls ;
                   (* Resolve invocation-only descriptors only after every
                      structural binding has been walked and every promoted
                      lambda insert has succeeded or failed.  This supports

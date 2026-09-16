@@ -1,0 +1,27 @@
+[
+  {
+    "severity": "HIGH",
+    "confidence": 5,
+    "path": "tezt/tests/ocaml_cfa_foundation.ml",
+    "line": 81,
+    "category": "spec",
+    "summary": "CHECK-2 does not cover the required nonpositive/unknown candidate-arity branch",
+    "evidence": "Originally, specs/ocaml-cfa-foundation.md:224 required AC-13 coverage that was absent: the tests covered known arities 1/2 and an omitted labeled slot but did not exercise lib/arch_index/arch_index_cmt.ml:690-699 with arity <= 0. The correction at tezt/tests/ocaml_cfa_foundation.ml:81-108 now reuses the compiled metadata.cmt collected at lines 23-52, injects arities 0 and -1 into otherwise known-only real-CMT sessions, and for each asserts exactly two bounded candidates, exactly one callback_param unknown, exactly one authentic raw scoped occurrence, and equality of exception scope, result scope, call site, conditionality, deadness, and partiality across every expansion. roster/ocaml-cfa-foundation/implementation-checkpoint.md:294-298 also corrects the earlier false historical claim and records the coverage as newly added. Root reports CHECK-1/2/3 passing; this preparatory reviewer has not independently executed those gates because root retains the exclusive build token.",
+    "fix": "Completed in tezt/tests/ocaml_cfa_foundation.ml:81-108 with the non-vacuous real-CMT arity 0/-1 regression.",
+    "fingerprint": "tezt/tests/ocaml_cfa_foundation.ml:61:spec",
+    "specialist": "reviewer",
+    "status": "RESOLVED",
+    "boundary": "CHECK-2 acceptance coverage for CFA candidate arity",
+    "invariant": "A nonpositive or unavailable candidate arity must preserve explicit uncertainty instead of implying saturation.",
+    "failure_mode": "Resolved: the arity<=0 branch now has direct cardinality, frontier, occurrence, and metadata assertions in CHECK-2.",
+    "acs": [
+      "AC-13",
+      "FR-031",
+      "FR-032",
+      "FR-042"
+    ],
+    "convergence": [
+      "tezt/tests/ocaml_cfa_foundation.ml:81-108"
+    ]
+  }
+]

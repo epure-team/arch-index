@@ -1,0 +1,36 @@
+{
+  "task": "ocaml-cfa-foundation",
+  "phase": "implementation-checkpoint",
+  "command": "rtk proxy opam exec -- dune runtest --force",
+  "log": "improvement/2026-09-16-cfa/identity-runtest.log",
+  "log_sha256": "30b4f3b1d20bf26f6e3f6eac4fce38b6a55b9d032953e36824b35a2f20c09726",
+  "exit_code": 1,
+  "tezt": {
+    "played": 345,
+    "passed": 341,
+    "failed": 4
+  },
+  "native_cfa": {
+    "groups": 6,
+    "passed": 6
+  },
+  "identity": {
+    "count": 402,
+    "source_sha": "5124d541ed163f49fe4d95021ea0f10f8e4f2756d21e3af5e06b09eb1f3cc561",
+    "bins": {
+      "bin/arch_callgraph_ocaml/arch_callgraph_ocaml.exe": "e0732753fa6559784eb3d25c82a6983d2e1a83730ec3d0f37ac8c9c8e73004c8",
+      "bin/arch_index_cli/arch_index_cli.exe": "34b4f1fea2f4766885378f9f42fff058a24f5e93a8ec13a8a296f1ca19894b56",
+      "bin/arch_query/arch_query.exe": "2c3713e7150da5fb3c4f79de8e39fed6ac6bce90cb4385ab5312530e7d9b7c8a",
+      "tezt/tests/main.exe": "f3926b4295215e48c61d0e881c97157b0cf4b90ce909556d246c2adfb3af87b5",
+      "test/test_cfa.exe": "2d1f8f769e958dbc8fe1daf67382d7c0893208c99bda701c512c431a82095da6"
+    }
+  },
+  "pre_post_equal": true,
+  "remaining_failures": [
+    "point-free alias underapplication expectation",
+    "point-free god-modules expectation",
+    "self-index golden",
+    "authentic origin consumer"
+  ],
+  "qualification": "Not Roster review/QA GO. Predates final raw-lambda-count assertion and fixture-dependency completion; these receive a separate targeted rerun."
+}

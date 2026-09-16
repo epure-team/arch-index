@@ -1,0 +1,5 @@
+(library
+ (name ocaml_cfa_fixture)
+ (wrapped false)
+ (modules alias_chain shadowed_target homonym_caller homonym_other local_alias named_joins literal_values metadata)
+ (flags (:standard -w -21-27-32)))

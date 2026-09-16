@@ -1,0 +1,19 @@
+{
+  "auditor": "spec-compliance-auditor",
+  "date": "2026-09-16",
+  "status": "NO_GO_PREPARATION",
+  "report_path_adaptation": {
+    "default": "kb/reports/spec-compliance-report.md",
+    "actual": "roster/ocaml-cfa-foundation/spec-review-preparation.{md,json}",
+    "reason": "Task manifest permits no new KB artifact."
+  },
+  "execution": {
+    "build_or_test_run": false,
+    "check_1": "unexecuted",
+    "check_2": "unexecuted",
+    "check_3": "unexecuted",
+    "full_suite": "unexecuted",
+    "verdict": "not_go"
+  },
+  "findings": []
+}

@@ -31,12 +31,17 @@ lib/arch_index/call_graph_extractor.ml
 lib/arch_index/dune
 tezt/tests/ocaml_cfa_foundation.ml
 tezt/tests/local_value_targets.ml
+tezt/tests/point_free_aliases.ml
 tezt/tests/callgraph_soundness.ml
 tezt/tests/dune
 tezt/tests/main.ml
 tezt/fixtures/ocaml_cfa/
 test/test_cfa.ml
 test/dune
+test/fixtures/self-index-stats.txt
+test/fixtures/origin-consumer/reference.json
+checks/origin-recurring-consumer.js
+test/fixtures/origin-consumer/self.allow
 docs/edge-kind-contract.md
 roster/ocaml-cfa-foundation/
 ```
@@ -48,6 +53,16 @@ New ordinary CFA applications use NULL; no schema change. New private CFA/CMT
 modules are optional separation, never a duplicate naming pass.
 
 ## Sequential work
+
+User explicitly approved the four reference/allowlist files above on 2026-09-16
+("oui!" answering the exact scope question). Apply only the measured 2x2
+source-growth references and the unique unchanged assertion's new coordinate;
+do not change policy rules or introduce exemptions. Evidence:
+roster/ocaml-cfa-foundation/self-reference-evidence.md.
+
+User approved the exact-file point-free scope extension on resume2026-09-16
+("ok continue" answering the explicit approval question). Only migrate the
+newly supported invocation expectations; preserve alias exclusions and no-MUST.
 
 1. Write an authentic failing alias-chain fixture before production edits.
    Add minimal finite kernel and per-CMT session, binder/physical-expression

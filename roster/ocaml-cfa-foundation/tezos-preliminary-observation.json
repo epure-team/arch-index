@@ -1,0 +1,35 @@
+{
+  "purpose": "descriptive observation; NOT CHECK3 validation",
+  "selected": 410,
+  "producer_sha256": "e0732753fa6559784eb3d25c82a6983d2e1a83730ec3d0f37ac8c9c8e73004c8",
+  "schema_sha256": "1dd2d909e1feb2582e8a13f717ef165b7be9b73b908f73f47983920bded580d0",
+  "tezos_revision": "1727d7e192f2374edda7ad7adceef6f4ec51f71a",
+  "old_rows": 45052,
+  "new_rows": 45054,
+  "canonical_sha256": "a4fbf0841ed4897f5321c315b12dcbff974537518d78a0177b1b6f5885718193",
+  "old_relations": {
+    "irmin": 4849,
+    "protocol": 12171
+  },
+  "new_relations": {
+    "irmin": 4850,
+    "protocol": 12173
+  },
+  "relation_gains": 3,
+  "relation_losses": 0,
+  "removed_rows": 8,
+  "added_rows": 10,
+  "new_must_rows": 0,
+  "unknown_before": 6776,
+  "unknown_after": 6774,
+  "producer_ms": 2999,
+  "max_rss_kib": null,
+  "inputs_reverified": true,
+  "tezos_status_unchanged": true,
+  "limitations": [
+    "No reviewed occurrence refinement witnesses; not a soundness/completeness result",
+    "Single duration observation; memory tool absent",
+    "Binary predates current metadata tranche"
+  ],
+  "observed_at": "2026-09-16 07:56:22 UTC"
+}

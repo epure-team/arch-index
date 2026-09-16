@@ -110,6 +110,7 @@ let () =
   Local_recursion_targets.register () ;
   Recursive_open_body_targets.register () ;
   Local_value_targets.register () ;
+  Ocaml_cfa_foundation.register () ;
   Report.register () ;
   Actionable_review_reports.register () ;
   Origin_recurring_consumer.register () ;
