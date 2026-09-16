@@ -1,10 +1,12 @@
 {
   "version": 1,
-  "revision": "c10d1a4f2bee4f72907fe6ce88cdc0338153398d+data-preservation-pristine-source-only",
+  "revision": "c397efd1b2248564c05c74fdab795213dea593db+ocaml-cfa-foundation-source-overlay-2x2-2026-09-16",
   "modules": [
     "lib/arch_index/arch_errors_config.ml",
     "lib/arch_index/arch_index.ml",
     "lib/arch_index/arch_index_bindings.ml",
+    "lib/arch_index/arch_index_cfa.ml",
+    "lib/arch_index/arch_index_cfa_cmt.ml",
     "lib/arch_index/arch_index_cfg.ml",
     "lib/arch_index/arch_index_cmt.ml",
     "lib/arch_index/arch_index_comment_parser.ml",
@@ -29,10 +31,10 @@
     "lib/arch_index/ts_enricher.ml"
   ],
   "totals": {
-    "modules": 25,
-    "functions": 1013,
-    "calls": 6425,
-    "origins": 583
+    "modules": 27,
+    "functions": 1082,
+    "calls": 6804,
+    "origins": 603
   },
   "origin_groups": [
     {
@@ -45,7 +47,7 @@
       "channel": "exception",
       "form": "compare",
       "escapes": 1,
-      "count": 52
+      "count": 54
     },
     {
       "channel": "exception",
@@ -63,7 +65,7 @@
       "channel": "exception",
       "form": "invalid_arg",
       "escapes": 1,
-      "count": 1
+      "count": 4
     },
     {
       "channel": "exception",
@@ -81,7 +83,7 @@
       "channel": "option",
       "form": "raise",
       "escapes": 1,
-      "count": 331
+      "count": 346
     },
     {
       "channel": "result",

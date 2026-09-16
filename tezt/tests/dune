@@ -84,6 +84,11 @@
 (test
  (name main)
  (libraries arch_tezt tezt arch_index arch_tools sqlite3)
+ ; Native identity controls exercise private CMT state without publishing it.
+ ; Dune already supplies this build dependency as a hidden (-H) include; this
+ ; test-only -I makes its CMIs visible to explicit private-module controls.
+ ; Compiler commands run from the build-context root, not this source folder.
+ (flags (:standard -I lib/arch_index/.arch_index.objs/byte))
  ; Without this field, `dune test` runs `main.exe` with no arguments and the suite stops at the
  ; first failing case, so a red run reports a lower bound on the failure set. The played count
  ; is carried in each line's `(N/M)` prefix; the runs recorded below print no summary line.
@@ -177,6 +182,16 @@
   ../../tezt/fixtures/arch_guard/effect_fixture.ml
   ../../tezt/fixtures/arch_guard/checker_report_oracle.js
   ../../tezt/fixtures/arch_guard/checker_numeric_cases.js
+  ../fixtures/ocaml_cfa/dune-project
+  ../fixtures/ocaml_cfa/dune
+  ../fixtures/ocaml_cfa/alias_chain.ml
+  ../fixtures/ocaml_cfa/shadowed_target.ml
+  ../fixtures/ocaml_cfa/homonym_caller.ml
+  ../fixtures/ocaml_cfa/homonym_other.ml
+  ../fixtures/ocaml_cfa/local_alias.ml
+  ../fixtures/ocaml_cfa/named_joins.ml
+  ../fixtures/ocaml_cfa/literal_values.ml
+  ../fixtures/ocaml_cfa/metadata.ml
   ../../test/fixtures/origin-consumer/consumer.ml
   ../../test/fixtures/origin-consumer/self.rules
   ../../test/fixtures/origin-consumer/self.allow

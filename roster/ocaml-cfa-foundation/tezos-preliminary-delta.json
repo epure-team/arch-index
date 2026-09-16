@@ -1,0 +1,256 @@
+{
+  "purpose": "descriptive observation; NOT CHECK3 validation",
+  "selected": 410,
+  "producer_sha256": "e0732753fa6559784eb3d25c82a6983d2e1a83730ec3d0f37ac8c9c8e73004c8",
+  "schema_sha256": "1dd2d909e1feb2582e8a13f717ef165b7be9b73b908f73f47983920bded580d0",
+  "tezos_revision": "1727d7e192f2374edda7ad7adceef6f4ec51f71a",
+  "old_rows": 45052,
+  "new_rows": 45054,
+  "canonical_sha256": "a4fbf0841ed4897f5321c315b12dcbff974537518d78a0177b1b6f5885718193",
+  "old_relations": {
+    "irmin": 4849,
+    "protocol": 12171
+  },
+  "new_relations": {
+    "irmin": 4850,
+    "protocol": 12173
+  },
+  "relation_gains": 3,
+  "relation_losses": 0,
+  "removed_rows": 8,
+  "added_rows": 10,
+  "new_must_rows": 0,
+  "changes": {
+    "removed": [
+      {
+        "caller_path": "src/proto_alpha/lib_protocol/tez_repr.ml",
+        "caller": "mul_percentage",
+        "call_site": "src/proto_alpha/lib_protocol/tez_repr.ml:189",
+        "target_path": null,
+        "target": null,
+        "callee_name": "div'",
+        "kind": "MAY_TOP",
+        "edge_form": null,
+        "top_reason": "callback_param",
+        "top_anchor": "src/proto_alpha/lib_protocol/tez_repr.ml:189"
+      },
+      {
+        "caller_path": "src/proto_alpha/lib_protocol/script_ir_translator.ml",
+        "caller": "ty_eq.<fun:295:3>.<fun:304:26>",
+        "call_site": "src/proto_alpha/lib_protocol/script_ir_translator.ml:306",
+        "target_path": null,
+        "target": null,
+        "callee_name": "record_trace_eval",
+        "kind": "MAY_TOP",
+        "edge_form": null,
+        "top_reason": "callback_param",
+        "top_anchor": "src/proto_alpha/lib_protocol/script_ir_translator.ml:306"
+      },
+      {
+        "caller_path": "src/proto_alpha/lib_protocol/script_ir_translator.ml",
+        "caller": "ty_eq.<fun:295:3>.<fun:309:13>",
+        "call_site": "src/proto_alpha/lib_protocol/script_ir_translator.ml:315",
+        "target_path": null,
+        "target": null,
+        "callee_name": "record_trace_eval",
+        "kind": "MAY_TOP",
+        "edge_form": null,
+        "top_reason": "callback_param",
+        "top_anchor": "src/proto_alpha/lib_protocol/script_ir_translator.ml:315"
+      },
+      {
+        "caller_path": "src/proto_alpha/lib_protocol/sapling_repr.ml",
+        "caller": "output_in_memory_size.<fun:161:3>",
+        "call_site": "src/proto_alpha/lib_protocol/sapling_repr.ml:163",
+        "target_path": null,
+        "target": null,
+        "callee_name": "ciphertext_size",
+        "kind": "MAY_TOP",
+        "edge_form": null,
+        "top_reason": "callback_param",
+        "top_anchor": "src/proto_alpha/lib_protocol/sapling_repr.ml:163"
+      },
+      {
+        "caller_path": "src/proto_alpha/lib_protocol/raw_context.ml",
+        "caller": "consume_gas_limit_in_block",
+        "call_site": "src/proto_alpha/lib_protocol/raw_context.ml:624",
+        "target_path": null,
+        "target": null,
+        "callee_name": "block_gas_level",
+        "kind": "MAY_TOP",
+        "edge_form": null,
+        "top_reason": "callback_param",
+        "top_anchor": "src/proto_alpha/lib_protocol/raw_context.ml:624"
+      },
+      {
+        "caller_path": "src/proto_alpha/lib_protocol/raw_context.ml",
+        "caller": "consume_gas_limit_in_block",
+        "call_site": "src/proto_alpha/lib_protocol/raw_context.ml:628",
+        "target_path": null,
+        "target": null,
+        "callee_name": "block_gas_level",
+        "kind": "MAY_TOP",
+        "edge_form": null,
+        "top_reason": "callback_param",
+        "top_anchor": "src/proto_alpha/lib_protocol/raw_context.ml:628"
+      },
+      {
+        "caller_path": "src/proto_alpha/lib_protocol/percentage.ml",
+        "caller": "of_q_bounded",
+        "call_site": "src/proto_alpha/lib_protocol/percentage.ml:52",
+        "target_path": null,
+        "target": null,
+        "callee_name": "div",
+        "kind": "MAY_TOP",
+        "edge_form": null,
+        "top_reason": "callback_param",
+        "top_anchor": "src/proto_alpha/lib_protocol/percentage.ml:52"
+      },
+      {
+        "caller_path": "src/proto_alpha/lib_protocol/apply.ml",
+        "caller": "apply_transaction_to_smart_contract",
+        "call_site": "src/proto_alpha/lib_protocol/apply.ml:612",
+        "target_path": null,
+        "target": null,
+        "callee_name": "execute",
+        "kind": "MAY_TOP",
+        "edge_form": null,
+        "top_reason": "callback_param",
+        "top_anchor": "src/proto_alpha/lib_protocol/apply.ml:612"
+      }
+    ],
+    "added": [
+      {
+        "caller_path": "src/proto_alpha/lib_protocol/tez_repr.ml",
+        "caller": "mul_percentage",
+        "call_site": "src/proto_alpha/lib_protocol/tez_repr.ml:189",
+        "target_path": null,
+        "target": null,
+        "callee_name": "*TOP*",
+        "kind": "MAY_TOP",
+        "edge_form": null,
+        "top_reason": "callback_param",
+        "top_anchor": "src/proto_alpha/lib_protocol/tez_repr.ml:189"
+      },
+      {
+        "caller_path": "src/proto_alpha/lib_protocol/script_ir_translator.ml",
+        "caller": "ty_eq.<fun:295:3>.<fun:304:26>",
+        "call_site": "src/proto_alpha/lib_protocol/script_ir_translator.ml:306",
+        "target_path": null,
+        "target": null,
+        "callee_name": "*TOP*",
+        "kind": "MAY_TOP",
+        "edge_form": null,
+        "top_reason": "callback_param",
+        "top_anchor": "src/proto_alpha/lib_protocol/script_ir_translator.ml:306"
+      },
+      {
+        "caller_path": "src/proto_alpha/lib_protocol/script_ir_translator.ml",
+        "caller": "ty_eq.<fun:295:3>.<fun:309:13>",
+        "call_site": "src/proto_alpha/lib_protocol/script_ir_translator.ml:315",
+        "target_path": null,
+        "target": null,
+        "callee_name": "*TOP*",
+        "kind": "MAY_TOP",
+        "edge_form": null,
+        "top_reason": "callback_param",
+        "top_anchor": "src/proto_alpha/lib_protocol/script_ir_translator.ml:315"
+      },
+      {
+        "caller_path": "src/proto_alpha/lib_protocol/sapling_repr.ml",
+        "caller": "output_in_memory_size.<fun:161:3>",
+        "call_site": "src/proto_alpha/lib_protocol/sapling_repr.ml:163",
+        "target_path": null,
+        "target": null,
+        "callee_name": "*TOP*",
+        "kind": "MAY_TOP",
+        "edge_form": null,
+        "top_reason": "callback_param",
+        "top_anchor": "src/proto_alpha/lib_protocol/sapling_repr.ml:163"
+      },
+      {
+        "caller_path": "src/proto_alpha/lib_protocol/raw_context.ml",
+        "caller": "consume_gas_limit_in_block",
+        "call_site": "src/proto_alpha/lib_protocol/raw_context.ml:624",
+        "target_path": "src/proto_alpha/lib_protocol/raw_context.ml",
+        "target": "remaining_block_gas",
+        "callee_name": "remaining_block_gas",
+        "kind": "MAY_ENUMERATED",
+        "edge_form": null,
+        "top_reason": null,
+        "top_anchor": null
+      },
+      {
+        "caller_path": "src/proto_alpha/lib_protocol/raw_context.ml",
+        "caller": "consume_gas_limit_in_block",
+        "call_site": "src/proto_alpha/lib_protocol/raw_context.ml:628",
+        "target_path": "src/proto_alpha/lib_protocol/raw_context.ml",
+        "target": "remaining_block_gas",
+        "callee_name": "remaining_block_gas",
+        "kind": "MAY_ENUMERATED",
+        "edge_form": null,
+        "top_reason": null,
+        "top_anchor": null
+      },
+      {
+        "caller_path": "src/proto_alpha/lib_protocol/percentage.ml",
+        "caller": "of_q_bounded",
+        "call_site": "src/proto_alpha/lib_protocol/percentage.ml:52",
+        "target_path": null,
+        "target": null,
+        "callee_name": "*TOP*",
+        "kind": "MAY_TOP",
+        "edge_form": null,
+        "top_reason": "callback_param",
+        "top_anchor": "src/proto_alpha/lib_protocol/percentage.ml:52"
+      },
+      {
+        "caller_path": "src/proto_alpha/lib_protocol/apply.ml",
+        "caller": "apply_transaction_to_smart_contract",
+        "call_site": "src/proto_alpha/lib_protocol/apply.ml:612",
+        "target_path": null,
+        "target": null,
+        "callee_name": "*TOP*",
+        "kind": "MAY_TOP",
+        "edge_form": null,
+        "top_reason": "callback_param",
+        "top_anchor": "src/proto_alpha/lib_protocol/apply.ml:612"
+      },
+      {
+        "caller_path": "irmin/lib_irmin/dot.ml",
+        "caller": "Make.fprintf.<fun:90:23>",
+        "call_site": "irmin/lib_irmin/dot.ml:92",
+        "target_path": "irmin/lib_irmin/dot.ml",
+        "target": "Make.fprintf.<fun:90:23>.<fun:94:15>",
+        "callee_name": "Make.fprintf.<fun:90:23>.<fun:94:15>",
+        "kind": "MAY_ENUMERATED",
+        "edge_form": null,
+        "top_reason": null,
+        "top_anchor": null
+      },
+      {
+        "caller_path": "irmin/lib_irmin/dot.ml",
+        "caller": "Make.fprintf.<fun:99:23>",
+        "call_site": "irmin/lib_irmin/dot.ml:102",
+        "target_path": "irmin/lib_irmin/dot.ml",
+        "target": "Make.fprintf.<fun:99:23>.<fun:102:65>",
+        "callee_name": "Make.fprintf.<fun:99:23>.<fun:102:65>",
+        "kind": "MAY_ENUMERATED",
+        "edge_form": null,
+        "top_reason": null,
+        "top_anchor": null
+      }
+    ]
+  },
+  "unknown_before": 6776,
+  "unknown_after": 6774,
+  "producer_ms": 2828,
+  "max_rss_kib": null,
+  "inputs_reverified": true,
+  "tezos_status_unchanged": true,
+  "limitations": [
+    "No reviewed occurrence refinement witnesses; not a soundness/completeness result",
+    "Single duration observation; memory tool absent",
+    "Binary predates current metadata tranche"
+  ]
+}

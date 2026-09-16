@@ -1,7 +1,7 @@
 {
   "task": "ocaml-cfa-foundation",
   "mode": "full",
-  "current_phase": "plan",
+  "current_phase": "implement",
   "events": [
     {
       "phase": "question",
@@ -37,6 +37,27 @@
       "at": "2026-09-16",
       "by": "roster-plan",
       "reason": "Sequential independent Sol/Terra voices; root grouped internal dependencies into three end-to-end slices. Validated subbriefs and atomic plan JSON written; routine gates delegated."
+    },
+    {
+      "phase": "implement",
+      "outcome": "PARTIAL",
+      "at": "2026-09-16",
+      "by": "roster-implement",
+      "reason": "Awaiting explicit scope approval for the point-free expectation migration; CHECK3 and self-reference attribution remain unfinished."
+    },
+    {
+      "phase": "implement",
+      "outcome": "PARTIAL",
+      "at": "2026-09-16",
+      "by": "roster-implement",
+      "reason": "Awaiting explicit scope approval for measured self-index/origin reference and coordinate migration."
+    },
+    {
+      "phase": "implement",
+      "outcome": "COMPLETED",
+      "at": "2026-09-16",
+      "by": "roster-implement",
+      "reason": "Explicit four-file approval applied; corrected nonvacuous unknown-arity coverage; final full345/345 and kernel6/6, CHECK1/2/3 and controls pass,313-source and five-binary hashes stable. Formal review/QA/ship pending."
     }
   ]
 }

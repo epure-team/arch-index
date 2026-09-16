@@ -1,0 +1,75 @@
+module String_set = Set.Make (String)
+
+type value = {targets : String_set.t; reasons : String_set.t}
+type cell = int
+
+type t = {
+  mutable next : int;
+  values : (cell, value) Hashtbl.t;
+  outgoing : (cell, cell list) Hashtbl.t;
+  queue : cell Queue.t;
+  queued : (cell, unit) Hashtbl.t;
+}
+
+let bottom = {targets = String_set.empty; reasons = String_set.empty}
+
+let create () =
+  {
+    next = 0;
+    values = Hashtbl.create 32;
+    outgoing = Hashtbl.create 32;
+    queue = Queue.create ();
+    queued = Hashtbl.create 32;
+  }
+
+let fresh t =
+  let cell = t.next in
+  t.next <- cell + 1 ;
+  Hashtbl.add t.values cell bottom ;
+  cell
+
+let enqueue t cell =
+  if not (Hashtbl.mem t.queued cell) then (
+    Hashtbl.add t.queued cell () ;
+    Queue.add cell t.queue)
+
+let update t cell value =
+  let previous = Hashtbl.find t.values cell in
+  if
+    not
+      (String_set.equal previous.targets value.targets
+      && String_set.equal previous.reasons value.reasons)
+  then (
+    Hashtbl.replace t.values cell value ;
+    enqueue t cell)
+
+let seed_target t cell target =
+  let value = Hashtbl.find t.values cell in
+  update t cell {value with targets = String_set.add target value.targets}
+
+let seed_reason t cell reason =
+  let value = Hashtbl.find t.values cell in
+  update t cell {value with reasons = String_set.add reason value.reasons}
+
+let copy t ~src ~dst =
+  let successors = Option.value (Hashtbl.find_opt t.outgoing src) ~default:[] in
+  if not (List.mem dst successors) then Hashtbl.replace t.outgoing src (dst :: successors) ;
+  enqueue t src
+
+let join left right =
+  {
+    targets = String_set.union left.targets right.targets;
+    reasons = String_set.union left.reasons right.reasons;
+  }
+
+let solve t =
+  while not (Queue.is_empty t.queue) do
+    let src = Queue.take t.queue in
+    Hashtbl.remove t.queued src ;
+    let source = Hashtbl.find t.values src in
+    List.iter
+      (fun dst -> update t dst (join (Hashtbl.find t.values dst) source))
+      (Option.value (Hashtbl.find_opt t.outgoing src) ~default:[])
+  done
+
+let value t cell = Hashtbl.find t.values cell

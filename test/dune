@@ -32,3 +32,12 @@
  (name test_lsp_uri)
  (modules test_lsp_uri)
  (libraries arch_index alcotest))
+
+; Compile the exact private kernel, without the indexer's compiler/DB stack.
+(copy_files ../lib/arch_index/arch_index_cfa.ml)
+(copy_files ../lib/arch_index/arch_index_cfa.mli)
+
+(test
+ (name test_cfa)
+ (modules test_cfa arch_index_cfa)
+ (libraries alcotest yojson))

@@ -241,10 +241,14 @@ let extract_calls_from_cmts ~project_dir fn_rows =
     (* name -> file_path index for resolving callee files *)
     let name_to_file : (string, string) Hashtbl.t = Hashtbl.create 512 in
     let same_file_rows = Hashtbl.create 512 in
+    let same_file_counts : (string * string, int) Hashtbl.t = Hashtbl.create 512 in
     List.iter
       (fun (r : Lsp_extractor.fn_row) ->
         Hashtbl.replace name_to_file r.name r.file_path ;
-        Hashtbl.replace same_file_rows (r.file_path, r.name) ())
+        Hashtbl.replace same_file_rows (r.file_path, r.name) () ;
+        let key = (r.file_path, r.name) in
+        Hashtbl.replace same_file_counts key
+          (1 + Option.value ~default:0 (Hashtbl.find_opt same_file_counts key)))
       fn_rows ;
     let cmt_files = Arch_index_cmt.find_cmt_files build_dir in
     let cmt_only =
@@ -300,6 +304,42 @@ let extract_calls_from_cmts ~project_dir fn_rows =
                     let module_alias_stamps =
                       Arch_index_cmt.build_module_alias_stamps structure
                     in
+                    let binding_names = Arch_index_cmt.build_binding_names structure in
+                    let root_binder_counts : (string, int) Hashtbl.t =
+                      Hashtbl.create 32
+                    in
+                    List.iter
+                      (fun (item : Typedtree.structure_item) ->
+                        match item.str_desc with
+                        | Typedtree.Tstr_value (_, bindings) ->
+                            List.iter
+                              (fun (binding : Typedtree.value_binding) ->
+                                match binding.vb_pat.pat_desc with
+                                | Typedtree.Tpat_var (id, _, _) ->
+                                    let name = Ident.name id in
+                                    Hashtbl.replace root_binder_counts name
+                                      (1 + Option.value ~default:0
+                                        (Hashtbl.find_opt root_binder_counts name))
+                                | _ -> ())
+                              bindings
+                        | _ -> ())
+                      structure.Typedtree.str_items ;
+                    let root_binder_count name =
+                      Option.value ~default:0
+                        (Hashtbl.find_opt root_binder_counts name)
+                    in
+                    let unique_cfa_symbol name =
+                      Arch_index_cfa_cmt.flat_symbol_unique
+                        ~lsp_count:(Option.value ~default:0
+                          (Hashtbl.find_opt same_file_counts (rel_src, name)))
+                        ~root_count:(root_binder_count name)
+                    in
+                    let cfa_session =
+                      Arch_index_cfa_cmt.create
+                        ~binding_name:(fun ~prefix id ->
+                          Arch_index_cmt.binding_name binding_names ~prefix id)
+                        ~fn_arity:Arch_index_cmt.fn_arity structure
+                    in
                     (* Issue #41's row-collapse (INSERT OR REPLACE on
                        UNIQUE(module_id, name)) never applies on this path:
                        this schema's `functions` rows come from LSP document
@@ -321,6 +361,22 @@ let extract_calls_from_cmts ~project_dir fn_rows =
                                 match vb.vb_pat.pat_desc with
                                 | Typedtree.Tpat_var (id, _, _) ->
                                     let caller_name = Ident.name id in
+                                    (match vb.vb_expr.exp_desc with
+                                    | Typedtree.Texp_function _ ->
+                                        let canonical_name =
+                                          Arch_index_cmt.binding_name binding_names
+                                            ~prefix:"" id
+                                        in
+                                        (* Flat has no main row insertion to
+                                           witness ownership.  Its own LSP row
+                                           is the only faithful availability
+                                           callback; without it finalization
+                                           deliberately leaves the head TOP. *)
+                                        if unique_cfa_symbol canonical_name
+                                        then
+                                          Arch_index_cfa_cmt.notify_stored_root cfa_session
+                                            ~binder:id ~body:vb.vb_expr ~canonical_name
+                                    | _ -> ()) ;
                                     let calls, _lam_nodes, _exn_facts, _errch_facts =
                                       Arch_index_cmt.collect_calls_from_expr
                                         ~src_path:rel_src
@@ -330,6 +386,7 @@ let extract_calls_from_cmts ~project_dir fn_rows =
                                         ~local_alias_stamps
                                         ~module_alias_stamps
                                         ~local_module_targets
+                                        ~cfa_session
                                         vb.vb_expr
                                     in
                                     (* Flat path: lambda-attributed calls flow
@@ -340,23 +397,59 @@ let extract_calls_from_cmts ~project_dir fn_rows =
                               vbs
                         | _ -> ())
                       structure.Typedtree.str_items ;
+                    Arch_index_cfa_cmt.finalize cfa_session ;
+                    pending :=
+                      Arch_index_cmt.expand_cfa_calls ~preserve_cfa_provenance:true
+                        cfa_session !pending ;
                     List.map
                       (fun (pc : Arch_index_cmt.pending_call) ->
+                        (* This marker exists only between whole-CMT CFA
+                           expansion and flat serialization.  It distinguishes
+                           a new CFA candidate from historical
+                           [Head_enumerated] rows without widening the public
+                           head vocabulary or persisting a private token. *)
+                        let is_cfa = pc.edge_form = Some "__cfa:expanded" in
+                        let cfa_target_is_representable =
+                          match pc.head with
+                          | Arch_index_cmt.Head_enumerated name -> unique_cfa_symbol name
+                          | Arch_index_cmt.Head_unknown _ -> true
+                          | _ -> false
+                        in
+                        let pc =
+                          if is_cfa
+                             && ((match pc.head with
+                                  | Arch_index_cmt.Head_unknown _ -> true
+                                  | _ -> false)
+                                 || not (unique_cfa_symbol pc.caller_name)
+                                 || not cfa_target_is_representable)
+                          then
+                            {pc with
+                             head = Arch_index_cmt.Head_unknown
+                               ("*TOP*", Arch_index_cmt.Callback_param);
+                             edge_form = None}
+                          else if is_cfa then {pc with edge_form = None}
+                          else pc
+                        in
                         let callee_name, _mod =
                           Arch_index_cmt.pending_display pc
                         in
                         let callee_file =
-                          let owned_names =
-                            if pc.local_module_invocation then local_invocation_names
-                            else local_module_names
-                          in
-                          if Hashtbl.mem owned_names callee_name then
-                            (* A proven body belongs to this CMT. LSP may not
-                               have supplied its qualified/ordinal name; an
-                               unrelated file's homonym cannot fill that gap. *)
-                            if Hashtbl.mem same_file_rows (rel_src, callee_name)
-                            then Some rel_src else None
-                          else Hashtbl.find_opt name_to_file callee_name
+                          if is_cfa then
+                            match pc.head with
+                            | Arch_index_cmt.Head_enumerated _ -> Some rel_src
+                            | _ -> None
+                          else
+                            let owned_names =
+                              if pc.local_module_invocation then local_invocation_names
+                              else local_module_names
+                            in
+                            if Hashtbl.mem owned_names callee_name then
+                              (* A proven body belongs to this CMT. LSP may not
+                                 have supplied its qualified/ordinal name; an
+                                 unrelated file's homonym cannot fill that gap. *)
+                              if Hashtbl.mem same_file_rows (rel_src, callee_name)
+                              then Some rel_src else None
+                            else Hashtbl.find_opt name_to_file callee_name
                         in
                         {
                           caller_name = pc.caller_name;
