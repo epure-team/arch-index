@@ -1,7 +1,7 @@
 {
   "task": "ocaml-functor-targets",
   "mode": "full",
-  "current_phase": "review",
+  "current_phase": "implement",
   "events": [
     {
       "phase": "question",
@@ -42,6 +42,13 @@
       "at": "2026-09-16T20:05:00+02:00",
       "by": "roster-implement",
       "reason": "Authenticated additive functor-member targets, durable witnesses, exact-copy/variant reconciliation and three independent gates are green; full Tezt is 351/351 and pinned410 adds seven witnessed Irmin relations with zero loss or new MUST."
+    },
+    {
+      "phase": "implement",
+      "outcome": "COMPLETED",
+      "at": "2026-09-16T22:04:47+02:00",
+      "by": "roster-implement",
+      "reason": "Materialized the missing implementation handoff artifact after review preflight rejected the incomplete bundle; product code and previously green exact-head gates are unchanged."
     }
   ]
 }
