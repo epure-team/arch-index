@@ -1,7 +1,7 @@
 {
   "task": "ocaml-cfa-foundation",
   "mode": "full",
-  "current_phase": "review",
+  "current_phase": "qa",
   "events": [
     {
       "phase": "question",
@@ -79,6 +79,13 @@
       "at": "2026-09-16",
       "by": "roster-review",
       "reason": "Round2/cycle1 HIGH corrected and CHECK2 linked. Owner and architect personally executed gates; root spec role executed after independent prep/thread-limit. Full convergence/trace pass, two medium/one low advisories retained, null pre_fix_sha flagged, OpenCode skipped-degraded. Routine gate delegated; QA next."
+    },
+    {
+      "phase": "qa",
+      "outcome": "GO",
+      "at": "2026-09-16T11:43:31.156Z",
+      "by": "roster-qa",
+      "reason": "Frozen8eb28f4 build/full345/345+kernel6/CHECK1/2/3 and controls all0;286source/fivebinary identities equal. Pinned410+1Irmin/+2protocol0loss/newMUST. QA convergence0, code-intel skip, cross-runtime shared-breaker skip; routine gate delegated."
     }
   ]
 }
