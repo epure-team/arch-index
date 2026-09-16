@@ -7,12 +7,13 @@ const path = require('node:path');
 const root = path.resolve(__dirname, '../..');
 const cmtChecker = path.join(__dirname, 'check-cmt.js');
 
-function run(label, command, args, expectedStatus) {
+function run(label, command, args, expectedStatus, extraEnv = {}) {
   const result = cp.spawnSync(command, args, {
     cwd: root,
     encoding: 'utf8',
     timeout: 240000,
     maxBuffer: 32 * 1024 * 1024,
+    env: {...process.env, ...extraEnv},
   });
   process.stdout.write(result.stdout || '');
   process.stderr.write(result.stderr || '');
@@ -23,6 +24,7 @@ function run(label, command, args, expectedStatus) {
     process.exit(2);
   }
   if (result.status !== expectedStatus) {
+    if (result.status === 2 && expectedStatus !== 2) process.exit(2);
     process.stderr.write(
       `REVIEW_FIXES_ASSERTION: ${label}: expected exit ${expectedStatus}, got ${result.status}\n`,
     );
@@ -37,6 +39,13 @@ run(
   0,
 );
 run('authentic CMT regressions', process.execPath, [cmtChecker], 0);
+run(
+  'CHECK-2 flat timeout setup classification',
+  process.execPath,
+  [cmtChecker],
+  2,
+  {EPURE_ARCH_INDEX_TIMEOUT_S: '1'},
+);
 for (const marker of ['propagation', 'recursion', 'capture']) {
   run(
     `CHECK-2 ${marker} assertion classification`,

@@ -109,3 +109,14 @@ ratchet. Pinned-410 CHECK-3 now records Irmin 4849→4921 (+72) and protocol
 Canonical rows are 45052→45290 (127 removed, 365 added); the producer run took
 3188 ms with 156020 KiB sampled RSS. Two fresh self-index 2×2 runs agree at 27
 modules, 1143 functions, 7066 calls and 614 origins with identical digests.
+
+The round-3 spec revalidation then reproduced an intermittent flat-only
+failure. Investigation isolated a test-infrastructure timeout, not a CFA
+regression: the LSP runner could return success with 135 functions and zero
+calls after exhausting its 30-second budget, while the helper discarded the
+timeout diagnostic and the nested ratchet collapsed setup exit 2 into assertion
+exit 1. The CFA fixture now has a 60-second default budget, rejects explicit
+partial-run diagnostics as `OCAML_CFA_SETUP`, and the ratchet preserves exit 2.
+A permanent one-second timeout control proves the classification. The corrected
+ratchet, full 345/345 suite, CHECK-1 and authentic CHECK-2 all pass. Root-cause
+evidence is in `briefs/ocaml-cfa-flat-timeout-investigation.md`.

@@ -417,9 +417,15 @@ let index ?extra_args fixture =
    here used to claim ("reported rather than fatal") while the code did neither:
    [code] was read only inside the failure message for a missing file, so a
    non-zero exit on a database that WAS produced vanished without trace. *)
-let index_project ~name project =
+let index_project_raw ?env ~name project =
   let db = temp_db name in
-  let code, output = run_command (arch_index_cli ()) ["--project"; project; "--output"; db] in
+  let code, output =
+    run_command ?env (arch_index_cli ()) ["--project"; project; "--output"; db]
+  in
+  (code, output, db)
+
+let index_project ?env ~name project =
+  let code, output, db = index_project_raw ?env ~name project in
   if not (Sys.file_exists db) then
     Test.fail "arch_index produced no database (exit %d):\n%s" code output ;
   if code <> 0 then

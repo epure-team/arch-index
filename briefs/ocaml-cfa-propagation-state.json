@@ -77,6 +77,13 @@
       "at": "2026-09-16T18:02:12+02:00",
       "by": "roster-implement",
       "reason": "Round-3 correction unified direct-head, root and local computed-value admission; six authentic rich/flat assertions reproduced the gap and now pass, with a destructured-let negative. Full suite 345/345, CHECK1 517, CHECK2 and review ratchet pass; pinned410 CHECK3 records +72 Irmin/+270 protocol relations, zero losses and zero new MUST rows."
+    },
+    {
+      "phase": "implement",
+      "outcome": "COMPLETED",
+      "at": "2026-09-16T18:33:00+02:00",
+      "by": "roster-implement",
+      "reason": "Round-3 revalidation timeout was reproduced and classified as setup rather than a CFA assertion: the flat fixture now rejects partial LSP diagnostics, uses a 60-second default budget and preserves setup exit 2 through the review ratchet. The one-second control exits 2; normal ratchet, full suite 345/345, CHECK1 517 and CHECK2 pass."
     }
   ]
 }
