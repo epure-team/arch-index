@@ -1,15 +1,23 @@
 {
   "mode": "full",
-  "no_go_round": 1,
+  "no_go_round": 2,
   "max_rounds": 5,
   "legacy_no_go_round": false,
-  "round": 1,
+  "round": 2,
   "legacy_round": false,
-  "current_round_strike": false,
+  "current_round_strike": true,
   "config": {"max_rounds": 5, "strikes": 2, "static": false},
   "cause": null,
   "warnings": [],
   "violations": [],
-  "checks": [],
-  "trace": {"obligated": true, "lines_seen": 8, "schema_version": "1.0", "skipped": false}
+  "checks": [
+    {"check":"roster/ocaml-cfa-propagation/check-review-fixes.js","fingerprint":"lib/arch_index/arch_index_cfa_cmt.ml:513:spec","red_verified":null,"flagged":"no pre_fix_sha recorded (uncommitted-tree task, FR-034)"},
+    {"check":"roster/ocaml-cfa-propagation/check-review-fixes.js","fingerprint":"lib/arch_index/arch_index_cfa_cmt.ml:218:spec","red_verified":null,"flagged":"no pre_fix_sha recorded (uncommitted-tree task, FR-034)"},
+    {"check":"roster/ocaml-cfa-propagation/check-review-fixes.js","fingerprint":"lib/arch_index/arch_index_cfa.ml:76:architecture","red_verified":null,"flagged":"no pre_fix_sha recorded (uncommitted-tree task, FR-034)"},
+    {"check":"roster/ocaml-cfa-propagation/check-review-fixes.js","fingerprint":"lib/arch_index/arch_index_cmt.ml:2143:correctness","red_verified":null,"flagged":"no pre_fix_sha recorded (uncommitted-tree task, FR-034)"},
+    {"check":"roster/ocaml-cfa-propagation/check-review-fixes.js","fingerprint":"lib/arch_index/arch_index_cmt.ml:2642:correctness","red_verified":null,"flagged":"no pre_fix_sha recorded (uncommitted-tree task, FR-034)"},
+    {"check":"roster/ocaml-cfa-propagation/check-review-fixes.js","fingerprint":"lib/arch_index/arch_index_cfa_cmt.ml:500:correctness","red_verified":null,"flagged":"no pre_fix_sha recorded (uncommitted-tree task, FR-034)"},
+    {"check":"roster/ocaml-cfa-propagation/check-review-fixes.js","fingerprint":"roster/ocaml-cfa-propagation/check-cmt.js:8:correctness","red_verified":null,"flagged":"no pre_fix_sha recorded (uncommitted-tree task, FR-034)"}
+  ],
+  "trace": {"obligated":true,"lines_seen":13,"schema_version":"1.0","skipped":false}
 }
