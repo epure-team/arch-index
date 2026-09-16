@@ -1,7 +1,7 @@
 {
   "task": "ocaml-cfa-foundation",
   "mode": "full",
-  "current_phase": "research",
+  "current_phase": "plan",
   "events": [
     {
       "phase": "question",
@@ -16,6 +16,27 @@
       "at": "2026-09-15T20:49:28.154Z",
       "by": "roster-research",
       "reason": "Nine neutral questions answered by four independent roles; user-corrected arch-guard prior art examined fully and independently confirmed. Scope-specific absence claims; no implementation or test pass claimed."
+    },
+    {
+      "phase": "intake",
+      "outcome": "VALIDATED",
+      "at": "2026-09-15T20:56:29.296Z",
+      "by": "roster-intake",
+      "reason": "Approved stage2 scope, explicit arch-guard reuse assessment, per-CMT alias/literal/join integration and independent-unknown preservation. Routine human gates delegated by user."
+    },
+    {
+      "phase": "spec",
+      "outcome": "VALIDATED",
+      "at": "2026-09-16",
+      "by": "roster-spec",
+      "reason": "Root-reviewed independent formalization, 2 stories, 20 resolved challenges, 44 FRs, 19 ACs, 3 planned checks. Routine quiz delegated; canonical claims tools unavailable."
+    },
+    {
+      "phase": "plan",
+      "outcome": "COMPLETED",
+      "at": "2026-09-16",
+      "by": "roster-plan",
+      "reason": "Sequential independent Sol/Terra voices; root grouped internal dependencies into three end-to-end slices. Validated subbriefs and atomic plan JSON written; routine gates delegated."
     }
   ]
 }

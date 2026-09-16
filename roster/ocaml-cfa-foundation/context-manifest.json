@@ -1,0 +1,10 @@
+{
+  "task": "ocaml-cfa-foundation",
+  "format": "local-input-digests-v1",
+  "note": "Local freshness record, not canonical claims reconciliation or authority.",
+  "inputs": {
+    "briefs/ocaml-cfa-foundation-intake.md": "631433c5347b1d1dfdb964f460507fd249c5974852e8375bc12ae8a2793d3c60",
+    "specs/ocaml-cfa-foundation.md": "07e4ea8f162be312e844ceeda38c6d329d7d18813db2f5511e0ea40b636478d2",
+    "briefs/ocaml-cfa-foundation-spec.md": "edda7ad237dd2a81479226cb0f5e6a865ae0693ee5ca9c8753b088c1fe452d47"
+  }
+}
