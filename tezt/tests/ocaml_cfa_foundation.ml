@@ -641,6 +641,23 @@ let register () =
               AND c.top_reason='callback_param' AND c.edge_form IS NULL")
         2 ;
       Batch.eq_int b
+        ~msg:"OCAML_CFA_PROPAGATION_RED: supported let expression head reaches target"
+        (count rich
+           "SELECT count(*) FROM calls c \
+            JOIN functions source ON source.id=c.caller_id \
+            JOIN functions target ON target.id=c.callee_id \
+            WHERE source.name='let_head_run' AND target.name='ho_target' \
+              AND source.module_id=target.module_id \
+              AND c.kind='MAY_ENUMERATED' AND c.edge_form IS NULL")
+        1 ;
+      Batch.eq_int b
+        ~msg:"OCAML_CFA_PROPAGATION_ASSERTION: supported let expression head is closed"
+        (count rich
+           "SELECT count(*) FROM calls c JOIN functions source ON source.id=c.caller_id \
+            WHERE source.name='let_head_run' AND c.kind='MAY_TOP' \
+              AND c.top_reason='callback_param' AND c.edge_form IS NULL")
+        0 ;
+      Batch.eq_int b
         ~msg:"OCAML_CFA_CAPTURE_RED: exact lexical alias capture reaches target"
         (count rich
            "SELECT count(*) FROM calls c JOIN functions caller ON caller.id=c.caller_id \

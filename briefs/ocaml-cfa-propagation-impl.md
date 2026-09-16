@@ -1,7 +1,7 @@
 # Implementation Report — ocaml-cfa-propagation
 
 **Mode:** full  
-**Implemented SHA:** `c240e28fc788ea30d1bd94efdd4cebdae410acdd`  
+**Implemented SHA:** `71bf0cb10850f1c238c737985dd796966af21a4c` plus the pending round-2 correction  
 **Status:** COMPLETED
 
 ## Delivered behavior
@@ -74,3 +74,21 @@ the native domain regressions, authentic CHECK-2 and its 0/1/2 exit controls.
 The original reviewed tree was dirty, so no automatic clean-SHA RED claim is
 made; the round-1 findings and their reproducing assertions remain the manual
 RED evidence. No finding was waived and no contract was relaxed.
+
+## Review round-2 ratchet
+
+Round 2 confirmed all seven earlier findings resolved and found one new HIGH:
+the collector registered a CFA occurrence for a supported simple-let head such
+as `(let chosen = target in chosen) x`, but `record_head` discarded its token and
+persisted `MAY_TOP`. Authentic CMT coverage reproduced the failure with zero
+bounded targets and one callback frontier. The marker branch now retains
+`Texp_let` occurrences; the same test observes exactly one `MAY_ENUMERATED`
+target and no callback frontier. Unsupported let shapes remain open in the CFA
+expression evaluator.
+
+Post-correction verification is green: full suite 345/345, CHECK-1 517 cases,
+authentic CHECK-2 and its 0/1/2 controls, the combined review ratchet, and
+pinned-410 CHECK-3. The corpus result is unchanged at Irmin +70, protocol +256,
+326 gains, zero losses and zero new `MUST`; the observed producer run was
+13682 ms and 156076 KiB. Two fresh self-index 2×2 runs have identical totals
+and digests at 27 modules, 1142 functions, 7061 calls and 614 origins.

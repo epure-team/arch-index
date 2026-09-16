@@ -60,3 +60,5 @@ let over_make () =
 let over_downstream x =
   let picked = over_make () x in
   picked x
+
+let let_head_run x = (let chosen = ho_target in chosen) x
