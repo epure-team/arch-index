@@ -438,6 +438,21 @@ let register () =
               AND caller.module_id=target.module_id AND c.kind='MAY_ENUMERATED'")
         2 ;
       Batch.eq_int b
+        ~msg:"OCAML_CFA_RED: root known-plus-opaque alias retains its known target"
+        (count rich "SELECT count(*) FROM calls c JOIN functions f ON f.id=c.caller_id JOIN functions t ON t.id=c.callee_id WHERE f.name='root_mixed_run' AND t.name='join_f' AND c.kind='MAY_ENUMERATED'") 1 ;
+      Batch.eq_int b
+        ~msg:"OCAML_CFA_RED: root known-plus-opaque alias retains callback uncertainty"
+        (count rich "SELECT count(*) FROM calls c JOIN functions f ON f.id=c.caller_id WHERE f.name='root_mixed_run' AND c.kind='MAY_TOP' AND c.top_reason='callback_param'") 1 ;
+      Batch.eq_int b
+        ~msg:"OCAML_CFA_ASSERTION: pure known root join remains bounded-only"
+        (count rich "SELECT count(*) FROM calls c JOIN functions f ON f.id=c.caller_id WHERE f.name='branch_run' AND c.kind='MAY_TOP' AND c.edge_form IS NULL") 0 ;
+      Batch.eq_int b
+        ~msg:"OCAML_CFA_ASSERTION: direct multi-hop opaque root alias remains TOP"
+        (count rich "SELECT count(*) FROM calls c JOIN functions f ON f.id=c.caller_id WHERE f.name='root_opaque_run' AND c.kind='MAY_TOP' AND c.top_reason='callback_param'") 1 ;
+      Batch.eq_int b
+        ~msg:"OCAML_CFA_ASSERTION: root opaque refinements are never MUST"
+        (count rich "SELECT count(*) FROM calls c JOIN functions f ON f.id=c.caller_id WHERE f.name IN ('root_mixed_run','root_opaque_run') AND c.kind='MUST' AND c.edge_form IS NULL") 0 ;
+      Batch.eq_int b
         ~msg:"OCAML_CFA_RED: named if join retains its callback frontier"
         (count rich
            "SELECT count(*) FROM calls c JOIN functions caller ON caller.id=c.caller_id \

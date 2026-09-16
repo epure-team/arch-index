@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "revision": "c397efd1b2248564c05c74fdab795213dea593db+ocaml-cfa-foundation-source-overlay-2x2-2026-09-16",
+  "revision": "c397efd1b2248564c05c74fdab795213dea593db+cfa-foundation-opaque-alias-fix-source-overlay-2x2-2026-09-16",
   "modules": [
     "lib/arch_index/arch_errors_config.ml",
     "lib/arch_index/arch_index.ml",
@@ -33,7 +33,7 @@
   "totals": {
     "modules": 27,
     "functions": 1082,
-    "calls": 6804,
+    "calls": 6808,
     "origins": 603
   },
   "origin_groups": [

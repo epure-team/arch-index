@@ -1,0 +1,46 @@
+{
+  "task": "ocaml-cfa-foundation",
+  "role": "architect",
+  "round": 1,
+  "cycle": 1,
+  "reviewed_head": "0af3625abd246dd1e6c47f5c3527e06d76732fc5",
+  "review_scope": "Complete base-to-HEAD changed-file list reviewed; architecture assessment covered the private CFA domain/CMT modules, main and flat integrations, interfaces, build ownership, native tests, authentic-CMT tests, checkers, and changed consumer references.",
+  "commands": [
+    {
+      "command": "rtk proxy dune build",
+      "exit": 1,
+      "result": "environment-command-unavailable",
+      "evidence": "dune was not on the direct shell PATH; retried through the repository's opam-selected environment."
+    },
+    {
+      "command": "rtk proxy opam exec -- dune build",
+      "exit": 0,
+      "result": "pass"
+    },
+    {
+      "command": "rtk proxy node roster/ocaml-cfa-foundation/check-domain.js",
+      "exit": 0,
+      "result": "pass",
+      "evidence": "PASS CHECK1 independent finite-domain oracle (517 cases)"
+    },
+    {
+      "command": "rtk proxy node roster/ocaml-cfa-foundation/check-cmt.js",
+      "exit": 0,
+      "result": "pass",
+      "evidence": "Authentic main, flat, metadata, identity and consumer controls passed. Diagnostics were limited to pre-existing Tezt temporary-directory warnings."
+    },
+    {
+      "command": "rtk proxy node roster/ocaml-cfa-foundation/check-tezos.js",
+      "exit": 0,
+      "result": "pass",
+      "evidence": "Pinned 410 inputs reverified; current rows 45054; canonical SHA256 a4fbf0841ed4897f5321c315b12dcbff974537518d78a0177b1b6f5885718193; Irmin relations 4849->4850; protocol relations 12171->12173; zero relation losses; baseline unchanged.",
+      "report": "improvement/2026-09-15-ocaml-cfa/check3-1789555465157-3850652.json"
+    }
+  ],
+  "full_suite": {
+    "status": "not-repeated-by-architect",
+    "reason": "The reviewer personally executed the full suite on the same HEAD and recorded exit 0 with Tezt 345/345 and CFA finite inclusion 6/6; architecture scope required independent build and CHECK1/CHECK2/CHECK3 execution, not duplication of that full-suite run.",
+    "source": "roster/ocaml-cfa-foundation/reviewer-execution.json"
+  },
+  "specialist_attestation": "Architecture gates personally executed on the reviewed HEAD; findings are limited to structural and future-integration risks and do not assert a current acceptance-criteria failure."
+}

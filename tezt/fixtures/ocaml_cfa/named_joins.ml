@@ -3,6 +3,12 @@ let join_g x = x + 1
 let branch_choice = true
 let branch_root = if branch_choice then join_f else join_g
 let branch_run x = branch_root x
+let root_opaque_source = Sys.opaque_identity join_g
+let root_opaque_alias = root_opaque_source
+let root_opaque_alias2 = root_opaque_alias
+let root_mixed = if branch_choice then join_f else root_opaque_alias2
+let root_mixed_run x = root_mixed x
+let root_opaque_run x = root_opaque_alias2 x
 let join_known choose x = let picked = if choose then join_f else join_g in picked x
 let join_unknown choose callback x = let picked = if choose then join_f else callback in picked x
 let direct_join choose x = (if choose then join_f else join_g) x

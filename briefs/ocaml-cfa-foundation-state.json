@@ -58,6 +58,20 @@
       "at": "2026-09-16",
       "by": "roster-implement",
       "reason": "Explicit four-file approval applied; corrected nonvacuous unknown-arity coverage; final full345/345 and kernel6/6, CHECK1/2/3 and controls pass,313-source and five-binary hashes stable. Formal review/QA/ship pending."
+    },
+    {
+      "phase": "review",
+      "outcome": "NO-GO",
+      "at": "2026-09-16",
+      "by": "roster-review",
+      "reason": "Round1: confirmed HIGH root opaque-alias unknown loss through known-target join, despite all existing gates passing. Two medium/one low architecture advisories. Convergence/trace valid; OpenCode timeout degraded. Return to implementation with regression required."
+    },
+    {
+      "phase": "implement",
+      "outcome": "COMPLETED",
+      "at": "2026-09-16",
+      "by": "roster-implement",
+      "reason": "Opaque-root-alias uncertainty repaired with authentic CHECK2 RED/GREEN; calibration BASE-overlay regression corrected RED/GREEN. Fresh 2x2 exact-array equality attributes6808 calls to source only; approved references migrated without exemption changes. Final full345/345 exit0; CHECK1/2/3, pure controls, bundle, scope and hygiene pass. Round2 review pending."
     }
   ]
 }

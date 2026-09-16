@@ -3,12 +3,48 @@
 // Pure controls for the Stage2 self-index 2x2 diagnostic.  They intentionally
 // do not build, archive, or inspect the repository's CMTs.
 const assert = require('node:assert/strict');
+const child = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const Module = require('node:module');
+const vm = require('node:vm');
 
 function assertion(error) {
   return error instanceof assert.AssertionError;
+}
+
+function command(cwd, args) {
+  const result = child.spawnSync(args[0], args.slice(1), {cwd, encoding: 'utf8'});
+  if (result.error || result.status !== 0) throw new Error(`${args.join(' ')}: ${result.error || result.stderr}`);
+  return result.stdout;
+}
+
+function changedPathsIn(root, base) {
+  const file = path.join(__dirname, 'calibrate-self.js');
+  const loader = Module.createRequire(file);
+  const source = fs.readFileSync(file, 'utf8')
+    .replace("const ROOT = path.resolve(__dirname, '../..');", `const ROOT = ${JSON.stringify(root)};`)
+    .replace("const BASE = 'c397efd1b2248564c05c74fdab795213dea593db';", `const BASE = ${JSON.stringify(base)};`)
+    + '\nmodule.exports.__changedPathsForTest = changedPaths;\n';
+  const mod = {exports: {}};
+  vm.runInNewContext(source, {require: loader, module: mod, exports: mod.exports,
+    __dirname, __filename: file, process, console, Buffer}, {filename: file});
+  return mod.exports.__changedPathsForTest();
+}
+
+function deltaFixture(root) {
+  command(root, ['git', 'init', '-q']);
+  command(root, ['git', 'config', 'user.name', 'test']);
+  command(root, ['git', 'config', 'user.email', 'test@example.invalid']);
+  fs.writeFileSync(path.join(root, 'base.ml'), 'let base = 0\n');
+  command(root, ['git', 'add', '.']); command(root, ['git', 'commit', '-qm', 'base']);
+  const base = command(root, ['git', 'rev-parse', 'HEAD']).trim();
+  fs.writeFileSync(path.join(root, 'committed.ml'), 'let committed = 1\n');
+  command(root, ['git', 'add', '.']); command(root, ['git', 'commit', '-qm', 'candidate']);
+  fs.writeFileSync(path.join(root, 'base.ml'), 'let base = 2\n');
+  fs.writeFileSync(path.join(root, 'untracked.ml'), 'let untracked = 3\n');
+  return {root, base};
 }
 
 function run() {
@@ -64,6 +100,13 @@ function run() {
   } finally {
     fs.rmSync(parent, {recursive: true, force: true});
   }
+
+  withOwnedTemp('arch-cfa-self-delta-', root => {
+    const fixture = deltaFixture(root);
+    assert.deepEqual(Array.from(changedPathsIn(fixture.root, fixture.base)),
+      ['base.ml', 'committed.ml', 'untracked.ml'],
+      'S1 overlay contains the complete BASE delta, including committed-clean and untracked paths');
+  });
 
   let failedPath = null;
   assert.throws(

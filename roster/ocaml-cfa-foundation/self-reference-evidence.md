@@ -65,3 +65,29 @@ Root added a behavioral failing assertion for the CMI case, then accepted only
 irrelevant file links while still refusing selected-input/directory links.
 The corrected pure test and third full diagnostic passed. The earlier agent's
 module-absent exit2 was setup failure, not behavioral RED.
+
+## Requalification after the review correction
+
+The root opaque-alias fix adds four calls to the indexed library source.
+Fresh report:
+`improvement/2026-09-16-cfa/self-2x2-138256-1789556905371/report.json`, SHA256
+`31daad56183b14edee601372afae6ec1767b99e27b063a51f71bf9df8c613f24`.
+Root again compared full calls, origins, groups, modules and totals: A=B and
+C=D exactly. A/B remain25/1013/6425/583; C/D are27/1082/6808/603.
+Module and origin-group arrays equal the already approved reference. The sole
+assertion remains the same name/line1722/column27/descriptor. Only the calls
+total and descriptive revision were updated in the existing approved scope;
+no additional allowlist edit or exemption was needed.
+
+Source/status/pins stayed stable. Root confirmed the owned calibration tree
+`/tmp/arch-cfa-self-2x2-EUaNSr` was removed. No worktree was created.
+
+The preceding attempt failed because the diagnostic used a HEAD-relative
+overlay after foundation code had been committed, omitting clean committed
+files from its c397efd archive. That failed measurement is retained at
+`improvement/2026-09-16-cfa/self-2x2-27424-1789556661355/report.json`; its owned
+`/tmp/arch-cfa-self-2x2-FOfy1D` tree was removed. A genuine failing test using
+a tiny owned Git repository exposed the omitted committed file; the diagnostic
+now computes its complete BASE-relative delta plus untracked paths. The test
+and fresh measurement pass. Fixture creation is inside owned-finally cleanup,
+including failures during Git setup.

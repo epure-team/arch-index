@@ -1,0 +1,12 @@
+{
+  "specialist": "spec-compliance",
+  "head": "0af3625abd246dd1e6c47f5c3527e06d76732fc5",
+  "build": {"command": "rtk proxy opam exec -- dune build", "exit": 0},
+  "checks": {
+    "CHECK-1": {"exit": 0, "detail": "517 independent oracle cases", "controls": {"pass": 0, "assertion": 1, "setup": 2}},
+    "CHECK-2": {"exit": 0, "detail": "authentic main/flat/metadata/identity/consumer fixture", "controls": {"assertion": 1, "setup": 2, "compiler_marker": 2, "empty_success": 2}},
+    "CHECK-3": {"exit": 0, "detail": "45054 rows; 3 relation gains; 0 losses; 0 new MUST; tracked state unchanged", "controls": {"pass": 0, "assertion": 1, "setup": 2}}
+  },
+  "full_suite": {"executed_by_this_specialist": false, "note": "Intentionally skipped; owner/reviewer separately owns same-HEAD 345/345 plus 6/6 evidence."},
+  "findings": 0
+}
