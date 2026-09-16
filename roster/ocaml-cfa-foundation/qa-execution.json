@@ -1,0 +1,122 @@
+{
+  "task": "ocaml-cfa-foundation",
+  "phase": "qa",
+  "head": "8eb28f4dcd04a0538a7bd17a519db60f75d3a47e",
+  "source_inventory_count": 286,
+  "source_before_sha256": "c9b1b303e35cee3eb61106f0e42a7c1a66e7c72642825c2c3e66252524010e6d",
+  "source_after_sha256": "c9b1b303e35cee3eb61106f0e42a7c1a66e7c72642825c2c3e66252524010e6d",
+  "source_unchanged": true,
+  "binaries_before": {
+    "bin/arch_callgraph_ocaml/arch_callgraph_ocaml.exe": "2f2d3f72c7ad8572ed8ea596b6c82d49e833fb664e7eedcc4f230a05073f844b",
+    "bin/arch_index_cli/arch_index_cli.exe": "2dcd29f2f6b61857cf0ab7e6d45b769706ceca260016ade082543d92b5824d7c",
+    "bin/arch_query/arch_query.exe": "2c3713e7150da5fb3c4f79de8e39fed6ac6bce90cb4385ab5312530e7d9b7c8a",
+    "tezt/tests/main.exe": "9fbd4ca206865d0a029e11ac455913abecd06013e053c5dfd67039add6fc56da",
+    "test/test_cfa.exe": "2d1f8f769e958dbc8fe1daf67382d7c0893208c99bda701c512c431a82095da6"
+  },
+  "binaries_after": {
+    "bin/arch_callgraph_ocaml/arch_callgraph_ocaml.exe": "2f2d3f72c7ad8572ed8ea596b6c82d49e833fb664e7eedcc4f230a05073f844b",
+    "bin/arch_index_cli/arch_index_cli.exe": "2dcd29f2f6b61857cf0ab7e6d45b769706ceca260016ade082543d92b5824d7c",
+    "bin/arch_query/arch_query.exe": "2c3713e7150da5fb3c4f79de8e39fed6ac6bce90cb4385ab5312530e7d9b7c8a",
+    "tezt/tests/main.exe": "9fbd4ca206865d0a029e11ac455913abecd06013e053c5dfd67039add6fc56da",
+    "test/test_cfa.exe": "2d1f8f769e958dbc8fe1daf67382d7c0893208c99bda701c512c431a82095da6"
+  },
+  "binaries_unchanged": true,
+  "build": {
+    "exit": 0,
+    "observed_ms": 476
+  },
+  "full_suite": {
+    "exit": 0,
+    "tezt": "345/345",
+    "kernel": "6/6",
+    "observed_duration_upper_bound_ms": 314817,
+    "duration_note": "Bound includes polling delay; not CPU or exact child elapsed time",
+    "log": "improvement/2026-09-16-cfa/qa-runtest.log",
+    "sha256": "fb6daac5c8750b79ed0f7a9329408303ce4e54e411c393d3527391d170373679"
+  },
+  "checks": {
+    "exit": 0,
+    "commands": [
+      "bundle22",
+      "git diff --check",
+      "scope-diff",
+      "CHECK1",
+      "CHECK2",
+      "CHECK3",
+      "check-domain-test",
+      "check-tezos-test",
+      "calibrate-self-test"
+    ],
+    "observed_duration_upper_bound_ms": 50660
+  },
+  "check3": {
+    "ok": true,
+    "current": {
+      "row_count": 45054,
+      "canonical_sha256": "08f491da61809c59401529be1373c5be3c61dc4c5de6c5269ee7b885e5467a18",
+      "producer_sha256": "2f2d3f72c7ad8572ed8ea596b6c82d49e833fb664e7eedcc4f230a05073f844b",
+      "schema_sha256": "1dd2d909e1feb2582e8a13f717ef165b7be9b73b908f73f47983920bded580d0",
+      "manifest_sha256": "9e38880a52f855c58081b1a171af5879058cbaa2697aaa5694827cbd16f8ecd1",
+      "selected": 410,
+      "cmt_hashes_reverified": true,
+      "arch_revision": "8eb28f4dcd04a0538a7bd17a519db60f75d3a47e",
+      "tezos_revision": "1727d7e192f2374edda7ad7adceef6f4ec51f71a"
+    },
+    "resources": {
+      "producer_wall_ms": 2841.969875,
+      "max_rss_kib": 145152,
+      "rss_observation": "Linux /proc VmHWM/VmRSS sample",
+      "executed_producer_sha256": "2f2d3f72c7ad8572ed8ea596b6c82d49e833fb664e7eedcc4f230a05073f844b",
+      "executed_schema_sha256": "1dd2d909e1feb2582e8a13f717ef165b7be9b73b908f73f47983920bded580d0"
+    },
+    "report": "/home/mathias/dev/arch-index/improvement/2026-09-15-ocaml-cfa/check3-1789558871518-556652.json",
+    "baseline_unchanged": true,
+    "relations": {
+      "before": {
+        "irmin": 4849,
+        "protocol": 12171
+      },
+      "after": {
+        "irmin": 4850,
+        "protocol": 12173
+      },
+      "gains": [
+        {
+          "key": "[\"irmin/lib_irmin/dot.ml\",\"Make.fprintf.<fun:90:23>\",\"irmin/lib_irmin/dot.ml:92\",\"irmin/lib_irmin/dot.ml\",\"Make.fprintf.<fun:90:23>.<fun:94:15>\"]",
+          "relation": [
+            "irmin/lib_irmin/dot.ml",
+            "Make.fprintf.<fun:90:23>",
+            "irmin/lib_irmin/dot.ml:92",
+            "irmin/lib_irmin/dot.ml",
+            "Make.fprintf.<fun:90:23>.<fun:94:15>"
+          ]
+        },
+        {
+          "key": "[\"src/proto_alpha/lib_protocol/raw_context.ml\",\"consume_gas_limit_in_block\",\"src/proto_alpha/lib_protocol/raw_context.ml:624\",\"src/proto_alpha/lib_protocol/raw_context.ml\",\"remaining_block_gas\"]",
+          "relation": [
+            "src/proto_alpha/lib_protocol/raw_context.ml",
+            "consume_gas_limit_in_block",
+            "src/proto_alpha/lib_protocol/raw_context.ml:624",
+            "src/proto_alpha/lib_protocol/raw_context.ml",
+            "remaining_block_gas"
+          ]
+        },
+        {
+          "key": "[\"src/proto_alpha/lib_protocol/raw_context.ml\",\"consume_gas_limit_in_block\",\"src/proto_alpha/lib_protocol/raw_context.ml:628\",\"src/proto_alpha/lib_protocol/raw_context.ml\",\"remaining_block_gas\"]",
+          "relation": [
+            "src/proto_alpha/lib_protocol/raw_context.ml",
+            "consume_gas_limit_in_block",
+            "src/proto_alpha/lib_protocol/raw_context.ml:628",
+            "src/proto_alpha/lib_protocol/raw_context.ml",
+            "remaining_block_gas"
+          ]
+        }
+      ],
+      "losses": []
+    }
+  },
+  "code_intel": "RESULT: skip (no code-intel block)",
+  "cross_runtime": "skipped-degraded (review breaker, unchanged runtime version)",
+  "claims": "canonical tool unavailable;3/3 local context digests unchanged",
+  "coverage": "not configured; no percentage claim"
+}
