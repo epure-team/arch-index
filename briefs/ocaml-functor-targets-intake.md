@@ -93,14 +93,14 @@ opam exec -- dune exec --root . tezt/tests/main.exe -- --job-count 1
 opam exec -- dune exec --root . tezt/tests/main.exe -- --job-count 1 --match 'functor|CFA'
 
 # Existing independent functor contract checks
-rtk proxy node scripts/check-functor-bindings.js inventory
-rtk proxy node scripts/check-functor-bindings.js lifecycle
-rtk proxy node scripts/check-functor-bindings.js query
-rtk proxy node scripts/check-functor-bindings.js compatibility
+opam exec -- node scripts/check-functor-bindings.js inventory
+opam exec -- node scripts/check-functor-bindings.js lifecycle
+opam exec -- node scripts/check-functor-bindings.js query
+opam exec -- node scripts/check-functor-bindings.js compatibility
 
 # Authentic producer and pinned Tezos/Irmin comparisons
-rtk proxy node roster/ocaml-cfa-foundation/check-cmt.js
-rtk proxy node roster/ocaml-cfa-foundation/check-tezos.js
+opam exec -- node roster/ocaml-cfa-foundation/check-cmt.js
+opam exec -- node roster/ocaml-cfa-foundation/check-tezos.js
 
 # Lint/Format
 # No standalone lint or format gate is documented; dune build/test are the documented gates.

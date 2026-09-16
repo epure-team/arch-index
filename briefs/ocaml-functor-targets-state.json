@@ -56,6 +56,13 @@
       "at": "2026-09-16T22:41:00+02:00",
       "by": "roster-review",
       "reason": "Independent review found unauthenticated physical/member witness links, representative-witness borrowing for nonidentical variants, incomplete storage-failure lifecycle, missing refusal/consumer gates and three QA command environment failures."
+    },
+    {
+      "phase": "spec",
+      "outcome": "VALIDATED",
+      "at": "2026-09-16T23:24:16+02:00",
+      "by": "roster-spec",
+      "reason": "Review round 1 confirmed the product boundary; version 1.0.1 makes durable occurrence/member links, atomic failure publication and environment-complete 0/1/2 gates explicit without expanding scope. The user's standing autonomous five-stage authorization supplies the revalidation gate."
     }
   ]
 }
