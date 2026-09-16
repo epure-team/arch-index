@@ -131,6 +131,8 @@ let create ~binding_name ~fn_arity (structure : Typedtree.structure) =
                            never enrolled merely because it has a root binder. *)
                         let dst = cell id in
                         Arch_index_cfa.copy domain ~src:(cell source) ~dst ;
+                        if not (Hashtbl.mem eligible (Ident.unique_name source)) then
+                          Arch_index_cfa.seed_reason domain dst "callback_param" ;
                         Hashtbl.replace eligible (Ident.unique_name id) () ;
                         Hashtbl.replace owners (Ident.unique_name id) None
                     | (Texp_ifthenelse _ | Texp_match _ | Texp_sequence _) ->

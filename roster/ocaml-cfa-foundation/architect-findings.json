@@ -1,0 +1,44 @@
+[
+  {
+    "severity": "MEDIUM",
+    "confidence": 5,
+    "path": "lib/arch_index/arch_index_cfa_cmt.ml",
+    "line": 154,
+    "category": "architecture",
+    "summary": "The session's finalized state is enforced by only some mutating entry points",
+    "evidence": "register_local_alias and register_call reject a finalized session at lines 199-200 and 267-268, but observe_literal, notify_stored_literal, notify_stored_root, notify_rejected_root, fresh_owner, register_local_expr, and register_expr_call remain callable after finalize. Several mutate literal state, owner allocation, cells, constraints, or target/reason seeds after the sole solve at lines 290-317. Current main and flat orchestration obey finalize-last, so this is not a demonstrated current acceptance-criteria violation; the risk is that future stage-3 integration can silently create stale closure results instead of failing at the ownership boundary.",
+    "fix": "Centralize an ensure_open guard and invoke it from every mutator and owner allocator, or split collection and finalized-query states into distinct abstract types so post-finalization mutation is unrepresentable.",
+    "fingerprint": "lib/arch_index/arch_index_cfa_cmt.ml:154:architecture",
+    "specialist": "architect",
+    "acs": ["AC-8", "FR-012", "FR-024"],
+    "status": "OPEN"
+  },
+  {
+    "severity": "MEDIUM",
+    "confidence": 4,
+    "path": "lib/arch_index/arch_index_cfa.ml",
+    "line": 1,
+    "category": "architecture",
+    "summary": "Semantic unknown-reason kinds are represented as unrestricted strings and mapped with a catch-all",
+    "evidence": "Both target identities and semantic reason kinds use the same String_set representation at arch_index_cfa.ml:1-3. Producers seed string literals such as callback_param and dropped_node, while arch_index_cmt.ml:686-688 maps only dropped_node explicitly and silently converts every other value, including a typo or future stage-3 reason, to Callback_param. The validated contract defines reasons as independent semantic kinds and specifies a closed persistence mapping.",
+    "fix": "Give reasons a private variant and dedicated ordered set, then expose an exhaustive conversion to existing top_reason values at the integration boundary. Keep targets as strings if canonical stored names remain their intended identity.",
+    "fingerprint": "lib/arch_index/arch_index_cfa.ml:1:architecture",
+    "specialist": "architect",
+    "acs": ["AC-5", "AC-15", "FR-008", "FR-036"],
+    "status": "OPEN"
+  },
+  {
+    "severity": "LOW",
+    "confidence": 5,
+    "path": "lib/arch_index/arch_index_cfa_cmt.ml",
+    "line": 83,
+    "category": "architecture",
+    "summary": "Root and same-callable expression transfer duplicate the stage-2 expression grammar",
+    "evidence": "root_expr_cell at lines 83-101 and expr_cell/build at lines 221-259 independently encode Pident copying, if/match joins, sequence-result selection, function literals, and opaque fallback. Their ownership and literal-authentication policies differ legitimately, but their syntax dispatch is duplicated inside a 336-line module and create spans roughly 95 lines. A stage-3 addition to returned values, arguments, or captures would require coordinated edits in both walkers and could create root/local semantic drift.",
+    "fix": "Extract one internal expression-transfer walker parameterized by source-ownership lookup and literal-cell policy, preserving deliberate root-versus-callable policy in those callbacks.",
+    "fingerprint": "lib/arch_index/arch_index_cfa_cmt.ml:83:architecture",
+    "specialist": "architect",
+    "acs": ["AC-9", "AC-10", "AC-11", "FR-019", "FR-023"],
+    "status": "OPEN"
+  }
+]

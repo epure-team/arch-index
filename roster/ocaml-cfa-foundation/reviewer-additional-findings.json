@@ -1,0 +1,25 @@
+[
+  {
+    "severity": "HIGH",
+    "confidence": 5,
+    "path": "lib/arch_index/arch_index_cfa_cmt.ml",
+    "line": 126,
+    "category": "correctness",
+    "summary": "A root alias of an unsupported value loses its unknown contribution when joined with a known target",
+    "evidence": "The root plain-alias arm at lines 126-135 copies the source cell without marking an untracked source unknown. For `let f (x:int)=x; let opaque=(fun k -> k) f; let a=opaque; let choice=if flag then f else a; let run x=choice x`, `opaque` is unsupported and unenrolled, so `a` copies an unseeded bottom cell and `choice` joins `{f}` with bottom. An isolated OCaml 5.3 CMT compiled successfully and the real arch_callgraph_ocaml producer emitted for `run` exactly one `MAY_ENUMERATED f` row with NULL TOP fields and no `MAY_TOP`; the pure-known control `pure_choice=if flag then f else pure_a` produced the identical row. In the same fixture, direct `a x` emitted `MAY_TOP callback_param`, proving the source is unknown at invocation but that uncertainty is lost specifically through the mixed join. This violates specs/ocaml-cfa-foundation.md:166 (FR-005), :183 (FR-019), and the independent-frontier requirements FR-034/FR-036.",
+    "fix": "When enrolling a root plain alias, preserve an explicit callback_param reason if its resolved source binder is not itself an eligible tracked root value; do not leave that source cell as semantic bottom. Add an authentic CMT regression containing the mixed unsupported-alias/known branch and a pure-known control, asserting that mixed `run` has bounded `f` plus exactly one callback_param unknown while the pure control has bounded `f` only; retain a direct `a x` assertion as the premise control.",
+    "fingerprint": "lib/arch_index/arch_index_cfa_cmt.ml:126:correctness",
+    "specialist": "reviewer",
+    "status": "OPEN",
+    "boundary": "Root single-variable alias enrollment and branch-result CFA joins",
+    "invariant": "Known targets and unsupported-value uncertainty must propagate independently through aliases and joins.",
+    "failure_mode": "A mixed known/unknown function value is reported as a closed finite target set, permitting downstream absence queries to treat an open callback frontier as bounded.",
+    "acs": [
+      "FR-005",
+      "FR-019",
+      "FR-034",
+      "FR-036",
+      "AC-9"
+    ]
+  }
+]

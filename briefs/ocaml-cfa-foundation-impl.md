@@ -2,7 +2,34 @@
 
 **Date:** 2026-09-16
 **Mode:** full
-**Status:** COMPLETED — Implementation gates pass; formal review/QA/ship pending.
+**Status:** COMPLETED — Review-round1 correction verified; round2 review pending.
+
+**Review-round1 resume:** The HIGH opaque-root-alias finding is corrected with
+two production lines and a real-CMT multi-hop regression. CHECK2 demonstrated
+RED before the fix and GREEN after. Fresh archive2x2 attributes the four extra
+self calls to source growth alone; approved references now6808, origins603 and
+the existing allowance unchanged. Final forced full suite345/345 passes, exit0;
+log opaque-alias-final-runtest.log SHA256
+91a3f720de7db6ef4f4ebf90b66e54cb9aceb55d601f0ba5ee3c3c6055a8d894.
+Root reran CHECK1/2/3, their pure controls, bundle22, scope and diff hygiene: all0.
+CHECK3 repeat reproduces identical45054 rows and canonical digest08f491da…,
++1 Irmin/+2 protocol relations,0 losses/newMUST. Producer wall2.760s, sampled
+RSS145068KiB; previous48.449s retained, not attributed or erased.
+The calibration helper now overlays BASE rather than HEAD; a real mini-repo
+regression demonstrated RED before that correction and GREEN after.
+No formal round2 review/QA GO or ship claim yet.
+
+## Ratchet
+
+- Finding: `lib/arch_index/arch_index_cfa_cmt.ml:126:correctness#6acf6220`
+- Check path: `roster/ocaml-cfa-foundation/check-cmt.js`
+- Red command: `rtk proxy node roster/ocaml-cfa-foundation/check-cmt.js`
+- Authentic RED exit1 before production edit:
+  `OCAML_CFA_RED: root known-plus-opaque alias retains callback uncertainty: got 0, expected 1`
+- `check_encodable`: true.
+- `pre_fix_sha`: null, as recorded by the parent dirty-tree review. No clean
+  SHA or automated red_verified attestation is fabricated. Manual RED evidence
+  and the gate's eventual null-SHA flag are distinct.
 
 **Resume2026-09-16:** the user approved the point-free file extension. That
 blocker is resolved. Targeted point-free5/5 passes; CHECK3 and self-reference

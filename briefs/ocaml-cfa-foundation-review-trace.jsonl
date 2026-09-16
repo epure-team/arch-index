@@ -1,0 +1,8 @@
+{"schema_version":"1.0","ts":"2026-09-16T10:35:57.643Z","task":"ocaml-cfa-foundation","round":1,"cycle":1,"event":"scope-gate","actor":"check-scope-diff.sh","outcome":"ran"}
+{"schema_version":"1.0","ts":"2026-09-16T10:41:14.012Z","task":"ocaml-cfa-foundation","round":1,"cycle":1,"event":"specialist","actor":"code-quality-auditor","outcome":"skipped","detail":"No kb/properties.md or KB installed"}
+{"schema_version":"1.0","ts":"2026-09-16T10:41:14.034Z","task":"ocaml-cfa-foundation","round":1,"cycle":1,"event":"specialist","actor":"reviewer-tui","outcome":"skipped","detail":"No TUI scope"}
+{"schema_version":"1.0","ts":"2026-09-16T10:43:28.021Z","task":"ocaml-cfa-foundation","round":1,"cycle":1,"event":"specialist","actor":"reviewer","outcome":"ran"}
+{"schema_version":"1.0","ts":"2026-09-16T10:44:01.681Z","task":"ocaml-cfa-foundation","round":1,"cycle":1,"event":"cross-runtime","actor":"opencode","outcome":"ran","detail":"degraded: timeout after 120.08s; no findings accepted","digest":"opencode:fd1dbeaa7d0c6431"}
+{"schema_version":"1.0","ts":"2026-09-16T10:45:43.683Z","task":"ocaml-cfa-foundation","round":1,"cycle":1,"event":"specialist","actor":"architect","outcome":"ran"}
+{"schema_version":"1.0","ts":"2026-09-16T10:49:28.838Z","task":"ocaml-cfa-foundation","round":1,"cycle":1,"event":"specialist","actor":"spec-compliance","outcome":"ran"}
+{"schema_version":"1.0","ts":"2026-09-16T10:50:23.426Z","task":"ocaml-cfa-foundation","round":1,"cycle":1,"event":"normalizer","actor":"review-normalize.js","outcome":"ran"}

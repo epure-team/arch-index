@@ -104,7 +104,10 @@ function run(command, args, options = {}) {
 }
 
 function changedPaths() {
-  const tracked = run('git', ['diff', '--name-status', '-z', 'HEAD']).stdout.split('\0').filter(Boolean);
+  // S1 overlays every owned difference from the pinned S0 commit, not merely
+  // the working-tree difference from HEAD.  Foundation code may already be a
+  // clean commit when this diagnostic is run.
+  const tracked = run('git', ['diff', '--name-status', '-z', BASE]).stdout.split('\0').filter(Boolean);
   const changed = [];
   for (let i = 0; i < tracked.length;) {
     const status = tracked[i++];

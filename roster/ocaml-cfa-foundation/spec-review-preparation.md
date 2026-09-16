@@ -1,18 +1,19 @@
 ---
 auditor: spec-compliance-auditor
 date: 2026-09-16
-status: PREPARATION — NO-GO (no confirmed static divergence; required personal execution gates pending)
+status: EXECUTED evidence preparation — no spec findings; not a ship verdict
 report_path_adaptation: "Skill default kb/reports/spec-compliance-report.md was deliberately redirected to roster/ocaml-cfa-foundation/spec-review-preparation.md because this task's manifest permits no new KB artifact."
 spec: specs/ocaml-cfa-foundation.md
-scope: static evidence review of the approved implementation/test set; no build, test, or check executed
+scope: committed-source review plus personally executed build/CHECK-1/CHECK-2/CHECK-3 and checker controls; no full-suite execution by this specialist
 ---
 
 # OCaml CFA Foundation — Spec Compliance Preparation
 
-This is not a GO decision. `CHECK-1`, `CHECK-2`, `CHECK-3`, the full suite,
-review bundle, diff check, QA, and exact-head CI have not been personally
-executed by this reviewer. Source locations below establish static evidence,
-not proof from reported counts or prior run records.
+This is not a ship decision. This specialist personally executed the build and
+CHECK-1/2/3, including their controls, at `0af3625`. The full suite was not
+rerun by this specialist: its same-HEAD `345/345` plus `6/6` result belongs to
+the owner/reviewer and is not claimed here. Source locations remain necessary
+alongside execution evidence; reported corpus counts are not semantic proof.
 
 ## Compliance matrix — functional requirements
 
@@ -28,7 +29,7 @@ not proof from reported counts or prior run records.
 | FR-008 | PASS (static) | `arch_index_cfa.ml:3-5,39-46` | `test/test_cfa.ml:50-54` | No witness data in the semantic value. |
 | FR-009 | PASS (static) | `arch_index_cfa.ml:32-63`; `arch_index_cfa_cmt.ml:83-101` | `test/test_cfa.ml:56-86` | Kernel supplies only copy closure. |
 | FR-010 | PASS (static) | `arch_index_cmt.ml:709-712` | `tezt/tests/ocaml_cfa_foundation.ml:241-260` | Empty CFA value retains an occurrence. |
-| FR-011 | UNTESTED | `roster/ocaml-cfa-foundation/check-domain.js:180-210` | Script/self-controls present but unexecuted | Exit contract needs personal execution. |
+| FR-011 | PASS | `roster/ocaml-cfa-foundation/check-domain.js:180-210` | CHECK-1 pass; controls pass/assertion/setup returned 0/1/2 | Personally executed at HEAD. |
 | FR-012 | PASS (static) | `arch_index_cmt.ml:3438-3442,4169-4173` | `tezt/tests/ocaml_cfa_foundation.ml:77-205` | Session finalizes after CMT walk. |
 | FR-013 | PASS (static) | `arch_index_cfa_cmt.ml:74-81,154-169`; `arch_index_cmt.ml:2539-2556` | `tezt/tests/ocaml_cfa_foundation.ml:121-205` | Binders use `Ident.unique_name`; expressions use physical equality. |
 | FR-014 | PASS (static) | `arch_index_cfa_cmt.ml:10-13,56,194-197` | `arch_index_cfa_cmt.ml:53-54` | Session token prevents cross-session equality. |
@@ -48,8 +49,8 @@ not proof from reported counts or prior run records.
 | FR-028 | PASS (static) | CFA fallback follows existing alias branch at `arch_index_cmt.ml:2531-2539` | `ocaml_cfa_foundation.ml:262-276` | CFA only runs after existing alias provenance path declines. |
 | FR-029 | PASS (static) | `arch_index_cmt.ml:681-708` | `ocaml_cfa_foundation.ml:67-75,465-486` | Expansion copies pending-call metadata; bounded head has no TOP fields at resolution. |
 | FR-030 | PASS (static) | `arch_index_cfa_cmt.ml:285-288` | `ocaml_cfa_foundation.ml:165-181,465-466` | Distinct registrations have distinct tokens. |
-| FR-031 | PASS (static) | Existing `fn_arity` passed at `arch_index_cmt.ml:3440-3442` and stored at `arch_index_cfa_cmt.ml:115-116,313-314` | `ocaml_cfa_foundation.ml:471-476` | Static evidence depends on existing helper; execution pending. |
-| FR-032 | PASS (static) | `arch_index_cmt.ml:2542-2546,2600-2603`; `arch_index_cmt.ml:676-708` | `ocaml_cfa_foundation.ml:471-476` | Uses supplied `Some` count and omitted-slot frontier. |
+| FR-031 | PASS | Existing `fn_arity` passed at `arch_index_cmt.ml:3440-3442` and stored at `arch_index_cfa_cmt.ml:115-116,313-314` | `ocaml_cfa_foundation.ml:81-108,491-496`; CHECK-2 pass | Includes arity `0` and `-1` with two bounded candidates plus one unknown. |
+| FR-032 | PASS | `arch_index_cmt.ml:2542-2546,2600-2603`; `arch_index_cmt.ml:676-708` | `ocaml_cfa_foundation.ml:81-108,491-496`; CHECK-2 pass | Uses supplied `Some` count and omitted-slot frontier, including nonpositive arity. |
 | FR-033 | PASS (static) | `arch_index_cmt.ml:701-707` | `ocaml_cfa_foundation.ml:477-480` | One residual list element per occurrence. |
 | FR-034 | PASS (static) | `arch_index_cmt.ml:691-708` | `ocaml_cfa_foundation.ml:477-480` | Reason and residual are independently appended. |
 | FR-035 | PASS (static) | `arch_index_cmt.ml:709-712` | `ocaml_cfa_foundation.ml:241-260` | Bottom keeps unknown main occurrence. |
@@ -59,40 +60,45 @@ not proof from reported counts or prior run records.
 | FR-039 | PASS (static) | `call_graph_extractor.ml:404-429` | `ocaml_cfa_foundation.ml:277-289` | Nonunique caller becomes flat unknown. |
 | FR-040 | PASS (static) | `arch_index_cmt.ml:3801-3826` | `ocaml_cfa_foundation.ml:305-320` | Main notifications retain existing missing-caller drop branch. |
 | FR-041 | PASS (static) | `call_graph_extractor.ml:404-449`; `arch_index_cmt.ml:730-732` | `ocaml_cfa_foundation.ml:277-303` | Private marker is removed before persistence. |
-| FR-042 | UNTESTED | `roster/ocaml-cfa-foundation/check-cmt.js:1-88` | Authentic fixture and controls present; unexecuted | Requires personal CHECK-2 execution. |
-| FR-043 | UNTESTED | `roster/ocaml-cfa-foundation/check-tezos.js:1-317` | Corpus accounting script present; unexecuted | Requires personal CHECK-3 execution or documented >=2 corpus absence. |
+| FR-042 | PASS | `roster/ocaml-cfa-foundation/check-cmt.js:1-88` | CHECK-2 authentic fixture pass; controls 1/2/2/2 | Personally executed at HEAD. |
+| FR-043 | PASS | `roster/ocaml-cfa-foundation/check-tezos.js:1-317` | CHECK-3 measured pass; controls pass/assertion/setup 0/1/2 | Replay had no relation loss/new MUST; accounting remains nonsemantic. |
 | FR-044 | PASS (static) | `arch_index_cfa.ml:32-63`; `arch_index_cfa_cmt.ml:83-101` | `check-tezos.js:144-169` | No stage-3/4 transfer primitive found in new kernel. |
 
 ## Compliance matrix — acceptance criteria
 
 | Claim | Static status | Evidence | Gate status |
 |---|---|---|---|
-| AC-1 | PASS (static) | `test/test_cfa.ml:50-54` | CHECK-1 unexecuted |
-| AC-2 | PASS (static) | `test/test_cfa.ml:50-54` | CHECK-1 unexecuted |
-| AC-3 | PASS (static) | `test/test_cfa.ml:56-86` | CHECK-1 unexecuted |
-| AC-4 | PASS (static) | `test/test_cfa.ml:103-111`; `ocaml_cfa_foundation.ml:241-260` | CHECK-1/2 unexecuted |
-| AC-5 | PASS (static) | `test/test_cfa.ml:50-54,103-111` | CHECK-1 unexecuted |
-| AC-6 | UNTESTED | `check-domain.js:180-210` | Exit controls not run |
-| AC-7 | PASS (static) | `ocaml_cfa_foundation.ml:220-276` | CHECK-2 unexecuted |
-| AC-8 | PASS (static) | `ocaml_cfa_foundation.ml:121-160` | CHECK-2 unexecuted |
-| AC-9 | PASS (static) | `named_joins.ml:6-12`; `ocaml_cfa_foundation.ml:408-415,362-390` | CHECK-2 unexecuted |
-| AC-10 | PASS (static) | `named_joins.ml:13-24`; `ocaml_cfa_foundation.ml:426-441` | CHECK-2 unexecuted |
-| AC-11 | PASS (static) | `ocaml_cfa_foundation.ml:305-320` | CHECK-2 unexecuted |
-| AC-12 | PASS (static) | `ocaml_cfa_foundation.ml:465-486` | CHECK-2 unexecuted |
-| AC-13 | PASS (static) | `ocaml_cfa_foundation.ml:471-476` | CHECK-2 unexecuted |
-| AC-14 | PASS (static) | `ocaml_cfa_foundation.ml:477-480` | CHECK-2 unexecuted |
-| AC-15 | PASS (static) | `ocaml_cfa_foundation.ml:184-205` | CHECK-2 unexecuted |
-| AC-16 | PASS (static) | `ocaml_cfa_foundation.ml:277-329` | CHECK-2 unexecuted |
-| AC-17 | PASS (static) | `arch_index_cmt.ml:709-712`; `call_graph_extractor.ml:404-429` | CHECK-2 unexecuted |
-| AC-18 | UNTESTED | `check-cmt.js:1-88` | Exit controls not run |
-| AC-19 | UNTESTED | `check-tezos.js:1-317` | Corpus/gain-loss check not run |
+| AC-1 | PASS | `test/test_cfa.ml:50-54` | CHECK-1 pass |
+| AC-2 | PASS | `test/test_cfa.ml:50-54` | CHECK-1 pass |
+| AC-3 | PASS | `test/test_cfa.ml:56-86` | CHECK-1 pass |
+| AC-4 | PASS | `test/test_cfa.ml:103-111`; `ocaml_cfa_foundation.ml:241-260` | CHECK-1/2 pass |
+| AC-5 | PASS | `test/test_cfa.ml:50-54,103-111` | CHECK-1 pass |
+| AC-6 | PASS | `check-domain.js:180-210` | Controls 0/1/2 |
+| AC-7 | PASS | `ocaml_cfa_foundation.ml:220-276` | CHECK-2 pass |
+| AC-8 | PASS | `ocaml_cfa_foundation.ml:121-160` | CHECK-2 pass |
+| AC-9 | PASS | `named_joins.ml:6-12`; `ocaml_cfa_foundation.ml:408-415,362-390` | CHECK-2 pass |
+| AC-10 | PASS | `named_joins.ml:13-24`; `ocaml_cfa_foundation.ml:426-441` | CHECK-2 pass |
+| AC-11 | PASS | `ocaml_cfa_foundation.ml:305-320` | CHECK-2 pass |
+| AC-12 | PASS | `ocaml_cfa_foundation.ml:465-486` | CHECK-2 pass |
+| AC-13 | PASS | `ocaml_cfa_foundation.ml:81-108,491-496` | CHECK-2 pass; arity 0/-1 covered |
+| AC-14 | PASS | `ocaml_cfa_foundation.ml:497-500` | CHECK-2 pass |
+| AC-15 | PASS | `ocaml_cfa_foundation.ml:213-234` | CHECK-2 pass |
+| AC-16 | PASS | `ocaml_cfa_foundation.ml:311-363` | CHECK-2 pass |
+| AC-17 | PASS | `arch_index_cmt.ml:709-712`; `call_graph_extractor.ml:404-429` | CHECK-2 pass |
+| AC-18 | PASS | `check-cmt.js:1-88` | Controls 1/2/2/2 |
+| AC-19 | PASS | `check-tezos.js:1-317` | CHECK-3 pass; controls 0/1/2 |
 
 ## Findings
 
-No static DIVERGE or MISSING finding remains after reviewing the existing
-module-refusal fixture. Execution status is deliberately recorded in the
-frontmatter and matrices rather than emitted as a semantic code/spec finding:
-the root withheld the build token, so no personal gate attestation exists yet.
+No DIVERGE, MISSING, or UNTESTED claim remains in this round.
+
+## Personal execution record
+
+- `rtk proxy opam exec -- dune build`: exit 0.
+- `CHECK-1`: exit 0, 517 oracle cases; pass/assertion/setup controls: 0/1/2.
+- `CHECK-2`: exit 0, authentic main/flat/metadata/identity/consumer test; assertion/setup/compiler-marker/empty-success controls: 1/2/2/2.
+- `CHECK-3`: exit 0; 45,054 rows; three relation gains, zero relation losses, zero new MUST rows; its before/after tracked-state digest was identical. Pass/assertion/setup controls: 0/1/2.
+- Full suite intentionally not rerun by this specialist; owner/reviewer separately owns the same-HEAD result.
 
 ## Unspecified-implementation scan
 
