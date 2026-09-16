@@ -1,0 +1,57 @@
+{
+  "task": "ocaml-cfa-foundation",
+  "mode": "full",
+  "schema_version": "1.0",
+  "steps": [
+    {
+      "id": "step-1",
+      "skill": "roster-implement",
+      "inputs": [
+        "briefs/ocaml-cfa-foundation-implementer.md"
+      ],
+      "outputs": [
+        "briefs/ocaml-cfa-foundation-impl.md"
+      ],
+      "hook": false
+    },
+    {
+      "id": "step-2",
+      "skill": "roster-review",
+      "inputs": [
+        "briefs/ocaml-cfa-foundation-reviewer.md"
+      ],
+      "outputs": [
+        "briefs/ocaml-cfa-foundation-review.json"
+      ],
+      "hook": false
+    },
+    {
+      "id": "step-3",
+      "skill": "roster-qa",
+      "inputs": [
+        "briefs/ocaml-cfa-foundation-qa-scope.md"
+      ],
+      "outputs": [
+        "briefs/ocaml-cfa-foundation-qa.md"
+      ],
+      "hook": false
+    },
+    {
+      "id": "step-4",
+      "skill": "roster-ship",
+      "inputs": [
+        "briefs/ocaml-cfa-foundation-review.json",
+        "briefs/ocaml-cfa-foundation-qa.md"
+      ],
+      "outputs": [
+        "briefs/ocaml-cfa-foundation-ship-gate.md"
+      ],
+      "hook": false
+    }
+  ],
+  "quality_gates": {
+    "build": "rtk proxy opam exec -- dune build",
+    "test": "rtk proxy opam exec -- dune runtest --force",
+    "lint": ""
+  }
+}
