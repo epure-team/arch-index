@@ -56,6 +56,13 @@
       "at": "2026-09-16T16:40:49+02:00",
       "by": "roster-implement",
       "reason": "Round-1 loop-back corrected all seven findings and added one runnable review ratchet. Full suite 345/345, CHECK1 517 cases, authentic CHECK2 plus exit controls, two identical self-index 2x2 calibrations, and pinned410 CHECK3 passed with +70 Irmin/+256 protocol relations, zero relation losses, and zero new MUST rows."
+    },
+    {
+      "phase": "review",
+      "outcome": "NO-GO",
+      "at": "2026-09-16T17:01:56+02:00",
+      "by": "roster-review",
+      "reason": "Round 2 resolved all seven prior findings. Full reviewer, architecture, and spec-compliance fanout found one new HIGH gap for supported simple-let application heads; the convergence gate passed with a first strike and routed the task back to implementation."
     }
   ]
 }

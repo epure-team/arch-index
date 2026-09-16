@@ -14,9 +14,9 @@
       "fingerprint": "lib/arch_index/arch_index_cfa_cmt.ml:513:spec", "specialist": "architect",
       "acs": ["AC-7", "FR-021", "AC-11", "FR-027"],
       "fid": "lib/arch_index/arch_index_cfa_cmt.ml:513:spec#8c8af98a",
-      "status": "OPEN", "first_seen_round": 1, "resolved_round": null,
+      "status": "RESOLVED", "first_seen_round": 1, "resolved_round": 2,
       "reopened_from_round": null, "reopened_at_round": null,
-      "check": null, "check_encodable": true, "red_verified": null,
+      "check": "roster/ocaml-cfa-propagation/check-review-fixes.js", "check_encodable": true, "red_verified": null,
       "pre_fix_sha": null, "check_blob": null
     },
     {
@@ -29,9 +29,9 @@
       "fingerprint": "lib/arch_index/arch_index_cfa_cmt.ml:218:spec", "specialist": "architect",
       "acs": ["AC-6", "FR-011", "FR-012"],
       "fid": "lib/arch_index/arch_index_cfa_cmt.ml:218:spec#a2e2195a",
-      "status": "OPEN", "first_seen_round": 1, "resolved_round": null,
+      "status": "RESOLVED", "first_seen_round": 1, "resolved_round": 2,
       "reopened_from_round": null, "reopened_at_round": null,
-      "check": null, "check_encodable": true, "red_verified": null,
+      "check": "roster/ocaml-cfa-propagation/check-review-fixes.js", "check_encodable": true, "red_verified": null,
       "pre_fix_sha": null, "check_blob": null
     },
     {
@@ -43,9 +43,9 @@
       "fix": "Queue finite target, reason, and residual events and drain them iteratively with the worklist.",
       "fingerprint": "lib/arch_index/arch_index_cfa.ml:76:architecture", "specialist": "architect",
       "fid": "lib/arch_index/arch_index_cfa.ml:76:architecture#3b82ba71",
-      "status": "OPEN", "first_seen_round": 1, "resolved_round": null,
+      "status": "RESOLVED", "first_seen_round": 1, "resolved_round": 2,
       "reopened_from_round": null, "reopened_at_round": null,
-      "check": null, "check_encodable": true, "red_verified": null,
+      "check": "roster/ocaml-cfa-propagation/check-review-fixes.js", "check_encodable": true, "red_verified": null,
       "pre_fix_sha": null, "check_blob": null
     },
     {
@@ -57,9 +57,9 @@
       "fix": "Pre-register every supported local recursive binder before walking any RHS, then collect bodies and constraints; add an authentic local mutual-recursion fixture.",
       "fingerprint": "lib/arch_index/arch_index_cmt.ml:2143:correctness", "specialist": "reviewer",
       "fid": "lib/arch_index/arch_index_cmt.ml:2143:correctness#80ef757f",
-      "status": "OPEN", "first_seen_round": 1, "resolved_round": null,
+      "status": "RESOLVED", "first_seen_round": 1, "resolved_round": 2,
       "reopened_from_round": null, "reopened_at_round": null,
-      "check": null, "check_encodable": true, "red_verified": null,
+      "check": "roster/ocaml-cfa-propagation/check-review-fixes.js", "check_encodable": true, "red_verified": null,
       "pre_fix_sha": null, "check_blob": null
     },
     {
@@ -71,9 +71,9 @@
       "fix": "Route Texp_apply heads through the CFA-marker branch and add an authentic direct staged call such as (identity target) x.",
       "fingerprint": "lib/arch_index/arch_index_cmt.ml:2642:correctness", "specialist": "reviewer",
       "fid": "lib/arch_index/arch_index_cmt.ml:2642:correctness#b0f1f5dc",
-      "status": "OPEN", "first_seen_round": 1, "resolved_round": null,
+      "status": "RESOLVED", "first_seen_round": 1, "resolved_round": 2,
       "reopened_from_round": null, "reopened_at_round": null,
-      "check": null, "check_encodable": true, "red_verified": null,
+      "check": "roster/ocaml-cfa-propagation/check-review-fixes.js", "check_encodable": true, "red_verified": null,
       "pre_fix_sha": null, "check_blob": null
     },
     {
@@ -85,9 +85,9 @@
       "fix": "Distinguish exact saturation from remaining actuals; keep the residual occurrence but make the whole result callback-open without copying the raw return, and test a downstream invocation.",
       "fingerprint": "lib/arch_index/arch_index_cfa_cmt.ml:500:correctness", "specialist": "reviewer",
       "fid": "lib/arch_index/arch_index_cfa_cmt.ml:500:correctness#76812656",
-      "status": "OPEN", "first_seen_round": 1, "resolved_round": null,
+      "status": "RESOLVED", "first_seen_round": 1, "resolved_round": 2,
       "reopened_from_round": null, "reopened_at_round": null,
-      "check": null, "check_encodable": true, "red_verified": null,
+      "check": "roster/ocaml-cfa-propagation/check-review-fixes.js", "check_encodable": true, "red_verified": null,
       "pre_fix_sha": null, "check_blob": null
     },
     {
@@ -99,17 +99,32 @@
       "fix": "Add a Stage-3-aware classifier and controlled 0/1/2 exit-contract self-tests for each new marker family.",
       "fingerprint": "roster/ocaml-cfa-propagation/check-cmt.js:8:correctness", "specialist": "reviewer",
       "fid": "roster/ocaml-cfa-propagation/check-cmt.js:8:correctness#67891c80",
-      "status": "OPEN", "first_seen_round": 1, "resolved_round": null,
+      "status": "RESOLVED", "first_seen_round": 1, "resolved_round": 2,
+      "reopened_from_round": null, "reopened_at_round": null,
+      "check": "roster/ocaml-cfa-propagation/check-review-fixes.js", "check_encodable": true, "red_verified": null,
+      "pre_fix_sha": null, "check_blob": null
+    },
+    {
+      "severity": "HIGH", "confidence": 5,
+      "path": "lib/arch_index/arch_index_cmt.ml", "line": 2640,
+      "category": "correctness",
+      "summary": "Supported simple-let application heads discard their CFA occurrence token and remain TOP.",
+      "evidence": "register_application creates a token and expression_cell supports Texp_let (Nonrecursive,[binding],body), but record_head attaches cfa_application_token only for Texp_ifthenelse, Texp_match, Texp_sequence, and Texp_apply at lines 2640-2645. A supported call such as (let f = target in f) x therefore falls through lines 2657-2660 to Head_unknown; expand_cfa_calls never reads its resolved token, so the physical call misses target despite the shared dispatcher resolving it.",
+      "fix": "Route supported Texp_let heads through the CFA-marker branch (unsupported let shapes already become callback uncertainty in expression_cell) and add authentic main/flat coverage for a saturated simple-let head, including exact occurrence metadata and retained frontier controls.",
+      "fingerprint": "lib/arch_index/arch_index_cmt.ml:2640:correctness", "specialist": "reviewer",
+      "acs": ["AC-3", "FR-007", "AC-13", "FR-031", "FR-033", "AC-14", "FR-034"],
+      "fid": "lib/arch_index/arch_index_cmt.ml:2640:correctness#e01f343a",
+      "status": "OPEN", "first_seen_round": 2, "resolved_round": null,
       "reopened_from_round": null, "reopened_at_round": null,
       "check": null, "check_encodable": true, "red_verified": null,
-      "pre_fix_sha": null, "check_blob": null
+      "pre_fix_sha": null, "pre_fix_reason": "dirty-tree", "check_blob": null
     }
   ],
   "cross_runtime_findings": [],
-  "summary": {"critical": 2, "high": 3, "medium": 2, "low": 0, "auto_fixed": 0},
-  "no_go_reason": {"type": "spec-ac-failure", "cause": null, "failed_acs": ["AC-6", "FR-011", "FR-012", "AC-7", "FR-021", "AC-11", "FR-027"]},
-  "no_go_round": 1,
-  "round": 1,
+  "summary": {"critical": 2, "high": 4, "medium": 2, "low": 0, "auto_fixed": 0},
+  "no_go_reason": {"type": "implementation-finding", "cause": null, "failed_acs": []},
+  "no_go_round": 2,
+  "round": 2,
   "cycle": 1,
   "rounds_audit": [
     {
@@ -124,10 +139,22 @@
       ],
       "strike": false,
       "trace_schema_version": "1.0"
+    },
+    {
+      "round": 2,
+      "reviewed_sha": "71bf0cb10850f1c238c737985dd796966af21a4c",
+      "fix_sha": "71bf0cb10850f1c238c737985dd796966af21a4c",
+      "specialists_run": [
+        {"name": "reviewer", "selection_reason": "Mandatory loop-back owner review; personally ran build, full345, CHECK1/2/3 and the review ratchet."},
+        {"name": "architect", "selection_reason": "Round-1 architect findings and public call-graph output corrections required full-fan-out architecture review."},
+        {"name": "spec-compliance", "selection_reason": "Public output behavior changed while closing CRITICAL spec findings, triggering full-fan-out compliance review."}
+      ],
+      "strike": true,
+      "trace_schema_version": "1.0"
     }
   ],
   "cross_runtime": {
-    "opencode": {"status": "degraded", "reason": "non-conforming-output", "config_digest": "opencode:fd1dbeaa7d0c6431", "round": 1}
+    "opencode": {"status": "degraded", "reason": "timeout", "config_digest": "opencode:76f897c73342fdbf", "round": 2}
   },
   "streak_override": null,
   "mode": "full",
