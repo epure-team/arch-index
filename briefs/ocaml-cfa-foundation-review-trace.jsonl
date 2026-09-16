@@ -6,3 +6,11 @@
 {"schema_version":"1.0","ts":"2026-09-16T10:45:43.683Z","task":"ocaml-cfa-foundation","round":1,"cycle":1,"event":"specialist","actor":"architect","outcome":"ran"}
 {"schema_version":"1.0","ts":"2026-09-16T10:49:28.838Z","task":"ocaml-cfa-foundation","round":1,"cycle":1,"event":"specialist","actor":"spec-compliance","outcome":"ran"}
 {"schema_version":"1.0","ts":"2026-09-16T10:50:23.426Z","task":"ocaml-cfa-foundation","round":1,"cycle":1,"event":"normalizer","actor":"review-normalize.js","outcome":"ran"}
+{"schema_version":"1.0","ts":"2026-09-16T11:33:42.504Z","task":"ocaml-cfa-foundation","round":2,"cycle":1,"event":"scope-gate","actor":"check-scope-diff.sh","outcome":"ran"}
+{"schema_version":"1.0","ts":"2026-09-16T11:33:42.682Z","task":"ocaml-cfa-foundation","round":2,"cycle":1,"event":"specialist","actor":"reviewer","outcome":"ran"}
+{"schema_version":"1.0","ts":"2026-09-16T11:33:42.827Z","task":"ocaml-cfa-foundation","round":2,"cycle":1,"event":"specialist","actor":"architect","outcome":"ran"}
+{"schema_version":"1.0","ts":"2026-09-16T11:33:43.025Z","task":"ocaml-cfa-foundation","round":2,"cycle":1,"event":"specialist","actor":"spec-compliance","outcome":"ran","detail":"root-executed skill after independent prep; delegated execution thread limit"}
+{"schema_version":"1.0","ts":"2026-09-16T11:33:43.190Z","task":"ocaml-cfa-foundation","round":2,"cycle":1,"event":"specialist","actor":"code-quality-auditor","outcome":"skipped","detail":"no KB properties"}
+{"schema_version":"1.0","ts":"2026-09-16T11:33:43.354Z","task":"ocaml-cfa-foundation","round":2,"cycle":1,"event":"specialist","actor":"reviewer-tui","outcome":"skipped","detail":"no TUI scope"}
+{"schema_version":"1.0","ts":"2026-09-16T11:33:44.203Z","task":"ocaml-cfa-foundation","round":2,"cycle":1,"event":"normalizer","actor":"review-normalize.js","outcome":"ran"}
+{"schema_version":"1.0","ts":"2026-09-16T11:34:24.285Z","task":"ocaml-cfa-foundation","round":2,"cycle":1,"event":"cross-runtime","actor":"opencode","outcome":"skipped","detail":"shared breaker: unchanged degraded runtime digest; wrapper returned skipped-degraded"}

@@ -1,0 +1,99 @@
+{
+  "task": "ocaml-cfa-foundation",
+  "role": "reviewer",
+  "round": 2,
+  "cycle": 1,
+  "reviewed_head": "791d1f9ac8947edc13a2101b0e86cfa9bced1f3f",
+  "scope_gate": {
+    "status": "deferred-to-root",
+    "detail": "Root reported the scope gate ran and passed on the qualified correction; this reviewer emitted no scope findings."
+  },
+  "commands": [
+    {
+      "command": "opam exec -- dune build",
+      "exit": 0,
+      "result": "pass"
+    },
+    {
+      "command": "opam exec -- dune runtest --force",
+      "exit": 0,
+      "result": "pass",
+      "evidence": "Tezt 345/345; CFA finite inclusion 6/6; all other native test groups passed. Trailing assertion/setup diagnostics were exercised negative controls inside the passing suite."
+    },
+    {
+      "command": "node roster/ocaml-cfa-foundation/check-domain.js",
+      "exit": 0,
+      "result": "pass",
+      "evidence": "PASS CHECK1 independent finite-domain oracle (517 cases)"
+    },
+    {
+      "command": "node roster/ocaml-cfa-foundation/check-cmt.js",
+      "exit": 0,
+      "result": "pass",
+      "evidence": "Authentic main, flat, metadata, identity and consumer controls passed; only pre-existing Tezt temporary-directory warnings were emitted."
+    },
+    {
+      "command": "node roster/ocaml-cfa-foundation/check-tezos.js",
+      "exit": 0,
+      "result": "pass",
+      "evidence": "Pinned 410 inputs and hashes reverified; current rows 45054; canonical SHA256 08f491da61809c59401529be1373c5be3c61dc4c5de6c5269ee7b885e5467a18; Irmin relations 4849->4850; protocol relations 12171->12173; relation gains 3 and losses 0; 0 new MUST rows; inputs and frozen baseline unchanged; semantic status remains not_proven with limitations retained; wall time 2689.629952 ms and max RSS 145092 KiB.",
+      "report": "improvement/2026-09-15-ocaml-cfa/check3-1789557999615-411206.json",
+      "report_sha256": "e641584af2d2f64f2a9c7519ba9c3cf20c8c60f2f58d8b7b453e87c46e601a2"
+    },
+    {
+      "command": "node roster/ocaml-cfa-foundation/calibrate-self-test.js",
+      "exit": 0,
+      "result": "pass",
+      "evidence": "PASS calibrate-self pure controls; mini-repository cases cover committed-clean, tracked worktree overlay and untracked inputs against the selected base."
+    },
+    {
+      "command": "git diff --check",
+      "exit": 0,
+      "result": "pass"
+    }
+  ],
+  "skipped_controls": [
+    {
+      "command": "node roster/ocaml-cfa-foundation/calibrate-self.js",
+      "reason": "The root supplied a fresh passing full 2x2 calibration for this correction. The reviewer independently ran the focused pure mini-repository regression that exercises the BASE-versus-HEAD overlay correction, while the forced full suite and CHECK2/CHECK3 covered the relevant production and reference paths."
+    }
+  ],
+  "source_snapshot": {
+    "selection": "tracked files under lib, bin, test and tezt, calibration scripts, dune-project and architecture-schema.sql",
+    "before_sha256": "893e5c57473f8fe75e12a91fad406b899df4e3093ef76cb2717f97602a19c887",
+    "after_sha256": "893e5c57473f8fe75e12a91fad406b899df4e3093ef76cb2717f97602a19c887",
+    "unchanged": true
+  },
+  "binary_snapshots": {
+    "_build/default/bin/arch_callgraph_ocaml/arch_callgraph_ocaml.exe": {
+      "before_sha256": "2f2d3f72c7ad8572ed8ea596b6c82d49e833fb664e7eedcc4f230a05073f844b",
+      "after_sha256": "2f2d3f72c7ad8572ed8ea596b6c82d49e833fb664e7eedcc4f230a05073f844b"
+    },
+    "_build/default/bin/arch_index_cli/arch_index_cli.exe": {
+      "before_sha256": "2dcd29f2f6b61857cf0ab7e6d45b769706ceca260016ade082543d92b5824d7c",
+      "after_sha256": "2dcd29f2f6b61857cf0ab7e6d45b769706ceca260016ade082543d92b5824d7c"
+    },
+    "_build/default/bin/arch_query/arch_query.exe": {
+      "before_sha256": "2c3713e7150da5fb3c4f79de8e39fed6ac6bce90cb4385ab5312530e7d9b7c8a",
+      "after_sha256": "2c3713e7150da5fb3c4f79de8e39fed6ac6bce90cb4385ab5312530e7d9b7c8a"
+    },
+    "_build/default/tezt/tests/main.exe": {
+      "before_sha256": "9fbd4ca206865d0a029e11ac455913abecd06013e053c5dfd67039add6fc56da",
+      "after_sha256": "9fbd4ca206865d0a029e11ac455913abecd06013e053c5dfd67039add6fc56da"
+    },
+    "_build/default/test/test_cfa.exe": {
+      "before_sha256": "2d1f8f769e958dbc8fe1daf67382d7c0893208c99bda701c512c431a82095da6",
+      "after_sha256": "2d1f8f769e958dbc8fe1daf67382d7c0893208c99bda701c512c431a82095da6"
+    }
+  },
+  "prior_red_evidence": {
+    "status": "manual-real-cmt-red-observed-in-round1",
+    "detail": "The unsupported-root-alias unknown-loss was reproduced manually with a benign real CMT fixture before the fix and preserved in the round-1 record. Automated pre_fix_sha was null, so this artifact does not claim an automated RED verification. The current round's CHECK2 and regression suite are GREEN."
+  },
+  "review_findings": [],
+  "foreign_paths": {
+    "preserved": true,
+    "count": 7
+  },
+  "formal_parent_verdict": "not-issued-by-specialist"
+}

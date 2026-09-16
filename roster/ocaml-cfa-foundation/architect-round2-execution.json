@@ -1,0 +1,49 @@
+{
+  "task": "ocaml-cfa-foundation",
+  "role": "architect",
+  "round": 2,
+  "cycle": 1,
+  "reviewed_head": "791d1f9ac8947edc13a2101b0e86cfa9bced1f3f",
+  "review_scope": "Full base-to-HEAD architecture scope rechecked, including the opaque-root-alias correction, authentic regression, BASE-relative calibration overlay and controls, private CFA modules, main and flat integrations, interfaces, native tests, CMT tests, checkers, and changed consumer references.",
+  "finding_disposition": {
+    "reobserved": [
+      "lib/arch_index/arch_index_cfa_cmt.ml:154:architecture",
+      "lib/arch_index/arch_index_cfa.ml:1:architecture",
+      "lib/arch_index/arch_index_cfa_cmt.ml:83:architecture"
+    ],
+    "new": [],
+    "resolved_by_round2_correction": []
+  },
+  "commands": [
+    {
+      "command": "rtk proxy sh -c 'test \"$(git rev-parse HEAD)\" = 791d1f9ac8947edc13a2101b0e86cfa9bced1f3f && opam exec -- dune build'",
+      "exit": 0,
+      "result": "pass"
+    },
+    {
+      "command": "rtk proxy node roster/ocaml-cfa-foundation/check-domain.js",
+      "exit": 0,
+      "result": "pass",
+      "evidence": "PASS CHECK1 independent finite-domain oracle (517 cases)"
+    },
+    {
+      "command": "rtk proxy node roster/ocaml-cfa-foundation/check-cmt.js",
+      "exit": 0,
+      "result": "pass",
+      "evidence": "Authentic main, flat, metadata, identity and consumer controls passed; diagnostics were limited to pre-existing Tezt temporary-directory warnings."
+    },
+    {
+      "command": "rtk proxy node roster/ocaml-cfa-foundation/check-tezos.js",
+      "exit": 0,
+      "result": "pass",
+      "evidence": "Pinned 410 inputs reverified; current rows 45054; canonical SHA256 08f491da61809c59401529be1373c5be3c61dc4c5de6c5269ee7b885e5467a18; producer SHA256 2f2d3f72c7ad8572ed8ea596b6c82d49e833fb664e7eedcc4f230a05073f844b; Irmin relations 4849->4850; protocol relations 12171->12173; zero relation losses; baseline unchanged; producer wall 2795.145803 ms and sampled RSS 145124 KiB.",
+      "report": "improvement/2026-09-15-ocaml-cfa/check3-1789558187376-465542.json"
+    }
+  ],
+  "full_suite": {
+    "status": "not-repeated-by-architect",
+    "reason": "The reviewer personally executed the full suite on the same HEAD and recorded exit 0 with Tezt 345/345; repeating it would duplicate the owner gate.",
+    "source": "roster/ocaml-cfa-foundation/reviewer-round2-execution.json"
+  },
+  "specialist_attestation": "The round-two opaque-alias correction and BASE-overlay calibration change introduce no new architecture finding. Three prior advisories were reobserved with unchanged semantic identity; none is a demonstrated current acceptance-criteria violation."
+}
