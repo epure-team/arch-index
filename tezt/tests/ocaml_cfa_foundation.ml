@@ -375,7 +375,26 @@ let register () =
   let code, output = index_raw_into ~db:rich fixture in
   if code <> 0 then
     Test.fail "OCAML_CFA_SETUP: rich producer exit %d: %s" code output ;
-  let flat = index_project ~name:"ocaml_cfa_alias_chain_flat" fixture.root in
+  let flat_env =
+    match Sys.getenv_opt "EPURE_ARCH_INDEX_TIMEOUT_S" with
+    | Some _ -> []
+    | None -> [("EPURE_ARCH_INDEX_TIMEOUT_S", "60")]
+  in
+  let flat_code, flat_output, flat =
+    index_project_raw ~env:flat_env ~name:"ocaml_cfa_alias_chain_flat" fixture.root
+  in
+  let incomplete_diagnostics =
+    [ "arch_index_lsp: LSP lookup failed:";
+      "arch_index_lsp: LSP start failed:";
+      "arch_index_lsp: timeout after";
+      "arch_index_lsp: unexpected error:" ]
+  in
+  if
+    flat_code <> 0
+    || not (Sys.file_exists flat)
+    || List.exists (fun marker -> contains ~needle:marker flat_output) incomplete_diagnostics
+  then
+    Test.fail "OCAML_CFA_SETUP: incomplete flat producer (exit %d): %s" flat_code flat_output ;
   Batch.run (fun b ->
       Batch.eq_int b
         ~msg:"OCAML_CFA_RED: main run reaches actual f as an ordinary MAY candidate"
