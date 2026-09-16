@@ -618,9 +618,11 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
   (* Process all .cmt files inside a transaction *)
   exec_exn db "BEGIN TRANSACTION" ;
   let all_pending_calls = ref [] in
+  let target_witness_jobs = ref [] in
   let all_pending_deps = ref [] in
   let all_pending_type_usages = ref [] in
   let graph_reuse = create_graph_reuse () in
+  let graph_copy_jobs = Hashtbl.create 16 in
   List.iter
     (fun path ->
       let record_missing_outcome default =
@@ -665,6 +667,8 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
             ~stmt_carrier
             ~producer_run_id
             ~graph_reuse
+            ~on_graph_reuse:(fun ~artifact ~representative ->
+              Hashtbl.replace graph_copy_jobs artifact representative)
             ~on_implementation:(fun ~artifact ~source ~compiler_unit ~module_id structure ->
               match producer_run_id with
               | None -> ()
@@ -936,6 +940,18 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
       in
       Hashtbl.replace units_by_last_component key (unit_name :: existing))
     (Arch_index_cmt.known_unit_names ()) ;
+  let target_expected_counts = Hashtbl.create 32 in
+  List.iter
+    (fun (call : pending_call) ->
+      List.iter
+        (fun (proof : Arch_index_cmt.functor_target_proof) ->
+          let count =
+            Option.value ~default:0
+              (Hashtbl.find_opt target_expected_counts proof.artifact)
+          in
+          Hashtbl.replace target_expected_counts proof.artifact (count + 1))
+        call.functor_target_proofs)
+    !all_pending_calls ;
   List.iter
     (fun (call : pending_call) ->
       match
@@ -1578,6 +1594,27 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
                ()
            with
           | Some call_id -> (
+              (match callee_id, kind with
+              | Some target_function_id, "MAY_ENUMERATED" ->
+                  List.iter
+                    (fun (proof : Arch_index_cmt.functor_target_proof) ->
+                      let witness : Arch_index_bindings.target_witness =
+                        { application_ordinal = proof.application_ordinal;
+                          declaration_key = proof.declaration_key;
+                          formal_position = proof.formal_position;
+                          formal_key = proof.formal_key;
+                          actual_root_key = proof.actual_root_key;
+                          actual_path = proof.actual_path;
+                          member_path = proof.member_path;
+                          caller_name = proof.source_caller_name;
+                          call_location = proof.call_location;
+                          occurrence_ordinal = proof.occurrence_ordinal;
+                          target_function_id;
+                          candidate_call_id = call_id }
+                      in
+                      target_witness_jobs := (proof.artifact, witness) :: !target_witness_jobs)
+                    call.functor_target_proofs
+              | _ -> ()) ;
               (* The handler scopes enclosing THIS call site, linked to this
                  call's own rowid — written back to back with the call so no
                  other insert can slip in between. Up to TWO rows: a call can
@@ -1835,6 +1872,49 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
             ~selected_inputs:selected_catalogue_count)
      with exn ->
        Arch_io.eprintf "Warning: functor binding finalization failed: %s\n"
+         (Printexc.to_string exn)) ;
+
+  let target_eligible = ref !binding_eligible in
+  List.iter
+    (fun (producer_run_id, artifact, bindings) ->
+      let witnesses =
+        let source_artifact =
+          Option.value ~default:artifact
+            (Hashtbl.find_opt graph_copy_jobs artifact)
+        in
+        List.filter_map
+          (fun (candidate, witness) ->
+            if candidate = source_artifact then Some witness else None)
+          !target_witness_jobs
+      in
+      try
+        match bindings with
+        | Some _ ->
+            let expected_witnesses =
+              let source_artifact =
+                Option.value ~default:artifact
+                  (Hashtbl.find_opt graph_copy_jobs artifact)
+              in
+              Option.value ~default:0
+                (Hashtbl.find_opt target_expected_counts source_artifact)
+            in
+            Arch_index_bindings.store_target_collected db ~producer_run_id
+              ~artifact ~expected_witnesses (List.rev witnesses)
+        | None ->
+            target_eligible := false ;
+            Arch_index_bindings.store_target_failed db ~producer_run_id ~artifact
+      with exn ->
+        target_eligible := false ;
+        Arch_io.eprintf "Warning: functor target storage failed for %s: %s\n"
+          artifact (Printexc.to_string exn))
+    (List.rev !binding_jobs) ;
+  if !target_eligible && !catalogue_collected = selected_catalogue_count then
+    (try
+       ignore
+         (Arch_index_bindings.finalize_target_contract db
+            ~selected_inputs:selected_catalogue_count)
+     with exn ->
+       Arch_io.eprintf "Warning: functor target finalization failed: %s\n"
          (Printexc.to_string exn)) ;
 
   (* Summary *)

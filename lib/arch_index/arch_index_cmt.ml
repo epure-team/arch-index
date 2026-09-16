@@ -660,6 +660,23 @@ type pending_call = {
          ([let f = M.g]), not from an application. Orthogonal to [kind] — see
          the [calls.edge_form] comment in architecture-schema.sql for why it is
          not a [kind] value. [None] for every ordinary call. *)
+  occurrence_ordinal : int;
+  functor_target_proofs : functor_target_proof list;
+}
+
+and functor_target_proof = {
+  artifact : string;
+  application_ordinal : int;
+  declaration_key : string;
+  formal_position : int;
+  formal_key : string;
+  actual_root_key : string;
+  actual_path : string list;
+  member_path : string list;
+  source_caller_name : string;
+  occurrence_ordinal : int;
+  call_location : string;
+  target_name : string;
 }
 
 (** Flat display of a pending call's callee: [(name, module)] — the qualified
@@ -749,7 +766,8 @@ let%test "CFA expansion keeps partiality per candidate" =
      head = Head_unknown ("*TOP*", Callback_param); local_module_invocation = false;
      partial = false; cond = false; dead = false; call_site = "x.ml:1";
      exn_scope = None; errch_scope = None; errch_propagates = None;
-     edge_form = Some "__cfa:0"}
+     edge_form = Some "__cfa:0"; occurrence_ordinal = 0;
+     functor_target_proofs = []}
   in
   match expand_cfa_value call (["one", 1; "two", 2], [], 1, 0, false) with
   | [one; two] ->
@@ -763,7 +781,8 @@ let%test "CFA expansion retains omitted-slot uncertainty and one residual" =
      head = Head_unknown ("*TOP*", Callback_param); local_module_invocation = false;
      partial = false; cond = false; dead = false; call_site = "x.ml:1";
      exn_scope = None; errch_scope = None; errch_propagates = None;
-     edge_form = Some "__cfa:1"}
+     edge_form = Some "__cfa:1"; occurrence_ordinal = 0;
+     functor_target_proofs = []}
   in
   let omitted = expand_cfa_value call (["one", 1], [], 1, 1, false) in
   let over =
@@ -1301,6 +1320,29 @@ let local_module_invocation_target targets path =
             (Option.join (Local_module_members.find_opt name exports.values)))
   | Path.Pident _ | Path.Papply _ | Path.Pextra_ty _ -> None
 
+let local_module_invocation_member targets owner_path member_path =
+  let rec owner = function
+    | Path.Pident id -> Local_module_ids.find_opt id targets
+    | Path.Pdot (parent, name) ->
+        Option.bind (owner parent) (fun exports ->
+            Option.join (Local_module_members.find_opt name exports.modules))
+    | Path.Papply _ | Path.Pextra_ty _ -> None
+  in
+  let rec member exports = function
+    | [] -> None
+    | [name] ->
+        Option.map
+          (function
+            | Direct_body (target_name, arity)
+            | One_hop_alias (target_name, arity) -> (target_name, arity))
+          (Option.join (Local_module_members.find_opt name exports.values))
+    | name :: rest ->
+        Option.bind
+          (Option.join (Local_module_members.find_opt name exports.modules))
+          (fun child -> member child rest)
+  in
+  Option.bind (owner owner_path) (fun exports -> member exports member_path)
+
 let local_module_target_names ?(invocation = false) targets =
   let rec collect exports acc =
     let acc = Local_module_members.fold
@@ -1444,6 +1486,8 @@ let collect_calls_from_expr_with_open_bodies ?(canon_exn = fun p -> Path.name p)
     ?(value_channels = [])
     ?(local_alias_stamps = Hashtbl.create 0) ?(module_alias_stamps = Hashtbl.create 0)
     ?(local_module_targets = Local_module_ids.empty)
+    ?(functor_actuals = [])
+    ?(artifact = "")
     ?cfa_session
     ?(open_body_targets = Hashtbl.create 0)
     ?recursive_body_targets
@@ -1547,13 +1591,21 @@ let collect_calls_from_expr_with_open_bodies ?(canon_exn = fun p -> Path.name p)
     | None -> p
   in
   let add_call ?(partial = false) ?is_head_of ?callee_ty ?edge_form
-      ?(local_module_invocation = false) head loc =
+      ?(local_module_invocation = false) ?(functor_target_proofs = [])
+      ?occurrence_ordinal ?(on_ordinal = fun _ -> ()) head loc =
     let line = loc.Location.loc_start.pos_lnum in
     let call_site = Printf.sprintf "%s:%d" src_path line in
     let c = !cur in
     let exn_scope = Arch_index_exn.current_scope c.lexn in
-    let ord = !next_call_ord in
-    incr next_call_ord ;
+    let ord =
+      match occurrence_ordinal with
+      | Some ordinal -> ordinal
+      | None ->
+          let ordinal = !next_call_ord in
+          incr next_call_ord ;
+          ordinal
+    in
+    on_ordinal ord ;
     (match is_head_of with
     | Some hloc -> Hashtbl.replace apply_head_ord hloc ord
     | None -> ()) ;
@@ -1570,7 +1622,8 @@ let collect_calls_from_expr_with_open_bodies ?(canon_exn = fun p -> Path.name p)
     in
     raw :=
       ( ord, c.cid, c.lblk, c.lcaller, head, partial, call_site, exn_scope,
-        errch_candidate, edge_form, local_module_invocation )
+        errch_candidate, edge_form, local_module_invocation,
+        functor_target_proofs )
       :: !raw
   in
   (* Current-context CFG shorthands. *)
@@ -1670,6 +1723,62 @@ let collect_calls_from_expr_with_open_bodies ?(canon_exn = fun p -> Path.name p)
   let module_target path = local_module_target local_module_targets path in
   let invocation_module_target path =
     local_module_invocation_target local_module_targets path
+  in
+  let rec path_segments = function
+    | Path.Pident id -> Some [Ident.name id]
+    | Path.Pdot (parent, name) ->
+        Option.map (fun segments -> segments @ [name]) (path_segments parent)
+    | Path.Papply _ | Path.Pextra_ty _ -> None
+  in
+  let parameter_path = function
+    | Path.Pdot (parent, member) ->
+        let rec split acc = function
+          | Path.Pident id -> Some (id, acc)
+          | Path.Pdot (path, name) -> split (name :: acc) path
+          | Path.Papply _ | Path.Pextra_ty _ -> None
+        in
+        split [member] parent
+    | Path.Pident _ | Path.Papply _ | Path.Pextra_ty _ -> None
+  in
+  let functor_candidates path ~caller_name ~occurrence_ordinal loc =
+    match parameter_path path with
+    | None -> []
+    | Some (formal_id, member_path) ->
+        let call_location, _ = Arch_index_functors.location_json loc in
+        let proofs =
+          List.filter_map
+            (fun (actual : Arch_index_bindings.matched_actual) ->
+              if not (Ident.same formal_id actual.formal_id) then None
+              else
+                Option.bind
+                  (local_module_invocation_member local_module_targets
+                     actual.actual_path member_path)
+                  (fun (target_name, _) ->
+                    Option.map
+                      (fun actual_path ->
+                        { artifact;
+                          application_ordinal = actual.application_ordinal;
+                          declaration_key = actual.declaration_key;
+                          formal_position = actual.formal_position;
+                          formal_key = actual.formal_key;
+                          actual_root_key = actual.actual_root_key;
+                          actual_path;
+                          member_path;
+                          source_caller_name = caller_name;
+                          occurrence_ordinal;
+                          call_location;
+                          target_name })
+                      (path_segments actual.actual_path)))
+            functor_actuals
+        in
+        let names =
+          List.map (fun proof -> proof.target_name) proofs
+          |> List.sort_uniq String.compare
+        in
+        List.map
+          (fun name ->
+            (name, List.filter (fun proof -> proof.target_name = name) proofs))
+          names
   in
   (* Number of leading arrows in a function type = its (maximal) arity. Uses
      the raw type — no env-based expansion, which is unreliable on .cmt-restored
@@ -2629,8 +2738,22 @@ let collect_calls_from_expr_with_open_bodies ?(canon_exn = fun p -> Path.name p)
                         | Some m -> m ^ "." ^ callee_name
                         | None -> callee_name
                       in
-                      add_call ~partial ~is_head_of:expr.exp_loc ?callee_ty:!callee_ty_for_channel
-                        (Head_unknown (disp, Module_param)) expr.exp_loc
+                      let occurrence = ref None in
+                      add_call ~partial ~is_head_of:expr.exp_loc
+                        ?callee_ty:!callee_ty_for_channel
+                        ~on_ordinal:(fun ordinal -> occurrence := Some ordinal)
+                        (Head_unknown (disp, Module_param)) expr.exp_loc ;
+                      Option.iter
+                        (fun occurrence_ordinal ->
+                          List.iter
+                            (fun (target_name, proofs) ->
+                              add_call ~partial ?callee_ty:!callee_ty_for_channel
+                                ~occurrence_ordinal
+                                ~functor_target_proofs:proofs
+                                (Head_enumerated target_name) expr.exp_loc)
+                            (functor_candidates path ~caller_name:(!cur).lcaller
+                               ~occurrence_ordinal expr.exp_loc))
+                        !occurrence
                     else
                       add_call
                         ~partial
@@ -3225,7 +3348,8 @@ let collect_calls_from_expr_with_open_bodies ?(canon_exn = fun p -> Path.name p)
   let calls =
     List.rev_map
       (fun ( ord, cid, block, caller, head, partial, call_site, exn_scope,
-             errch_candidate, edge_form, local_module_invocation ) ->
+             errch_candidate, edge_form, local_module_invocation,
+             functor_target_proofs ) ->
         let cond =
           match Hashtbl.find_opt verdicts cid with
           | Some v -> not (Arch_index_cfg.always_exec v block)
@@ -3264,6 +3388,8 @@ let collect_calls_from_expr_with_open_bodies ?(canon_exn = fun p -> Path.name p)
           errch_scope;
           errch_propagates;
           edge_form;
+          occurrence_ordinal = ord;
+          functor_target_proofs;
         })
       !raw
   in
@@ -3292,7 +3418,13 @@ let collect_calls_from_expr ?canon_exn ?value_channels ?local_alias_stamps
    the representative path and SHA-256, not all typedtrees/artifact bytes. On a
    hit we reread both artifacts and compare their full bytes; the digest binds
    the representative to the bytes seen when its graph was extracted. *)
-type graph_representative = {artifact : string; fingerprint : string; module_id : int}
+type graph_representative = {
+  artifact : string;
+  fingerprint : string;
+  module_id : int;
+  source_digest : string option;
+  variant_signature : string;
+}
 type graph_reuse = (string * string * string, graph_representative) Hashtbl.t
 
 let create_graph_reuse () = Hashtbl.create 64
@@ -3306,6 +3438,112 @@ let artifact_bytes path =
 
 let artifact_fingerprint bytes = Digestif.SHA256.(to_hex (digest_string bytes))
 
+let variant_signature structure =
+  let rec normalize = function
+    | `Assoc fields ->
+        `Assoc
+          (List.filter_map
+             (fun (key, value) ->
+               if key = "compiler" then None else Some (key, normalize value))
+             fields)
+    | `List values -> `List (List.map normalize values)
+    | value -> value
+  in
+  let catalogue =
+    Arch_index_functors.collect structure
+    |> List.map (fun (occurrence : Arch_index_functors.occurrence) ->
+         let descriptor text =
+           Yojson.Safe.from_string text |> normalize |> Yojson.Safe.to_string
+         in
+         String.concat "\x1f"
+           [ string_of_int occurrence.ordinal;
+             (match occurrence.application_kind with
+             | Arch_index_functors.Apply -> "apply"
+             | Arch_index_functors.Apply_unit -> "apply_unit");
+             occurrence.location;
+             descriptor occurrence.head;
+             descriptor occurrence.argument;
+             occurrence.diagnostics ])
+  in
+  (* A source digest and the functor-application catalogue alone are not
+     sufficient to authenticate a non-byte-identical CMT variant: a stale or
+     corrupted artifact can preserve both while changing a call through a
+     formal module parameter.  Include the target-relevant call shape, using
+     only source-stable names, locations and binding keys (never compiler
+     stamps), so independently compiled copies still reconcile. *)
+  let actuals, binding_shape =
+    try
+      ( (Arch_index_bindings.collect_with_actuals structure).matched_actuals,
+        "binding-shape:available" )
+    with _ -> ([], "binding-shape:unavailable")
+  in
+  let parameter_path = function
+    | Path.Pdot (parent, member) ->
+        let rec split acc = function
+          | Path.Pident id -> Some (id, acc)
+          | Path.Pdot (path, name) -> split (name :: acc) path
+          | Path.Papply _ | Path.Pextra_ty _ -> None
+        in
+        split [member] parent
+    | Path.Pident _ | Path.Papply _ | Path.Pextra_ty _ -> None
+  in
+  let target_calls = ref [] in
+  let caller = ref "<module>" in
+  let ordinal = ref 0 in
+  let open Tast_iterator in
+  let iterator =
+    { default_iterator with
+      value_binding =
+        (fun self binding ->
+          let previous = !caller in
+          (match binding.vb_pat.pat_desc with
+          | Tpat_var (id, _, _) -> caller := Ident.name id
+          | _ -> ()) ;
+          Fun.protect
+            ~finally:(fun () -> caller := previous)
+            (fun () -> default_iterator.value_binding self binding));
+      expr =
+        (fun self expression ->
+          (match expression.exp_desc with
+          | Texp_apply ({exp_desc=Texp_ident (path, _, _); _}, arguments) -> (
+              match parameter_path path with
+              | Some (formal_id, member_path) ->
+                  let matching =
+                    List.filter
+                      (fun (actual : Arch_index_bindings.matched_actual) ->
+                        Ident.same formal_id actual.formal_id)
+                      actuals
+                  in
+                  if matching <> [] then (
+                    incr ordinal ;
+                    let location, _ =
+                      Arch_index_functors.location_json expression.exp_loc
+                    in
+                    let bindings =
+                      matching
+                      |> List.map
+                           (fun (actual : Arch_index_bindings.matched_actual) ->
+                             String.concat ":"
+                               [ actual.declaration_key;
+                                 string_of_int actual.formal_position;
+                                 actual.formal_key ])
+                      |> List.sort_uniq String.compare |> String.concat ","
+                    in
+                    target_calls :=
+                      String.concat "\x1f"
+                        [ string_of_int !ordinal; !caller; location;
+                          Ident.name formal_id; String.concat "." member_path;
+                          string_of_int (List.length arguments); bindings ]
+                      :: !target_calls)
+              | None -> ())
+          | _ -> ()) ;
+          default_iterator.expr self expression) }
+  in
+  iterator.structure iterator structure ;
+  (catalogue @ [binding_shape; "target-calls"] @ List.rev !target_calls)
+  |> String.concat "\x1e"
+  |> Digestif.SHA256.(fun value -> to_hex (digest_string value))
+
 let reusable_graph cache key path bytes =
   match bytes, Hashtbl.find_opt cache key with
   | Some bytes, Some representative ->
@@ -3313,7 +3551,7 @@ let reusable_graph cache key path bytes =
       | Some previous, Some current
         when previous = bytes && current = bytes
              && artifact_fingerprint previous = representative.fingerprint ->
-          Some representative.module_id
+          Some representative
       | _ -> None)
   | _ -> None
 
@@ -3330,8 +3568,12 @@ let%test_unit "graph reuse rejects changed bytes and different run/root/unit" =
     let cache = create_graph_reuse () in
     write original "indexed bytes"; write copy "indexed bytes";
     Hashtbl.add cache key
-      {artifact=original; fingerprint=artifact_fingerprint "indexed bytes"; module_id=7};
-    assert (reusable_graph cache key copy (Some "indexed bytes") = Some 7);
+      {artifact=original; fingerprint=artifact_fingerprint "indexed bytes"; module_id=7;
+       source_digest=Some "source"; variant_signature="signature"};
+    assert
+      (match reusable_graph cache key copy (Some "indexed bytes") with
+       | Some representative -> representative.module_id = 7
+       | None -> false);
     assert (reusable_graph (create_graph_reuse ()) key copy (Some "indexed bytes") = None);
     List.iter (fun different ->
       assert (reusable_graph cache different copy (Some "indexed bytes") = None))
@@ -3354,6 +3596,7 @@ let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
     ~exposed_tbl ~doc_tbl ~module_quint_tbl ~stmt_mod ~stmt_fn ~stmt_ty
     ~stmt_fld ~stmt_ctor ~stmt_scope ~stmt_catch ~stmt_origin ~stmt_rebind
     ?(value_channels = []) ?stmt_carrier ?(producer_run_id = None) ?on_implementation
+    ?on_graph_reuse
     ?on_catalogue_outcome ?graph_reuse path =
   let notify outcome =
     match on_catalogue_outcome with
@@ -3377,6 +3620,7 @@ let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
           | None -> notify "missing_source" ; ([], [], [])
           | Some src_path ->
               let modname = info.cmt_modname in
+              let structure_variant_signature = variant_signature structure in
               (* Store path relative to project root if possible *)
               let rel_path =
                 if project_root <> "" then
@@ -3404,9 +3648,30 @@ let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
               in
               let key = (project_root, rel_path, modname) in
               match Option.bind graph_reuse (fun cache -> reusable_graph cache key path initial_bytes) with
-              | Some module_id ->
-                  collect module_id ;
+              | Some representative ->
+                  Option.iter
+                    (fun callback ->
+                      callback ~artifact:path ~representative:representative.artifact)
+                    on_graph_reuse ;
+                  collect representative.module_id ;
                   ([], [], [])
+              | None ->
+              (match Option.bind graph_reuse (fun cache ->
+                       match Hashtbl.find_opt cache key with
+                       | Some representative
+                         when representative.source_digest <> None
+                              && representative.source_digest = info.cmt_source_digest
+                              && representative.variant_signature = structure_variant_signature ->
+                           Some representative
+                       | _ -> None) with
+              | Some representative ->
+                      Option.iter
+                        (fun callback ->
+                          callback ~artifact:path
+                            ~representative:representative.artifact)
+                        on_graph_reuse ;
+                      collect representative.module_id ;
+                      ([], [], [])
               | None ->
               (* Count code lines (excludes comments and blank lines) *)
               let lines = count_code_lines src_path in
@@ -3474,6 +3739,11 @@ let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
                   let open_body_targets = build_open_body_targets structure in
                   let recursive_body_targets = Hashtbl.create 16 in
                   let local_module_targets = build_local_module_targets ~local_fn_stamps structure in
+                  let functor_actuals =
+                    try
+                      (Arch_index_bindings.collect_with_actuals structure).matched_actuals
+                    with _ -> []
+                  in
                   let local_alias_stamps = build_local_alias_stamps structure in
                   let module_alias_stamps = build_module_alias_stamps structure in
                   let binding_names = build_binding_names structure in
@@ -3898,6 +4168,8 @@ let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
                                           ~local_alias_stamps
                                           ~module_alias_stamps
                                           ~local_module_targets
+                                          ~functor_actuals
+                                          ~artifact:path
                                           ~cfa_session
                                           ~open_body_targets
                                           ~recursive_body_targets
@@ -4282,7 +4554,11 @@ let process_cmt db ~project_root ~source_path_of_cmt ~count_code_lines
                     when statement_failures () = failures_before
                          && artifact_bytes path = Some bytes ->
                       Hashtbl.replace cache key
-                        {artifact = path; fingerprint = artifact_fingerprint bytes; module_id}
+                        { artifact = path;
+                          fingerprint = artifact_fingerprint bytes;
+                          module_id;
+                          source_digest = info.cmt_source_digest;
+                          variant_signature = structure_variant_signature }
                   | _ -> ()) ;
-                  (!pending_calls, !pending_deps, !pending_type_usages))
+                  (!pending_calls, !pending_deps, !pending_type_usages)))
       | _ -> notify "unsupported_annotation" ; ([], [], []))

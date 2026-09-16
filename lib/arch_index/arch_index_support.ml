@@ -31,7 +31,7 @@ type intent_backup = {
    declared non-load-bearing. *)
 let completion_marker_keys =
   ["error_contract"; "exn_contract"; "callgraph_contract"; "functor_catalogue_contract";
-   "functor_binding_contract"]
+   "functor_binding_contract"; "functor_target_contract"]
 
 let schema_views_to_drop =
   [
@@ -57,6 +57,8 @@ let schema_views_to_drop =
 
 let schema_tables_to_drop =
   [
+    "functor_target_witnesses";
+    "functor_target_inputs";
     "functor_bindings";
     "functor_declarations";
     "functor_binding_inputs";

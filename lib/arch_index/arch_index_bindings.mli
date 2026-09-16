@@ -29,6 +29,27 @@ type collection = {
   results : result list;
 }
 
+type matched_actual = {
+  application_ordinal : int;
+  declaration_key : string;
+  formal_position : int;
+  formal_key : string;
+  formal_id : Ident.t;
+  actual_root_key : string;
+  actual_path : Path.t;
+}
+
+type collection_with_actuals = {
+  bindings : collection;
+  matched_actuals : matched_actual list;
+}
+
+val collect_with_actuals : Typedtree.structure -> collection_with_actuals
+(** The persisted binding collection plus same-CMT compiler identities used
+    transiently by target correspondence. Ephemeral identities never cross an
+    artifact boundary and are emitted only for already-matched named formals
+    with supported local module-ident actuals. *)
+
 val collect : Typedtree.structure -> collection
 (** Collect local named functor declarations and account for every catalogue
     application using the catalogue collector's exact ordinals. Local Pident
@@ -43,3 +64,24 @@ val finalize_contract : Sqlite3.db -> selected_inputs:int -> bool
     previous binding marker, validates the complete catalogue and binding facts
     in a new transaction, then writes v1 only when valid. Returns false for
     inconsistent data; SQL and transaction failures raise. *)
+
+type target_witness = {
+  application_ordinal : int;
+  declaration_key : string;
+  formal_position : int;
+  formal_key : string;
+  actual_root_key : string;
+  actual_path : string list;
+  member_path : string list;
+  caller_name : string;
+  call_location : string;
+  occurrence_ordinal : int;
+  target_function_id : int;
+  candidate_call_id : int;
+}
+
+val store_target_collected :
+  Sqlite3.db -> producer_run_id:int -> artifact:string ->
+  expected_witnesses:int -> target_witness list -> unit
+val store_target_failed : Sqlite3.db -> producer_run_id:int -> artifact:string -> unit
+val finalize_target_contract : Sqlite3.db -> selected_inputs:int -> bool

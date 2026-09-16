@@ -31,6 +31,21 @@ type collection = {
   results : result list;
 }
 
+type matched_actual = {
+  application_ordinal : int;
+  declaration_key : string;
+  formal_position : int;
+  formal_key : string;
+  formal_id : Ident.t;
+  actual_root_key : string;
+  actual_path : Path.t;
+}
+
+type collection_with_actuals = {
+  bindings : collection;
+  matched_actuals : matched_actual list;
+}
+
 type binder = {
   id : Ident.t;
   name : string;
@@ -196,6 +211,27 @@ let actual_root = function
           | _ -> None)
       | _ -> None)
 
+let actual_identity = function
+  | None -> None
+  | Some argument ->
+      (match (peel argument).mod_desc with
+      | Tmod_ident (path, _) when not (path_contains_apply path) ->
+          (match path_root path with
+          | Some id when not (Ident.persistent id) -> Some (ident_key id, path)
+          | _ -> None)
+      | _ -> None)
+
+let formal_identity expr position =
+  let rec loop current m =
+    match (peel m).mod_desc with
+    | Tmod_functor (parameter, body) ->
+        if current = position then
+          (match parameter with Named (Some id, _, _) -> Some id | Unit | Named (None, _, _) -> None)
+        else loop (current + 1) body
+    | _ -> None
+  in
+  loop 1 expr
+
 let unresolved ~ordinal ~reason ~head_application_ordinal ~actual_root_key =
   { ordinal;
     status = "unresolved";
@@ -205,10 +241,11 @@ let unresolved ~ordinal ~reason ~head_application_ordinal ~actual_root_key =
     head_application_ordinal;
     actual_root_key }
 
-let collect structure =
+let collect_with_actuals structure =
   let binders, parameters = preindex structure in
   let declarations = List.filter_map declaration_of_binder binders in
   let results = ref [] in
+  let matched_actuals = ref [] in
   let on_application ~ordinal ~application_kind ~head_application_ordinal ~head ~argument =
     let actual_root_key = actual_root argument in
     let result =
@@ -225,7 +262,20 @@ let collect structure =
           if not kind_matches then
             unresolved ~ordinal ~reason:"formal_kind_mismatch" ~head_application_ordinal
               ~actual_root_key
-          else
+          else begin
+            (match formal_identity binder.expr position, selected.binder_key,
+                   actual_identity argument with
+            | Some formal_id, Some formal_key, Some (actual_root_key, actual_path) ->
+                matched_actuals :=
+                  { application_ordinal = ordinal;
+                    declaration_key = ident_key binder.id;
+                    formal_position = position;
+                    formal_key;
+                    formal_id;
+                    actual_root_key;
+                    actual_path }
+                  :: !matched_actuals
+            | _ -> ()) ;
             { ordinal;
               status = "matched";
               reason = None;
@@ -233,13 +283,21 @@ let collect structure =
               formal_position = Some position;
               head_application_ordinal;
               actual_root_key }
+          end
     in
     results := result :: !results
   in
   ignore (Arch_index_functors.collect ~on_application structure) ;
-  { declarations =
-      List.sort (fun (a : declaration) (b : declaration) -> String.compare a.declaration_key b.declaration_key) declarations;
-    results = List.sort (fun a b -> Int.compare a.ordinal b.ordinal) !results }
+  { bindings =
+      { declarations =
+          List.sort (fun (a : declaration) (b : declaration) ->
+            String.compare a.declaration_key b.declaration_key) declarations;
+        results = List.sort (fun a b -> Int.compare a.ordinal b.ordinal) !results };
+    matched_actuals =
+      List.sort (fun a b -> Int.compare a.application_ordinal b.application_ordinal)
+        !matched_actuals }
+
+let collect structure = (collect_with_actuals structure).bindings
 
 let exec db sql =
   match Sqlite3.exec db sql with
@@ -669,4 +727,129 @@ let finalize_contract db ~selected_inputs =
     if rollback <> Sqlite3.Rc.OK then
       failwith ("functor bindings finalization rollback uncertain after "
                 ^ Printexc.to_string exn);
+    raise exn
+
+type target_witness = {
+  application_ordinal : int;
+  declaration_key : string;
+  formal_position : int;
+  formal_key : string;
+  actual_root_key : string;
+  actual_path : string list;
+  member_path : string list;
+  caller_name : string;
+  call_location : string;
+  occurrence_ordinal : int;
+  target_function_id : int;
+  candidate_call_id : int;
+}
+
+let string_list_json values =
+  Yojson.Safe.to_string (`List (List.map (fun value -> `String value) values))
+
+let store_target_collected db ~producer_run_id ~artifact ~expected_witnesses witnesses =
+  exec db "SAVEPOINT functor_target_input" ;
+  try
+    exec db (Printf.sprintf
+      "INSERT INTO functor_target_inputs(producer_run_id,artifact,outcome,expected_witnesses) VALUES(%d,%s,'collected',%d)"
+      producer_run_id (quote artifact) expected_witnesses) ;
+    List.iter (fun (w : target_witness) ->
+      exec db (Printf.sprintf
+        "INSERT INTO functor_target_witnesses(producer_run_id,artifact,application_ordinal,declaration_key,formal_position,formal_key,actual_root_key,actual_path,member_path,caller_name,call_location,occurrence_ordinal,target_function_id,candidate_call_id) VALUES(%d,%s,%d,%s,%d,%s,%s,%s,%s,%s,%s,%d,%d,%d)"
+        producer_run_id (quote artifact) w.application_ordinal
+        (quote w.declaration_key) w.formal_position (quote w.formal_key)
+        (quote w.actual_root_key) (quote (string_list_json w.actual_path))
+        (quote (string_list_json w.member_path)) (quote w.caller_name)
+        (quote w.call_location) w.occurrence_ordinal w.target_function_id
+        w.candidate_call_id)) witnesses ;
+    exec db "RELEASE functor_target_input"
+  with exn ->
+    let rolled_back = Sqlite3.exec db "ROLLBACK TO functor_target_input" in
+    let released = Sqlite3.exec db "RELEASE functor_target_input" in
+    if rolled_back <> Sqlite3.Rc.OK || released <> Sqlite3.Rc.OK then
+      failwith ("functor targets rollback uncertain after " ^ Printexc.to_string exn) ;
+    raise exn
+
+let store_target_failed db ~producer_run_id ~artifact =
+  exec db (Printf.sprintf
+    "INSERT INTO functor_target_inputs(producer_run_id,artifact,outcome,expected_witnesses) VALUES(%d,%s,'collection_failed',0)"
+    producer_run_id (quote artifact))
+
+let validate_target_contract db ~selected_inputs =
+  if scalar_count db
+       "SELECT 1 FROM comment_db_meta WHERE key='functor_binding_contract' AND value='v1'"
+     <> 1 then invalid () ;
+  if scalar_count db "SELECT 1 FROM functor_target_inputs" <> selected_inputs then invalid () ;
+  if scalar_count db
+       "SELECT 1 FROM functor_target_inputs WHERE outcome<>'collected'"
+     <> 0 then invalid () ;
+  let expected =
+    match rows db "SELECT coalesce(sum(expected_witnesses),0) FROM functor_target_inputs" with
+    | [[value]] -> db_int value
+    | _ -> invalid ()
+  in
+  if scalar_count db "SELECT 1 FROM functor_target_witnesses" <> expected then invalid () ;
+  if scalar_count db
+       "SELECT 1 FROM functor_target_inputs i \
+        LEFT JOIN (SELECT producer_run_id,artifact,count(*) AS actual \
+                   FROM functor_target_witnesses GROUP BY producer_run_id,artifact) w \
+          USING(producer_run_id,artifact) \
+        WHERE i.expected_witnesses IS NOT coalesce(w.actual,0)"
+     <> 0 then invalid () ;
+  if scalar_count db
+       "SELECT 1 FROM functor_target_witnesses w \
+        LEFT JOIN functor_target_inputs i USING(producer_run_id,artifact) \
+        LEFT JOIN functor_catalogue_inputs ci USING(producer_run_id,artifact) \
+        LEFT JOIN functor_bindings b ON b.producer_run_id=w.producer_run_id \
+          AND b.artifact=w.artifact AND b.ordinal=w.application_ordinal \
+        LEFT JOIN functor_declarations d ON d.producer_run_id=w.producer_run_id \
+          AND d.artifact=w.artifact AND d.declaration_key=w.declaration_key \
+        LEFT JOIN calls c ON c.id=w.candidate_call_id \
+        LEFT JOIN functions f ON f.id=w.target_function_id \
+        LEFT JOIN modules target_module ON target_module.id=f.module_id \
+        LEFT JOIN functions caller ON caller.id=c.caller_id \
+        LEFT JOIN modules caller_module ON caller_module.id=caller.module_id \
+        WHERE i.outcome IS NOT 'collected' OR ci.source IS NULL \
+          OR b.status IS NOT 'matched' \
+          OR b.declaration_key IS NOT w.declaration_key \
+          OR b.formal_position IS NOT w.formal_position \
+          OR b.actual_root_key IS NOT w.actual_root_key \
+          OR d.declaration_key IS NULL \
+          OR json_extract(d.formals,'$[' || (w.formal_position-1) || '].binder_key') \
+             IS NOT w.formal_key \
+          OR c.id IS NULL OR c.kind IS NOT 'MAY_ENUMERATED' \
+          OR c.callee_id IS NOT w.target_function_id \
+          OR c.producer_run_id IS NOT w.producer_run_id \
+          OR caller.name IS NOT w.caller_name \
+          OR caller_module.path IS NOT ci.source \
+          OR c.call_site IS NOT \
+             (ci.source || ':' || json_extract(w.call_location,'$.start_line')) \
+          OR f.id IS NULL OR f.producer_run_id IS NOT w.producer_run_id \
+          OR target_module.path IS NOT ci.source \
+          OR json_valid(w.actual_path)<>1 OR json_type(w.actual_path)<>'array' \
+          OR json_array_length(w.actual_path)=0 \
+          OR json_valid(w.member_path)<>1 OR json_type(w.member_path)<>'array' \
+          OR json_array_length(w.member_path)=0 \
+          OR json_valid(w.call_location)<>1 \
+          OR json_type(w.call_location)<>'object'"
+     <> 0 then invalid ()
+
+let finalize_target_contract db ~selected_inputs =
+  exec db "DELETE FROM comment_db_meta WHERE key='functor_target_contract'" ;
+  exec db "BEGIN" ;
+  try
+    let complete =
+      try validate_target_contract db ~selected_inputs ; true
+      with Invalid_contract -> false
+    in
+    if complete then
+      exec db
+        "INSERT INTO comment_db_meta(key,value) VALUES('functor_target_contract','v1')" ;
+    exec db "COMMIT" ;
+    complete
+  with exn ->
+    let rollback = Sqlite3.exec db "ROLLBACK" in
+    if rollback <> Sqlite3.Rc.OK then
+      failwith ("functor targets finalization rollback uncertain after "
+                ^ Printexc.to_string exn) ;
     raise exn

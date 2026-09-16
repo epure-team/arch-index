@@ -402,6 +402,233 @@ module M = Alias2(A)
   require_native_query db ~matched:1 ;
   Lwt.return_unit
 
+let register_native_direct_target_resolution () =
+  Test.register ~__FILE__
+    ~title:"functor targets: direct local application resolves a formal member call"
+    ~tags:["functor"; "targets"; "cfa"; "native"]
+  @@ fun () ->
+  let source = {ocaml|module type S = sig val target : int -> int end
+module F (X : S) = struct let run x = X.target x end
+module A = struct let target x = x + 1 end
+module M = F(A)
+|ocaml} in
+  with_fixture ~name:"functor_target_direct" ~files:(native_files source) @@ fun fixture ->
+  let db = index fixture in
+  Db.with_db db (fun conn ->
+    Check.((Db.int conn
+      "SELECT count(*) FROM calls c JOIN functions target ON target.id=c.callee_id \
+       WHERE target.name='A.target' AND c.kind='MAY_ENUMERATED'" = 1) int
+      ~error_msg:"FUNCTOR_TARGET_RED: direct F(A) target count is %L, expected %R") ;
+    Check.((Db.int conn
+      "SELECT count(*) FROM calls c WHERE c.callee_name='X.target' \
+       AND c.kind='MAY_TOP' AND c.top_reason='module_param'" = 1) int
+      ~error_msg:"FUNCTOR_TARGET_ASSERTION: original formal frontier count is %L, expected %R") ;
+    Check.((Db.int conn "SELECT count(*) FROM functions WHERE name LIKE 'M.%'" = 0) int
+      ~error_msg:"FUNCTOR_TARGET_ASSERTION: instantiated definitions were cloned: %L, expected %R") ;
+    Check.((Db.int conn
+      "SELECT count(*) FROM functor_target_witnesses w \
+       JOIN functor_bindings b ON b.producer_run_id=w.producer_run_id \
+         AND b.artifact=w.artifact AND b.ordinal=w.application_ordinal \
+       JOIN functor_declarations d ON d.producer_run_id=w.producer_run_id \
+         AND d.artifact=w.artifact AND d.declaration_key=w.declaration_key \
+       JOIN calls c ON c.id=w.candidate_call_id \
+       JOIN functions target ON target.id=w.target_function_id \
+       WHERE b.status='matched' AND b.formal_position=1 \
+         AND json_extract(d.formals,'$[0].binder_key')=w.formal_key \
+         AND target.name='A.target' AND c.kind='MAY_ENUMERATED'" = 1) int
+      ~error_msg:"FUNCTOR_TARGET_RED: authenticated durable witness count is %L, expected %R") ;
+    Check.((Db.string_opt conn
+      "SELECT value FROM comment_db_meta WHERE key='functor_target_contract'" = Some "v1")
+      (option string) ~error_msg:"FUNCTOR_TARGET_RED: target contract is %L, expected %R") ;
+    Lwt.return_unit)
+
+let register_flat_target_non_inference () =
+  Test.register ~__FILE__
+    ~title:"functor targets: flat mode infers and persists no Stage 4 target or witness"
+    ~tags:["functor"; "targets"; "cfa"; "flat"; "regression"]
+  @@ fun () ->
+  let source = {ocaml|module type S = sig val target : int -> int end
+module F (X : S) = struct let run x = X.target x end
+module A = struct let target x = x + 1 end
+module M = F(A)
+|ocaml} in
+  with_fixture ~name:"functor_target_flat_non_inference" ~files:(native_files source)
+  @@ fun fixture ->
+  let db = index_project ~name:"functor_target_flat_non_inference" fixture.root in
+  Db.with_db db (fun conn ->
+    Check.((Db.int conn
+      "SELECT count(*) FROM calls WHERE callee_name='A.target'" = 0) int
+      ~error_msg:"FUNCTOR_TARGET_FLAT: inferred Stage 4 targets are %L, expected %R") ;
+    Check.((Db.int conn
+      "SELECT count(*) FROM sqlite_master \
+       WHERE type='table' AND name='functor_target_witnesses'" = 0) int
+      ~error_msg:"FUNCTOR_TARGET_FLAT: persisted Stage 4 witness tables are %L, expected %R") ;
+    Lwt.return_unit)
+
+let register_native_target_union_witnesses () =
+  Test.register ~__FILE__
+    ~title:"functor targets: 0-CFA unions actuals and preserves every witness"
+    ~tags:["functor"; "targets"; "cfa"; "native"; "witness"]
+  @@ fun () ->
+  let source = {ocaml|module type S = sig val target : int -> int end
+module F (X : S) = struct let run x = X.target x + X.target x end
+module A = struct let target x = x + 1 end
+module B = struct let target x = x - 1 end
+module MA = F(A)
+module MB = F(B)
+module MA2 = F(A)
+|ocaml} in
+  with_fixture ~name:"functor_target_union" ~files:(native_files source) @@ fun fixture ->
+  let db = index fixture in
+  Db.with_db db (fun conn ->
+    Check.((Db.int conn
+      "SELECT count(*) FROM calls c JOIN functions f ON f.id=c.callee_id \
+       WHERE f.name IN ('A.target','B.target') AND c.kind='MAY_ENUMERATED'" = 4) int
+      ~error_msg:"FUNCTOR_TARGET_UNION: candidate rows are %L, expected %R") ;
+    Check.((Db.int conn
+      "SELECT count(*) FROM calls WHERE callee_name='X.target' \
+       AND kind='MAY_TOP' AND top_reason='module_param'" = 2) int
+      ~error_msg:"FUNCTOR_TARGET_UNION: retained TOP rows are %L, expected %R") ;
+    Check.((Db.int conn "SELECT count(*) FROM functor_target_witnesses" = 6) int
+      ~error_msg:"FUNCTOR_TARGET_UNION: witness rows are %L, expected %R") ;
+    Check.((Db.int conn
+      "SELECT count(DISTINCT occurrence_ordinal) FROM functor_target_witnesses" = 2) int
+      ~error_msg:"FUNCTOR_TARGET_UNION: physical occurrences are %L, expected %R") ;
+    Check.((Db.int conn
+      "SELECT max(occurrence_ordinal)-min(occurrence_ordinal) \
+       FROM functor_target_witnesses" = 1) int
+      ~error_msg:"FUNCTOR_TARGET_OCCURRENCE_RED: physical ordinal gap is %L, expected %R") ;
+    Check.((Db.int conn
+      "SELECT count(DISTINCT target_function_id) FROM functor_target_witnesses" = 2) int
+      ~error_msg:"FUNCTOR_TARGET_UNION: target union cardinality is %L, expected %R") ;
+    Lwt.return_unit)
+
+let register_target_validator_null_callee () =
+  Test.register ~__FILE__
+    ~title:"functor targets: finalizer rejects a witness whose candidate lost its callee"
+    ~tags:["functor"; "targets"; "lifecycle"; "corruption"]
+  @@ fun () ->
+  let source = {ocaml|module type S = sig val target : int -> int end
+module F (X : S) = struct let run x = X.target x end
+module A = struct let target x = x + 1 end
+module M = F(A)
+|ocaml} in
+  with_fixture ~name:"functor_target_null_callee" ~files:(native_files source) @@ fun fixture ->
+  let db = index fixture in
+  Db.with_db_rw db (fun conn ->
+    Db.exec conn "PRAGMA foreign_keys=OFF" ;
+    Db.exec conn
+      "UPDATE calls SET callee_id=NULL WHERE id IN \
+       (SELECT candidate_call_id FROM functor_target_witnesses)" ;
+    Check.((Arch_index__Arch_index_bindings.finalize_target_contract conn
+              ~selected_inputs:1 = false) bool
+      ~error_msg:"FUNCTOR_TARGET_VALIDATOR_RED: NULL callee verdict is %L, expected %R") ;
+    Check.((Db.string_opt conn
+      "SELECT value FROM comment_db_meta WHERE key='functor_target_contract'" = None)
+      (option string) ~error_msg:"corrupt target marker is %L, expected %R") ;
+    Lwt.return_unit)
+
+let register_target_rejected_candidate_lifecycle () =
+  Test.register ~__FILE__
+    ~title:"functor targets: rejected positive candidate prevents completion"
+    ~tags:["functor"; "targets"; "lifecycle"; "rejection"]
+  @@ fun () ->
+  let source = {ocaml|module type S = sig val target : int -> int end
+module F (X : S) = struct let run x = X.target x end
+module A = struct let target x = x + 1 end
+module M = F(A)
+|ocaml} in
+  with_fixture ~name:"functor_target_rejected" ~files:(native_files source) @@ fun fixture ->
+  let schema_path = Temp.file "functor-target-rejection.sql" in
+  write_file schema_path (read_file (schema ()) ^
+    "\nCREATE TRIGGER reject_functor_target BEFORE INSERT ON calls \
+     WHEN NEW.callee_name='A.target' AND NEW.kind='MAY_ENUMERATED' \
+     BEGIN SELECT RAISE(ABORT,'injected functor target rejection'); END;\n") ;
+  let db = temp_db "functor_target_rejected" in
+  let code, _output = run_command (callgraph_ocaml ())
+      ["--build-dir"; fixture.build_dir; "--db-path"; db; "--schema-path"; schema_path] in
+  Check.((code = 1) int ~error_msg:"rejected candidate index exit is %L, expected %R") ;
+  Db.with_db db (fun conn ->
+    Check.((Db.int conn
+      "SELECT expected_witnesses FROM functor_target_inputs" = 1) int
+      ~error_msg:"FUNCTOR_TARGET_COMPLETION_RED: expected witnesses are %L, expected %R") ;
+    Check.((Db.int conn "SELECT count(*) FROM functor_target_witnesses" = 0) int
+      ~error_msg:"rejected candidate stored %L witnesses, expected %R") ;
+    Check.((Db.string_opt conn
+      "SELECT value FROM comment_db_meta WHERE key='functor_target_contract'" = None)
+      (option string)
+      ~error_msg:"FUNCTOR_TARGET_COMPLETION_RED: rejected candidate marker is %L, expected %R") ;
+    Lwt.return_unit)
+
+let register_native_target_positions_and_refusals () =
+  Test.register ~__FILE__
+    ~title:"functor targets: curried slots nested members and refusals stay separated"
+    ~tags:["functor"; "targets"; "cfa"; "native"; "refusal"]
+  @@ fun () ->
+  let source = {ocaml|module type S = sig
+  val target : int -> int
+  val alias : int -> int
+  module N : sig val target : int -> int end
+end
+module G (X : S) (Y : S) = struct
+  let run n = X.target n + Y.target n + Y.N.target n + X.alias n
+end
+module A = struct
+  let target n = n + 1
+  let alias = target
+  module N = struct let target n = n + 2 end
+end
+module B = struct
+  let target n = n - 1
+  let alias = target
+  module N = struct let target n = n - 2 end
+end
+module M = G(A)(B)
+module Alias = A
+module Refused = G(Alias)(B)
+|ocaml} in
+  with_fixture ~name:"functor_target_positions" ~files:(native_files source) @@ fun fixture ->
+  let db = index fixture in
+  Db.with_db db (fun conn ->
+    Check.((Db.int conn
+      "SELECT count(*) FROM functor_bindings WHERE status='matched' \
+       AND formal_position=2 AND actual_root_key IS NOT NULL" = 2) int
+      ~error_msg:"FUNCTOR_TARGET_CURRIED_PREMISE: matched position-two bindings are %L, expected %R") ;
+    Check.((Db.int conn
+      "SELECT count(*) FROM calls WHERE kind='MAY_ENUMERATED' \
+       AND callee_name LIKE '%N.target'" = 1) int
+      ~error_msg:"FUNCTOR_TARGET_NESTED_DIAGNOSTIC: nested candidate rows are %L, expected %R") ;
+    Check.((Db.int conn
+      "SELECT count(*) FROM functor_target_witnesses WHERE formal_position=2" = 4) int
+      ~error_msg:"FUNCTOR_TARGET_CURRIED_RED: position-two witness total is %L, expected %R") ;
+    Check.((Db.int conn
+      "SELECT count(*) FROM functor_target_witnesses w \
+       JOIN functions f ON f.id=w.target_function_id \
+       WHERE w.formal_position=1 AND f.name='A.target'" = 2) int
+      ~error_msg:"FUNCTOR_TARGET_CURRIED: position-one witnesses are %L, expected %R") ;
+    Check.((Db.int conn
+      "SELECT count(*) FROM functor_target_witnesses w \
+       JOIN functions f ON f.id=w.target_function_id \
+       WHERE w.formal_position=2 AND w.actual_path='[\"B\"]' \
+         AND w.member_path='[\"target\"]' AND f.name='B.target'" = 2) int
+      ~error_msg:"FUNCTOR_TARGET_CURRIED: position-two witnesses are %L, expected %R") ;
+    Check.((Db.int conn
+      "SELECT count(*) FROM functor_target_witnesses w \
+       JOIN functions f ON f.id=w.target_function_id \
+       WHERE w.formal_position=2 AND w.actual_path='[\"B\"]' \
+         AND w.member_path='[\"N\",\"target\"]' AND f.name='B.N.target'" = 2) int
+      ~error_msg:"FUNCTOR_TARGET_NESTED_RED: nested-member witnesses are %L, expected %R") ;
+    Check.((Db.int conn
+      "SELECT count(*) FROM functor_target_witnesses w \
+       JOIN functions f ON f.id=w.target_function_id \
+       WHERE f.name LIKE 'Alias.%'" = 0) int
+      ~error_msg:"FUNCTOR_TARGET_REFUSAL: module alias invented %L witnesses, expected %R") ;
+    Check.((Db.int conn
+      "SELECT count(*) FROM calls WHERE kind='MAY_TOP' AND top_reason='module_param' \
+       AND callee_name IN ('X.target','Y.target','Y.N.target','X.alias')" = 4) int
+      ~error_msg:"FUNCTOR_TARGET_CURRIED: original formal frontiers are %L, expected %R") ;
+    Lwt.return_unit)
+
 let register_native_curried () =
   Test.register ~__FILE__
     ~title:"functor bindings: literal curried application links both formal positions"
@@ -799,6 +1026,12 @@ let register_checkers () =
 
 let register () =
   register_checkers () ;
+  register_native_direct_target_resolution () ;
+  register_flat_target_non_inference () ;
+  register_native_target_union_witnesses () ;
+  register_target_validator_null_callee () ;
+  register_target_rejected_candidate_lifecycle () ;
+  register_native_target_positions_and_refusals () ;
   register_native_traversal () ;
   register_native_formals_roots_refusals () ;
   register_storage_failure_lifecycle () ;

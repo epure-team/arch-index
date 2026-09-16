@@ -127,6 +127,46 @@ CREATE TABLE IF NOT EXISTS functor_bindings (
     FOREIGN KEY(producer_run_id, artifact, declaration_key) REFERENCES functor_declarations(producer_run_id, artifact, declaration_key) ON DELETE CASCADE
 );
 
+-- Authenticated correspondence from a matched functor application to a
+-- concrete same-CMT target. Canonical calls stay deduplicable; this table
+-- retains every independent application/occurrence proof.
+CREATE TABLE IF NOT EXISTS functor_target_inputs (
+    producer_run_id INTEGER NOT NULL,
+    artifact TEXT NOT NULL,
+    outcome TEXT NOT NULL CHECK(outcome IN ('collected','collection_failed')),
+    expected_witnesses INTEGER NOT NULL CHECK(expected_witnesses >= 0),
+    PRIMARY KEY(producer_run_id, artifact),
+    FOREIGN KEY(producer_run_id, artifact) REFERENCES functor_binding_inputs(producer_run_id, artifact) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS functor_target_witnesses (
+    producer_run_id INTEGER NOT NULL,
+    artifact TEXT NOT NULL,
+    application_ordinal INTEGER NOT NULL CHECK(application_ordinal > 0),
+    declaration_key TEXT NOT NULL CHECK(declaration_key <> ''),
+    formal_position INTEGER NOT NULL CHECK(formal_position > 0),
+    formal_key TEXT NOT NULL CHECK(formal_key <> ''),
+    actual_root_key TEXT NOT NULL CHECK(actual_root_key <> ''),
+    actual_path TEXT NOT NULL,
+    member_path TEXT NOT NULL,
+    caller_name TEXT NOT NULL CHECK(caller_name <> ''),
+    call_location TEXT NOT NULL,
+    occurrence_ordinal INTEGER NOT NULL CHECK(occurrence_ordinal >= 0),
+    target_function_id INTEGER NOT NULL REFERENCES functions(id) ON DELETE CASCADE,
+    candidate_call_id INTEGER NOT NULL REFERENCES calls(id) ON DELETE CASCADE,
+    PRIMARY KEY(producer_run_id, artifact, application_ordinal, caller_name,
+                occurrence_ordinal, member_path, target_function_id),
+    FOREIGN KEY(producer_run_id, artifact, application_ordinal)
+      REFERENCES functor_bindings(producer_run_id, artifact, ordinal) ON DELETE CASCADE,
+    FOREIGN KEY(producer_run_id, artifact, declaration_key)
+      REFERENCES functor_declarations(producer_run_id, artifact, declaration_key) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_functor_target_witnesses_call
+  ON functor_target_witnesses(candidate_call_id);
+CREATE INDEX IF NOT EXISTS idx_functor_target_witnesses_target
+  ON functor_target_witnesses(target_function_id);
+
 -- Modules (source files)
 CREATE TABLE IF NOT EXISTS modules (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

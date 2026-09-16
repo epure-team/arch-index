@@ -87,10 +87,10 @@ What is explicitly OUT of scope:
 opam exec -- dune build --root .
 
 # Full deterministic test suite
-opam exec -- dune exec --root . tezt/tests/main.exe -- --file tezt/tests --job-count 1
+opam exec -- dune exec --root . tezt/tests/main.exe -- --job-count 1
 
 # Focused authentic CMT/functor tests
-opam exec -- dune exec --root . tezt/tests/main.exe -- --file tezt/tests --job-count 1 --title-regex 'functor|CFA'
+opam exec -- dune exec --root . tezt/tests/main.exe -- --job-count 1 --match 'functor|CFA'
 
 # Existing independent functor contract checks
 rtk proxy node scripts/check-functor-bindings.js inventory
