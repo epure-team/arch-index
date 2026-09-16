@@ -1,0 +1,50 @@
+[
+  {
+    "severity": "HIGH",
+    "confidence": 5,
+    "path": "lib/arch_index/arch_index.ml",
+    "line": 1880,
+    "category": "correctness",
+    "summary": "Nonidentical variants persist the representative artifact's witnesses instead of their own artifact-local proofs",
+    "evidence": "lib/arch_index/arch_index.ml:1880-1902 selects target_witness_jobs belonging to source_artifact and stores those unchanged witness fields under the current artifact. lib/arch_index/arch_index_cmt.ml:3522-3530 hashes declaration/formal Ident.unique_name keys but not local_module_invocation_member results.",
+    "fix": "Collect correspondence proofs independently for every artifact before graph reuse. Reconcile each locally proven member target to exactly one representative occurrence using stable source fields, persist the current artifact's own proof, and never copy representative witnesses.",
+    "fingerprint": "lib/arch_index/arch_index.ml:1880:variant-representative-witness-borrowing",
+    "specialist": "reviewer"
+  },
+  {
+    "severity": "MEDIUM",
+    "confidence": 5,
+    "path": "roster/ocaml-functor-targets/check-tezos.js",
+    "line": 120,
+    "category": "testing",
+    "summary": "Stale frozen or corpus inputs are classified as assertion failures instead of setup failures",
+    "evidence": "roster/ocaml-functor-targets/check-tezos.js:120-128 and :214-215 use assert.equal for frozen hashes, snapshot and Tezos revision; the final handler maps every AssertionError to exit 1 although FR-031/FR-036 require stale and mismatched inputs to exit at least 2.",
+    "fix": "Use SetupError for frozen/current input, revision, manifest, schema and replay-integrity checks; reserve assertion exit 1 for semantic candidate mismatches and add stale-input controls.",
+    "fingerprint": "roster/ocaml-functor-targets/check-tezos.js:120:setup-misclassified-as-assertion",
+    "specialist": "reviewer"
+  },
+  {
+    "severity": "MEDIUM",
+    "confidence": 5,
+    "path": "briefs/ocaml-functor-targets-qa-scope.md",
+    "line": 20,
+    "category": "testing",
+    "summary": "Three required standalone binding gates bypass the selected opam environment and fail as documented",
+    "evidence": "briefs/ocaml-functor-targets-qa-scope.md:20-23 produced inventory exit 1, lifecycle exit 2 and compatibility exit 1; the equivalent opam exec -- node invocations and CHECK-2 all exited 0.",
+    "fix": "Run all four standalone modes through opam exec -- node or make the checker select the repository switch, then rerun the exact documented gates.",
+    "fingerprint": "briefs/ocaml-functor-targets-qa-scope.md:20:binding-gates-miss-opam-environment",
+    "specialist": "reviewer"
+  },
+  {
+    "severity": "MEDIUM",
+    "confidence": 5,
+    "path": "briefs/ocaml-functor-targets-qa-scope.md",
+    "line": 11,
+    "category": "testing",
+    "summary": "The normal CHECK-1/2/3 commands do not exercise their advertised exit-code controls",
+    "evidence": "briefs/ocaml-functor-targets-qa-scope.md:11 advertises pass/assertion/setup controls, but check-cmt.js:41-43, check-native.js:31-33 and check-tezos.js:207-209 run controlled modes only when explicitly given --test-control; no listed gate supplies those arguments.",
+    "fix": "Add explicit 0/1/2 control invocations to the QA scope or a deterministic meta-check that executes all three modes for every checker.",
+    "fingerprint": "briefs/ocaml-functor-targets-qa-scope.md:11:checker-controls-not-exercised",
+    "specialist": "reviewer"
+  }
+]

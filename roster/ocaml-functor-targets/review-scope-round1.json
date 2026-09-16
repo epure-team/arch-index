@@ -1,0 +1,26 @@
+[
+  {
+    "severity": "HIGH",
+    "confidence": 5,
+    "path": "lib/arch_index/arch_index_support.ml",
+    "line": 0,
+    "category": "scope",
+    "summary": "Out-of-manifest change: lib/arch_index/arch_index_support.ml",
+    "evidence": "git diff --name-status 093eac12152a...HEAD: M\\tlib/arch_index/arch_index_support.ml",
+    "fix": "Revert the file or have the human accept the schema-lifecycle change into scope.",
+    "fingerprint": "lib/arch_index/arch_index_support.ml:0:scope",
+    "specialist": "scope-gate"
+  },
+  {
+    "severity": "HIGH",
+    "confidence": 5,
+    "path": "lib/arch_index/arch_index_db.ml",
+    "line": 0,
+    "category": "scope",
+    "summary": "Out-of-manifest change: lib/arch_index/arch_index_db.ml",
+    "evidence": "git diff --name-status 093eac12152a...HEAD: M\\tlib/arch_index/arch_index_db.ml",
+    "fix": "Revert the file or have the human accept the schema-version change into scope.",
+    "fingerprint": "lib/arch_index/arch_index_db.ml:0:scope",
+    "specialist": "scope-gate"
+  }
+]

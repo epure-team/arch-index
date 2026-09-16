@@ -1,0 +1,184 @@
+{
+  "task": "ocaml-functor-targets",
+  "date": "2026-09-16T22:41:00+02:00",
+  "status": "NO-GO",
+  "auto_fixes_applied": [],
+  "findings": [
+    {
+      "severity": "HIGH", "confidence": 5,
+      "path": "lib/arch_index/arch_index_support.ml", "line": 0, "category": "scope",
+      "summary": "Out-of-manifest change: lib/arch_index/arch_index_support.ml",
+      "evidence": "git diff --name-status 093eac12152a...HEAD: M\\tlib/arch_index/arch_index_support.ml",
+      "fix": "Accepted under the user's standing autonomous Stage-4 authorization because the target marker and target tables must participate in database reset lifecycle.",
+      "fingerprint": "lib/arch_index/arch_index_support.ml:0:scope",
+      "specialist": "scope-gate", "fid": "lib/arch_index/arch_index_support.ml:0:scope#06216f50",
+      "status": "ACCEPTED", "first_seen_round": 1, "resolved_round": null
+    },
+    {
+      "severity": "HIGH", "confidence": 5,
+      "path": "lib/arch_index/arch_index_db.ml", "line": 0, "category": "scope",
+      "summary": "Out-of-manifest change: lib/arch_index/arch_index_db.ml",
+      "evidence": "git diff --name-status 093eac12152a...HEAD: M\\tlib/arch_index/arch_index_db.ml",
+      "fix": "Accepted under the user's standing autonomous Stage-4 authorization because the additive main-schema tables require the documented 1.16 version.",
+      "fingerprint": "lib/arch_index/arch_index_db.ml:0:scope",
+      "specialist": "scope-gate", "fid": "lib/arch_index/arch_index_db.ml:0:scope#9a91f754",
+      "status": "ACCEPTED", "first_seen_round": 1, "resolved_round": null
+    },
+    {
+      "severity": "HIGH", "confidence": 5,
+      "path": "lib/arch_index/arch_index.ml", "line": 1880, "category": "correctness",
+      "summary": "Nonidentical variants persist the representative artifact's witnesses instead of their own artifact-local proofs",
+      "evidence": "lib/arch_index/arch_index.ml:1880-1902 selects target_witness_jobs belonging to source_artifact and stores those unchanged witness fields under the current artifact. lib/arch_index/arch_index_cmt.ml:3522-3530 hashes declaration/formal Ident.unique_name keys but not local_module_invocation_member results.",
+      "fix": "Collect correspondence proofs independently before graph reuse, uniquely reconcile stable physical occurrence fields, and persist only the current artifact's proof.",
+      "fingerprint": "lib/arch_index/arch_index.ml:1880:correctness",
+      "specialist": "reviewer", "fid": "lib/arch_index/arch_index.ml:1880:correctness#b847c212",
+      "status": "OPEN", "first_seen_round": 1, "resolved_round": null,
+      "pre_fix_sha": "a693ba23059e8816ed9353988b1a1a80e4feab89"
+    },
+    {
+      "severity": "MEDIUM", "confidence": 5,
+      "path": "roster/ocaml-functor-targets/check-tezos.js", "line": 120, "category": "testing",
+      "summary": "Stale frozen or corpus inputs are classified as assertion failures instead of setup failures",
+      "evidence": "roster/ocaml-functor-targets/check-tezos.js:120-128 and :214-215 use assert.equal for frozen hashes, snapshot and Tezos revision; the final handler maps every AssertionError to exit 1 although FR-031/FR-036 require setup exit at least 2.",
+      "fix": "Use SetupError for frozen/current input integrity checks, reserve assertion exit 1 for semantic mismatches, and add stale-input controls.",
+      "fingerprint": "roster/ocaml-functor-targets/check-tezos.js:120:testing",
+      "specialist": "reviewer", "fid": "roster/ocaml-functor-targets/check-tezos.js:120:testing#f33315e5",
+      "status": "OPEN", "first_seen_round": 1, "resolved_round": null
+    },
+    {
+      "severity": "MEDIUM", "confidence": 5,
+      "path": "briefs/ocaml-functor-targets-qa-scope.md", "line": 20, "category": "testing",
+      "summary": "Three required standalone binding gates bypass the selected opam environment and fail as documented",
+      "evidence": "briefs/ocaml-functor-targets-qa-scope.md:20-23 produced inventory exit 1, lifecycle exit 2 and compatibility exit 1; the equivalent opam exec -- node invocations and CHECK-2 exited 0.",
+      "fix": "Run all four modes through opam exec -- node and rerun the exact documented gates.",
+      "fingerprint": "briefs/ocaml-functor-targets-qa-scope.md:20:testing",
+      "specialist": "reviewer", "fid": "briefs/ocaml-functor-targets-qa-scope.md:20:testing#ab5c21d0",
+      "status": "OPEN", "first_seen_round": 1, "resolved_round": null
+    },
+    {
+      "severity": "MEDIUM", "confidence": 5,
+      "path": "briefs/ocaml-functor-targets-qa-scope.md", "line": 11, "category": "testing",
+      "summary": "The normal CHECK-1/2/3 commands do not exercise their advertised exit-code controls",
+      "evidence": "briefs/ocaml-functor-targets-qa-scope.md:11 advertises pass/assertion/setup controls, but the listed gates never supply the --test-control arguments implemented by the three checkers.",
+      "fix": "Add explicit 0/1/2 invocations for all three checkers to the QA scope.",
+      "fingerprint": "briefs/ocaml-functor-targets-qa-scope.md:11:testing",
+      "specialist": "reviewer", "fid": "briefs/ocaml-functor-targets-qa-scope.md:11:testing#ad05be9a",
+      "status": "OPEN", "first_seen_round": 1, "resolved_round": null
+    },
+    {
+      "severity": "CRITICAL", "confidence": 5,
+      "path": "briefs/ocaml-functor-targets-qa-scope.md", "line": 20, "category": "verification",
+      "summary": "Three documented standalone binding gates fail outside OPAM despite being required as validated non-degraded gates",
+      "evidence": "briefs/ocaml-functor-targets-qa-scope.md:20-23 documents direct rtk proxy node invocations. Observed exits were inventory=1, lifecycle=1, query=0 and compatibility=1; CHECK-2 masks the issue by using opam exec.",
+      "fix": "Change the documented commands to opam exec -- node and rerun them.",
+      "fingerprint": "briefs/ocaml-functor-targets-qa-scope.md:20:verification",
+      "specialist": "architect", "fid": "briefs/ocaml-functor-targets-qa-scope.md:20:verification#789b521a",
+      "status": "OPEN", "first_seen_round": 1, "resolved_round": null,
+      "pre_fix_sha": "a693ba23059e8816ed9353988b1a1a80e4feab89"
+    },
+    {
+      "severity": "CRITICAL", "confidence": 5,
+      "path": "architecture-schema.sql", "line": 154, "category": "spec",
+      "summary": "Physical occurrence identity is stored but never authenticated",
+      "evidence": "architecture-schema.sql:154 stores occurrence_ordinal standalone; calls has no discriminator and lib/arch_index/arch_index_bindings.ml:799 validates only caller plus file:start_line, so a nonexistent or swapped same-line ordinal can finalize.",
+      "fix": "Persist a keyed physical occurrence inventory, foreign-key witnesses and candidates to it, and add same-line corruption and ambiguity tests.",
+      "fingerprint": "architecture-schema.sql:154:spec",
+      "specialist": "spec-compliance", "acs": ["AC-6", "FR-011", "FR-015", "AC-9", "FR-021", "AC-13", "FR-034"],
+      "fid": "architecture-schema.sql:154:spec#dccadcba", "status": "OPEN",
+      "first_seen_round": 1, "resolved_round": null,
+      "pre_fix_sha": "a693ba23059e8816ed9353988b1a1a80e4feab89"
+    },
+    {
+      "severity": "CRITICAL", "confidence": 5,
+      "path": "lib/arch_index/arch_index_bindings.ml", "line": 799, "category": "spec",
+      "summary": "The actual/member-to-target witness chain is not authenticated",
+      "evidence": "lib/arch_index/arch_index_bindings.ml:799-811 checks only nonempty path JSON and source-module ownership; it never proves that resolving that actual member yields target_function_id.",
+      "fix": "Persist an exact resolved-member identity through keyed occurrence/candidate links and add member-path and target-swap corruption tests.",
+      "fingerprint": "lib/arch_index/arch_index_bindings.ml:799:spec",
+      "specialist": "spec-compliance", "acs": ["AC-1", "FR-011", "AC-6", "AC-13", "FR-034"],
+      "fid": "lib/arch_index/arch_index_bindings.ml:799:spec#53bb01ad", "status": "OPEN",
+      "first_seen_round": 1, "resolved_round": null,
+      "pre_fix_sha": "a693ba23059e8816ed9353988b1a1a80e4feab89"
+    },
+    {
+      "severity": "CRITICAL", "confidence": 5,
+      "path": "lib/arch_index/arch_index_cmt.ml", "line": 3662, "category": "spec",
+      "summary": "Nonidentical variants borrow representative proofs instead of reconciling artifact-local proofs",
+      "evidence": "lib/arch_index/arch_index_cmt.ml:3659-3674 returns before variant targets are collected; lib/arch_index/arch_index.ml:1880-1902 copies representative witnesses under the variant artifact without zero/one/multiple stable-field reconciliation.",
+      "fix": "Collect each variant's local proof before reuse and attach it only after one stable representative occurrence and target match.",
+      "fingerprint": "lib/arch_index/arch_index_cmt.ml:3662:spec",
+      "specialist": "spec-compliance", "acs": ["AC-8", "FR-018", "AC-9", "FR-020", "FR-021", "FR-022", "FR-023", "AC-10"],
+      "fid": "lib/arch_index/arch_index_cmt.ml:3662:spec#a6e4388e", "status": "OPEN",
+      "first_seen_round": 1, "resolved_round": null,
+      "pre_fix_sha": "a693ba23059e8816ed9353988b1a1a80e4feab89"
+    },
+    {
+      "severity": "CRITICAL", "confidence": 5,
+      "path": "lib/arch_index/arch_index.ml", "line": 1906, "category": "spec",
+      "summary": "Target-storage failures do not preserve the required failed-input lifecycle",
+      "evidence": "lib/arch_index/arch_index.ml:1901-1909 commits candidate calls before witness storage; failure only logs and disables finalization, records no collection_failed input, and leaves an unwitnessed positive call usable.",
+      "fix": "Make candidate and witness persistence atomic or quarantine rejected candidates, always record collection_failed, and add injected storage-failure tests.",
+      "fingerprint": "lib/arch_index/arch_index.ml:1906:spec",
+      "specialist": "spec-compliance", "acs": ["AC-8", "FR-019"],
+      "fid": "lib/arch_index/arch_index.ml:1906:spec#84e84ff5", "status": "OPEN",
+      "first_seen_round": 1, "resolved_round": null,
+      "pre_fix_sha": "a693ba23059e8816ed9353988b1a1a80e4feab89"
+    },
+    {
+      "severity": "CRITICAL", "confidence": 5,
+      "path": "roster/ocaml-functor-targets/check-cmt.js", "line": 82, "category": "spec",
+      "summary": "Required binding, member, and reconciliation refusal counters are absent",
+      "evidence": "roster/ocaml-functor-targets/check-cmt.js:82 emits only a generic pass marker; neither producer nor checker reports distinct deterministic refusal categories required by FR-026.",
+      "fix": "Persist refusal categories, emit exact sorted aggregates, and assert order-invariant counts.",
+      "fingerprint": "roster/ocaml-functor-targets/check-cmt.js:82:spec",
+      "specialist": "spec-compliance", "acs": ["AC-9", "FR-026", "AC-10"],
+      "fid": "roster/ocaml-functor-targets/check-cmt.js:82:spec#8c37b648", "status": "OPEN",
+      "first_seen_round": 1, "resolved_round": null,
+      "pre_fix_sha": "a693ba23059e8816ed9353988b1a1a80e4feab89"
+    },
+    {
+      "severity": "CRITICAL", "confidence": 5,
+      "path": "roster/ocaml-functor-targets/check-cmt.js", "line": 45, "category": "spec",
+      "summary": "CHECK-1 omits required arch-query and ambiguous-reconciliation verification",
+      "evidence": "roster/ocaml-functor-targets/check-cmt.js:45-82 builds arch-query but never invokes it for Stage-4 targets; its fixtures omit zero/multiple representative matches and default control execution.",
+      "fix": "Add target-aware arch-query assertions, absent/ambiguous variant fixtures, and explicit three-mode controls in QA.",
+      "fingerprint": "roster/ocaml-functor-targets/check-cmt.js:45:spec",
+      "specialist": "spec-compliance", "acs": ["AC-11", "FR-028", "FR-029"],
+      "fid": "roster/ocaml-functor-targets/check-cmt.js:45:spec#2a81b6bc", "status": "OPEN",
+      "first_seen_round": 1, "resolved_round": null,
+      "pre_fix_sha": "a693ba23059e8816ed9353988b1a1a80e4feab89"
+    }
+  ],
+  "cross_runtime_findings": [],
+  "summary": {"critical": 7, "high": 1, "medium": 3, "low": 0, "info": 0, "accepted": 2, "auto_fixed": 0},
+  "no_go_reason": {
+    "type": "spec-ac-failure",
+    "cause": null,
+    "failed_acs": ["AC-1", "AC-6", "AC-8", "AC-9", "AC-10", "AC-11", "AC-13", "FR-011", "FR-015", "FR-018", "FR-019", "FR-020", "FR-021", "FR-022", "FR-023", "FR-026", "FR-028", "FR-029", "FR-034"]
+  },
+  "no_go_round": 1,
+  "round": 1,
+  "cycle": 1,
+  "rounds_audit": [
+    {
+      "round": 1,
+      "cycle": 1,
+      "reviewed_sha": "a693ba23059e8816ed9353988b1a1a80e4feab89",
+      "fix_sha": null,
+      "fix_sha_reason": "dirty-tree",
+      "specialists_run": [
+        {"name": "reviewer", "selection_reason": "Mandatory owner review; independently ran the build, full 351/351 suite, CHECK-1/2/3 and every QA-scope gate."},
+        {"name": "architect", "selection_reason": "Large public-module and schema blast radius; independently ran the build, full 351/351 suite, CHECK-1/2/3 and every QA-scope gate."},
+        {"name": "spec-compliance", "selection_reason": "Per-feature spec exists; independently checked 36 requirements and ran the build, full 351/351 suite, CHECK-1/2/3, QA gates and controls."}
+      ],
+      "strike": false,
+      "trace_schema_version": "1.0"
+    }
+  ],
+  "cross_runtime": {},
+  "streak_override": null,
+  "mode": "full",
+  "escalation_needed": false,
+  "escalation_reason": null,
+  "normalized_by": "2.0.0"
+}
