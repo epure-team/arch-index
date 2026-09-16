@@ -98,6 +98,13 @@
       "at": "2026-09-16T19:06:00+02:00",
       "by": "roster-qa",
       "reason": "QA round 1 passed build, forced full345, CHECK1 517, authentic CHECK2, pinned410 CHECK3, review ratchet and one-second setup classification on 81d23cc; no TUI or code-intel scope and OpenCode remained skipped-degraded."
+    },
+    {
+      "phase": "ship",
+      "outcome": "COMPLETED",
+      "at": "2026-09-16T19:21:58+02:00",
+      "by": "roster-ship",
+      "reason": "PR112 passed required exact-head CI35126214642 on 9c3e9bf, then rebase-merged to main0eb5887 at 2026-09-16T17:21:21Z; remote feature branch deleted, local main synchronized and main-worktree Dune artifacts cleaned."
     }
   ]
 }
