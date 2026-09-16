@@ -1,7 +1,7 @@
 {
   "task": "ocaml-cfa-foundation",
   "mode": "full",
-  "current_phase": "qa",
+  "current_phase": "ship",
   "events": [
     {
       "phase": "question",
@@ -86,6 +86,13 @@
       "at": "2026-09-16T11:43:31.156Z",
       "by": "roster-qa",
       "reason": "Frozen8eb28f4 build/full345/345+kernel6/CHECK1/2/3 and controls all0;286source/fivebinary identities equal. Pinned410+1Irmin/+2protocol0loss/newMUST. QA convergence0, code-intel skip, cross-runtime shared-breaker skip; routine gate delegated."
+    },
+    {
+      "phase": "ship",
+      "outcome": "COMPLETED",
+      "at": "2026-09-16T12:00:33.533Z",
+      "by": "roster-ship",
+      "reason": "PR111 guarded rebase-merged2026-09-16T11:57:56Z after required build35091891816 passed12m56s on exact7e6f5c6. Main53907c5 tree-identical; local main resynced, foreign7 preserved. MCP skipped missing token. Foundation branch deleted, no new worktree. Roadmap stages1/2 delivered; stage3 next."
     }
   ]
 }
