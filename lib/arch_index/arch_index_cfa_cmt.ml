@@ -7,10 +7,39 @@ type occurrence = {
   forced_callback : bool;
 }
 
-type owner = {session : int; serial : int}
+type formal = {
+  label : Asttypes.arg_label;
+  binder : Ident.t;
+  cell : Arch_index_cfa.cell;
+}
+
+type callable = {
+  expr : Typedtree.expression;
+  formals : formal list;
+  body : Typedtree.expression;
+  result : Arch_index_cfa.cell;
+  mutable target : string option;
+}
+
+type application_result = {
+  expr : Typedtree.expression;
+  cell : Arch_index_cfa.cell;
+}
+
+type owner = {session : int; serial : int; parent_owner : owner option}
 
 let same_owner left right =
   left.session = right.session && left.serial = right.serial
+
+let owner_visible current source =
+  current.session = source.session
+  &&
+  let rec loop = function
+    | None -> false
+    | Some owner when owner.serial = source.serial -> true
+    | Some owner -> loop owner.parent_owner
+  in
+  loop (Some current)
 
 type root = {
   body : Typedtree.expression;
@@ -36,6 +65,8 @@ type t = {
   mutable arities : (string, int) Hashtbl.t;
   roots : (string, root) Hashtbl.t;
   mutable literals : literal list;
+  callables : callable list;
+  application_results : application_result list;
   calls : (int, occurrence) Hashtbl.t;
   mutable next_call : int;
   mutable next_owner : int;
@@ -51,7 +82,10 @@ let%test "flat CFA rejects a CMT duplicate hidden by LSP" =
   && flat_symbol_unique ~lsp_count:1 ~root_count:1
 
 let%test "CFA owners are session-local tokens" =
-  not (same_owner {session = 1; serial = 0} {session = 2; serial = 0})
+  not
+    (same_owner
+       {session = 1; serial = 0; parent_owner = None}
+       {session = 2; serial = 0; parent_owner = None})
 
 let next_session = ref 0
 
@@ -112,6 +146,8 @@ let create ~binding_name ~fn_arity (structure : Typedtree.structure) =
   let arities = Hashtbl.create 32 in
   let roots = Hashtbl.create 16 in
   let literals = ref [] in
+  let callables = ref [] in
+  let application_results = ref [] in
   let literal_cell ?owner expr =
     match List.find_opt (fun literal -> literal.expr == expr) !literals with
     | Some literal -> literal.cell
@@ -129,6 +165,34 @@ let create ~binding_name ~fn_arity (structure : Typedtree.structure) =
         Hashtbl.add cells key cell ;
         cell
   in
+  let supported_formal (param : Typedtree.function_param) =
+    match param.fp_partial, param.fp_arg_label, param.fp_kind with
+    | Typedtree.Total, ((Asttypes.Nolabel | Asttypes.Labelled _) as label),
+      Tparam_pat {pat_desc = Tpat_var (binder, _, _); _}
+      when Ident.name binder <> "_" ->
+        Some {label; binder; cell = cell binder}
+    | _ -> None
+  in
+  let open Tast_iterator in
+  let allocator =
+    {
+      default_iterator with
+      expr = (fun self (expr : Typedtree.expression) ->
+        (match expr.exp_desc with
+        | Texp_function (params, Tfunction_body body) ->
+            let formals = List.filter_map supported_formal params in
+            if List.length formals = List.length params then
+              callables :=
+                {expr; formals; body; result = Arch_index_cfa.fresh domain; target = None}
+                :: !callables
+        | Texp_apply _ ->
+            application_results :=
+              {expr; cell = Arch_index_cfa.fresh domain} :: !application_results
+        | _ -> ()) ;
+        default_iterator.expr self expr);
+    }
+  in
+  allocator.structure allocator structure ;
   let root_expr_cell expr =
     expression_cell domain ~fresh:(fun () -> Arch_index_cfa.fresh domain)
       ~policy:{
@@ -138,7 +202,11 @@ let create ~binding_name ~fn_arity (structure : Typedtree.structure) =
           | Some None, Some src -> Some src
           | _ -> None);
         literal = literal_cell;
-        application = (fun _ -> None);
+        application = (fun expr ->
+          Option.map (fun (result : application_result) -> result.cell)
+            (List.find_opt
+               (fun (result : application_result) -> result.expr == expr)
+               !application_results));
       }
       expr
   in
@@ -146,13 +214,24 @@ let create ~binding_name ~fn_arity (structure : Typedtree.structure) =
     List.iter
       (fun (item : Typedtree.structure_item) ->
         match item.str_desc with
-        | Tstr_value (Asttypes.Nonrecursive, bindings) ->
+        | Tstr_value (rec_flag, bindings) ->
+            let group_supported =
+              match rec_flag with
+              | Asttypes.Nonrecursive -> true
+              | Asttypes.Recursive ->
+                  List.for_all
+                    (fun (binding : Typedtree.value_binding) ->
+                      match binding.vb_pat.pat_desc, binding.vb_expr.exp_desc with
+                      | Tpat_var (id, _, _), Texp_function _ -> Ident.name id <> "_"
+                      | _ -> false)
+                    bindings
+            in
             List.iter
               (fun (binding : Typedtree.value_binding) ->
                 match binding.vb_pat.pat_desc with
                 | Tpat_var (id, _, _) when Ident.name id <> "_" ->
                     (match binding.vb_expr.exp_desc with
-                    | Texp_function _ ->
+                    | Texp_function _ when group_supported ->
                         let dst = cell id in
                         let name = binding_name ~prefix:"" id in
                         let arity = fn_arity binding.vb_expr in
@@ -162,10 +241,16 @@ let create ~binding_name ~fn_arity (structure : Typedtree.structure) =
                            physical-body notification. *)
                         Hashtbl.replace roots (Ident.unique_name id)
                           {body = binding.vb_expr; name; arity; notified = false} ;
+                        List.iter
+                          (fun (callable : callable) ->
+                            if callable.expr == binding.vb_expr then
+                              callable.target <- Some name)
+                          !callables ;
                         Hashtbl.replace eligible (Ident.unique_name id) () ;
                         Hashtbl.replace owners (Ident.unique_name id) None ;
                         ignore dst
-                    | Texp_ident (Path.Pident source, _, _) ->
+                    | Texp_ident (Path.Pident source, _, _)
+                      when rec_flag = Asttypes.Nonrecursive ->
                         (* A plain alias is the supported transfer itself even
                            when its source is opaque: it must remain an
                            explicit CFA frontier.  In contrast, an unsupported
@@ -177,7 +262,8 @@ let create ~binding_name ~fn_arity (structure : Typedtree.structure) =
                           Arch_index_cfa.seed_reason domain dst Arch_index_cfa.Callback_param ;
                         Hashtbl.replace eligible (Ident.unique_name id) () ;
                         Hashtbl.replace owners (Ident.unique_name id) None
-                    | (Texp_ifthenelse _ | Texp_match _ | Texp_sequence _) ->
+                    | (Texp_ifthenelse _ | Texp_match _ | Texp_sequence _ | Texp_apply _)
+                      when rec_flag = Asttypes.Nonrecursive ->
                         Hashtbl.replace cells (Ident.unique_name id)
                           (root_expr_cell binding.vb_expr) ;
                         Hashtbl.replace eligible (Ident.unique_name id) () ;
@@ -192,7 +278,8 @@ let create ~binding_name ~fn_arity (structure : Typedtree.structure) =
   let session = !next_session in
   incr next_session ;
   {domain; cells; eligible; owners; arities; roots; calls = Hashtbl.create 32; next_call = 0;
-   literals = !literals; next_owner = 0; session;
+   literals = !literals; callables = !callables;
+   application_results = !application_results; next_owner = 0; session;
    finalized = false}
 
 let ensure_open t =
@@ -203,10 +290,21 @@ let observe_literal t ~owner ~expr ~name ~arity =
   match List.find_opt (fun literal -> literal.expr == expr) t.literals with
   | Some literal ->
       (match literal.eval_owner with
-      | None -> literal.eval_owner <- Some owner; literal.observed <- Some (name, arity)
+      | None ->
+          literal.eval_owner <- Some owner;
+          literal.observed <- Some (name, arity) ;
+          List.iter
+            (fun (callable : callable) ->
+              if callable.expr == expr then callable.target <- Some name)
+            t.callables
       | Some expected when same_owner expected owner ->
           (match literal.observed with
-          | None -> literal.observed <- Some (name, arity)
+          | None ->
+              literal.observed <- Some (name, arity) ;
+              List.iter
+                (fun (callable : callable) ->
+                  if callable.expr == expr then callable.target <- Some name)
+                t.callables
           | Some prior when prior = (name, arity) -> ()
           | Some _ -> literal.ambiguous <- true)
       | Some _ -> literal.ambiguous <- true)
@@ -214,7 +312,11 @@ let observe_literal t ~owner ~expr ~name ~arity =
       let cell = Arch_index_cfa.fresh t.domain in
       t.literals <-
         {expr; cell; eval_owner = Some owner; observed = Some (name, arity); stored = false; ambiguous = false}
-        :: t.literals
+        :: t.literals ;
+      List.iter
+        (fun (callable : callable) ->
+          if callable.expr == expr then callable.target <- Some name)
+        t.callables
 
 let notify_stored_literal t ~name =
   ensure_open t ;
@@ -242,12 +344,6 @@ let notify_rejected_root t ~binder ~body =
       Arch_index_cfa.seed_reason t.domain cell Arch_index_cfa.Dropped_node
   | _ -> ()
 
-let fresh_owner t =
-  ensure_open t ;
-  let owner = {session = t.session; serial = t.next_owner} in
-  t.next_owner <- t.next_owner + 1 ;
-  owner
-
 let register_local_alias t ~owner ~binder ~source =
   ensure_open t ;
   let cell id =
@@ -264,7 +360,7 @@ let register_local_alias t ~owner ~binder ~source =
   let source_owner = Hashtbl.find_opt t.owners source_stamp in
   (match source_owner with
   | Some None -> Arch_index_cfa.copy t.domain ~src:(cell source) ~dst
-  | Some (Some source_owner) when same_owner source_owner owner ->
+  | Some (Some source_owner) when owner_visible owner source_owner ->
       Arch_index_cfa.copy t.domain ~src:(cell source) ~dst
   | _ -> Arch_index_cfa.seed_reason t.domain dst Arch_index_cfa.Callback_param) ;
   Hashtbl.replace t.eligible (Ident.unique_name binder) () ;
@@ -275,7 +371,7 @@ let expr_cell t owner expr =
   let lookup id =
     match Hashtbl.find_opt t.owners (Ident.unique_name id), Hashtbl.find_opt t.cells (Ident.unique_name id) with
     | Some None, Some src -> Some src
-    | Some (Some source_owner), Some src when same_owner source_owner owner -> Some src
+    | Some (Some source_owner), Some src when owner_visible owner source_owner -> Some src
     | _ -> None
   in
   let literal e =
@@ -296,7 +392,37 @@ let expr_cell t owner expr =
         cell
   in
   expression_cell t.domain ~fresh
-    ~policy:{lookup; literal; application = (fun _ -> None)} expr
+    ~policy:{
+      lookup;
+      literal;
+      application = (fun expr ->
+        Option.map (fun (result : application_result) -> result.cell)
+          (List.find_opt
+             (fun (result : application_result) -> result.expr == expr)
+             t.application_results));
+    }
+    expr
+
+let fresh_owner ?parent t ~body =
+  ensure_open t ;
+  let owner = {session = t.session; serial = t.next_owner; parent_owner = parent} in
+  t.next_owner <- t.next_owner + 1 ;
+  List.iter
+    (fun (callable : callable) ->
+      if callable.expr == body then (
+        List.iter
+          (fun formal ->
+            let stamp = Ident.unique_name formal.binder in
+            Hashtbl.replace t.cells stamp formal.cell ;
+            Hashtbl.replace t.eligible stamp () ;
+            Hashtbl.replace t.owners stamp (Some owner) ;
+            Arch_index_cfa.seed_reason t.domain formal.cell
+              Arch_index_cfa.Callback_param)
+          callable.formals ;
+        let returned = expr_cell t owner callable.body in
+        Arch_index_cfa.copy t.domain ~src:returned ~dst:callable.result))
+    t.callables ;
+  owner
 
 let register_local_expr t ~owner ~binder expr =
   ensure_open t ;
@@ -327,7 +453,77 @@ let register_expr_call t ~owner expr ~head ~supplied ~omitted_slots ~legacy_resi
   ensure_open t ;
   let cell = expr_cell t owner expr in
   let token = t.next_call in t.next_call <- token + 1 ;
-  Hashtbl.add t.calls token {cell; head; supplied; omitted_slots; legacy_residual; forced_callback = false} ; token
+  Hashtbl.add t.calls token
+    {cell; head; supplied; omitted_slots; legacy_residual;
+     forced_callback = false} ;
+  token
+
+let register_application t ~owner ~application ~head ~args ~legacy_residual =
+  ensure_open t ;
+  let head_cell = expr_cell t owner head in
+  let result =
+    match
+      List.find_opt
+        (fun (result : application_result) -> result.expr == application)
+        t.application_results
+    with
+    | Some result -> result.cell
+    | None -> invalid_arg "CFA application result was not preallocated"
+  in
+  let supplied = List.length (List.filter_map snd args) in
+  let omitted_slots = List.length args - supplied in
+  let actuals =
+    List.map
+      (fun (label, expression) ->
+        label, Option.map (expr_cell t owner) expression)
+      args
+  in
+  let same_label left right =
+    match left, right with
+    | Asttypes.Nolabel, Asttypes.Nolabel -> true
+    | Asttypes.Labelled left, Asttypes.Labelled right -> left = right
+    | _ -> false
+  in
+  Arch_index_cfa.on_reason t.domain head_cell
+    (fun domain reason -> Arch_index_cfa.seed_reason domain result reason) ;
+  let activate domain ~target ~consumed =
+    match
+      List.find_opt
+        (fun (callable : callable) -> callable.target = Some target)
+        t.callables
+    with
+    | None -> Arch_index_cfa.seed_reason domain result Arch_index_cfa.Callback_param
+    | Some callable ->
+        let remaining = List.filteri (fun index _ -> index >= consumed) callable.formals in
+        let rec connect count formals actuals =
+          match formals, actuals with
+          | _, [] | [], _ -> Some count
+          | formal :: formals, (label, Some actual) :: actuals
+            when same_label formal.label label ->
+              Arch_index_cfa.copy domain ~src:actual ~dst:formal.cell ;
+              connect (count + 1) formals actuals
+          | _ -> None
+        in
+        (match connect 0 remaining actuals with
+        | None ->
+            Arch_index_cfa.seed_reason domain result Arch_index_cfa.Callback_param
+        | Some newly_consumed ->
+            let total = consumed + newly_consumed in
+            if total < List.length callable.formals then
+              Arch_index_cfa.seed_residual domain result {target; consumed = total}
+            else Arch_index_cfa.copy domain ~src:callable.result ~dst:result)
+  in
+  Arch_index_cfa.on_target t.domain head_cell
+    (fun domain target -> activate domain ~target ~consumed:0) ;
+  Arch_index_cfa.on_residual t.domain head_cell
+    (fun domain residual ->
+      activate domain ~target:residual.target ~consumed:residual.consumed) ;
+  let token = t.next_call in
+  t.next_call <- token + 1 ;
+  Hashtbl.add t.calls token
+    {cell = head_cell; head; supplied; omitted_slots;
+     legacy_residual; forced_callback = false} ;
+  token
 
 let finalize_with_hook ~before_solve t =
   if not t.finalized then (
@@ -378,13 +574,30 @@ let value_of_call t token =
       let value =
         if occurrence.forced_callback then
           {Arch_index_cfa.targets = Arch_index_cfa.String_set.empty;
-           reasons = Arch_index_cfa.Reason_set.singleton Arch_index_cfa.Callback_param}
-        else Arch_index_cfa.value t.domain
-          occurrence.cell
+           reasons = Arch_index_cfa.Reason_set.singleton Arch_index_cfa.Callback_param;
+           residuals = Arch_index_cfa.Residual_set.empty}
+        else
+          let value = Arch_index_cfa.value t.domain occurrence.cell in
+          if Arch_index_cfa.String_set.is_empty value.targets
+             && Arch_index_cfa.Reason_set.is_empty value.reasons
+             && Arch_index_cfa.Residual_set.is_empty value.residuals
+          then
+            {Arch_index_cfa.targets = Arch_index_cfa.String_set.empty;
+             reasons = Arch_index_cfa.Reason_set.singleton Arch_index_cfa.Callback_param;
+             residuals = Arch_index_cfa.Residual_set.empty}
+          else value
       in
-      ( Arch_index_cfa.String_set.elements value.targets
-        |> List.map (fun name ->
-               (name, Option.value (Hashtbl.find_opt t.arities name) ~default:0)),
+      let targets =
+        (Arch_index_cfa.String_set.elements value.targets
+         |> List.map (fun name ->
+                name, Option.value (Hashtbl.find_opt t.arities name) ~default:0))
+        @ (Arch_index_cfa.Residual_set.elements value.residuals
+           |> List.map (fun (residual : Arch_index_cfa.residual) ->
+                  let arity = Option.value (Hashtbl.find_opt t.arities residual.target) ~default:0 in
+                  residual.target, max 0 (arity - residual.consumed)))
+        |> List.sort_uniq Stdlib.compare
+      in
+      ( targets,
         Arch_index_cfa.Reason_set.elements value.reasons,
         occurrence.supplied, occurrence.omitted_slots, occurrence.legacy_residual ))
     (Hashtbl.find_opt t.calls token)

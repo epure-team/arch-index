@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "revision": "c397efd1b2248564c05c74fdab795213dea593db+cfa-foundation-opaque-alias-fix-source-overlay-2x2-2026-09-16",
+  "revision": "60cc88be2db717b0c4727b1206ab666570585df1+cfa-propagation-source-overlay-2x2-2026-09-16",
   "modules": [
     "lib/arch_index/arch_errors_config.ml",
     "lib/arch_index/arch_index.ml",
@@ -32,9 +32,9 @@
   ],
   "totals": {
     "modules": 27,
-    "functions": 1082,
-    "calls": 6808,
-    "origins": 603
+    "functions": 1132,
+    "calls": 7026,
+    "origins": 613
   },
   "origin_groups": [
     {
@@ -47,7 +47,7 @@
       "channel": "exception",
       "form": "compare",
       "escapes": 1,
-      "count": 54
+      "count": 56
     },
     {
       "channel": "exception",
@@ -83,7 +83,7 @@
       "channel": "option",
       "form": "raise",
       "escapes": 1,
-      "count": 346
+      "count": 354
     },
     {
       "channel": "result",

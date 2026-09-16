@@ -1,7 +1,7 @@
 {
   "task": "ocaml-cfa-propagation",
   "mode": "full",
-  "current_phase": "plan",
+  "current_phase": "review",
   "events": [
     {
       "phase": "question",
@@ -35,6 +35,13 @@
       "outcome": "COMPLETED",
       "at": "2026-09-16",
       "by": "roster-plan"
+    },
+    {
+      "phase": "implement",
+      "outcome": "COMPLETED",
+      "at": "2026-09-16T15:31:08+02:00",
+      "by": "roster-implement",
+      "reason": "Seven vertical slices implemented; full suite 345/345; CHECK1 517 cases; CHECK2 authentic CMT passed; pinned410 CHECK3 produced 181 relation gains, zero relation losses, and zero new MUST rows."
     }
   ]
 }

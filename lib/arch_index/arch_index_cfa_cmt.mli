@@ -19,7 +19,7 @@ val notify_stored_root :
 val notify_rejected_root :
   t -> binder:Ident.t -> body:Typedtree.expression -> unit
 
-val fresh_owner : t -> owner
+val fresh_owner : ?parent:owner -> t -> body:Typedtree.expression -> owner
 val observe_literal : t -> owner:owner -> expr:Typedtree.expression -> name:string -> arity:int -> unit
 val notify_stored_literal : t -> name:string -> unit
 val register_local_alias : t -> owner:owner -> binder:Ident.t -> source:Ident.t -> unit
@@ -32,6 +32,12 @@ val register_call :
   legacy_residual:bool -> int option
 
 val register_expr_call : t -> owner:owner -> Typedtree.expression -> head:Typedtree.expression -> supplied:int -> omitted_slots:int -> legacy_residual:bool -> int
+
+val register_application :
+  t -> owner:owner -> application:Typedtree.expression ->
+  head:Typedtree.expression ->
+  args:(Asttypes.arg_label * Typedtree.expression option) list ->
+  legacy_residual:bool -> int
 
 val finalize : t -> unit
 

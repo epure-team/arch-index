@@ -7,24 +7,45 @@ module Reason_set = Set.Make (struct
   let compare = Stdlib.compare
 end)
 
-type value = {targets : String_set.t; reasons : Reason_set.t}
+type residual = {target : string; consumed : int}
+
+module Residual_set = Set.Make (struct
+  type t = residual
+  let compare = Stdlib.compare
+end)
+
+type value = {
+  targets : String_set.t;
+  reasons : Reason_set.t;
+  residuals : Residual_set.t;
+}
 type cell = int
 
 type t = {
   mutable next : int;
   values : (cell, value) Hashtbl.t;
   outgoing : (cell, cell list) Hashtbl.t;
+  watchers : (cell, (t -> string -> unit) list) Hashtbl.t;
+  reason_watchers : (cell, (t -> reason -> unit) list) Hashtbl.t;
+  residual_watchers : (cell, (t -> residual -> unit) list) Hashtbl.t;
   queue : cell Queue.t;
   queued : (cell, unit) Hashtbl.t;
 }
 
-let bottom = {targets = String_set.empty; reasons = Reason_set.empty}
+let bottom = {
+  targets = String_set.empty;
+  reasons = Reason_set.empty;
+  residuals = Residual_set.empty;
+}
 
 let create () =
   {
     next = 0;
     values = Hashtbl.create 32;
     outgoing = Hashtbl.create 32;
+    watchers = Hashtbl.create 32;
+    reason_watchers = Hashtbl.create 32;
+    residual_watchers = Hashtbl.create 32;
     queue = Queue.create ();
     queued = Hashtbl.create 32;
   }
@@ -34,6 +55,9 @@ let clone t =
     next = t.next;
     values = Hashtbl.copy t.values;
     outgoing = Hashtbl.copy t.outgoing;
+    watchers = Hashtbl.copy t.watchers;
+    reason_watchers = Hashtbl.copy t.reason_watchers;
+    residual_watchers = Hashtbl.copy t.residual_watchers;
     queue = Queue.copy t.queue;
     queued = Hashtbl.copy t.queued;
   }
@@ -54,10 +78,29 @@ let update t cell value =
   if
     not
       (String_set.equal previous.targets value.targets
-      && Reason_set.equal previous.reasons value.reasons)
+      && Reason_set.equal previous.reasons value.reasons
+      && Residual_set.equal previous.residuals value.residuals)
   then (
     Hashtbl.replace t.values cell value ;
-    enqueue t cell)
+    enqueue t cell ;
+    String_set.iter
+      (fun target ->
+        if not (String_set.mem target previous.targets) then
+          List.iter (fun watcher -> watcher t target)
+            (Option.value (Hashtbl.find_opt t.watchers cell) ~default:[]))
+      value.targets ;
+    Reason_set.iter
+      (fun reason ->
+        if not (Reason_set.mem reason previous.reasons) then
+          List.iter (fun watcher -> watcher t reason)
+            (Option.value (Hashtbl.find_opt t.reason_watchers cell) ~default:[]))
+      value.reasons ;
+    Residual_set.iter
+      (fun residual ->
+        if not (Residual_set.mem residual previous.residuals) then
+          List.iter (fun watcher -> watcher t residual)
+            (Option.value (Hashtbl.find_opt t.residual_watchers cell) ~default:[]))
+      value.residuals)
 
 let seed_target t cell target =
   let value = Hashtbl.find t.values cell in
@@ -67,15 +110,35 @@ let seed_reason t cell reason =
   let value = Hashtbl.find t.values cell in
   update t cell {value with reasons = Reason_set.add reason value.reasons}
 
+let seed_residual t cell residual =
+  let value = Hashtbl.find t.values cell in
+  update t cell {value with residuals = Residual_set.add residual value.residuals}
+
 let copy t ~src ~dst =
   let successors = Option.value (Hashtbl.find_opt t.outgoing src) ~default:[] in
   if not (List.mem dst successors) then Hashtbl.replace t.outgoing src (dst :: successors) ;
   enqueue t src
 
+let on_target t cell watcher =
+  let existing = Option.value (Hashtbl.find_opt t.watchers cell) ~default:[] in
+  Hashtbl.replace t.watchers cell (watcher :: existing) ;
+  String_set.iter (watcher t) (Hashtbl.find t.values cell).targets
+
+let on_reason t cell watcher =
+  let existing = Option.value (Hashtbl.find_opt t.reason_watchers cell) ~default:[] in
+  Hashtbl.replace t.reason_watchers cell (watcher :: existing) ;
+  Reason_set.iter (watcher t) (Hashtbl.find t.values cell).reasons
+
+let on_residual t cell watcher =
+  let existing = Option.value (Hashtbl.find_opt t.residual_watchers cell) ~default:[] in
+  Hashtbl.replace t.residual_watchers cell (watcher :: existing) ;
+  Residual_set.iter (watcher t) (Hashtbl.find t.values cell).residuals
+
 let join left right =
   {
     targets = String_set.union left.targets right.targets;
     reasons = Reason_set.union left.reasons right.reasons;
+    residuals = Residual_set.union left.residuals right.residuals;
   }
 
 let solve t =
