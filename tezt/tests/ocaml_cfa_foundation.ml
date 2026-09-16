@@ -657,6 +657,65 @@ let register () =
             WHERE source.name='let_head_run' AND c.kind='MAY_TOP' \
               AND c.top_reason='callback_param' AND c.edge_form IS NULL")
         0 ;
+      List.iter
+        (fun caller ->
+          Batch.eq_int b
+            ~msg:("OCAML_CFA_PROPAGATION_RED: let admission reaches target for " ^ caller)
+            (count rich
+               (Printf.sprintf
+                  "SELECT count(*) FROM calls c \
+                   JOIN functions source ON source.id=c.caller_id \
+                   JOIN functions target ON target.id=c.callee_id \
+                   WHERE source.name='%s' AND target.name='ho_target' \
+                     AND source.module_id=target.module_id \
+                     AND c.kind='MAY_ENUMERATED' AND c.edge_form IS NULL"
+                  caller))
+            1 ;
+          Batch.eq_int b
+            ~msg:("OCAML_CFA_PROPAGATION_ASSERTION: let admission is closed for " ^ caller)
+            (count rich
+               (Printf.sprintf
+                  "SELECT count(*) FROM calls c JOIN functions source ON source.id=c.caller_id \
+                   WHERE source.name='%s' AND c.kind='MAY_TOP' \
+                     AND c.top_reason='callback_param' AND c.edge_form IS NULL"
+                  caller))
+            0 ;
+          Batch.eq_int b
+            ~msg:("OCAML_CFA_PROPAGATION_RED: flat let admission reaches target for " ^ caller)
+            (count flat
+               (Printf.sprintf
+                  "SELECT count(*) FROM calls \
+                   WHERE caller_file LIKE '%%higher_order.ml' AND caller_name='%s' \
+                     AND callee_name='ho_target' AND callee_file=caller_file \
+                     AND edge_form IS NULL"
+                  caller))
+            1 ;
+          Batch.eq_int b
+            ~msg:("OCAML_CFA_PROPAGATION_ASSERTION: flat let admission is closed for " ^ caller)
+            (count flat
+               (Printf.sprintf
+                  "SELECT count(*) FROM calls \
+                   WHERE caller_file LIKE '%%higher_order.ml' AND caller_name='%s' \
+                     AND callee_name='*TOP*' AND callee_file IS NULL \
+                     AND edge_form IS NULL"
+                  caller))
+            0)
+        ["let_head_run"; "root_let_run"; "local_let_run"] ;
+      Batch.eq_int b
+        ~msg:"OCAML_CFA_PROPAGATION_ASSERTION: destructured let head stays unknown"
+        (count rich
+           "SELECT count(*) FROM calls c JOIN functions source ON source.id=c.caller_id \
+            WHERE source.name='let_pattern_head' AND c.kind='MAY_TOP' \
+              AND c.top_reason='callback_param' AND c.edge_form IS NULL")
+        1 ;
+      Batch.eq_int b
+        ~msg:"OCAML_CFA_PROPAGATION_ASSERTION: destructured let head gains no target"
+        (count rich
+           "SELECT count(*) FROM calls c JOIN functions source ON source.id=c.caller_id \
+            JOIN functions target ON target.id=c.callee_id \
+            WHERE source.name='let_pattern_head' AND target.name='ho_target' \
+              AND c.kind='MAY_ENUMERATED' AND c.edge_form IS NULL")
+        0 ;
       Batch.eq_int b
         ~msg:"OCAML_CFA_CAPTURE_RED: exact lexical alias capture reaches target"
         (count rich

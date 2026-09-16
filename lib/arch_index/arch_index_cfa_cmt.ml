@@ -103,6 +103,15 @@ let supported_callable (expr : Typedtree.expression) =
       List.for_all supported_formal_shape params
   | _ -> false
 
+(** Constructors whose value can be interpreted by [expression_cell].  Keep
+    the enrollment sites and computed application-head site on this shared
+    classifier; [expression_cell] remains the single semantic dispatcher and
+    rejects unsupported sub-shapes conservatively. *)
+let supported_computed_value (desc : Typedtree.expression_desc) = match desc with
+  | Texp_ifthenelse _ | Texp_match _ | Texp_sequence _ | Texp_apply _
+  | Texp_let _ -> true
+  | _ -> false
+
 let install_callable_target callable target =
   match callable.target, callable.residuals with
   | Some existing, Some _ when existing = target -> ()
@@ -288,8 +297,9 @@ let create ~binding_name ~fn_arity (structure : Typedtree.structure) =
                           Arch_index_cfa.seed_reason domain dst Arch_index_cfa.Callback_param ;
                         Hashtbl.replace eligible (Ident.unique_name id) () ;
                         Hashtbl.replace owners (Ident.unique_name id) None
-                    | (Texp_ifthenelse _ | Texp_match _ | Texp_sequence _ | Texp_apply _)
-                      when rec_flag = Asttypes.Nonrecursive ->
+                    | desc
+                      when rec_flag = Asttypes.Nonrecursive
+                           && supported_computed_value desc ->
                         Hashtbl.replace cells (Ident.unique_name id)
                           (root_expr_cell binding.vb_expr) ;
                         Hashtbl.replace eligible (Ident.unique_name id) () ;

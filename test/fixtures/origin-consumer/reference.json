@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "revision": "c9ce0fc3094db44793dc2ad79b6067cebdd3e66e+cfa-propagation-review-fixes-overlay-2x2-2026-09-16",
+  "revision": "b5a52f3dbb131dcc2b1ae3206003328c5547e1b3+cfa-let-family-overlay-2x2-2026-09-16",
   "modules": [
     "lib/arch_index/arch_errors_config.ml",
     "lib/arch_index/arch_index.ml",
@@ -32,8 +32,8 @@
   ],
   "totals": {
     "modules": 27,
-    "functions": 1142,
-    "calls": 7061,
+    "functions": 1143,
+    "calls": 7066,
     "origins": 614
   },
   "origin_groups": [

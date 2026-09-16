@@ -1,7 +1,7 @@
 # Implementation Report — ocaml-cfa-propagation
 
 **Mode:** full  
-**Implemented SHA:** `71bf0cb10850f1c238c737985dd796966af21a4c` plus the pending round-2 correction  
+**Implemented SHA:** `b5a52f312b693b0e9facaa890b137cfda25f8a22` plus the pending round-3 correction  
 **Status:** COMPLETED
 
 ## Delivered behavior
@@ -91,4 +91,21 @@ authentic CHECK-2 and its 0/1/2 controls, the combined review ratchet, and
 pinned-410 CHECK-3. The corpus result is unchanged at Irmin +70, protocol +256,
 326 gains, zero losses and zero new `MUST`; the observed producer run was
 13682 ms and 156076 KiB. Two fresh self-index 2×2 runs have identical totals
-and digests at 27 modules, 1142 functions, 7061 calls and 614 origins.
+and digests at 27 modules, 1143 functions, 7066 calls and 614 origins.
+
+Round 3 then exposed the broader invariant behind the direct-head fix: the
+common dispatcher supported `Texp_let`, while the root and local computed-value
+admission lists did not, and the direct regression lacked a flat assertion. A
+shared `supported_computed_value` classifier now drives all three admission
+sites. Authentic direct/root/local rich+flat positives and a destructured-let
+negative reproduced six pre-fix failures and now pass without widening the
+supported let grammar. The friction log's out-of-vocabulary classes were also
+remapped to the closed Roster vocabulary.
+
+Post-correction verification is green again: full suite 345/345, CHECK-1 517
+cases, authentic CHECK-2 plus its exit controls, and the combined review
+ratchet. Pinned-410 CHECK-3 now records Irmin 4849→4921 (+72) and protocol
+12171→12441 (+270), for 342 relation gains, zero losses and zero new `MUST`.
+Canonical rows are 45052→45290 (127 removed, 365 added); the producer run took
+3188 ms with 156020 KiB sampled RSS. Two fresh self-index 2×2 runs agree at 27
+modules, 1143 functions, 7066 calls and 614 origins with identical digests.
