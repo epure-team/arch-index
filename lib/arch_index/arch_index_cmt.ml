@@ -2637,7 +2637,8 @@ let collect_calls_from_expr_with_open_bodies ?(canon_exn = fun p -> Path.name p)
                         ?callee_ty:!callee_ty_for_channel
                         (Head_qualified (callee_module, callee_name))
                         expr.exp_loc)
-                | (Texp_ifthenelse _ | Texp_match _ | Texp_sequence _ | Texp_apply _) -> (
+                | (Texp_ifthenelse _ | Texp_match _ | Texp_sequence _ | Texp_apply _
+                  | Texp_let _) -> (
                     match cfa_application_token with
                     | Some token ->
                         add_call ~partial ~is_head_of:expr.exp_loc ?callee_ty:!callee_ty_for_channel
