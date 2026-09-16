@@ -62,3 +62,12 @@ let over_downstream x =
   picked x
 
 let let_head_run x = (let chosen = ho_target in chosen) x
+
+let root_let_picked = let chosen = ho_target in chosen
+let root_let_run x = root_let_picked x
+
+let local_let_run x =
+  let picked = (let chosen = ho_target in chosen) in
+  picked x
+
+let let_pattern_head x = (let (chosen, _) = (ho_target, 0) in chosen) x

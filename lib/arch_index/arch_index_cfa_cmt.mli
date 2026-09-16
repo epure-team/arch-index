@@ -4,6 +4,7 @@ type owner
 (** Flat CFA candidates require one LSP symbol and one root CMT binder. *)
 val flat_symbol_unique : lsp_count:int -> root_count:int -> bool
 val supported_callable : Typedtree.expression -> bool
+val supported_computed_value : Typedtree.expression_desc -> bool
 
 val create :
   binding_name:(prefix:string -> Ident.t -> string) ->

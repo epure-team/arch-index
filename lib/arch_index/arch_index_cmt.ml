@@ -2194,8 +2194,9 @@ let collect_calls_from_expr_with_open_bodies ?(canon_exn = fun p -> Path.name p)
                     Tpat_var (id, _, _)
                     when cfa_group_supported ->
                       (match vb.vb_expr.exp_desc with
-                      | Texp_function _ | Texp_ifthenelse _ | Texp_match _ | Texp_sequence _
-                      | Texp_apply _ ->
+                      | Texp_function _ ->
+                          Arch_index_cfa_cmt.register_local_expr session ~owner ~binder:id vb.vb_expr
+                      | desc when Arch_index_cfa_cmt.supported_computed_value desc ->
                           Arch_index_cfa_cmt.register_local_expr session ~owner ~binder:id vb.vb_expr
                       | _ -> ())
                   | _ -> ()) ;
@@ -2637,8 +2638,7 @@ let collect_calls_from_expr_with_open_bodies ?(canon_exn = fun p -> Path.name p)
                         ?callee_ty:!callee_ty_for_channel
                         (Head_qualified (callee_module, callee_name))
                         expr.exp_loc)
-                | (Texp_ifthenelse _ | Texp_match _ | Texp_sequence _ | Texp_apply _
-                  | Texp_let _) -> (
+                | desc when Arch_index_cfa_cmt.supported_computed_value desc -> (
                     match cfa_application_token with
                     | Some token ->
                         add_call ~partial ~is_head_of:expr.exp_loc ?callee_ty:!callee_ty_for_channel

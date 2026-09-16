@@ -70,6 +70,13 @@
       "at": "2026-09-16T17:17:17+02:00",
       "by": "roster-implement",
       "reason": "Round-2 loop-back reproduced and corrected the supported simple-let application-head gap with authentic rich/flat CMT coverage. Full suite 345/345, CHECK1 517 cases, CHECK2 and classifier controls, combined review ratchet, two identical self-index 2x2 runs, and pinned410 CHECK3 passed with +70 Irmin/+256 protocol relations, zero losses, and zero new MUST rows."
+    },
+    {
+      "phase": "implement",
+      "outcome": "COMPLETED",
+      "at": "2026-09-16T18:02:12+02:00",
+      "by": "roster-implement",
+      "reason": "Round-3 correction unified direct-head, root and local computed-value admission; six authentic rich/flat assertions reproduced the gap and now pass, with a destructured-let negative. Full suite 345/345, CHECK1 517, CHECK2 and review ratchet pass; pinned410 CHECK3 records +72 Irmin/+270 protocol relations, zero losses and zero new MUST rows."
     }
   ]
 }
