@@ -1,0 +1,80 @@
+[
+  {
+    "severity": "CRITICAL",
+    "confidence": 5,
+    "path": "architecture-schema.sql",
+    "line": 154,
+    "category": "spec",
+    "summary": "Physical occurrence identity is stored but never authenticated",
+    "evidence": "architecture-schema.sql:154 stores occurrence_ordinal as a standalone integer, calls has no occurrence discriminator, and lib/arch_index/arch_index_bindings.ml:799 validates only caller_name plus file:start_line. A nonexistent or swapped same-line ordinal can still finalize.",
+    "fix": "Persist a keyed physical occurrence inventory, foreign-key witnesses and candidates to it, and add same-line mutation and ambiguity tests.",
+    "fingerprint": "spec:functor-targets:unlinked-occurrence-ordinal",
+    "specialist": "spec-compliance",
+    "acs": ["AC-6", "FR-011", "FR-015", "AC-9", "FR-021", "AC-13", "FR-034"]
+  },
+  {
+    "severity": "CRITICAL",
+    "confidence": 5,
+    "path": "lib/arch_index/arch_index_bindings.ml",
+    "line": 799,
+    "category": "spec",
+    "summary": "The actual/member-to-target witness chain is not authenticated",
+    "evidence": "lib/arch_index/arch_index_bindings.ml:799-811 checks only nonempty actual_path/member_path JSON and that the target function belongs to the source module. It never proves that resolving that actual member yields target_function_id.",
+    "fix": "Persist an exact export/body identity for the resolved member and validate it through keyed candidate/target links; add member-path and same-source target swap corruption tests.",
+    "fingerprint": "spec:functor-targets:unverified-member-target-chain",
+    "specialist": "spec-compliance",
+    "acs": ["AC-1", "FR-011", "AC-6", "AC-13", "FR-034"]
+  },
+  {
+    "severity": "CRITICAL",
+    "confidence": 5,
+    "path": "lib/arch_index/arch_index_cmt.ml",
+    "line": 3662,
+    "category": "spec",
+    "summary": "Nonidentical variants borrow representative proofs instead of reconciling artifact-local proofs",
+    "evidence": "lib/arch_index/arch_index_cmt.ml:3659-3674 returns before variant calls and targets are collected after a source-digest plus signature match; lib/arch_index/arch_index.ml:1880-1902 then copies representative witnesses under the variant artifact. No zero/one/multiple stable-field occurrence reconciliation runs.",
+    "fix": "Collect each variant's complete local proof before graph insertion loss, normalize only source-stable occurrence fields, reconcile to exactly one representative occurrence, and attach only that artifact's facts.",
+    "fingerprint": "spec:functor-targets:variant-proof-borrowing",
+    "specialist": "spec-compliance",
+    "acs": ["AC-8", "FR-018", "AC-9", "FR-020", "FR-021", "FR-022", "FR-023", "AC-10"]
+  },
+  {
+    "severity": "CRITICAL",
+    "confidence": 5,
+    "path": "lib/arch_index/arch_index.ml",
+    "line": 1906,
+    "category": "spec",
+    "summary": "Target-storage failures do not preserve the required failed-input lifecycle",
+    "evidence": "lib/arch_index/arch_index.ml:1901-1909 commits candidate calls before target witness storage; on store_target_collected failure the catch only logs and disables finalization. It records no collection_failed target input and leaves an unwitnessed positive call usable by consumers that do not consult functor_target_contract.",
+    "fix": "Make candidate and witness persistence atomic or quarantine rejected candidates, always record a recoverable collection_failed input, and add injected input/witness/failed-row storage tests.",
+    "fingerprint": "spec:functor-targets:storage-failure-orphan-call",
+    "specialist": "spec-compliance",
+    "acs": ["AC-8", "FR-019"]
+  },
+  {
+    "severity": "CRITICAL",
+    "confidence": 5,
+    "path": "roster/ocaml-functor-targets/check-cmt.js",
+    "line": 82,
+    "category": "spec",
+    "summary": "Required binding, member, and reconciliation refusal counters are absent",
+    "evidence": "roster/ocaml-functor-targets/check-cmt.js:82 emits only a generic pass marker. Neither the producer nor CHECK-1 reports distinct deterministic binding, member and reconciliation refusal counts for FR-026.",
+    "fix": "Persist deterministic refusal categories, emit exact sorted aggregates in CHECK-1, and compare them under reordered discovery and authentic refusal fixtures.",
+    "fingerprint": "spec:functor-targets:missing-refusal-counters",
+    "specialist": "spec-compliance",
+    "acs": ["AC-9", "FR-026", "AC-10"]
+  },
+  {
+    "severity": "CRITICAL",
+    "confidence": 5,
+    "path": "roster/ocaml-functor-targets/check-cmt.js",
+    "line": 45,
+    "category": "spec",
+    "summary": "CHECK-1 omits required arch-query and ambiguous-reconciliation verification",
+    "evidence": "roster/ocaml-functor-targets/check-cmt.js:45-82 builds arch-query but never invokes it for Stage-4 targets; its fixtures do not exercise zero/multiple representative matches, and the default gate does not execute its own control branches.",
+    "fix": "Add target-aware arch-query assertions, absent and ambiguous nonidentical-variant fixtures, and explicit three-mode control invocations in the validated QA commands.",
+    "fingerprint": "spec:functor-targets:check1-missing-consumer-variant-controls",
+    "specialist": "spec-compliance",
+    "acs": ["AC-11", "FR-028", "FR-029"]
+  }
+]

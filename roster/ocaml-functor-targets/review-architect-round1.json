@@ -1,0 +1,14 @@
+[
+  {
+    "severity": "CRITICAL",
+    "confidence": 5,
+    "path": "briefs/ocaml-functor-targets-qa-scope.md",
+    "line": 20,
+    "category": "verification",
+    "summary": "Three documented standalone binding gates fail outside OPAM despite being required as validated non-degraded gates",
+    "evidence": "briefs/ocaml-functor-targets-qa-scope.md:20-23 documents direct rtk proxy node invocations. Observed exits were inventory=1, lifecycle=1, query=0 and compatibility=1; roster/ocaml-functor-targets/check-native.js:38 masks the issue by running the modes through opam exec.",
+    "fix": "Change the documented standalone commands to opam exec -- node or make the scripts establish the OPAM environment, then rerun all four modes successfully.",
+    "fingerprint": "ocaml-functor-targets-qa-scope-direct-node-missing-opam-env",
+    "specialist": "architect"
+  }
+]
