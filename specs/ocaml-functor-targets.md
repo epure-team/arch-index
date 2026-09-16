@@ -5,7 +5,7 @@ status: live
 feature: OCaml functor actual-member target correspondence
 brief: briefs/ocaml-functor-targets-intake.md
 date: 2026-09-16
-version: 1.0.0
+version: 1.0.1
 ---
 
 # Spec — OCaml functor actual-member target correspondence (Stage 4)
@@ -164,7 +164,7 @@ and existing specs; none required an additional product choice.
 - **FR-008** [US-1]: A missing, opaque, primitive, method, field, destructured, multi-hop-alias or module-alias member MUST NOT be treated as callable evidence.
 - **FR-009** [US-1]: A curried application MUST select its slot by artifact-local declaration identity, named formal binder and telescope position; `head_application_ordinal` MUST NOT define slot identity.
 - **FR-010** [US-1]: Multiple supported applications MUST union their independently proven targets context-insensitively and MUST deduplicate relation rows by the existing canonical call identity without erasing proof provenance.
-- **FR-011** [US-1]: Every independently proven positive correspondence MUST persist a deterministic artifact-local witness containing application ordinal, declaration and formal identity, formal position, actual/member path, physical caller occurrence, target and exact-key links sufficient to validate the whole identity chain.
+- **FR-011** [US-1]: Every independently proven positive correspondence MUST persist a deterministic artifact-local witness containing application ordinal, declaration and formal identity, formal position, actual/member path, physical caller occurrence, target and exact-key links sufficient to validate the whole identity chain. The physical occurrence and resolved member candidate MUST be durable keyed records; an unauthenticated scalar ordinal or freely swappable member/target text is not sufficient evidence.
 - **FR-012** [US-1]: The resolver MUST consume only existing catalogue/binding traversal outcomes; nested, local, include and curried contexts MUST inherit that collector's eligibility and refusal semantics.
 - **FR-013** [US-1]: When no concrete member target is proven, the output MUST preserve the single pre-existing `MAY_TOP/module_param` relation and MUST NOT add a per-application TOP relation.
 - **FR-014** [US-1]: Every proven target MUST be a separate `MAY_ENUMERATED` row coexisting with the original `MAY_TOP/module_param`; this feature MUST NOT add or upgrade a `MUST` relation.
@@ -175,9 +175,9 @@ and existing specs; none required an additional product choice.
 
 - **FR-017** [US-2]: Two artifacts MAY share an `ExactCmtGraphReuse` only when their normalized project-relative source and compiler unit match and authoritative full bytes plus SHA-256 guard match; compiler identities MUST NOT be compared across artifacts.
 - **FR-018** [US-2]: Every exact-copy artifact MUST collect catalogue, binding and correspondence provenance independently and each witness MUST retain that artifact's own path.
-- **FR-019** [US-2]: If per-artifact catalogue, binding or correspondence collection fails, existing incomplete/failure semantics MUST remain and no positive witness for that artifact may persist.
+- **FR-019** [US-2]: If per-artifact catalogue, binding or correspondence collection fails, existing incomplete/failure semantics MUST remain and no usable positive relation or witness for that artifact may persist. Candidate relation and witness publication MUST be atomic, or rejected candidates MUST remain quarantined from consumers, and the failed target input MUST be recorded.
 - **FR-020** [US-2]: A complete artifact-local positive proof from a nonidentical same-source variant MUST be collected before source-path insertion can discard that artifact.
-- **FR-021** [US-2]: A nonidentical variant proof MUST attach only when exactly one representative occurrence matches normalized source and compiler unit, canonical caller, normalized call site, formal-member path and occurrence shape.
+- **FR-021** [US-2]: A nonidentical variant proof MUST attach only when exactly one representative occurrence matches normalized source and compiler unit, canonical caller, normalized call site, formal-member path and occurrence shape, and when the locally proven member candidate matches the attached target through durable exact-key links.
 - **FR-022** [US-2]: Zero or multiple representative matches, or a local occurrence absent from the representative graph, MUST add neither target nor positive witness.
 - **FR-023** [US-2]: Cross-artifact reconciliation MUST occur only after a complete artifact-local proof and MUST use stable source-level fields; equal compiler stamp, spelling or location alone MUST NOT authenticate it.
 - **FR-024** [US-2]: Variant handling MUST NOT merge or create function, type, exception or caller nodes and MUST NOT perform a general graph merge.
@@ -241,9 +241,9 @@ Every command uses 0 = complete pass, 1 = assertion failure and at least 2 =
 setup/load/environment error. These are required deliverables and are not
 treated as passing until implemented and observed RED then GREEN.
 
-- **CHECK-1** [AC-1/2/3/4/5/6/7/8/9/10/11]: `rtk proxy node roster/ocaml-functor-targets/check-cmt.js` → compile authentic fixtures; inspect main calls/witnesses, consumers, exact copies, nonidentical variants, refusal/order controls and flat non-inference.
-- **CHECK-2** [AC-11]: `rtk proxy node roster/ocaml-functor-targets/check-native.js` → run the full native Tezt suite and every independent `check-functor-bindings.js` mode with normalized 0/1/at-least-2 classification.
-- **CHECK-3** [AC-12/13/14]: `rtk proxy node roster/ocaml-functor-targets/check-tezos.js` → validate frozen Stage-3 and current inputs, compare exact pinned410 rows/relations, validate every gain witness and record resource observations plus limitations.
+- **CHECK-1** [AC-1/2/3/4/5/6/7/8/9/10/11]: `opam exec -- node roster/ocaml-functor-targets/check-cmt.js` plus explicit `--test-control=assertion` and `--test-control=setup` invocations → compile authentic fixtures; inspect main calls/witnesses, consumers, exact copies, nonidentical variants, refusal/order controls and flat non-inference; require exit 0/1/at-least-2 respectively.
+- **CHECK-2** [AC-11]: `opam exec -- node roster/ocaml-functor-targets/check-native.js` plus explicit `--test-control=assertion` and `--test-control=setup` invocations → run the full native Tezt suite and every independent `check-functor-bindings.js` mode with normalized 0/1/at-least-2 classification.
+- **CHECK-3** [AC-12/13/14]: `opam exec -- node roster/ocaml-functor-targets/check-tezos.js` plus explicit `--test-control=assertion` and `--test-control=setup` invocations → validate frozen Stage-3 and current inputs, compare exact pinned410 rows/relations, validate every gain witness and record resource observations plus limitations; stale frozen inputs are setup failures, never assertion failures.
 
 ## Claims Metadata
 
@@ -339,3 +339,9 @@ Three stories, nine clarifications, 62 challenges resolved, 36 requirements,
 14 acceptance criteria and three runnable checks. Claims metadata was parsed
 and cross-reference checked locally (36 FR, 14 AC, 3 CHECK); deterministic
 claims validation/projection is unavailable because no reconciler is installed.
+
+Version 1.0.1 revalidates the same product contract after review round 1. It
+makes the already-required occurrence/member exact-key chain and atomic failure
+semantics explicit, and makes every runnable command environment-complete with
+observable pass/assertion/setup controls. No supported target class or soundness
+boundary changed.
