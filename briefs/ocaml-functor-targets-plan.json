@@ -1,0 +1,63 @@
+{
+  "task": "ocaml-functor-targets",
+  "mode": "full",
+  "schema_version": "1.0",
+  "steps": [
+    {
+      "id": "step-1",
+      "skill": "roster-implement",
+      "inputs": [
+        "briefs/ocaml-functor-targets-implementer.md",
+        "specs/ocaml-functor-targets.md"
+      ],
+      "outputs": [
+        "briefs/ocaml-functor-targets-impl.md",
+        "roster/ocaml-functor-targets/check-cmt.js",
+        "roster/ocaml-functor-targets/check-native.js",
+        "roster/ocaml-functor-targets/check-tezos.js"
+      ],
+      "hook": false
+    },
+    {
+      "id": "step-2",
+      "skill": "roster-review",
+      "inputs": [
+        "briefs/ocaml-functor-targets-reviewer.md",
+        "briefs/ocaml-functor-targets-impl.md"
+      ],
+      "outputs": [
+        "briefs/ocaml-functor-targets-review.md"
+      ],
+      "hook": false
+    },
+    {
+      "id": "step-3",
+      "skill": "roster-qa",
+      "inputs": [
+        "briefs/ocaml-functor-targets-qa-scope.md",
+        "briefs/ocaml-functor-targets-review.md"
+      ],
+      "outputs": [
+        "briefs/ocaml-functor-targets-qa.md"
+      ],
+      "hook": false
+    },
+    {
+      "id": "step-4",
+      "skill": "roster-ship",
+      "inputs": [
+        "briefs/ocaml-functor-targets-review.md",
+        "briefs/ocaml-functor-targets-qa.md"
+      ],
+      "outputs": [
+        "briefs/ocaml-functor-targets-ship-gate.md"
+      ],
+      "hook": false
+    }
+  ],
+  "quality_gates": {
+    "build": "opam exec -- dune build --root .",
+    "test": "rtk proxy node roster/ocaml-functor-targets/check-native.js",
+    "lint": ""
+  }
+}
