@@ -36,3 +36,25 @@ definition yet.
 
 The first implementation must stop at level 1 and report its inability to
 reach levels 2–3; otherwise a source-name match could be mistaken for linkage.
+
+## First reproducible raw census
+
+`node roster/ffi-boundary-census/census.js /home/mathias/dev/tezos/tezos`
+completed on the selected root with source-record digest
+`27acc8ac25f267c4326f7ff1003df2090927ffb4dbddd56befa8c7a1bff97869`:
+
+| Measure | Count |
+|---|---:|
+| source files scanned | 80,541 |
+| source-level records | 24,061 |
+| OCaml externals | 18,669 |
+| C `CAMLprim` definitions | 4,747 |
+| Rust C-ABI exports | 446 |
+| OCaml callbacks | 184 |
+| dynamic-load occurrences | 15 |
+
+These are intentionally **not linkage counts**. The checkout carries vendored
+libraries and historical protocol families inside its canonical root; source
+text alone cannot decide which are linked into a selected target. Stage 2 must
+introduce build-target/artifact attribution before using any of these counts as
+an improvement metric.
