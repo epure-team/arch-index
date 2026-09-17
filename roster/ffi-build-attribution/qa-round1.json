@@ -1,0 +1,14 @@
+{
+  "task":"ffi-build-attribution",
+  "round":1,
+  "implementation_head":"bfd2c6a480d0177afb7c08322bbe3ce0cb6eb80a",
+  "verdict":"GO",
+  "commands":[
+    {"command":"node roster/ffi-build-attribution/check-attribution.js /home/mathias/dev/tezos/tezos","result":"pass; 1024 attributed, 1302 unattributed"},
+    {"command":"assertion/setup controls","result":"pass; exits 1/2"},
+    {"command":"opam exec -- dune exec --root . tezt/tests/main.exe -- --job-count 1","result":"pass; 354/354"},
+    {"command":"git diff --check","result":"pass"}
+  ],
+  "observation":{"record_digest":"6ec772eca453844c05d28333da611b9351af3961575fcd25c6eff4fa3b336584","scope":"build ownership only; no symbol link inferred"},
+  "remaining":["hosted exact-head CI","guarded rebase merge"]
+}
