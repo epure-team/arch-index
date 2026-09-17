@@ -11,7 +11,7 @@ const crypto = require('crypto');
 
 const SKIP_DIRS = new Set([
   '.git', '_build', 'node_modules', 'target', 'vendor', 'vendors', 'worktrees',
-  'generated', 'gen', 'dist', 'build',
+  'generated', 'gen', 'dist', 'build', '_opam', '.opam-switch',
 ]);
 
 function fail(message) { process.stderr.write(`ffi-census: ${message}\n`); process.exit(2); }
@@ -42,7 +42,7 @@ function scanOcaml(records, root, file, text) {
   const re = /^\s*external\s+([A-Za-z_][A-Za-z0-9_']*|\([^\n]*\))\s*:[\s\S]*?=\s*((?:"(?:[^"\\]|\\.)*"\s*)+)/gm;
   for (const match of text.matchAll(re)) {
     const symbols = [...match[2].matchAll(/"((?:[^"\\]|\\.)*)"/g)].map(m => m[1]);
-    const nonPrimitive = symbols.filter(symbol => !symbol.startsWith('%'));
+    const nonPrimitive = symbols.filter(symbol => symbol !== '' && !symbol.startsWith('%'));
     if (nonPrimitive.length === 0) continue;
     for (const symbol of nonPrimitive)
       record(records, root, 'ocaml_external', file, lineAt(text, match.index), symbol,
@@ -100,10 +100,12 @@ function selfTest() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'arch-index-ffi-census-'));
   try {
     fs.mkdirSync(path.join(root, 'nested', 'worktrees'), {recursive: true});
+    fs.mkdirSync(path.join(root, '_opam'), {recursive: true});
     fs.writeFileSync(path.join(root, 'a.ml'), 'external run : unit -> unit = "c_run"\nexternal add : int -> int = "%addint"\n');
     fs.writeFileSync(path.join(root, 'stub.c'), 'CAMLprim value c_run(value x) { return x; }\nvoid f(void) { caml_callback(0, 0); dlsym(0, "x"); }\n');
     fs.writeFileSync(path.join(root, 'ffi.rs'), '#[no_mangle]\npub extern "C" fn rust_run() {}\n');
     fs.writeFileSync(path.join(root, 'nested', 'worktrees', 'ignored.ml'), 'external bad : unit -> unit = "bad"\n');
+    fs.writeFileSync(path.join(root, '_opam', 'ignored.ml'), 'external bad_switch : unit -> unit = "bad_switch"\n');
     const output = census(root);
     const got = output.records.map(r => `${r.mechanism}:${r.symbol}`).sort();
     const expected = ['callback:caml_callback', 'camlprim:c_run', 'dynamic_load:dlsym', 'ocaml_external:c_run', 'rust_c_abi:rust_run'];

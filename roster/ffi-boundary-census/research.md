@@ -41,20 +41,22 @@ reach levels 2–3; otherwise a source-name match could be mistaken for linkage.
 
 `node roster/ffi-boundary-census/census.js /home/mathias/dev/tezos/tezos`
 completed on the selected root with source-record digest
-`27acc8ac25f267c4326f7ff1003df2090927ffb4dbddd56befa8c7a1bff97869`:
+`164138c7e366dd4b0354b534724556d9bbf187ceae4da200d6198a172c6effad`:
 
 | Measure | Count |
 |---|---:|
-| source files scanned | 80,541 |
-| source-level records | 24,061 |
-| OCaml externals | 18,669 |
-| C `CAMLprim` definitions | 4,747 |
+| source files scanned | 20,445 |
+| source-level records | 2,326 |
+| OCaml externals | 1,672 |
+| C `CAMLprim` definitions | 207 |
 | Rust C-ABI exports | 446 |
-| OCaml callbacks | 184 |
-| dynamic-load occurrences | 15 |
+| OCaml callbacks | 0 |
+| dynamic-load occurrences | 1 |
 
-These are intentionally **not linkage counts**. The checkout carries vendored
-libraries and historical protocol families inside its canonical root; source
-text alone cannot decide which are linked into a selected target. Stage 2 must
-introduce build-target/artifact attribution before using any of these counts as
-an improvement metric.
+These are intentionally **not linkage counts**. The first raw run accidentally
+entered the checkout's `_opam` build switch, yielding 24,061 records. `_opam`
+and `.opam-switch` are now explicit exclusions; the corrected result above is
+the only retained observation. The checkout still carries vendored libraries and
+historical protocol families, so source text alone cannot decide which inputs a
+selected target links. Stage 2 must introduce build-target/artifact attribution
+before using any of these counts as an improvement metric.
