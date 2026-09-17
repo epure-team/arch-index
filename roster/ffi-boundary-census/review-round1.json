@@ -1,0 +1,29 @@
+{
+  "task": "ffi-boundary-census",
+  "round": 1,
+  "reviewed_head": "f806389af0eec2a23d97ef3a671aa98517eadfac",
+  "reviewer": "maintainer",
+  "status": "GO",
+  "findings": [
+    {
+      "concern": "source-name equality could be represented as an FFI link",
+      "resolution": "the data model emits only declaration/export candidates and carries an explicit no-linkage scope; no call or graph table is written.",
+      "evidence": ["specs/ffi-boundary-census.md", "roster/ffi-boundary-census/census.js"]
+    },
+    {
+      "concern": "a Tezos parent-directory scan could mix nested worktrees or an opam switch",
+      "resolution": "the corpus root is fixed and symlinks, worktrees, vendor/build directories, _opam and .opam-switch are excluded; the self-test covers both worktree and _opam contamination.",
+      "evidence": ["roster/ffi-boundary-census/task.md", "roster/ffi-boundary-census/census.js"]
+    },
+    {
+      "concern": "a raw count could be read as linked targets or graph precision",
+      "resolution": "the research record calls the 2,326 entries an observation only and requires Stage 2 target/artifact attribution before a link metric exists.",
+      "evidence": ["roster/ffi-boundary-census/research.md"]
+    }
+  ],
+  "open": [],
+  "accepted_limits": [
+    "Source-level patterns can miss generated bindings and cannot establish ABI, target or linkage.",
+    "Vendored and historical material within the selected root remains inventory scope until Stage 2 build attribution." 
+  ]
+}

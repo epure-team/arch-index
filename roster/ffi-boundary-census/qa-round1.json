@@ -1,0 +1,17 @@
+{
+  "task": "ffi-boundary-census",
+  "round": 1,
+  "implementation_head": "f806389af0eec2a23d97ef3a671aa98517eadfac",
+  "verdict": "GO",
+  "commands": [
+    {"command": "node roster/ffi-boundary-census/check-census.js /home/mathias/dev/tezos/tezos", "result": "pass; 20,445 files, 2,326 candidates; no link inferred"},
+    {"command": "assertion/setup controls", "result": "pass; observed exits 1 and 2"},
+    {"command": "opam exec -- dune exec --root . tezt/tests/main.exe -- --job-count 1", "result": "pass; 354/354"},
+    {"command": "git diff --check", "result": "pass"}
+  ],
+  "census_observation": {
+    "record_digest": "164138c7e366dd4b0354b534724556d9bbf187ceae4da200d6198a172c6effad",
+    "scope": "source declarations and exports only; no linkage inferred"
+  },
+  "remaining": ["hosted exact-head CI", "guarded rebase merge"]
+}
