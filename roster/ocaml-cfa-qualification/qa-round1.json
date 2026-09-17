@@ -1,0 +1,20 @@
+{
+  "task": "ocaml-cfa-qualification",
+  "round": 1,
+  "implementation_head": "48a86e8ababf7347d5d8b4234423bdd5a22dc6c1",
+  "verdict": "GO",
+  "commands": [
+    {"command": "opam exec -- node roster/ocaml-cfa-qualification/check-cmt.js", "result": "pass; CHECK1_PASS; authentic CMT alias query plus pinned Irmin replay"},
+    {"command": "opam exec -- node roster/ocaml-cfa-qualification/check-cmt.js --test-control=assertion", "result": "pass; observed exit 1"},
+    {"command": "opam exec -- node roster/ocaml-cfa-qualification/check-cmt.js --test-control=setup", "result": "pass; observed exit 2"},
+    {"command": "opam exec -- dune exec --root . tezt/tests/main.exe -- --job-count 1", "result": "pass; 354/354"},
+    {"command": "git diff --check main...HEAD", "result": "pass"}
+  ],
+  "pinned_replay": {
+    "result": "pass",
+    "delta": "+7 MAY_ENUMERATED Irmin relations, +0 protocol, 0 losses, 0 new/upgraded MUST",
+    "resources": "producer observation 3734.763473 ms; RSS not sampled and no bound claimed"
+  },
+  "known_output": "The full Tezt suite deliberately emits injected-failure and constraint-refusal diagnostics from tests that pass; its 354/354 result is authoritative.",
+  "remaining": ["hosted exact-head CI", "guarded rebase merge"]
+}
