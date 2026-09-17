@@ -28,8 +28,12 @@ or the later public query/profile/recurrence roadmap.
 - **FR-003:** A task-local useful-query checker MUST run authentic indexed CMT
   input and prove one MUST-only positive path, one bounded MAY path, one retained
   MAY_TOP frontier, and the distinction in `arch-impact` output.
-- **FR-004:** The checker MUST refuse old/flat/markerless or malformed setup as
-  an operational/setup failure and distinguish it from an assertion mismatch.
+- **FR-004:** The checker MUST treat a missing corpus/build/input as an
+  operational/setup failure and distinguish it from an assertion mismatch.
+  Individual queries retain their established contracts: `arch-query unreachable`
+  refuses an unmarked graph, while `arch-impact` may still print explicitly
+  lower-bounded information for a flat or legacy index rather than pretending it
+  was fully analysed.
 - **FR-005:** The pinned 410-CMT qualification MUST preserve exact semantic
   relation accounting (no resolved loss, no new/upgraded MUST), report separate
   Irmin/protocol changes, and label wall/RSS values as observations.
@@ -50,8 +54,9 @@ or the later public query/profile/recurrence roadmap.
 3. Text/Markdown do not contain "definitely reach" for a mixed MUST/MAY closure;
    JSON carries an explicit machine-readable scope/limitation rather than relying
    on prose.
-4. A control mutating the checker expectation exits 1; a missing contract/input
-   exits 2; normal execution exits 0.
+4. A control mutating the checker expectation exits 1; a missing build/corpus
+   input exits 2; normal execution exits 0. Legacy/flat query behavior remains
+   explicit according to the existing command contract.
 5. The frozen Tezos replay is input-hash bound and reports its resource evidence
    with no performance-bound claim.
 
