@@ -32,7 +32,9 @@ Dropping them is what makes the closure computable, and a ⊤ edge could land an
 Anyone who reads "12 functions reach this change" as *twelve* will under-review the change. The
 tool therefore prints two sets, not one:
 
-- **DEFINITELY reach** — a resolved path exists. This is ground truth, not an estimate.
+- **MAY reach through known bounded targets** — a path exists over `MUST` and/or
+  `MAY_ENUMERATED`. A MAY edge is a finite candidate set, not a definite invocation. Only an
+  `arch-query reaches` MUST-only positive path is ground truth.
 - **MAY reach through a ⊤ edge** — every function holding an unresolvable edge, plus everything
   that reaches one. A ⊤ edge means "may call anything", which includes the changed code.
 
@@ -40,9 +42,10 @@ Backwards that second set is enumerable, so it is enumerated. Forwards it is not
 *anything*), so only the frontier itself is reported — the functions in the forward cone that hold
 an escaping edge, which are precisely the places where the radius stops being trustworthy.
 
-When the forward cone contains **no** ⊤ edge, the tool says so explicitly: the cone is closed and
-the radius really is a bound. That is the same closed-universe condition `arch-query unreachable`
-requires, and it is worth reading as a positive result.
+When the forward cone contains **no** ⊤ edge, the tool says so explicitly: the cone is closed with
+respect to the indexed, bounded candidates, so the reported set is a useful finite scope. It does
+not turn a `MAY_ENUMERATED` edge into a MUST edge. The absence of TOP is also the closed-universe
+condition `arch-query unreachable` requires for its separate sound-negative verdict.
 
 **On an index without the edge-kind contract**, the lower bounds survive — dropping edges only
 lowers a lower bound — but the closed-cone claim does not. "No ⊤ in the cone, therefore this is a
@@ -94,6 +97,7 @@ directly.
 |---|---|---|
 | `computed` | bool | the reachability analysis ran (always `true` when this object is printed at all — kept as a field, not assumed, so a gate can require its presence rather than its absence of failure) |
 | `contract_ok` | bool | same value as `sound_reachability`: is this index ⊤-marked, so the closed-cone claim is trustworthy. Computed by `Arch_db.contract_ok`, the same helper `arch-rules` uses for its own `contract_ok` — never `t.contract <> None` alone, which a flag-set-but-NULL-kind-edge index would satisfy while still being unsound |
+| `resolved_edge_kinds` / `resolved_cone` | array / string | the closure is exactly `MUST ∪ MAY_ENUMERATED` and therefore `"possible_bounded"`; consumers must not render it as definite reachability |
 | `verdict` | `"pass"` \| `"fail"` \| `"refused"` | the `--fail-on-new-findings` decision, restated so a consumer with only stdout reaches the same conclusion as one with only the exit code. `"pass"` when the flag was not requested at all (informational run) |
 | `new_findings` | int | count of `findings.decisions` — the same number `--fail-on-new-findings` gates on |
 | `findings.computed` | bool | did this index carry decision analysis at all (mirrors `decision_analysis_available`) |
