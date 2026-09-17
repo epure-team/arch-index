@@ -277,6 +277,8 @@ let main () =
              ("verdict", `String (verdict_str verdict));
              ("new_findings", `Int new_findings);
              ("db", `String db_path); ("sound_reachability", `Bool sound);
+             ("resolved_edge_kinds", `List [`String "MUST"; `String "MAY_ENUMERATED"]);
+             ("resolved_cone", `String "possible_bounded");
              ("touched",
               `List
                 (List.map
@@ -325,7 +327,7 @@ let main () =
     if not sound then
       print_endline
         (b
-        ^ "**this index is NOT ⊤-marked** (no edge-kind contract). The DEFINITE sets below \
+        ^ "**this index is NOT ⊤-marked** (no edge-kind contract). The BOUNDED-POSSIBLE sets below \
            remain valid lower bounds — a dropped edge only shrinks them — but the ⊤ frontier \
            cannot be trusted to be complete, so no closed-cone claim is made and the MAY-reach \
            set may be understated.") ;
@@ -358,15 +360,15 @@ let main () =
            b (List.length unmatched)) ;
       List.iter (fun f -> print_endline ("    " ^ f)) (cap maxlist unmatched)) ;
     print_endline "" ;
-    print_endline (h2 ^ "Who is affected (reverse reachability)") ;
+    print_endline (h2 ^ "Who may be affected (reverse bounded reachability)") ;
     print_endline
       (Printf.sprintf
-         "%s%d function(s) DEFINITELY reach the change (%d exported), over MUST ∪ MAY_ENUMERATED. \
+         "%s%d function(s) MAY reach the change through known bounded targets (%d exported), over MUST ∪ MAY_ENUMERATED. \
           This is a LOWER bound — ⊤ edges are dropped to make it computable."
          b (SS.cardinal upstream) (SS.cardinal (SS.filter exported upstream))) ;
     print_endline
       (Printf.sprintf
-         "%s%d exported function(s) affected (definite upstream, plus exported functions changed \
+         "%s%d exported function(s) affected (bounded-possible upstream, plus exported functions changed \
           directly):"
          b (List.length affected)) ;
     List.iter (fun n -> print_endline (if md then "  - " ^ n else "    " ^ n)) (cap maxlist affected) ;
@@ -378,9 +380,9 @@ let main () =
            b (SS.cardinal may_upstream) (List.length may_affected)) ;
       List.iter (fun n -> print_endline (if md then "  - " ^ n else "    " ^ n)) (cap maxlist may_affected)) ;
     print_endline "" ;
-    print_endline (h2 ^ "Blast radius (forward reachability)") ;
+    print_endline (h2 ^ "Blast radius (forward bounded reachability)") ;
     print_endline
-      (Printf.sprintf "%sthe changed code definitely reaches %d function(s) (also a lower bound)" b
+      (Printf.sprintf "%sthe changed code may reach %d function(s) through known bounded targets (also a lower bound)" b
          (SS.cardinal downstream)) ;
     if frontier <> [] then (
       print_endline
@@ -404,12 +406,12 @@ let main () =
     print_endline "" ;
     print_endline (h2 ^ "Tests reaching the change") ;
     if tests <> [] then (
-      print_endline (Printf.sprintf "%s%d test function(s) definitely reach it:" b (List.length tests)) ;
+      print_endline (Printf.sprintf "%s%d test function(s) may reach it through known bounded targets:" b (List.length tests)) ;
       List.iter (fun n -> print_endline ("    " ^ n)) (cap maxlist tests))
     else
       print_endline
         (b
-        ^ "no test definitely reaches the change — either it is untested, or the tests are not in \
+        ^ "no test may reach the change through known bounded targets — either it is untested, or the tests are not in \
            this index (check what was indexed before concluding it is untested)") ;
     if may_tests <> [] then (
       print_endline (Printf.sprintf "%s%d more MAY reach it via a ⊤ edge:" b (List.length may_tests)) ;

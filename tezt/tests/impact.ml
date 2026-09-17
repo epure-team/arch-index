@@ -104,10 +104,19 @@ let register_granularity () =
             (String.concat "," (List.sort compare (names_of j "touched" ~field:"name")))
             "helper" ;
 
-          (* Reverse reachability: entry and test_helper definitely reach helper;
-             reflector holds a ⊤ edge, so it only MAY. *)
+          (* Reverse reachability is a bounded possible cone: the fixture also
+             has a MAY_ENUMERATED edge, so this must never be labelled definite.
+             reflector has an additional ⊤-open possibility. *)
           int_field b j "upstream_count" 2 ;
           int_field b j "may_upstream_count" 1 ;
+          (match Json.member "resolved_cone" j with
+          | Some (`String "possible_bounded") -> ()
+          | _ -> Batch.note b "impact.resolved_cone must be possible_bounded") ;
+          (match Json.strings ~what:"impact" "resolved_edge_kinds" j with
+          | Ok kinds ->
+              Batch.eq_string b ~msg:"impact must expose its MUST plus bounded-MAY closure"
+                (String.concat "," kinds) "MUST,MAY_ENUMERATED"
+          | Error e -> Batch.note b "%s" e) ;
           (match Json.strings ~what:"impact" "may_affected_exported" j with
           | Ok may ->
               let joined = String.concat "," may in
@@ -130,6 +139,10 @@ let register_granularity () =
           let _, text = impact [db; "--diff"; "HEAD~1..HEAD"; "--repo"; root] in
           Batch.contains b ~msg:"the forward radius must be labelled a lower bound, never a bound"
             ~haystack:text "lower bound" ;
+          Batch.contains b ~msg:"a mixed MUST/MAY closure must be labelled possible, never definite"
+            ~haystack:text "MAY reach the change through known bounded targets" ;
+          Batch.not_contains b ~msg:"a mixed MUST/MAY closure must not claim definite reachability"
+            ~haystack:text "DEFINITELY reach" ;
 
           (* The sibling at lines 9-11 is not dragged in. *)
           Batch.not_contains b
