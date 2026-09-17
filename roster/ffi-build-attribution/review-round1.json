@@ -1,0 +1,14 @@
+{
+  "task": "ffi-build-attribution",
+  "round": 1,
+  "reviewed_head": "bfd2c6a480d0177afb7c08322bbe3ce0cb6eb80a",
+  "reviewer": "maintainer",
+  "status": "GO",
+  "findings": [
+    {"concern":"Dune target ownership could be misread as linkage","resolution":"every output scope and Rust dependency record explicitly denies ABI/symbol linkage; no graph or schema writer exists.","evidence":["specs/ffi-build-attribution.md","roster/ffi-build-attribution/attribution.js"]},
+    {"concern":"missing Dune fields could crash or create a default association","resolution":"optional fields become empty values and malformed Dune files yield no target; candidates are explicitly UNATTRIBUTED.","evidence":["roster/ffi-build-attribution/attribution.js","roster/ffi-build-attribution/check-attribution.js"]},
+    {"concern":"C source basename could overclaim an OCaml primitive mapping","resolution":"foreign_stub_source is emitted only for a C candidate named in foreign_stubs; OCaml externals retain same_dune_directory only.","evidence":["roster/ffi-build-attribution/attribution.js"]}
+  ],
+  "open": [],
+  "accepted_limits":["Dune parsing is a narrow direct-field subset.","Build declarations do not establish ABI or exact linked objects."]
+}
