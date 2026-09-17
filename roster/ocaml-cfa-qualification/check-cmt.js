@@ -28,7 +28,9 @@ function run(command, commandArgs, timeout = 600000) {
 function checked(command, commandArgs, label) {
   const runResult = run(command, commandArgs);
   if (runResult.result.status === 0) return;
-  if (runResult.result.status === 1 && runResult.output.includes('[FAILURE]'))
+  if (runResult.result.status === 1
+      && (runResult.output.includes('[FAILURE]')
+          || /CHECK\d+_ASSERTION/.test(runResult.output)))
     throw new assert.AssertionError({message: `${label} assertion failed`});
   throw new SetupError(`${label} exited ${runResult.result.status}`);
 }
