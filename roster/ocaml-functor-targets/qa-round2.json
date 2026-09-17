@@ -1,0 +1,16 @@
+{
+  "task": "ocaml-functor-targets",
+  "round": 2,
+  "implementation_head": "a874c14",
+  "verdict": "GO",
+  "commands": [
+    {"command": "opam exec -- dune build --root .", "result": "pass"},
+    {"command": "opam exec -- node roster/ocaml-functor-targets/check-cmt.js", "result": "pass; 9 authentic scenarios"},
+    {"command": "opam exec -- node roster/ocaml-functor-targets/check-native.js", "result": "pass; CHECK2_PASS; 354/354"},
+    {"command": "opam exec -- node roster/ocaml-functor-targets/check-tezos.js", "result": "pass; +7 Irmin, +0 protocol, 0 loss, 0 new/upgraded MUST"},
+    {"command": "six --test-control assertion/setup commands", "result": "all assertion=1, setup=2"},
+    {"command": "git diff --check", "result": "pass"}
+  ],
+  "known_output": "The native suite deliberately prints injected-failure diagnostics and constraint refusal diagnostics while their owning tests pass; CHECK2_PASS is the authoritative wrapper result.",
+  "remaining": ["hosted exact-head CI", "guarded rebase merge"]
+}

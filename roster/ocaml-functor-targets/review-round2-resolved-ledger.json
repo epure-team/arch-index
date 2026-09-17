@@ -1,0 +1,57 @@
+{
+  "task": "ocaml-functor-targets",
+  "round": 2,
+  "reviewed_head": "a874c14",
+  "prior_review": "e877ef1",
+  "status": "GO",
+  "resolved": [
+    {
+      "fingerprint": "lib/arch_index/arch_index.ml:1880:variant-representative-witness-borrowing",
+      "resolution": "Every artifact is independently collected into functor_target_occurrences; each local proof reconciles through exactly one stable representative site before persistence.",
+      "evidence": ["lib/arch_index/arch_index.ml:1885-2088", "tezt/tests/functor_bindings.ml"]
+    },
+    {
+      "fingerprint": "spec:functor-targets:unlinked-occurrence-ordinal",
+      "resolution": "Durable occurrence keys and witness foreign keys replace the scalar-only proof; same-occurrence corruption refuses finalization.",
+      "evidence": ["architecture-schema.sql", "lib/arch_index/arch_index_bindings.ml:848-930", "tezt/tests/functor_bindings.ml"]
+    },
+    {
+      "fingerprint": "spec:functor-targets:unverified-member-target-chain",
+      "resolution": "Candidate keys bind actual/member paths, exact function and call. Witness validation checks all four values together.",
+      "evidence": ["architecture-schema.sql", "lib/arch_index/arch_index_bindings.ml:898-930", "tezt/tests/functor_bindings.ml"]
+    },
+    {
+      "fingerprint": "spec:functor-targets:storage-failure-orphan-call",
+      "resolution": "Stage-4 calls, provenance and v2 marker are committed in one transaction; failures roll back and write collection_failed inputs separately.",
+      "evidence": ["lib/arch_index/arch_index.ml:1885-2105", "lib/arch_index/arch_index_bindings.ml:778-841"]
+    },
+    {
+      "fingerprint": "spec:functor-targets:missing-refusal-counters",
+      "resolution": "Input rows persist binding/member/reconciliation refusal counters and CHECK-1 authenticates the fixture result.",
+      "evidence": ["architecture-schema.sql", "lib/arch_index/arch_index.ml:2070-2088", "roster/ocaml-functor-targets/check-cmt.js"]
+    },
+    {
+      "fingerprint": "spec:functor-targets:check1-missing-consumer-variant-controls",
+      "resolution": "CHECK-1 covers arch-query, compiled variants and its explicit assertion/setup controls; QA invokes every control through the selected opam switch.",
+      "evidence": ["roster/ocaml-functor-targets/check-cmt.js", "briefs/ocaml-functor-targets-qa-scope.md"]
+    },
+    {
+      "fingerprint": "roster/ocaml-functor-targets-qa-scope-direct-node-missing-opam-env",
+      "resolution": "All documented standalone binding commands run under opam exec.",
+      "evidence": ["briefs/ocaml-functor-targets-qa-scope.md"]
+    }
+  ],
+  "open": [],
+  "accepted_scope": [
+    "schema lifecycle support and version bump",
+    "test/reference ratchets caused by indexed source growth",
+    "semantic compatibility normalisation for allocator-independent call IDs"
+  ],
+  "verification": {
+    "build": "pass",
+    "check1": "pass",
+    "native_full": "354/354 pass",
+    "check3": "pass; +7 Irmin, +0 protocol, 0 loss, 0 new/upgraded MUST",
+    "controls": "all six assertion/setup invocations returned 1/2"
+  }
+}
