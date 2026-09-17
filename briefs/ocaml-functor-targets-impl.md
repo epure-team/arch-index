@@ -2,7 +2,32 @@
 
 **Date:** 2026-09-16
 **Mode:** full
-**Status:** COMPLETED
+**Status:** LOOPBACK READY FOR INDEPENDENT REVIEW
+
+## Review-loopback update — 2026-09-17
+
+Round 1 was a NO-GO for authentication and atomic-publication gaps, not for the
+bounded target semantics. The corrective implementation changes the main
+schema from 1.16 to 1.17 and the target contract from v1 to v2. It adds durable
+artifact-local `functor_target_occurrences` (including zero-positive-site
+occurrences) and `functor_target_candidates`; each witness now references both
+exact keys. Variants collect their own local proof inventory and only reconcile
+to one stable representative occurrence. Target calls, local provenance and the
+completion marker are committed as one target-only transaction, so a failed
+positive candidate leaves no consumable target call.
+
+Loopback scope additionally includes the schema drop list, compatibility
+normalisation (semantic call identities rather than allocator row IDs), fresh
+self-index/origin ratchets, direct `arch-query` coverage and corruption tests
+for occurrence and actual/member-to-candidate substitution. It is a necessary
+correction to the original task contract, not a new semantic capability.
+
+Fresh verification: build passes; CHECK-1 passes its nine scenarios and
+assertion/setup controls; the full native suite passes 354/354; CHECK-3 passes
+on the frozen 410-CMT corpus with seven fully witnessed Irmin additions, zero
+protocol additions, zero removed resolved relations and zero new/upgraded MUST.
+Evidence: `improvement/2026-09-16-ocaml-functor-targets/check3-1789624905367-458970.json`.
+Review, QA, PR, exact-head CI and merge remain pending.
 
 ## Modified files
 

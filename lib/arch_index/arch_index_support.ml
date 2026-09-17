@@ -58,6 +58,8 @@ let schema_views_to_drop =
 let schema_tables_to_drop =
   [
     "functor_target_witnesses";
+    "functor_target_candidates";
+    "functor_target_occurrences";
     "functor_target_inputs";
     "functor_bindings";
     "functor_declarations";

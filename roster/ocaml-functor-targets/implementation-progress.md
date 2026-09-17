@@ -1,7 +1,8 @@
 # Implementation checkpoint — 2026-09-16
 
-Implementation is complete and ready for independent Roster review. This is
-not yet a review/QA GO, PR, CI, merge, or Stage-4 delivery claim.
+Review round 1 found proof-authentication and publication gaps. This loopback
+implements the v2 correction and awaits independent Roster review; it is not
+yet a review/QA GO, PR, CI, merge, or Stage-4 delivery claim.
 
 ## Product
 
@@ -16,30 +17,31 @@ not yet a review/QA GO, PR, CI, merge, or Stage-4 delivery claim.
   and caller. No functor body, caller, function, or runtime instance is cloned.
 - Exact copies share only the representative graph while retaining independent
   catalogue, binding and target provenance. Nonidentical same-source variants
-  reconcile only when their normalized catalogue and target-relevant call
-  signature matches; altered variants fail closed.
+  collect their own local occurrences/proofs before unique stable-field
+  reconciliation; zero/multiple matches fail closed.
 
 ## Persistence and lifecycle
 
-- Main schema 1.16 adds `functor_target_inputs`,
-  `functor_target_witnesses`, supporting indexes, and
-  `functor_target_contract=v1`.
-- Witnesses link application, declaration/formal slot, actual/member paths,
-  physical occurrence, candidate call and target function. The finalizer
-  validates expected cardinalities, binding/formal/actual equality, caller and
-  target source/run identity, candidate kind/callee, JSON shape and all joins.
-- A rejected positive candidate or any storage/collection failure prevents the
-  marker. Reindex drops both tables and clears the marker. Flat output remains
-  unchanged and has an explicit non-inference test.
+- Main schema 1.17 adds durable target occurrences/candidates and
+  `functor_target_contract=v2`.
+- Candidate rows bind each actual/member path to its exact call/function; the
+  finalizer authenticates physical sites, member-to-candidate links, stable
+  representative reconciliation, cardinalities, run/source identities and JSON.
+- Candidate calls, provenance and marker are one atomic batch. A rejected
+  positive candidate or any storage/collection failure records failure without
+  leaving an independently consumable functor-derived call.
 
 ## Verification
 
-- CHECK-1: pass, including six authentic target fixtures, exact copies,
-  separately compiled variants, reversed discovery order and altered-variant
-  refusal.
-- CHECK-2: full 351/351 Tezt suite plus inventory/lifecycle/query/compatibility
+- CHECK-1: pass, including durable occurrence and member/candidate corruption
+  ratchets, real `arch-query` consumer coverage, exact copies and independently
+  compiled variants.
+- The self-index golden is recalibrated to `27/1231/7556`: the v2 collector,
+  occurrence inventory and atomic-publication code are indexed source, while
+  its direct target checks remain independently covered above.
+- CHECK-2: full 354/354 Tezt suite plus inventory/lifecycle/query/compatibility
   independent binding modes pass.
-- CHECK-3: frozen Stage-3 replay is neutral at 45,290 rows and digest
+- CHECK-3: frozen Stage-3 replay starts at 45,290 rows and digest
   `e1eca575...`; candidate adds seven exactly witnessed Irmin relations, zero
   protocol relations, zero global loss and zero new/upgraded `MUST`.
 - Checker controls classify pass/assertion/setup as 0/1/2 for all three gates.

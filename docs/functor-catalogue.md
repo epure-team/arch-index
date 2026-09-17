@@ -93,15 +93,16 @@ anonymous structures, unpacked modules, opaque members, multi-hop aliases, and
 Shapes/UID reconciliation remain outside this contract. The flat LSP producer
 does not infer these targets.
 
-`functor_target_inputs` records the outcome and expected witness count for every
-selected artifact. `functor_target_witnesses` retains each positive proof even
-when several applications deduplicate to the same canonical call row. A witness
-links the application ordinal, declaration/formal position and key, actual and
-member paths, physical caller occurrence, candidate call row, and target
-function row. `functor_target_contract=v1` is written only after every selected
-input and every expected witness passes the complete foreign-key and semantic
-join validation. Missing, partial, corrupt, or failed target provenance remains
-unmarked rather than appearing as an empty successful result.
+`functor_target_inputs` records expected occurrence, candidate and witness
+counts plus deterministic refusal categories for every selected artifact.
+`functor_target_occurrences` persists every physical formal-member site,
+including sites with no concrete target; `functor_target_candidates` binds the
+actual/member path to the exact candidate call and function. Witnesses retain
+each application proof without collapsing provenance when calls deduplicate.
+`functor_target_contract=v2` is written only after the complete batch of calls,
+occurrences, candidates and witnesses passes foreign-key and semantic validation
+in one transaction. Missing, partial, corrupt, or failed target provenance leaves
+no usable functor-derived call rather than an empty successful marker.
 
 Diagnostic SQL can inspect the supported subset:
 

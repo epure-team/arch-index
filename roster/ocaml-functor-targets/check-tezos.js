@@ -32,6 +32,13 @@ class SetupError extends Error {}
 const exitCode = error => error instanceof assert.AssertionError ? 1 : 2;
 const sha256 = value => crypto.createHash('sha256').update(value).digest('hex');
 const fileSha256 = file => sha256(fs.readFileSync(file));
+function setupEqual(actual, expected, label) {
+  if (actual !== expected)
+    throw new SetupError(`${label}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);
+}
+function setupDeepEqual(actual, expected, label) {
+  setupEqual(JSON.stringify(actual), JSON.stringify(expected), label);
+}
 
 function run(command, commandArgs, options = {}) {
   const result = cp.spawnSync(command, commandArgs, {
@@ -117,14 +124,14 @@ function validateFrozen(manifest) {
   };
   for (const [name, file] of Object.entries(files))
     if (!fs.existsSync(file) || !fs.statSync(file).isFile()) throw new SetupError(`missing frozen Stage-3 ${name}: ${file}`);
-  assert.equal(fileSha256(files.db), frozen.databaseSha256, 'frozen Stage-3 database hash');
-  assert.equal(fileSha256(files.producer), frozen.producerSha256, 'frozen Stage-3 producer hash');
-  assert.equal(fileSha256(files.schema), frozen.schemaSha256, 'frozen Stage-3 schema hash');
+  setupEqual(fileSha256(files.db), frozen.databaseSha256, 'frozen Stage-3 database hash');
+  setupEqual(fileSha256(files.producer), frozen.producerSha256, 'frozen Stage-3 producer hash');
+  setupEqual(fileSha256(files.schema), frozen.schemaSha256, 'frozen Stage-3 schema hash');
   const snapshot = comparison.snapshotDatabase(files.db,
     {expectedArtifactSuffixes: manifest.destinationSuffixes});
-  assert.equal(snapshot.row_count, frozen.rows, 'frozen Stage-3 row count');
-  assert.equal(snapshot.digest, frozen.canonicalSha256, 'frozen Stage-3 canonical digest');
-  assert.deepEqual(baseline.relationMetrics(snapshot.rows), frozen.relations,
+  setupEqual(snapshot.row_count, frozen.rows, 'frozen Stage-3 row count');
+  setupEqual(snapshot.digest, frozen.canonicalSha256, 'frozen Stage-3 canonical digest');
+  setupDeepEqual(baseline.relationMetrics(snapshot.rows), frozen.relations,
     'frozen Stage-3 slice relation counts');
   return {files, snapshot};
 }
@@ -134,20 +141,28 @@ function validateWitnesses(dbPath) {
   try {
     const scalar = (sql, ...params) => Number(Object.values(db.prepare(sql).get(...params))[0]);
     const marker = key => db.prepare('SELECT value FROM comment_db_meta WHERE key=?').get(key)?.value;
-    for (const table of ['functor_target_inputs', 'functor_target_witnesses'])
+    for (const table of ['functor_target_inputs', 'functor_target_occurrences',
+      'functor_target_candidates', 'functor_target_witnesses'])
       if (!db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name=?").get(table))
         throw new SetupError(`candidate database lacks ${table}`);
-    assert.equal(marker('functor_target_contract'), 'v1', 'target contract marker');
+    assert.equal(marker('functor_target_contract'), 'v2', 'target contract marker');
     assert.equal(scalar('SELECT count(*) FROM functor_target_inputs'), frozen.selected,
       'target input inventory');
     assert.equal(scalar("SELECT count(*) FROM functor_target_inputs WHERE outcome='collected'"),
       frozen.selected, 'collected target input inventory');
     const expected = scalar('SELECT coalesce(sum(expected_witnesses),0) FROM functor_target_inputs');
+    const expectedOccurrences = scalar('SELECT coalesce(sum(expected_occurrences),0) FROM functor_target_inputs');
+    const expectedCandidates = scalar('SELECT coalesce(sum(expected_candidates),0) FROM functor_target_inputs');
     const witnessCount = scalar('SELECT count(*) FROM functor_target_witnesses');
+    assert.equal(scalar('SELECT count(*) FROM functor_target_occurrences'), expectedOccurrences,
+      'expected/stored target occurrence count');
+    assert.equal(scalar('SELECT count(*) FROM functor_target_candidates'), expectedCandidates,
+      'expected/stored target candidate count');
     assert.equal(witnessCount, expected, 'expected/stored target witness count');
     const rows = db.prepare(`SELECT w.producer_run_id,w.artifact,w.application_ordinal,
       w.declaration_key,w.formal_position,w.formal_key,w.actual_root_key,w.actual_path,
       w.member_path,w.caller_name,w.call_location,w.occurrence_ordinal,
+      tc.actual_path candidate_actual_path,tc.member_path candidate_member_path,
       cm.path caller_path,cf.name caller,c.call_site,tm.path target_path,tf.name target,
       c.kind,c.edge_form,c.top_reason,c.top_anchor,b.status,b.formal_position binding_position,
       b.actual_root_key binding_actual_root,
@@ -160,6 +175,11 @@ function validateWitnesses(dbPath) {
         AND b.artifact=w.artifact AND b.ordinal=w.application_ordinal
       JOIN functor_declarations d ON d.producer_run_id=w.producer_run_id
         AND d.artifact=w.artifact AND d.declaration_key=w.declaration_key
+      JOIN functor_target_occurrences o ON o.producer_run_id=w.producer_run_id
+        AND o.artifact=w.artifact AND o.ordinal=w.target_occurrence_ordinal
+      JOIN functor_target_candidates tc ON tc.producer_run_id=w.producer_run_id
+        AND tc.artifact=w.artifact AND tc.occurrence_ordinal=w.target_occurrence_ordinal
+        AND tc.target_key=w.target_key
       JOIN calls c ON c.id=w.candidate_call_id
       JOIN functions cf ON cf.id=c.caller_id JOIN modules cm ON cm.id=cf.module_id
       JOIN functions tf ON tf.id=w.target_function_id AND tf.id=c.callee_id
@@ -171,6 +191,8 @@ function validateWitnesses(dbPath) {
       assert.equal(row.status, 'matched', 'witness binding status');
       assert.equal(Number(row.binding_position), Number(row.formal_position), 'witness formal position');
       assert.equal(row.binding_actual_root, row.actual_root_key, 'witness actual root');
+      assert.equal(row.candidate_actual_path, row.actual_path, 'candidate actual path');
+      assert.equal(row.candidate_member_path, row.member_path, 'candidate member path');
       assert.equal(row.kind, 'MAY_ENUMERATED', 'witness candidate kind');
       assert.equal(Number(row.retained_top), 1, 'independent module-parameter TOP');
       for (const [name, value] of [['actual_path', row.actual_path], ['member_path', row.member_path]]) {
@@ -211,7 +233,7 @@ async function main() {
   const manifest = baseline.readManifest({expected: {
     selected: frozen.selected, manifestSha256: frozen.manifestSha256,
   }});
-  assert.equal(run('git', ['rev-parse', 'HEAD'], {cwd: baseline.TEZOS}).trim(),
+  setupEqual(run('git', ['rev-parse', 'HEAD'], {cwd: baseline.TEZOS}).trim(),
     frozen.tezosRevision, 'fixed410 Tezos revision');
   const old = validateFrozen(manifest);
   run('opam', ['exec', '--', 'dune', 'build', '--root=.',
@@ -225,14 +247,14 @@ async function main() {
     baseline.produce(old.files.producer, old.files.schema, replayDb, selection);
     const replay = comparison.snapshotDatabase(replayDb,
       {expectedArtifactSuffixes: manifest.destinationSuffixes});
-    assert.equal(replay.digest, frozen.canonicalSha256, 'frozen Stage-3 replay digest');
+    setupEqual(replay.digest, frozen.canonicalSha256, 'frozen Stage-3 replay digest');
 
     const producer = path.join(temporary, 'candidate-producer.exe');
     const schema = path.join(temporary, 'candidate-schema.sql');
     fs.copyFileSync(baseline.CURRENT_PRODUCER, producer);
     fs.copyFileSync(baseline.CURRENT_SCHEMA, schema);
-    assert.equal(fileSha256(producer), before.producer_sha256, 'copied candidate producer');
-    assert.equal(fileSha256(schema), before.schema_sha256, 'copied candidate schema');
+    setupEqual(fileSha256(producer), before.producer_sha256, 'copied candidate producer');
+    setupEqual(fileSha256(schema), before.schema_sha256, 'copied candidate schema');
     const candidateDb = path.join(temporary, 'candidate.db');
     const started = process.hrtime.bigint();
     baseline.produce(producer, schema, candidateDb, selection);
