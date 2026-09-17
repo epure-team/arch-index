@@ -1,0 +1,36 @@
+{
+  "task": "ocaml-cfa-qualification",
+  "round": 1,
+  "reviewed_head": "48a86e8ababf7347d5d8b4234423bdd5a22dc6c1",
+  "reviewer": "maintainer",
+  "independence": "degraded: the requested delegated Sol review could not start because the workspace was out of credits; this is not represented as an independent approval",
+  "status": "GO",
+  "reviewed": [
+    {
+      "concern": "bounded MAY edges were presented as definite impact",
+      "resolution": "arch-impact labels the resolved closure as possible_bounded, exposes the included edge kinds, and its human wording says MAY rather than DEFINITELY.",
+      "evidence": ["bin/arch_impact/arch_impact.ml", "tezt/tests/impact.ml", "docs/change-impact.md"]
+    },
+    {
+      "concern": "a user could infer that absence of TOP proves MUST reachability",
+      "resolution": "documentation states that no TOP only closes the indexed bounded candidate set; it does not promote MAY_ENUMERATED to MUST.",
+      "evidence": ["docs/change-impact.md", "specs/ocaml-cfa-qualification.md"]
+    },
+    {
+      "concern": "the qualification check could hide its own assertion as an environment failure",
+      "resolution": "the CHECK-1 wrapper classifies explicit CHECK assertions and test failures as exit 1, and setup failures as exit 2; both controls were exercised.",
+      "evidence": ["roster/ocaml-cfa-qualification/check-cmt.js"]
+    },
+    {
+      "concern": "the claimed precision improvement might be synthetic-only",
+      "resolution": "CHECK-1 invokes the same-CMT alias-chain Tezt scenario and replays the pinned Stage-4 Irmin corpus; its seven observed additions retain MAY_ENUMERATED and no protocol claim is made.",
+      "evidence": ["tezt/tests/ocaml_cfa_foundation.ml", "roster/ocaml-cfa-qualification/check-cmt.js", "roster/ocaml-functor-targets/check-tezos.js"]
+    }
+  ],
+  "open": [],
+  "accepted_limits": [
+    "No whole-program, closed-world, or completeness claim.",
+    "MAY_TOP remains outside the resolved bounded cone.",
+    "The pinned replay is an observation, not a performance bound."
+  ]
+}
