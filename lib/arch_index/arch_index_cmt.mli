@@ -325,7 +325,16 @@ type pending_call = {
           is that no call happens at the site, which is what a caller-count
           consumer needs. [None] for every ordinary call. *)
   occurrence_ordinal : int;
+  functor_target_site : functor_target_site option;
   functor_target_proofs : functor_target_proof list;
+}
+
+and functor_target_site = {
+  site_caller_name : string;
+  site_occurrence_ordinal : int;
+  site_call_location : string;
+  site_member_path : string list;
+  site_occurrence_shape : string;
 }
 
 and functor_target_proof = {
@@ -342,6 +351,19 @@ and functor_target_proof = {
   call_location : string;
   target_name : string;
 }
+
+type artifact_functor_target_occurrence = {
+  artifact_occurrence_ordinal : int;
+  target_site : functor_target_site;
+  target_proofs : functor_target_proof list;
+}
+
+val collect_functor_target_occurrences :
+  artifact:string -> src_path:string -> Typedtree.structure ->
+  artifact_functor_target_occurrence list
+(** Collect every physical formal-member occurrence and its zero or more
+    artifact-local positive proofs without inserting graph rows. This is the
+    variant-safe proof path: compiler identities remain inside the artifact. *)
 
 (** Flat [(name, module)] display of a pending call's callee, for kind-less
     consumers (the LSP fallback path). *)

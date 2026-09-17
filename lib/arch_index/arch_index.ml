@@ -64,6 +64,13 @@ type result = {
   db_path : string;
 }
 
+type resolved_functor_target_call = {
+  pending_target_call : Arch_index_cmt.pending_call;
+  target_caller_id : int;
+  target_function_id : int;
+  target_display_name : string;
+}
+
 (* -------------------------------------------------------------------------- *)
 (* Main entry point                                                           *)
 (* -------------------------------------------------------------------------- *)
@@ -618,7 +625,9 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
   (* Process all .cmt files inside a transaction *)
   exec_exn db "BEGIN TRANSACTION" ;
   let all_pending_calls = ref [] in
-  let target_witness_jobs = ref [] in
+  let target_occurrence_jobs = Hashtbl.create 32 in
+  let target_call_jobs = ref [] in
+  let target_top_rows = ref [] in
   let all_pending_deps = ref [] in
   let all_pending_type_usages = ref [] in
   let graph_reuse = create_graph_reuse () in
@@ -673,6 +682,12 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
               match producer_run_id with
               | None -> ()
               | Some producer_run_id ->
+                  let target_occurrences =
+                    Arch_index_cmt.collect_functor_target_occurrences
+                      ~artifact ~src_path:source structure
+                  in
+                  Hashtbl.replace target_occurrence_jobs artifact
+                    (producer_run_id, source, compiler_unit, target_occurrences) ;
                   let occurrences = Arch_index_functors.collect structure in
                   Arch_index_functors.store_collected db ~producer_run_id ~artifact ~source
                     ~compiler_unit ~module_id occurrences ;
@@ -940,18 +955,6 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
       in
       Hashtbl.replace units_by_last_component key (unit_name :: existing))
     (Arch_index_cmt.known_unit_names ()) ;
-  let target_expected_counts = Hashtbl.create 32 in
-  List.iter
-    (fun (call : pending_call) ->
-      List.iter
-        (fun (proof : Arch_index_cmt.functor_target_proof) ->
-          let count =
-            Option.value ~default:0
-              (Hashtbl.find_opt target_expected_counts proof.artifact)
-          in
-          Hashtbl.replace target_expected_counts proof.artifact (count + 1))
-        call.functor_target_proofs)
-    !all_pending_calls ;
   List.iter
     (fun (call : pending_call) ->
       match
@@ -1573,7 +1576,17 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
                           (None, display_name, "MAY_TOP", Some "dropped_node")
                         else (None, display_name, kind, None)))
           in
-          (match
+          if call.functor_target_proofs <> [] then
+            (match callee_id, kind with
+            | Some target_function_id, "MAY_ENUMERATED" ->
+                target_call_jobs :=
+                  { pending_target_call = call;
+                    target_caller_id = caller_id;
+                    target_function_id;
+                    target_display_name = callee_display_name }
+                  :: !target_call_jobs
+            | _ -> ())
+          else (match
              insert_call_rowid
                db
                stmt_call
@@ -1594,27 +1607,11 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
                ()
            with
           | Some call_id -> (
-              (match callee_id, kind with
-              | Some target_function_id, "MAY_ENUMERATED" ->
-                  List.iter
-                    (fun (proof : Arch_index_cmt.functor_target_proof) ->
-                      let witness : Arch_index_bindings.target_witness =
-                        { application_ordinal = proof.application_ordinal;
-                          declaration_key = proof.declaration_key;
-                          formal_position = proof.formal_position;
-                          formal_key = proof.formal_key;
-                          actual_root_key = proof.actual_root_key;
-                          actual_path = proof.actual_path;
-                          member_path = proof.member_path;
-                          caller_name = proof.source_caller_name;
-                          call_location = proof.call_location;
-                          occurrence_ordinal = proof.occurrence_ordinal;
-                          target_function_id;
-                          candidate_call_id = call_id }
-                      in
-                      target_witness_jobs := (proof.artifact, witness) :: !target_witness_jobs)
-                    call.functor_target_proofs
-              | _ -> ()) ;
+              Option.iter
+                (fun site ->
+                  target_top_rows :=
+                    (call.caller_module, site, call_id) :: !target_top_rows)
+                call.functor_target_site ;
               (* The handler scopes enclosing THIS call site, linked to this
                  call's own rowid — written back to back with the call so no
                  other insert can slip in between. Up to TWO rows: a call can
@@ -1874,48 +1871,242 @@ let run ?(db_path = db_path) ?(schema_path = schema_path) ?errors_config ?errors
        Arch_io.eprintf "Warning: functor binding finalization failed: %s\n"
          (Printexc.to_string exn)) ;
 
+  let same_target_site
+      (left : Arch_index_cmt.functor_target_site)
+      (right : Arch_index_cmt.functor_target_site) =
+    left.site_caller_name = right.site_caller_name
+    && left.site_call_location = right.site_call_location
+    && left.site_member_path = right.site_member_path
+    && left.site_occurrence_shape = right.site_occurrence_shape
+  in
+  let target_artifacts =
+    Hashtbl.fold
+      (fun artifact payload acc -> (artifact, payload) :: acc)
+      target_occurrence_jobs []
+    |> List.sort (fun (left, _) (right, _) ->
+         let left_copy = Hashtbl.mem graph_copy_jobs left in
+         let right_copy = Hashtbl.mem graph_copy_jobs right in
+         compare (left_copy, left) (right_copy, right))
+  in
   let target_eligible = ref !binding_eligible in
-  List.iter
-    (fun (producer_run_id, artifact, bindings) ->
-      let witnesses =
-        let source_artifact =
-          Option.value ~default:artifact
-            (Hashtbl.find_opt graph_copy_jobs artifact)
-        in
-        List.filter_map
-          (fun (candidate, witness) ->
-            if candidate = source_artifact then Some witness else None)
-          !target_witness_jobs
-      in
-      try
-        match bindings with
-        | Some _ ->
-            let expected_witnesses =
-              let source_artifact =
-                Option.value ~default:artifact
-                  (Hashtbl.find_opt graph_copy_jobs artifact)
-              in
-              Option.value ~default:0
-                (Hashtbl.find_opt target_expected_counts source_artifact)
-            in
-            Arch_index_bindings.store_target_collected db ~producer_run_id
-              ~artifact ~expected_witnesses (List.rev witnesses)
-        | None ->
-            target_eligible := false ;
-            Arch_index_bindings.store_target_failed db ~producer_run_id ~artifact
-      with exn ->
-        target_eligible := false ;
-        Arch_io.eprintf "Warning: functor target storage failed for %s: %s\n"
-          artifact (Printexc.to_string exn))
-    (List.rev !binding_jobs) ;
-  if !target_eligible && !catalogue_collected = selected_catalogue_count then
-    (try
-       ignore
-         (Arch_index_bindings.finalize_target_contract db
-            ~selected_inputs:selected_catalogue_count)
+  if !target_eligible && List.length target_artifacts = selected_catalogue_count then
+    (exec_exn db "BEGIN TRANSACTION" ;
+     try
+       let inserted_candidates = Hashtbl.create 32 in
+       List.iter
+         (fun (artifact, (producer_run_id, source, compiler_unit,
+                          local_occurrences)) ->
+           let representative_artifact =
+             Option.value ~default:artifact
+               (Hashtbl.find_opt graph_copy_jobs artifact)
+           in
+           let _, representative_source, _, representative_occurrences =
+             match Hashtbl.find_opt target_occurrence_jobs representative_artifact with
+             | Some job -> job
+             | None -> failwith ("missing target representative: " ^ representative_artifact)
+           in
+           let stored_occurrences = ref [] in
+           let stored_candidates = ref [] in
+           let stored_witnesses = ref [] in
+           let member_refusals = ref 0 in
+           let reconciliation_refusals = ref 0 in
+           List.iter
+             (fun (local : Arch_index_cmt.artifact_functor_target_occurrence) ->
+               let representative_matches =
+                 List.filter
+                   (fun (candidate : Arch_index_cmt.artifact_functor_target_occurrence) ->
+                     same_target_site local.target_site candidate.target_site)
+                   representative_occurrences
+               in
+               let mapping =
+                 match representative_matches with
+                 | [representative] ->
+                     let top_matches =
+                       List.filter
+                         (fun (top_source, site, _) ->
+                           top_source = representative_source
+                           && same_target_site representative.target_site site)
+                         !target_top_rows
+                     in
+                     (match top_matches with
+                     | [(_, _, top_call_id)] -> Some (representative, top_call_id)
+                     | _ -> None)
+                 | _ -> None
+               in
+               (match mapping with
+               | None -> incr reconciliation_refusals
+               | Some _ when local.target_proofs = [] -> incr member_refusals
+               | Some _ -> ()) ;
+               let occurrence : Arch_index_bindings.target_occurrence =
+                 { ordinal = local.artifact_occurrence_ordinal;
+                   source;
+                   compiler_unit;
+                   caller_name = local.target_site.site_caller_name;
+                   call_location = local.target_site.site_call_location;
+                   physical_ordinal = local.target_site.site_occurrence_ordinal;
+                   member_path = local.target_site.site_member_path;
+                   occurrence_shape = local.target_site.site_occurrence_shape;
+                   representative_artifact =
+                     Option.map (fun _ -> representative_artifact) mapping;
+                   representative_ordinal =
+                     Option.map
+                       (fun (representative, _) ->
+                         representative.artifact_occurrence_ordinal)
+                       mapping;
+                   top_call_id = Option.map snd mapping }
+               in
+               stored_occurrences := occurrence :: !stored_occurrences ;
+               Option.iter
+                 (fun (representative, _) ->
+                   let json_path path =
+                     `List (List.map (fun segment -> `String segment) path)
+                     |> Yojson.Safe.to_string
+                   in
+                   let proof_groups =
+                     local.target_proofs
+                     |> List.map (fun (proof : Arch_index_cmt.functor_target_proof) ->
+                          let target_key =
+                            String.concat "\x1f"
+                              [ json_path proof.actual_path;
+                                json_path proof.member_path;
+                                proof.target_name ]
+                          in
+                          (target_key, proof.actual_path, proof.member_path,
+                           proof.target_name))
+                     |> List.sort_uniq compare
+                   in
+                   List.iter
+                     (fun (target_key, actual_path, member_path, target_name) ->
+                       let matching_jobs =
+                         List.filter
+                           (fun job ->
+                             job.pending_target_call.caller_module = representative_source
+                             && (match job.pending_target_call.functor_target_site with
+                                | Some site -> same_target_site representative.target_site site
+                                | None -> false)
+                             && (match job.pending_target_call.head with
+                                | Arch_index_cmt.Head_enumerated name -> name = target_name
+                                | _ -> false))
+                           !target_call_jobs
+                       in
+                       match matching_jobs with
+                       | [job] ->
+                           let cache_key =
+                             ( representative_artifact,
+                               representative.artifact_occurrence_ordinal,
+                               target_name )
+                           in
+                           let candidate_call_id =
+                             match Hashtbl.find_opt inserted_candidates cache_key with
+                             | Some call_id -> call_id
+                             | None ->
+                                 let call_id =
+                                   match
+                                     insert_call_rowid db stmt_call
+                                       ~caller_id:job.target_caller_id
+                                       ~callee_id:(Some job.target_function_id)
+                                       ~callee_name:job.target_display_name
+                                       ~call_site:(Some job.pending_target_call.call_site)
+                                       ~kind:"MAY_ENUMERATED"
+                                       ~producer_run_id:(Some producer_run_id)
+                                       ~edge_form:job.pending_target_call.edge_form ()
+                                   with
+                                   | Some call_id -> call_id
+                                   | None -> failwith "functor target call insertion rejected"
+                                 in
+                                 List.iter
+                                   (fun scope_id ->
+                                     Arch_index_db.insert_call_exn_scope db stmt_call_scope
+                                       ~call_id ~scope_id)
+                                   (List.filter_map Fun.id
+                                      [ job.pending_target_call.exn_scope;
+                                        job.pending_target_call.errch_scope ]) ;
+                                 Option.iter
+                                   (fun channel ->
+                                     Arch_index_db.insert_exn_edge db stmt_edge ~call_id
+                                       ~channel ~role:"propagates")
+                                   job.pending_target_call.errch_propagates ;
+                                 Hashtbl.add inserted_candidates cache_key call_id ;
+                                 call_id
+                           in
+                           let candidate : Arch_index_bindings.target_candidate =
+                             { occurrence_ordinal = local.artifact_occurrence_ordinal;
+                               target_key;
+                               actual_path;
+                               member_path;
+                               target_function_id = job.target_function_id;
+                               candidate_call_id }
+                           in
+                           stored_candidates := candidate :: !stored_candidates ;
+                           List.iter
+                             (fun (proof : Arch_index_cmt.functor_target_proof) ->
+                               if proof.target_name = target_name
+                                  && proof.actual_path = actual_path
+                                  && proof.member_path = member_path
+                               then
+                                 let witness : Arch_index_bindings.target_witness =
+                                   { application_ordinal = proof.application_ordinal;
+                                     declaration_key = proof.declaration_key;
+                                     formal_position = proof.formal_position;
+                                     formal_key = proof.formal_key;
+                                     actual_root_key = proof.actual_root_key;
+                                     actual_path = proof.actual_path;
+                                     member_path = proof.member_path;
+                                     caller_name = proof.source_caller_name;
+                                     call_location = proof.call_location;
+                                     occurrence_ordinal = proof.occurrence_ordinal;
+                                     target_occurrence_ordinal =
+                                       local.artifact_occurrence_ordinal;
+                                     target_key;
+                                     target_function_id = job.target_function_id;
+                                     candidate_call_id }
+                                 in
+                                 stored_witnesses := witness :: !stored_witnesses)
+                             local.target_proofs
+                       | _ -> incr reconciliation_refusals)
+                     proof_groups)
+                 mapping)
+             local_occurrences ;
+           let binding_refusals =
+             List.find_map
+               (fun (_, candidate_artifact, bindings) ->
+                 if candidate_artifact <> artifact then None
+                 else
+                   Some
+                     (match bindings with
+                     | None -> 1
+                     | Some collection ->
+                         List.fold_left
+                           (fun count result ->
+                             if result.Arch_index_bindings.status = "matched"
+                             then count else count + 1)
+                           0 collection.Arch_index_bindings.results))
+               !binding_jobs
+             |> Option.value ~default:1
+           in
+           Arch_index_bindings.store_target_collected db ~producer_run_id ~artifact
+             ~binding_refusals ~member_refusals:!member_refusals
+             ~reconciliation_refusals:!reconciliation_refusals
+             (List.rev !stored_occurrences) (List.rev !stored_candidates)
+             (List.rev !stored_witnesses))
+         target_artifacts ;
+       if not
+            (Arch_index_bindings.mark_target_contract db
+               ~selected_inputs:selected_catalogue_count)
+       then failwith "functor target v2 contract validation refused publication" ;
+       exec_exn db "COMMIT"
      with exn ->
-       Arch_io.eprintf "Warning: functor target finalization failed: %s\n"
-         (Printexc.to_string exn)) ;
+       target_eligible := false ;
+       ignore (Sqlite3.exec db "ROLLBACK") ;
+       Arch_io.eprintf "Warning: functor target publication failed: %s\n"
+         (Printexc.to_string exn) ;
+       List.iter
+         (fun (artifact, (producer_run_id, _, _, _)) ->
+           try Arch_index_bindings.store_target_failed db ~producer_run_id ~artifact
+           with failed ->
+             Arch_io.eprintf "Warning: functor target failure recording failed for %s: %s\n"
+               artifact (Printexc.to_string failed))
+         target_artifacts) ;
 
   (* Summary *)
   let n_fields = count_rows db "SELECT COUNT(*) FROM type_fields" in

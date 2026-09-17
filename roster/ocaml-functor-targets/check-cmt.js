@@ -10,7 +10,10 @@ const titles = [
   'functor targets: direct local application resolves a formal member call',
   'functor targets: flat mode infers and persists no Stage 4 target or witness',
   'functor targets: 0-CFA unions actuals and preserves every witness',
+  'functor targets: nonidentical variants retain artifact-local proofs',
   'functor targets: finalizer rejects a witness whose candidate lost its callee',
+  'functor targets: finalizer authenticates the physical occurrence',
+  'functor targets: finalizer authenticates actual member to candidate',
   'functor targets: rejected positive candidate prevents completion',
   'functor targets: curried slots nested members and refusals stay separated',
 ];
@@ -52,7 +55,7 @@ function main() {
     '--match', 'functor targets', '--keep-going']);
   if (tezt.result.status !== 0) {
     if (tezt.result.status === 1 && tezt.output.includes('[FAILURE]') &&
-        /FUNCTOR_TARGET_(?:RED|FLAT|UNION|OCCURRENCE|VALIDATOR|LIFECYCLE|POSITION|NESTED|REFUSAL)/.test(tezt.output))
+        /FUNCTOR_TARGET_(?:RED|FLAT|UNION|OCCURRENCE|MEMBER|VARIANT|VALIDATOR|LIFECYCLE|POSITION|NESTED|REFUSAL|QUERY|ATOMIC)/.test(tezt.output))
       throw new (require('node:assert').AssertionError)({message: 'authentic target fixture assertion failed'});
     throw new SetupError(`target Tezt execution exited ${tezt.result.status}`);
   }

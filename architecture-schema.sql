@@ -134,9 +134,49 @@ CREATE TABLE IF NOT EXISTS functor_target_inputs (
     producer_run_id INTEGER NOT NULL,
     artifact TEXT NOT NULL,
     outcome TEXT NOT NULL CHECK(outcome IN ('collected','collection_failed')),
+    expected_occurrences INTEGER NOT NULL DEFAULT 0 CHECK(expected_occurrences >= 0),
+    expected_candidates INTEGER NOT NULL DEFAULT 0 CHECK(expected_candidates >= 0),
     expected_witnesses INTEGER NOT NULL CHECK(expected_witnesses >= 0),
+    binding_refusals INTEGER NOT NULL DEFAULT 0 CHECK(binding_refusals >= 0),
+    member_refusals INTEGER NOT NULL DEFAULT 0 CHECK(member_refusals >= 0),
+    reconciliation_refusals INTEGER NOT NULL DEFAULT 0 CHECK(reconciliation_refusals >= 0),
     PRIMARY KEY(producer_run_id, artifact),
     FOREIGN KEY(producer_run_id, artifact) REFERENCES functor_binding_inputs(producer_run_id, artifact) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS functor_target_occurrences (
+    producer_run_id INTEGER NOT NULL,
+    artifact TEXT NOT NULL,
+    ordinal INTEGER NOT NULL CHECK(ordinal > 0),
+    source TEXT NOT NULL,
+    compiler_unit TEXT NOT NULL CHECK(compiler_unit <> ''),
+    caller_name TEXT NOT NULL CHECK(caller_name <> ''),
+    call_location TEXT NOT NULL,
+    physical_ordinal INTEGER NOT NULL CHECK(physical_ordinal >= 0),
+    member_path TEXT NOT NULL,
+    occurrence_shape TEXT NOT NULL CHECK(occurrence_shape <> ''),
+    representative_artifact TEXT,
+    representative_ordinal INTEGER CHECK(representative_ordinal > 0),
+    top_call_id INTEGER REFERENCES calls(id) ON DELETE CASCADE,
+    CHECK((representative_artifact IS NULL AND representative_ordinal IS NULL AND top_call_id IS NULL)
+       OR (representative_artifact IS NOT NULL AND representative_ordinal IS NOT NULL AND top_call_id IS NOT NULL)),
+    PRIMARY KEY(producer_run_id, artifact, ordinal),
+    FOREIGN KEY(producer_run_id, artifact)
+      REFERENCES functor_target_inputs(producer_run_id, artifact) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS functor_target_candidates (
+    producer_run_id INTEGER NOT NULL,
+    artifact TEXT NOT NULL,
+    occurrence_ordinal INTEGER NOT NULL CHECK(occurrence_ordinal > 0),
+    target_key TEXT NOT NULL CHECK(target_key <> ''),
+    actual_path TEXT NOT NULL,
+    member_path TEXT NOT NULL,
+    target_function_id INTEGER NOT NULL REFERENCES functions(id) ON DELETE CASCADE,
+    candidate_call_id INTEGER NOT NULL REFERENCES calls(id) ON DELETE CASCADE,
+    PRIMARY KEY(producer_run_id, artifact, occurrence_ordinal, target_key),
+    FOREIGN KEY(producer_run_id, artifact, occurrence_ordinal)
+      REFERENCES functor_target_occurrences(producer_run_id, artifact, ordinal) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS functor_target_witnesses (
@@ -152,6 +192,8 @@ CREATE TABLE IF NOT EXISTS functor_target_witnesses (
     caller_name TEXT NOT NULL CHECK(caller_name <> ''),
     call_location TEXT NOT NULL,
     occurrence_ordinal INTEGER NOT NULL CHECK(occurrence_ordinal >= 0),
+    target_occurrence_ordinal INTEGER NOT NULL CHECK(target_occurrence_ordinal > 0),
+    target_key TEXT NOT NULL CHECK(target_key <> ''),
     target_function_id INTEGER NOT NULL REFERENCES functions(id) ON DELETE CASCADE,
     candidate_call_id INTEGER NOT NULL REFERENCES calls(id) ON DELETE CASCADE,
     PRIMARY KEY(producer_run_id, artifact, application_ordinal, caller_name,
@@ -159,7 +201,11 @@ CREATE TABLE IF NOT EXISTS functor_target_witnesses (
     FOREIGN KEY(producer_run_id, artifact, application_ordinal)
       REFERENCES functor_bindings(producer_run_id, artifact, ordinal) ON DELETE CASCADE,
     FOREIGN KEY(producer_run_id, artifact, declaration_key)
-      REFERENCES functor_declarations(producer_run_id, artifact, declaration_key) ON DELETE CASCADE
+      REFERENCES functor_declarations(producer_run_id, artifact, declaration_key) ON DELETE CASCADE,
+    FOREIGN KEY(producer_run_id, artifact, target_occurrence_ordinal)
+      REFERENCES functor_target_occurrences(producer_run_id, artifact, ordinal) ON DELETE CASCADE,
+    FOREIGN KEY(producer_run_id, artifact, target_occurrence_ordinal, target_key)
+      REFERENCES functor_target_candidates(producer_run_id, artifact, occurrence_ordinal, target_key) ON DELETE CASCADE
 );
 
 CREATE INDEX IF NOT EXISTS idx_functor_target_witnesses_call

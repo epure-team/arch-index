@@ -195,7 +195,27 @@ function query() {
   return {valid: 3, formats: 6, corruption: 19, extended};
 }
 function canonical(v) { if (Array.isArray(v)) return v.map(canonical).sort((a,b) => JSON.stringify(a).localeCompare(JSON.stringify(b))); if (v && typeof v === 'object') return Object.fromEntries(Object.keys(v).sort().map(k => [k, canonical(v[k])])); return v; }
-function withoutRunMetadata(rows_) { return rows_.map(row => { const out = {...row}; for (const k of ['created_at','last_analyzed','producer_run_id']) delete out[k]; return out; }); }
+function callIdentity(row) {
+  return JSON.stringify([row.caller_id,row.callee_id,row.callee_name,row.call_site,
+    row.kind,row.top_reason,row.top_anchor,row.edge_form]);
+}
+function withoutRunMetadata(rows_, table, calls = []) {
+  const callsById = new Map(calls.map(call => [call.id, callIdentity(call)]));
+  return rows_.map(row => {
+    const out = {...row};
+    for (const k of ['created_at','last_analyzed','producer_run_id']) delete out[k];
+    // Call rowids are allocator artifacts. Schema 1.17 publishes proven functor
+    // candidates atomically after their proof batch is assembled, so their
+    // physical insertion point may differ while every consumer-visible edge is
+    // identical. Compare dependent links by the semantic call tuple instead.
+    if (table === 'calls') delete out.id;
+    if ((table === 'call_exn_scopes' || table === 'exn_edges') && out.call_id !== undefined) {
+      out.call = callsById.get(out.call_id) || `missing:${out.call_id}`;
+      delete out.call_id;
+    }
+    return out;
+  });
+}
 function compatibility() {
   [indexer, queryBinary].forEach(assertSetupProbe); const expected = JSON.parse(fs.readFileSync(path.join(root, 'roster/functor-instance-resolution/compatibility-rich-baseline.json'), 'utf8'));
   const verdicts = [
@@ -215,11 +235,13 @@ function compatibility() {
     let firstCatalogue;
     for (let pass = 0; pass < 2; pass++) {
       indexDir(out, db);
+      const actualCalls = rows(db, 'SELECT * FROM calls');
       for (const [key, baseline] of Object.entries(expected)) {
         const statement = key === 'contracts'
           ? "SELECT key,value FROM comment_db_meta WHERE key IN ('callgraph_contract','error_contract','exn_contract')"
           : `SELECT * FROM ${key}`;
-        assert.deepEqual(canonical(withoutRunMetadata(rows(db, statement))), canonical(baseline), `${key}, reindex pass ${pass}`);
+        assert.deepEqual(canonical(withoutRunMetadata(rows(db, statement), key, actualCalls)),
+          canonical(withoutRunMetadata(baseline, key, expected.calls)), `${key}, reindex pass ${pass}`);
       }
       assert.equal(expected.conditions.length, 0, 'constant false is not a stored condition premise');
       assert(expected.calls.some(c => c.callee_name === 'A.run' && c.callee_id === 1 && c.kind === 'MAY_ENUMERATED' && c.top_reason === null && c.top_anchor === null));

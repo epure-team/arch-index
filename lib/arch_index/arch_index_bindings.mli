@@ -76,12 +76,41 @@ type target_witness = {
   caller_name : string;
   call_location : string;
   occurrence_ordinal : int;
+  target_occurrence_ordinal : int;
+  target_key : string;
+  target_function_id : int;
+  candidate_call_id : int;
+}
+
+type target_occurrence = {
+  ordinal : int;
+  source : string;
+  compiler_unit : string;
+  caller_name : string;
+  call_location : string;
+  physical_ordinal : int;
+  member_path : string list;
+  occurrence_shape : string;
+  representative_artifact : string option;
+  representative_ordinal : int option;
+  top_call_id : int option;
+}
+
+type target_candidate = {
+  occurrence_ordinal : int;
+  target_key : string;
+  actual_path : string list;
+  member_path : string list;
   target_function_id : int;
   candidate_call_id : int;
 }
 
 val store_target_collected :
   Sqlite3.db -> producer_run_id:int -> artifact:string ->
-  expected_witnesses:int -> target_witness list -> unit
+  ?binding_refusals:int -> ?member_refusals:int ->
+  ?reconciliation_refusals:int -> target_occurrence list ->
+  target_candidate list -> target_witness list -> unit
 val store_target_failed : Sqlite3.db -> producer_run_id:int -> artifact:string -> unit
+val mark_target_contract : Sqlite3.db -> selected_inputs:int -> bool
+(** Validate and write the v2 marker inside the caller's active transaction. *)
 val finalize_target_contract : Sqlite3.db -> selected_inputs:int -> bool

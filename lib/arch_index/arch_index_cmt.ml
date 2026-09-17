@@ -661,7 +661,16 @@ type pending_call = {
          the [calls.edge_form] comment in architecture-schema.sql for why it is
          not a [kind] value. [None] for every ordinary call. *)
   occurrence_ordinal : int;
+  functor_target_site : functor_target_site option;
   functor_target_proofs : functor_target_proof list;
+}
+
+and functor_target_site = {
+  site_caller_name : string;
+  site_occurrence_ordinal : int;
+  site_call_location : string;
+  site_member_path : string list;
+  site_occurrence_shape : string;
 }
 
 and functor_target_proof = {
@@ -767,6 +776,7 @@ let%test "CFA expansion keeps partiality per candidate" =
      partial = false; cond = false; dead = false; call_site = "x.ml:1";
      exn_scope = None; errch_scope = None; errch_propagates = None;
      edge_form = Some "__cfa:0"; occurrence_ordinal = 0;
+     functor_target_site = None;
      functor_target_proofs = []}
   in
   match expand_cfa_value call (["one", 1; "two", 2], [], 1, 0, false) with
@@ -782,6 +792,7 @@ let%test "CFA expansion retains omitted-slot uncertainty and one residual" =
      partial = false; cond = false; dead = false; call_site = "x.ml:1";
      exn_scope = None; errch_scope = None; errch_propagates = None;
      edge_form = Some "__cfa:1"; occurrence_ordinal = 0;
+     functor_target_site = None;
      functor_target_proofs = []}
   in
   let omitted = expand_cfa_value call (["one", 1], [], 1, 1, false) in
@@ -1592,7 +1603,7 @@ let collect_calls_from_expr_with_open_bodies ?(canon_exn = fun p -> Path.name p)
   in
   let add_call ?(partial = false) ?is_head_of ?callee_ty ?edge_form
       ?(local_module_invocation = false) ?(functor_target_proofs = [])
-      ?occurrence_ordinal ?(on_ordinal = fun _ -> ()) head loc =
+      ?functor_target_site ?occurrence_ordinal ?(on_ordinal = fun _ -> ()) head loc =
     let line = loc.Location.loc_start.pos_lnum in
     let call_site = Printf.sprintf "%s:%d" src_path line in
     let c = !cur in
@@ -1623,7 +1634,7 @@ let collect_calls_from_expr_with_open_bodies ?(canon_exn = fun p -> Path.name p)
     raw :=
       ( ord, c.cid, c.lblk, c.lcaller, head, partial, call_site, exn_scope,
         errch_candidate, edge_form, local_module_invocation,
-        functor_target_proofs )
+        functor_target_site, functor_target_proofs )
       :: !raw
   in
   (* Current-context CFG shorthands. *)
@@ -2738,22 +2749,34 @@ let collect_calls_from_expr_with_open_bodies ?(canon_exn = fun p -> Path.name p)
                         | Some m -> m ^ "." ^ callee_name
                         | None -> callee_name
                       in
-                      let occurrence = ref None in
+                      let occurrence_ordinal = !next_call_ord in
+                      incr next_call_ord ;
+                      let functor_target_site =
+                        Option.map
+                          (fun (_, member_path) ->
+                            let call_location, _ =
+                              Arch_index_functors.location_json expr.exp_loc
+                            in
+                            { site_caller_name = (!cur).lcaller;
+                              site_occurrence_ordinal = occurrence_ordinal;
+                              site_call_location = call_location;
+                              site_member_path = member_path;
+                              site_occurrence_shape =
+                                (if partial then "partial" else "saturated") })
+                          (parameter_path path)
+                      in
                       add_call ~partial ~is_head_of:expr.exp_loc
                         ?callee_ty:!callee_ty_for_channel
-                        ~on_ordinal:(fun ordinal -> occurrence := Some ordinal)
+                        ~occurrence_ordinal ?functor_target_site
                         (Head_unknown (disp, Module_param)) expr.exp_loc ;
-                      Option.iter
-                        (fun occurrence_ordinal ->
-                          List.iter
-                            (fun (target_name, proofs) ->
-                              add_call ~partial ?callee_ty:!callee_ty_for_channel
-                                ~occurrence_ordinal
-                                ~functor_target_proofs:proofs
-                                (Head_enumerated target_name) expr.exp_loc)
-                            (functor_candidates path ~caller_name:(!cur).lcaller
-                               ~occurrence_ordinal expr.exp_loc))
-                        !occurrence
+                      List.iter
+                        (fun (target_name, proofs) ->
+                          add_call ~partial ?callee_ty:!callee_ty_for_channel
+                            ~occurrence_ordinal ?functor_target_site
+                            ~functor_target_proofs:proofs
+                            (Head_enumerated target_name) expr.exp_loc)
+                        (functor_candidates path ~caller_name:(!cur).lcaller
+                           ~occurrence_ordinal expr.exp_loc)
                     else
                       add_call
                         ~partial
@@ -3349,7 +3372,7 @@ let collect_calls_from_expr_with_open_bodies ?(canon_exn = fun p -> Path.name p)
     List.rev_map
       (fun ( ord, cid, block, caller, head, partial, call_site, exn_scope,
              errch_candidate, edge_form, local_module_invocation,
-             functor_target_proofs ) ->
+             functor_target_site, functor_target_proofs ) ->
         let cond =
           match Hashtbl.find_opt verdicts cid with
           | Some v -> not (Arch_index_cfg.always_exec v block)
@@ -3389,6 +3412,7 @@ let collect_calls_from_expr_with_open_bodies ?(canon_exn = fun p -> Path.name p)
           errch_propagates;
           edge_form;
           occurrence_ordinal = ord;
+          functor_target_site;
           functor_target_proofs;
         })
       !raw
@@ -3409,6 +3433,89 @@ let collect_calls_from_expr ?canon_exn ?value_channels ?local_alias_stamps
   collect_calls_from_expr_with_open_bodies ?canon_exn ?value_channels
     ?local_alias_stamps ?module_alias_stamps ?local_module_targets ?cfa_session ~src_path
     ~caller_module ~caller_name ~local_fn_stamps expr
+
+type artifact_functor_target_occurrence = {
+  artifact_occurrence_ordinal : int;
+  target_site : functor_target_site;
+  target_proofs : functor_target_proof list;
+}
+
+let collect_functor_target_occurrences ~artifact ~src_path structure =
+  let local_fn_stamps = build_local_fn_stamps structure in
+  let open_body_targets = build_open_body_targets structure in
+  let recursive_body_targets = Hashtbl.create 16 in
+  let local_module_targets = build_local_module_targets ~local_fn_stamps structure in
+  let functor_actuals =
+    try (Arch_index_bindings.collect_with_actuals structure).matched_actuals
+    with _ -> []
+  in
+  let local_alias_stamps = build_local_alias_stamps structure in
+  let module_alias_stamps = build_module_alias_stamps structure in
+  let binding_names = build_binding_names structure in
+  let cfa_session =
+    Arch_index_cfa_cmt.create
+      ~binding_name:(fun ~prefix id -> binding_name binding_names ~prefix id)
+      ~fn_arity structure
+  in
+  let collected = ref [] in
+  iter_structure_items structure ~f:(fun ~prefix item ->
+    match item.Typedtree.str_desc with
+    | Tstr_value (_, bindings) ->
+        List.iter
+          (fun (binding : Typedtree.value_binding) ->
+            match binding.vb_pat.pat_desc with
+            | Tpat_var (id, _, _) when Ident.name id <> "_" ->
+                let caller_name = binding_name binding_names ~prefix id in
+                let calls, _, _, _ =
+                  collect_calls_from_expr_with_open_bodies
+                    ~src_path ~caller_module:src_path ~caller_name
+                    ~local_fn_stamps ~local_alias_stamps ~module_alias_stamps
+                    ~local_module_targets ~functor_actuals ~artifact ~cfa_session
+                    ~open_body_targets ~recursive_body_targets binding.vb_expr
+                in
+                List.iter
+                  (fun call ->
+                    match call.functor_target_site with
+                    | None -> ()
+                    | Some target_site ->
+                        collected :=
+                          { artifact_occurrence_ordinal = 0;
+                            target_site;
+                            target_proofs=call.functor_target_proofs }
+                          :: !collected)
+                  calls
+            | _ -> ())
+          bindings
+    | _ -> ()) ;
+  let compare_occurrence a b =
+    compare
+      ( a.target_site.site_caller_name,
+        a.target_site.site_occurrence_ordinal,
+        a.target_site.site_call_location,
+        a.target_site.site_member_path,
+        a.target_site.site_occurrence_shape )
+      ( b.target_site.site_caller_name,
+        b.target_site.site_occurrence_ordinal,
+        b.target_site.site_call_location,
+        b.target_site.site_member_path,
+        b.target_site.site_occurrence_shape )
+  in
+  let sorted = List.sort compare_occurrence !collected in
+  let rec merge acc = function
+    | [] -> List.rev acc
+    | item :: rest ->
+        let same, rest =
+          List.partition (fun other -> compare_occurrence item other = 0) rest
+        in
+        let proofs =
+          List.concat_map (fun occurrence -> occurrence.target_proofs) (item :: same)
+          |> List.sort_uniq compare
+        in
+        merge ({item with target_proofs=proofs} :: acc) rest
+  in
+  merge [] sorted
+  |> List.mapi (fun index occurrence ->
+       {occurrence with artifact_occurrence_ordinal=index + 1})
 
 (* -------------------------------------------------------------------------- *)
 (* Process a single .cmt file                                                 *)

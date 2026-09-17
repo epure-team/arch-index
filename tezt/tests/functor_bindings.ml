@@ -438,9 +438,18 @@ module M = F(A)
          AND target.name='A.target' AND c.kind='MAY_ENUMERATED'" = 1) int
       ~error_msg:"FUNCTOR_TARGET_RED: authenticated durable witness count is %L, expected %R") ;
     Check.((Db.string_opt conn
-      "SELECT value FROM comment_db_meta WHERE key='functor_target_contract'" = Some "v1")
+      "SELECT value FROM comment_db_meta WHERE key='functor_target_contract'" = Some "v2")
       (option string) ~error_msg:"FUNCTOR_TARGET_RED: target contract is %L, expected %R") ;
-    Lwt.return_unit)
+    Lwt.return_unit) >>= fun () ->
+  let code, stdout, stderr =
+    run_command_split ~env:[("ARCH_QUERY_FORMAT", "json")] (arch_query ())
+      [db; "callees-of"; "F.run"]
+  in
+  Check.((code = 0) int
+    ~error_msg:("FUNCTOR_TARGET_QUERY_RED: callees query exit is %L, expected %R: " ^ stderr)) ;
+  Check.((contains ~needle:"A.target" stdout = true) bool
+    ~error_msg:"FUNCTOR_TARGET_QUERY_RED: concrete target absent from consumer output: %L") ;
+  Lwt.return_unit
 
 let register_flat_target_non_inference () =
   Test.register ~__FILE__
@@ -503,6 +512,46 @@ module MA2 = F(A)
       ~error_msg:"FUNCTOR_TARGET_UNION: target union cardinality is %L, expected %R") ;
     Lwt.return_unit)
 
+let register_native_target_variant_local_proofs () =
+  Test.register ~__FILE__
+    ~title:"functor targets: nonidentical variants retain artifact-local proofs"
+    ~tags:["functor"; "targets"; "variant"; "provenance"; "ratchet"]
+  @@ fun () ->
+  let source = {ocaml|module type S = sig val target : int -> int end
+module F (X : S) = struct let run x = X.target x end
+module A = struct let target x = x + 1 end
+module M = F(A)
+|ocaml} in
+  with_fixture ~name:"functor_target_variant_proofs" ~files:(native_files source)
+  @@ fun fixture ->
+  let variant_dir = Filename.concat fixture.build_dir "variant" in
+  let mkdir_code, mkdir_output = run_command "mkdir" ["-p"; variant_dir] in
+  Check.((mkdir_code = 0) int
+    ~error_msg:("variant directory exit %L, expected %R: " ^ mkdir_output)) ;
+  let variant_cmo = Filename.concat variant_dir "fixture.cmo" in
+  let compile_code, compile_output =
+    run_command ~cwd:fixture.root "ocamlc"
+      ["-bin-annot"; "-g"; "-open"; "Stdlib"; "-c"; "-o"; variant_cmo;
+       "fixture.ml"]
+  in
+  Check.((compile_code = 0) int
+    ~error_msg:("variant compilation exit %L, expected %R: " ^ compile_output)) ;
+  let db = index fixture in
+  Db.with_db db (fun conn ->
+    Check.((Db.int conn
+      "SELECT count(*) FROM functor_target_inputs WHERE outcome='collected'" = 2) int
+      ~error_msg:"FUNCTOR_TARGET_VARIANT_RED: collected target inputs are %L, expected %R") ;
+    Check.((Db.int conn
+      "SELECT count(DISTINCT artifact) FROM functor_target_witnesses" = 2) int
+      ~error_msg:"FUNCTOR_TARGET_VARIANT_RED: local witness artifacts are %L, expected %R") ;
+    Check.((Db.int conn
+      "SELECT coalesce(sum(reconciliation_refusals),0) FROM functor_target_inputs" = 0) int
+      ~error_msg:"FUNCTOR_TARGET_VARIANT_RED: reconciliation refusals are %L, expected %R") ;
+    Check.((Db.int conn
+      "SELECT count(*) FROM calls WHERE callee_name='A.target' AND kind='MAY_ENUMERATED'" = 1) int
+      ~error_msg:"FUNCTOR_TARGET_VARIANT_RED: canonical candidate calls are %L, expected %R") ;
+    Lwt.return_unit)
+
 let register_target_validator_null_callee () =
   Test.register ~__FILE__
     ~title:"functor targets: finalizer rejects a witness whose candidate lost its callee"
@@ -550,14 +599,83 @@ module M = F(A)
   Check.((code = 1) int ~error_msg:"rejected candidate index exit is %L, expected %R") ;
   Db.with_db db (fun conn ->
     Check.((Db.int conn
-      "SELECT expected_witnesses FROM functor_target_inputs" = 1) int
-      ~error_msg:"FUNCTOR_TARGET_COMPLETION_RED: expected witnesses are %L, expected %R") ;
+      "SELECT count(*) FROM functor_target_inputs \
+       WHERE outcome='collection_failed' AND expected_occurrences=0 \
+         AND expected_candidates=0 AND expected_witnesses=0" = 1) int
+      ~error_msg:"FUNCTOR_TARGET_COMPLETION_RED: atomic failed inputs are %L, expected %R") ;
+    Check.((Db.int conn "SELECT count(*) FROM calls WHERE callee_name='A.target' \
+       AND kind='MAY_ENUMERATED'" = 0) int
+      ~error_msg:"FUNCTOR_TARGET_ATOMIC_RED: rejected candidate left %L usable calls, expected %R") ;
     Check.((Db.int conn "SELECT count(*) FROM functor_target_witnesses" = 0) int
       ~error_msg:"rejected candidate stored %L witnesses, expected %R") ;
     Check.((Db.string_opt conn
       "SELECT value FROM comment_db_meta WHERE key='functor_target_contract'" = None)
       (option string)
       ~error_msg:"FUNCTOR_TARGET_COMPLETION_RED: rejected candidate marker is %L, expected %R") ;
+    Lwt.return_unit)
+
+let register_target_validator_occurrence_identity () =
+  Test.register ~__FILE__
+    ~title:"functor targets: finalizer authenticates the physical occurrence"
+    ~tags:["functor"; "targets"; "lifecycle"; "corruption"; "ratchet"]
+  @@ fun () ->
+  let source = {ocaml|module type S = sig val target : int -> int end
+module F (X : S) = struct let run x = X.target x + X.target x end
+module A = struct let target x = x + 1 end
+module M = F(A)
+|ocaml} in
+  with_fixture ~name:"functor_target_occurrence_identity" ~files:(native_files source)
+  @@ fun fixture ->
+  let db = index fixture in
+  Db.with_db_rw db (fun conn ->
+    Db.exec conn "PRAGMA foreign_keys=OFF" ;
+    Db.exec conn
+      "UPDATE functor_target_witnesses SET occurrence_ordinal=97 \
+       WHERE rowid=(SELECT min(rowid) FROM functor_target_witnesses)" ;
+    Check.((Arch_index__Arch_index_bindings.finalize_target_contract conn
+              ~selected_inputs:1 = false) bool
+      ~error_msg:"FUNCTOR_TARGET_OCCURRENCE_AUTH_RED: corrupted ordinal verdict is %L, expected %R") ;
+    Check.((Db.string_opt conn
+      "SELECT value FROM comment_db_meta WHERE key='functor_target_contract'" = None)
+      (option string) ~error_msg:"corrupt occurrence marker is %L, expected %R") ;
+    Lwt.return_unit)
+
+let register_target_validator_member_candidate_identity () =
+  Test.register ~__FILE__
+    ~title:"functor targets: finalizer authenticates actual member to candidate"
+    ~tags:["functor"; "targets"; "lifecycle"; "corruption"; "ratchet"]
+  @@ fun () ->
+  let source = {ocaml|module type S = sig val target : int -> int end
+module F (X : S) = struct let run x = X.target x end
+module A = struct let target x = x + 1 end
+module B = struct let target x = x - 1 end
+module MA = F(A)
+module MB = F(B)
+|ocaml} in
+  with_fixture ~name:"functor_target_member_candidate_identity"
+    ~files:(native_files source) @@ fun fixture ->
+  let db = index fixture in
+  Db.with_db_rw db (fun conn ->
+    Db.exec conn "PRAGMA foreign_keys=OFF" ;
+    Db.exec conn
+      "UPDATE functor_target_witnesses \
+       SET target_key=(SELECT c.target_key FROM functor_target_candidates c \
+                       WHERE c.occurrence_ordinal=functor_target_witnesses.target_occurrence_ordinal \
+                         AND c.actual_path='[\"B\"]'), \
+           target_function_id=(SELECT c.target_function_id FROM functor_target_candidates c \
+                       WHERE c.occurrence_ordinal=functor_target_witnesses.target_occurrence_ordinal \
+                         AND c.actual_path='[\"B\"]'), \
+           candidate_call_id=(SELECT c.candidate_call_id FROM functor_target_candidates c \
+                       WHERE c.occurrence_ordinal=functor_target_witnesses.target_occurrence_ordinal \
+                         AND c.actual_path='[\"B\"]') \
+       WHERE rowid=(SELECT min(rowid) FROM functor_target_witnesses \
+                    WHERE actual_path='[\"A\"]')" ;
+    Check.((Arch_index__Arch_index_bindings.finalize_target_contract conn
+              ~selected_inputs:1 = false) bool
+      ~error_msg:"FUNCTOR_TARGET_MEMBER_AUTH_RED: swapped candidate verdict is %L, expected %R") ;
+    Check.((Db.string_opt conn
+      "SELECT value FROM comment_db_meta WHERE key='functor_target_contract'" = None)
+      (option string) ~error_msg:"swapped member marker is %L, expected %R") ;
     Lwt.return_unit)
 
 let register_native_target_positions_and_refusals () =
@@ -1029,7 +1147,10 @@ let register () =
   register_native_direct_target_resolution () ;
   register_flat_target_non_inference () ;
   register_native_target_union_witnesses () ;
+  register_native_target_variant_local_proofs () ;
   register_target_validator_null_callee () ;
+  register_target_validator_occurrence_identity () ;
+  register_target_validator_member_candidate_identity () ;
   register_target_rejected_candidate_lifecycle () ;
   register_native_target_positions_and_refusals () ;
   register_native_traversal () ;

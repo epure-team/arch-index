@@ -740,6 +740,31 @@ type target_witness = {
   caller_name : string;
   call_location : string;
   occurrence_ordinal : int;
+  target_occurrence_ordinal : int;
+  target_key : string;
+  target_function_id : int;
+  candidate_call_id : int;
+}
+
+type target_occurrence = {
+  ordinal : int;
+  source : string;
+  compiler_unit : string;
+  caller_name : string;
+  call_location : string;
+  physical_ordinal : int;
+  member_path : string list;
+  occurrence_shape : string;
+  representative_artifact : string option;
+  representative_ordinal : int option;
+  top_call_id : int option;
+}
+
+type target_candidate = {
+  occurrence_ordinal : int;
+  target_key : string;
+  actual_path : string list;
+  member_path : string list;
   target_function_id : int;
   candidate_call_id : int;
 }
@@ -747,21 +772,43 @@ type target_witness = {
 let string_list_json values =
   Yojson.Safe.to_string (`List (List.map (fun value -> `String value) values))
 
-let store_target_collected db ~producer_run_id ~artifact ~expected_witnesses witnesses =
+let quote_option = function None -> "NULL" | Some value -> quote value
+let int_option = function None -> "NULL" | Some value -> string_of_int value
+
+let store_target_collected db ~producer_run_id ~artifact
+    ?(binding_refusals=0) ?(member_refusals=0) ?(reconciliation_refusals=0)
+    occurrences candidates witnesses =
   exec db "SAVEPOINT functor_target_input" ;
   try
     exec db (Printf.sprintf
-      "INSERT INTO functor_target_inputs(producer_run_id,artifact,outcome,expected_witnesses) VALUES(%d,%s,'collected',%d)"
-      producer_run_id (quote artifact) expected_witnesses) ;
+      "INSERT INTO functor_target_inputs(producer_run_id,artifact,outcome,expected_occurrences,expected_candidates,expected_witnesses,binding_refusals,member_refusals,reconciliation_refusals) VALUES(%d,%s,'collected',%d,%d,%d,%d,%d,%d)"
+      producer_run_id (quote artifact) (List.length occurrences)
+      (List.length candidates) (List.length witnesses) binding_refusals
+      member_refusals reconciliation_refusals) ;
+    List.iter (fun (o : target_occurrence) ->
+      exec db (Printf.sprintf
+        "INSERT INTO functor_target_occurrences(producer_run_id,artifact,ordinal,source,compiler_unit,caller_name,call_location,physical_ordinal,member_path,occurrence_shape,representative_artifact,representative_ordinal,top_call_id) VALUES(%d,%s,%d,%s,%s,%s,%s,%d,%s,%s,%s,%s,%s)"
+        producer_run_id (quote artifact) o.ordinal (quote o.source)
+        (quote o.compiler_unit) (quote o.caller_name) (quote o.call_location)
+        o.physical_ordinal (quote (string_list_json o.member_path))
+        (quote o.occurrence_shape) (quote_option o.representative_artifact)
+        (int_option o.representative_ordinal) (int_option o.top_call_id))) occurrences ;
+    List.iter (fun (c : target_candidate) ->
+      exec db (Printf.sprintf
+        "INSERT INTO functor_target_candidates(producer_run_id,artifact,occurrence_ordinal,target_key,actual_path,member_path,target_function_id,candidate_call_id) VALUES(%d,%s,%d,%s,%s,%s,%d,%d)"
+        producer_run_id (quote artifact) c.occurrence_ordinal (quote c.target_key)
+        (quote (string_list_json c.actual_path))
+        (quote (string_list_json c.member_path))
+        c.target_function_id c.candidate_call_id)) candidates ;
     List.iter (fun (w : target_witness) ->
       exec db (Printf.sprintf
-        "INSERT INTO functor_target_witnesses(producer_run_id,artifact,application_ordinal,declaration_key,formal_position,formal_key,actual_root_key,actual_path,member_path,caller_name,call_location,occurrence_ordinal,target_function_id,candidate_call_id) VALUES(%d,%s,%d,%s,%d,%s,%s,%s,%s,%s,%s,%d,%d,%d)"
+        "INSERT INTO functor_target_witnesses(producer_run_id,artifact,application_ordinal,declaration_key,formal_position,formal_key,actual_root_key,actual_path,member_path,caller_name,call_location,occurrence_ordinal,target_occurrence_ordinal,target_key,target_function_id,candidate_call_id) VALUES(%d,%s,%d,%s,%d,%s,%s,%s,%s,%s,%s,%d,%d,%s,%d,%d)"
         producer_run_id (quote artifact) w.application_ordinal
         (quote w.declaration_key) w.formal_position (quote w.formal_key)
         (quote w.actual_root_key) (quote (string_list_json w.actual_path))
         (quote (string_list_json w.member_path)) (quote w.caller_name)
-        (quote w.call_location) w.occurrence_ordinal w.target_function_id
-        w.candidate_call_id)) witnesses ;
+        (quote w.call_location) w.occurrence_ordinal w.target_occurrence_ordinal
+        (quote w.target_key) w.target_function_id w.candidate_call_id)) witnesses ;
     exec db "RELEASE functor_target_input"
   with exn ->
     let rolled_back = Sqlite3.exec db "ROLLBACK TO functor_target_input" in
@@ -772,7 +819,7 @@ let store_target_collected db ~producer_run_id ~artifact ~expected_witnesses wit
 
 let store_target_failed db ~producer_run_id ~artifact =
   exec db (Printf.sprintf
-    "INSERT INTO functor_target_inputs(producer_run_id,artifact,outcome,expected_witnesses) VALUES(%d,%s,'collection_failed',0)"
+    "INSERT INTO functor_target_inputs(producer_run_id,artifact,outcome,expected_occurrences,expected_candidates,expected_witnesses) VALUES(%d,%s,'collection_failed',0,0,0)"
     producer_run_id (quote artifact))
 
 let validate_target_contract db ~selected_inputs =
@@ -783,18 +830,62 @@ let validate_target_contract db ~selected_inputs =
   if scalar_count db
        "SELECT 1 FROM functor_target_inputs WHERE outcome<>'collected'"
      <> 0 then invalid () ;
-  let expected =
+  let expected_occurrences =
+    match rows db "SELECT coalesce(sum(expected_occurrences),0) FROM functor_target_inputs" with
+    | [[value]] -> db_int value
+    | _ -> invalid ()
+  in
+  let expected_candidates =
+    match rows db "SELECT coalesce(sum(expected_candidates),0) FROM functor_target_inputs" with
+    | [[value]] -> db_int value
+    | _ -> invalid ()
+  in
+  let expected_witnesses =
     match rows db "SELECT coalesce(sum(expected_witnesses),0) FROM functor_target_inputs" with
     | [[value]] -> db_int value
     | _ -> invalid ()
   in
-  if scalar_count db "SELECT 1 FROM functor_target_witnesses" <> expected then invalid () ;
+  if scalar_count db "SELECT 1 FROM functor_target_occurrences" <> expected_occurrences
+  then invalid () ;
+  if scalar_count db "SELECT 1 FROM functor_target_candidates" <> expected_candidates
+  then invalid () ;
+  if scalar_count db "SELECT 1 FROM functor_target_witnesses" <> expected_witnesses
+  then invalid () ;
   if scalar_count db
        "SELECT 1 FROM functor_target_inputs i \
-        LEFT JOIN (SELECT producer_run_id,artifact,count(*) AS actual \
-                   FROM functor_target_witnesses GROUP BY producer_run_id,artifact) w \
-          USING(producer_run_id,artifact) \
-        WHERE i.expected_witnesses IS NOT coalesce(w.actual,0)"
+        LEFT JOIN (SELECT producer_run_id,artifact,count(*) AS actual FROM functor_target_occurrences GROUP BY producer_run_id,artifact) o USING(producer_run_id,artifact) \
+        LEFT JOIN (SELECT producer_run_id,artifact,count(*) AS actual FROM functor_target_candidates GROUP BY producer_run_id,artifact) c USING(producer_run_id,artifact) \
+        LEFT JOIN (SELECT producer_run_id,artifact,count(*) AS actual FROM functor_target_witnesses GROUP BY producer_run_id,artifact) w USING(producer_run_id,artifact) \
+        WHERE i.expected_occurrences IS NOT coalesce(o.actual,0) \
+           OR i.expected_candidates IS NOT coalesce(c.actual,0) \
+           OR i.expected_witnesses IS NOT coalesce(w.actual,0)"
+     <> 0 then invalid () ;
+  if scalar_count db
+       "SELECT 1 FROM functor_target_occurrences o \
+        LEFT JOIN functor_catalogue_inputs ci USING(producer_run_id,artifact) \
+        LEFT JOIN functor_target_occurrences ro ON ro.producer_run_id=o.producer_run_id \
+          AND ro.artifact=o.representative_artifact AND ro.ordinal=o.representative_ordinal \
+        LEFT JOIN calls top ON top.id=o.top_call_id \
+        LEFT JOIN functions caller ON caller.id=top.caller_id \
+        LEFT JOIN modules caller_module ON caller_module.id=caller.module_id \
+        WHERE ci.source IS NOT o.source OR ci.compiler_unit IS NOT o.compiler_unit \
+          OR json_valid(o.call_location)<>1 OR json_valid(o.member_path)<>1 \
+          OR (o.representative_artifact IS NOT NULL AND ( \
+             ro.ordinal IS NULL OR ro.artifact IS NOT ro.representative_artifact \
+             OR ro.source IS NOT o.source OR ro.compiler_unit IS NOT o.compiler_unit \
+             OR ro.caller_name IS NOT o.caller_name OR ro.call_location IS NOT o.call_location \
+             OR ro.member_path IS NOT o.member_path OR ro.occurrence_shape IS NOT o.occurrence_shape \
+             OR top.kind IS NOT 'MAY_TOP' OR top.top_reason IS NOT 'module_param' \
+             OR top.producer_run_id IS NOT o.producer_run_id \
+             OR caller.name IS NOT ro.caller_name OR caller_module.path IS NOT ro.source \
+             OR top.call_site IS NOT (ro.source || ':' || json_extract(ro.call_location,'$.start_line'))))"
+     <> 0 then invalid () ;
+  if scalar_count db
+       "SELECT 1 FROM functor_target_candidates tc \
+        LEFT JOIN calls c ON c.id=tc.candidate_call_id \
+        WHERE c.kind IS NOT 'MAY_ENUMERATED' \
+           OR c.callee_id IS NOT tc.target_function_id \
+           OR c.producer_run_id IS NOT tc.producer_run_id"
      <> 0 then invalid () ;
   if scalar_count db
        "SELECT 1 FROM functor_target_witnesses w \
@@ -804,6 +895,11 @@ let validate_target_contract db ~selected_inputs =
           AND b.artifact=w.artifact AND b.ordinal=w.application_ordinal \
         LEFT JOIN functor_declarations d ON d.producer_run_id=w.producer_run_id \
           AND d.artifact=w.artifact AND d.declaration_key=w.declaration_key \
+        LEFT JOIN functor_target_occurrences o ON o.producer_run_id=w.producer_run_id \
+          AND o.artifact=w.artifact AND o.ordinal=w.target_occurrence_ordinal \
+        LEFT JOIN functor_target_candidates tc ON tc.producer_run_id=w.producer_run_id \
+          AND tc.artifact=w.artifact AND tc.occurrence_ordinal=w.target_occurrence_ordinal \
+          AND tc.target_key=w.target_key \
         LEFT JOIN calls c ON c.id=w.candidate_call_id \
         LEFT JOIN functions f ON f.id=w.target_function_id \
         LEFT JOIN modules target_module ON target_module.id=f.module_id \
@@ -817,6 +913,14 @@ let validate_target_contract db ~selected_inputs =
           OR d.declaration_key IS NULL \
           OR json_extract(d.formals,'$[' || (w.formal_position-1) || '].binder_key') \
              IS NOT w.formal_key \
+          OR o.ordinal IS NULL OR o.caller_name IS NOT w.caller_name \
+          OR o.call_location IS NOT w.call_location \
+          OR o.physical_ordinal IS NOT w.occurrence_ordinal \
+          OR o.member_path IS NOT w.member_path \
+          OR tc.actual_path IS NOT w.actual_path \
+          OR tc.member_path IS NOT w.member_path \
+          OR tc.target_function_id IS NOT w.target_function_id \
+          OR tc.candidate_call_id IS NOT w.candidate_call_id \
           OR c.id IS NULL OR c.kind IS NOT 'MAY_ENUMERATED' \
           OR c.callee_id IS NOT w.target_function_id \
           OR c.producer_run_id IS NOT w.producer_run_id \
@@ -834,17 +938,21 @@ let validate_target_contract db ~selected_inputs =
           OR json_type(w.call_location)<>'object'"
      <> 0 then invalid ()
 
-let finalize_target_contract db ~selected_inputs =
+let mark_target_contract db ~selected_inputs =
   exec db "DELETE FROM comment_db_meta WHERE key='functor_target_contract'" ;
+  let complete =
+    try validate_target_contract db ~selected_inputs ; true
+    with Invalid_contract -> false
+  in
+  if complete then
+    exec db
+      "INSERT INTO comment_db_meta(key,value) VALUES('functor_target_contract','v2')" ;
+  complete
+
+let finalize_target_contract db ~selected_inputs =
   exec db "BEGIN" ;
   try
-    let complete =
-      try validate_target_contract db ~selected_inputs ; true
-      with Invalid_contract -> false
-    in
-    if complete then
-      exec db
-        "INSERT INTO comment_db_meta(key,value) VALUES('functor_target_contract','v1')" ;
+    let complete = mark_target_contract db ~selected_inputs in
     exec db "COMMIT" ;
     complete
   with exn ->
