@@ -24,6 +24,49 @@ Git text would confuse a changed corpus or unavailable analysis with a code
 finding. It will require a semantic baseline and input/tool/configuration
 fingerprints before it is offered.
 
+## Recurring API-review packages
+
+`scripts/analysis-report-consumer.js` makes an existing `api-review`
+`report.json` reviewable over time. It never builds an index or decides a gate.
+Give it the report and a small, versioned scope manifest that names the corpus
+and configuration used to create that report:
+
+```json
+{"version":1,"corpus":"tezos-proto-alpha@<pinned-input>","configuration":"api-review"}
+```
+
+Create a first-run package, inspect it, then compare a later report against the
+reviewed package:
+
+```sh
+node scripts/analysis-report-consumer.js \
+  --report current/report.json --scope api-review-scope.json --out reviews/base
+
+node scripts/analysis-report-consumer.js \
+  --report later/report.json --scope api-review-scope.json \
+  --baseline reviews/base/run.json --out reviews/later
+```
+
+The output directory must be new. A complete package contains `report.json`,
+`scope.json`, `delta.json`, `diagnostics.txt`, and a final `run.json` whose
+hashes cover the preceding files. Keep or promote a baseline only after human
+review; the runner never rewrites one.
+
+The first package has `status: first-run`; its delta says `no_baseline` rather
+than inventing changes. A compatible comparison has `status: compared` and
+classifies exported API identities as `new`, `unchanged`, or `absent`, using
+only the producer-published `api_surface|file|function` identity. A line move
+does not change that identity. An absent API is not a fix, severity, or risk
+verdict; the runner does not compare reachability, MUST/MAY paths, or `MAY_TOP`
+frontiers.
+
+The runner exits 2 rather than compares if either report is incomplete, the API
+section is unavailable, an identity is duplicated, or the schema/profile,
+producer provenance, analysis coverage, or scope manifest differ. Stage7
+reports do not contain a corpus fingerprint, which is why the scope manifest is
+mandatory and compared exactly. This refusal is intentional: a changed corpus
+must not be represented as an API change.
+
 ## Optional rule evaluation
 
 With `--rules`, `arch-report` parses and evaluates the rules once through the same evaluator as
