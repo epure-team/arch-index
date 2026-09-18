@@ -1,0 +1,11 @@
+{
+  "round": 1,
+  "verdict": "GO_PENDING_HOSTED_CI",
+  "checks": [
+    "profile selection occurs before the single report collection and all three renderers consume the same value",
+    "api-review queries only the producer-published functions.exposed column",
+    "api inventory entries are SARIF notes and never a risk score or gate",
+    "architecture requires an explicit rule file",
+    "default reports preserve a null profile and existing sections"
+  ]
+}

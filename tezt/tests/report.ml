@@ -71,6 +71,19 @@ let run_report db =
   in
   (read "report.json", read "report.sarif", read "report.html")
 
+let run_report_profile db profile =
+  let dir = Temp.dir "arch_report_profile_out" in
+  let code, out = Arch_tezt.run_command (Arch_tezt.arch_report ())
+      [ db; "--out"; dir; "--profile"; profile ] in
+  if code <> 0 then Test.fail "arch-report profile %s failed (exit %d):\n%s" profile code out ;
+  let read name =
+    let ic = open_in (Filename.concat dir name) in
+    let n = in_channel_length ic in
+    let s = really_input_string ic n in
+    close_in ic ; s
+  in
+  (read "report.json", read "report.sarif", read "report.html")
+
 let run_report_with_rules db rules =
   let dir = Temp.dir "arch_report_rules_out" in
   let code, out =
@@ -128,6 +141,47 @@ let json_findings raw =
       |> List.map (fun f ->
              (Option.value ~default:"<no id>" (str "id" f), str "location" f,
                str "soundness_class" f))
+
+let register_api_profile () =
+  Test.register ~__FILE__
+    ~title:"arch-report api-review: profile identity and published API scope reach every artifact"
+    ~tags:["report"; "profile"; "api"]
+  @@ fun () ->
+  with_fixture ~name:"rep_api_profile" ~files:fixture_files @@ fun fixture ->
+  let db = Arch_tezt.temp_db "rep_api_profile" in
+  let code, output = Arch_tezt.index_raw_into ~db fixture in
+  if code <> 0 then Test.fail "index failed (exit %d):\n%s" code output ;
+  let json_text, sarif_text, html_text = run_report_profile db "api-review" in
+  let profile_of raw =
+    match Json.strict_object ~what:"report json" raw with
+    | Ok j -> str "profile" j
+    | Error e -> Test.fail "%s" e
+  in
+  Check.((profile_of json_text = Some "api-review") (option string)
+    ~error_msg:"JSON profile expected %R, got %L") ;
+  let sarif_profile =
+    match Json.strict_object ~what:"report sarif" sarif_text with
+    | Ok j -> (match Json.member "properties" j with Some p -> str "profile" p | None -> None)
+    | Error e -> Test.fail "%s" e
+  in
+  Check.((sarif_profile = Some "api-review") (option string)
+    ~error_msg:"SARIF profile expected %R, got %L") ;
+  Check.((Arch_tezt.contains ~needle:"profile <code>api-review</code>" html_text = true) bool
+    ~error_msg:"HTML profile identity absent: %L") ;
+  let api_section_has_coverage =
+    Arch_tezt.contains ~needle:{|"analysis": "api_surface"|} json_text
+    && Arch_tezt.contains ~needle:{|"status": "covered"|} json_text
+  in
+  Check.((api_section_has_coverage = true) bool
+    ~error_msg:"API profile must use only the persisted exposed column: %L") ;
+  let architecture_dir = Temp.dir "arch_report_architecture_missing_rules" in
+  let architecture_code, architecture_output = Arch_tezt.run_command (Arch_tezt.arch_report ())
+      [db; "--out"; architecture_dir; "--profile"; "architecture"] in
+  Check.((architecture_code = 2) int
+    ~error_msg:"architecture profile without rules must exit %R, got %L") ;
+  Check.((Arch_tezt.contains ~needle:"requires --rules" architecture_output = true) bool
+    ~error_msg:"architecture profile refusal must explain missing rules: %L") ;
+  Lwt.return_unit
 
 let register_round_trip () =
   Test.register ~__FILE__
@@ -516,6 +570,7 @@ let register_coverage_matrix () =
 
 let register () =
   register_round_trip () ;
+  register_api_profile () ;
   register_coverage_matrix () ;
   register_sarif_validates () ;
   register_not_analysed () ;

@@ -1,0 +1,10 @@
+{
+  "round": 1,
+  "verdict": "GO_PENDING_HOSTED_CI",
+  "checks": [
+    "api profile targeted native test passed",
+    "default report CHECK-5 round-trip test passed",
+    "temporary _build removed after checks",
+    "full CI remains required on the exact PR head"
+  ]
+}
