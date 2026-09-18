@@ -1,0 +1,27 @@
+{
+  "task": "change-review-contract",
+  "round": 1,
+  "reviewer": "maintainer",
+  "status": "GO_FOR_SEPARATE_IMPLEMENTATION",
+  "findings": [
+    {
+      "concern": "The current impact JSON identifies touched functions but not the exact diff/range or changed-line input used to derive them.",
+      "resolution": "An implementation must add a versioned impact provenance block, including the explicit mode (range or files), canonical changed-file/line map, and refusal-safe scope identity."
+    },
+    {
+      "concern": "A bounded closure includes MAY_ENUMERATED edges and may not be rendered as definite reachability.",
+      "resolution": "Normalized rows retain resolved_cone=possible_bounded and the exact edge-kind vocabulary; comparison status is descriptive and never a gate verdict."
+    },
+    {
+      "concern": "MAY_TOP has no enumerable forward target set.",
+      "resolution": "Only current observed frontier holders are compared. No inferred hidden-target or forward-completeness delta is emitted."
+    },
+    {
+      "concern": "An invocation digest changes when its DB path changes.",
+      "resolution": "As in Stage8, preserve it as provenance but compare stable producer identity and an explicit user-supplied scope manifest."
+    }
+  ],
+  "open": [
+    "Implementation needs its own Roster task and authentic impact fixtures; this design intake writes no product code."
+  ]
+}
