@@ -95,6 +95,16 @@ type coverage = {
   c_detail : string option;
 }
 
+(** The database facts that identify an index input without attempting to
+    identify its source checkout.  Kept separate from a full report collection:
+    lightweight consumers such as [arch-impact] must not run report-only
+    analysis queries against legacy flat schemas. *)
+type index_provenance = {
+  ip_schema_version : string option;
+  ip_producers : producer list;
+  ip_coverage : coverage list;
+}
+
 (** One finding, in the only representation any renderer sees.
 
     [f_id] is a stable identity {b derived from the content}, not a row id: CHECK-5 compares
@@ -193,10 +203,7 @@ let opt = function "" -> None | s -> Some s
    visible finding rather than a silent `covered`. *)
 let known_analyses = [ ("dead_code", "dead_code_sites"); ("sarif_import", "imported_findings") ]
 
-let collect ?profile ?rule_evaluation ~db_path (t : Arch_db.t) : t =
-  (match profile with
-  | None | Some "api-review" | Some "architecture" -> ()
-  | Some p -> invalid_arg ("unknown report profile: " ^ p));
+let collect_index_provenance (t : Arch_db.t) : index_provenance =
   let schema_version =
     if Arch_db.has_table t "comment_db_meta" then
       match q1 t "SELECT value FROM comment_db_meta WHERE key='schema_version'" with
@@ -227,6 +234,16 @@ let collect ?profile ?rule_evaluation ~db_path (t : Arch_db.t) : t =
                Some { c_language = opt l; c_analysis = a; c_status = s; c_detail = opt d }
            | _ -> None)
   in
+  { ip_schema_version = schema_version; ip_producers = producers; ip_coverage = coverage }
+
+let collect ?profile ?rule_evaluation ~db_path (t : Arch_db.t) : t =
+  (match profile with
+  | None | Some "api-review" | Some "architecture" -> ()
+  | Some p -> invalid_arg ("unknown report profile: " ^ p));
+  let index_provenance = collect_index_provenance t in
+  let schema_version = index_provenance.ip_schema_version in
+  let producers = index_provenance.ip_producers in
+  let coverage = index_provenance.ip_coverage in
   let top_frontier =
     if Arch_db.has_table t "calls" && Arch_db.has_col t "calls" "kind" then
       match q1 t "SELECT CAST(count(*) AS TEXT) FROM calls WHERE kind='MAY_TOP'" with
@@ -466,11 +483,10 @@ let verdicts_json (r : t) =
     ("verdicts_reason", `String reason);
     ("verdicts", `Assoc (List.map (fun (k, n) -> (k, `Int n)) r.verdicts)) ]
 
-let header_json (r : t) =
-  [ ("profile", match r.profile with Some p -> `String p | None -> `Null);
-    ("db_path", `String r.db_path);
+let index_provenance_fields ~schema_version ~producers ~coverage =
+  [
     ( "schema_version",
-      match r.schema_version with Some v -> `String v | None -> `Null );
+      match schema_version with Some v -> `String v | None -> `Null );
     ( "producers",
       `List
         (List.map
@@ -481,7 +497,7 @@ let header_json (r : t) =
                  ("soundness_class", `String p.p_soundness_class);
                  ( "invocation_digest",
                    match p.p_invocation_digest with Some d -> `String d | None -> `Null ) ])
-           r.producers) );
+           producers) );
     ( "analysis_coverage",
       `List
         (List.map
@@ -490,8 +506,19 @@ let header_json (r : t) =
                [ ("language", match c.c_language with Some l -> `String l | None -> `Null);
                  ("analysis", `String c.c_analysis); ("status", `String c.c_status);
                  ("detail", match c.c_detail with Some d -> `String d | None -> `Null) ])
-           r.coverage) );
-    ("top_frontier", match r.top_frontier with Some n -> `Int n | None -> `Null) ]
+           coverage) ) ]
+
+let index_provenance_json (p : index_provenance) =
+  `Assoc
+    (("version", `Int 1)
+    :: index_provenance_fields ~schema_version:p.ip_schema_version
+         ~producers:p.ip_producers ~coverage:p.ip_coverage)
+
+let header_json (r : t) =
+  [ ("profile", match r.profile with Some p -> `String p | None -> `Null);
+    ("db_path", `String r.db_path) ]
+  @ index_provenance_fields ~schema_version:r.schema_version ~producers:r.producers ~coverage:r.coverage
+  @ [("top_frontier", match r.top_frontier with Some n -> `Int n | None -> `Null)]
   @ verdicts_json r
 
 let finding_json (f : finding) =
