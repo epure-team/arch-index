@@ -1,0 +1,12 @@
+{
+  "round": 1,
+  "verdict": "GO_PENDING_HOSTED_CI",
+  "commands": [
+    "opam exec --switch=/home/mathias/dev/arch-index -- dune build tezt/tests/main.exe",
+    "_build/default/tezt/tests/main.exe --file tezt/tests/functor_bindings.ml --title 'functor targets: direct local application resolves a formal member call' --keep-going",
+    "_build/default/tezt/tests/main.exe --file tezt/tests/functor_bindings.ml --title 'functor targets: flat mode infers and persists no Stage 4 target or witness' --keep-going",
+    "_build/default/tezt/tests/main.exe --file tezt/tests/functor_catalogue.ml --title 'functor catalogue: query renders a validated snapshot' --keep-going"
+  ],
+  "result": "all targeted commands passed; the temporary worktree _build was removed",
+  "pending": "full CI suite on the exact PR head"
+}

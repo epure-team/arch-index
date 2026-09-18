@@ -33,6 +33,7 @@ Subcommands:
   reaches      <from> <to>     MUST-only: does a definite call path exist?
   unreachable  <from> <to>     SOUND dual (requires ⊤-marking): REACHABLE | UNREACHABLE | UNKNOWN
   escapes      <from>          the MAY_TOP (⊤) edges reachable from FROM
+  unknown-frontier <from>      explained MAY_TOP frontier (same sound closure as escapes)
   may-fail     <fn> --channel <name|all> [--assume-externals-pure] [--builtin-summaries]
                                per error-channel generalisation of raises (specs/error-channels.md):
                                BOUNDED | UNBOUNDED (⊤) | NOT_A_CARRIER(channel); --channel all
@@ -104,6 +105,7 @@ Subcommands:
   unsafe-params    [unfixed|fixed|all]  string-typed params tracked for a proper type (default: unfixed)
   functor-applications [limit] selected-CMT syntactic applications (default limit: 50)
   functor-bindings [limit] selected-CMT local formal provenance (default limit: 50)
+  functor-targets [limit] authenticated same-CMT concrete targets (default limit: 50)
   analysis-status             availability and contract markers for optional analyses
 
 A "MEASURE" command reports an exact number and sorts by it. It never fails the build and never
@@ -142,7 +144,7 @@ let () =
   match argv with
   | _ :: db_path :: cmd :: rest -> (
       let functor_limit =
-        if cmd <> "functor-applications" && cmd <> "functor-bindings" then None
+        if cmd <> "functor-applications" && cmd <> "functor-bindings" && cmd <> "functor-targets" then None
         else
           let parse s =
             if s = "" || not (String.for_all (fun c -> c >= '0' && c <= '9') s) then
@@ -231,6 +233,78 @@ let () =
               "functor_target_witnesses", ["producer_run_id"; "artifact"; "target_key"]]]
         in
         Arch_fmt.print fmt ["analysis"; "availability"; "contract"; "reason"] rows
+      in
+      let functor_targets () =
+        let need table columns =
+          if not (Arch_db.has_table t table)
+             || List.exists (fun column -> not (Arch_db.has_col t table column)) columns
+          then Arch_db.refuse "UNSUPPORTED_SCHEMA: functor target v2 tables/columns are absent"
+        in
+        if t.Arch_db.schema = Arch_db.Flat then
+          Arch_db.refuse "UNSUPPORTED_SCHEMA: functor target v2 is unavailable on the flat schema" ;
+        List.iter (fun (table, columns) -> need table columns)
+          [ "functor_target_inputs", ["producer_run_id"; "artifact"; "outcome";
+                                      "expected_occurrences"; "expected_candidates"; "expected_witnesses"];
+            "functor_target_occurrences", ["producer_run_id"; "artifact"; "ordinal";
+                                             "caller_name"; "call_location"; "top_call_id"];
+            "functor_target_candidates", ["producer_run_id"; "artifact"; "occurrence_ordinal";
+                                            "target_key"; "actual_path"; "member_path";
+                                            "target_function_id"; "candidate_call_id"];
+            "functor_target_witnesses", ["producer_run_id"; "artifact"; "application_ordinal";
+                                           "formal_position"; "target_occurrence_ordinal";
+                                           "target_key"; "target_function_id"; "candidate_call_id"] ] ;
+        if Arch_db.meta t "functor_target_contract" <> Some "v2" then
+          Arch_db.refuse "NOT_COMPUTED: functor target contract v2 marker is absent" ;
+        let invalid message sql =
+          if Arch_db.count t sql <> 0 then Arch_db.refuse "INCONSISTENT_TARGETS: %s" message
+        in
+        invalid "an input was not collected"
+          "SELECT count(*) FROM functor_target_inputs WHERE outcome<>'collected'" ;
+        invalid "an occurrence lacks its collected input"
+          "SELECT count(*) FROM functor_target_occurrences o LEFT JOIN functor_target_inputs i \
+           ON i.producer_run_id=o.producer_run_id AND i.artifact=o.artifact \
+           WHERE i.artifact IS NULL" ;
+        invalid "a candidate lacks its physical occurrence"
+          "SELECT count(*) FROM functor_target_candidates c LEFT JOIN functor_target_occurrences o \
+           ON o.producer_run_id=c.producer_run_id AND o.artifact=c.artifact \
+             AND o.ordinal=c.occurrence_ordinal WHERE o.ordinal IS NULL" ;
+        invalid "a witness is not its candidate's exact target"
+          "SELECT count(*) FROM functor_target_witnesses w LEFT JOIN functor_target_candidates c \
+           ON c.producer_run_id=w.producer_run_id AND c.artifact=w.artifact \
+             AND c.occurrence_ordinal=w.target_occurrence_ordinal AND c.target_key=w.target_key \
+           WHERE c.target_key IS NULL OR c.target_function_id<>w.target_function_id \
+              OR c.candidate_call_id<>w.candidate_call_id" ;
+        invalid "a candidate call is not its MAY_ENUMERATED target"
+          "SELECT count(*) FROM functor_target_candidates tc JOIN calls c ON c.id=tc.candidate_call_id \
+           WHERE c.kind<>'MAY_ENUMERATED' OR c.callee_id<>tc.target_function_id" ;
+        invalid "an input's published counts disagree with its rows"
+          "SELECT count(*) FROM functor_target_inputs i LEFT JOIN \
+             (SELECT producer_run_id,artifact,count(*) n FROM functor_target_occurrences GROUP BY producer_run_id,artifact) o \
+             ON o.producer_run_id=i.producer_run_id AND o.artifact=i.artifact LEFT JOIN \
+             (SELECT producer_run_id,artifact,count(*) n FROM functor_target_candidates GROUP BY producer_run_id,artifact) c \
+             ON c.producer_run_id=i.producer_run_id AND c.artifact=i.artifact LEFT JOIN \
+             (SELECT producer_run_id,artifact,count(*) n FROM functor_target_witnesses GROUP BY producer_run_id,artifact) w \
+             ON w.producer_run_id=i.producer_run_id AND w.artifact=i.artifact \
+           WHERE i.expected_occurrences<>coalesce(o.n,0) OR i.expected_candidates<>coalesce(c.n,0) \
+              OR i.expected_witnesses<>coalesce(w.n,0)" ;
+        let limit = Option.get functor_limit in
+        q ~h:["artifact"; "source"; "caller"; "call_location"; "physical_occurrence";
+              "target"; "actual_path"; "member_path"; "application_ordinal";
+              "formal_position"; "edge_kind"; "top_frontier"]
+          ~shape:Arch_db.Rows.t12' ~cells:Arch_db.Rows.c12 ~pty:unit_ty
+          (Printf.sprintf
+             "SELECT w.artifact,o.source,o.caller_name,o.call_location, \
+              CAST(w.target_occurrence_ordinal AS TEXT),f.name,w.actual_path,w.member_path, \
+              CAST(w.application_ordinal AS TEXT),CAST(w.formal_position AS TEXT),c.kind, \
+              COALESCE(top.kind || ':' || COALESCE(top.top_reason,''),'none') \
+              FROM functor_target_witnesses w \
+              JOIN functor_target_occurrences o ON o.producer_run_id=w.producer_run_id \
+                AND o.artifact=w.artifact AND o.ordinal=w.target_occurrence_ordinal \
+              JOIN calls c ON c.id=w.candidate_call_id JOIN functions f ON f.id=w.target_function_id \
+              LEFT JOIN calls top ON top.id=o.top_call_id \
+              ORDER BY w.artifact,w.target_occurrence_ordinal,f.name,w.application_ordinal,w.formal_position \
+              LIMIT %d" limit)
+          ()
       in
       (* [error_contract = "v1:exception,result,option,…"] — the channel
          list [--channel all] iterates (specs/error-channels.md "Query
@@ -339,6 +413,7 @@ let () =
                  "declaration_key"; "declaration_name"; "formal_position"; "formal_kind";
                  "formal_key"; "formal_name"; "head_application_ordinal";
                  "actual_root_key"; "argument"] bindings
+        | "functor-targets" -> functor_targets ()
         (* PORT FIX. These four read `calls.caller_name`, which exists only on the FLAT
            schema, so on arch-index's own CMT-produced schema the bash version died with a
            raw sqlite error and exit 1 — including `callers-of`, which the README advertises
@@ -495,12 +570,17 @@ let () =
                     a b
             in
             Arch_fmt.print fmt [ "verdict" ] [ [ Arch_db.Text verdict ] ]
-        | "escapes" ->
+        | "escapes" | "unknown-frontier" ->
+            if cmd = "unknown-frontier" && List.length rest <> 1 then
+              die 2 "arch-query: unknown-frontier accepts exactly one root" ;
             need_contract () ;
             (* An unknown root yields an empty ⊤ frontier, which reads as "nothing escapes" — the
                most reassuring possible answer to a question that was never asked. *)
             need_known "source" a ;
-            let hesc = [ "escaping_fn"; "call_site"; "kind" ] in
+            let hesc =
+              if cmd = "unknown-frontier" then [ "frontier_fn"; "call_site"; "edge_kind" ]
+              else [ "escaping_fn"; "call_site"; "kind" ]
+            in
             if flat then
               q ~h:hesc ~shape:Arch_db.Rows.t3' ~cells:Arch_db.Rows.c3 ~pty:str1
                 "WITH RECURSIVE reach_res(n) AS (SELECT ? UNION SELECT c.callee_name FROM calls c \

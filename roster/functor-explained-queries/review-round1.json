@@ -1,0 +1,16 @@
+{
+  "round": 1,
+  "reviewed_head": "working-tree",
+  "verdict": "GO_PENDING_HOSTED_CI",
+  "checks": [
+    "new commands open the database read-only through arch-query's existing handle",
+    "functor-targets requires main-schema target-v2 tables and exact marker",
+    "target reader rejects incomplete input, orphan occurrence/candidate/witness, candidate identity drift, non-MAY_ENUMERATED calls, and count disagreement",
+    "target rows retain a separate MAY_TOP frontier field and never present MAY_ENUMERATED as MUST",
+    "unknown-frontier reuses the existing sound MAY_TOP closure and refuses invalid arity"
+  ],
+  "limitations": [
+    "exact caller filtering and a single-object JSON envelope are deferred to the following report/profile stage",
+    "hosted CI remains the full native-suite authority"
+  ]
+}
