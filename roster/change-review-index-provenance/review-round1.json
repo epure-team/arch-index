@@ -1,0 +1,27 @@
+{
+  "task": "change-review-index-provenance",
+  "round": 1,
+  "reviewer": "maintainer",
+  "status": "GO",
+  "findings": [
+    {
+      "concern": "Reusing full arch-report collection in arch-impact would execute report-only queries against legacy flat databases.",
+      "resolution": "Extract a lightweight shared collect_index_provenance reader; full report collection composes it, while impact invokes only that reader."
+    },
+    {
+      "concern": "A database pathname and invocation digest do not establish a stable comparison identity.",
+      "resolution": "Publish schema/producers/coverage as observed facts. A future consumer compares producer name/version/soundness and exact coverage, while retaining digest only as provenance."
+    },
+    {
+      "concern": "Missing producer or coverage tables could be rendered as a successful complete analysis.",
+      "resolution": "Serialize null/empty values verbatim and document them as absence, never completeness."
+    },
+    {
+      "concern": "The new consumer-oriented metadata might change the impact reachability claim.",
+      "resolution": "It is JSON-only. Text/Markdown and MUST, bounded MAY and TOP semantics remain untouched; the existing full impact controls pass."
+    }
+  ],
+  "open": [
+    "The following intake may implement a sidecar consumer only after it validates impact_input, index_provenance, the edge-kind contract and an explicit user-supplied corpus/configuration scope manifest."
+  ]
+}

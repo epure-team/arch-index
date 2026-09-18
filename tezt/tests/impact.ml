@@ -126,6 +126,16 @@ let register_granularity () =
       | None -> ()
       | Some j ->
           impact_input b j ~mode:"diff" ~range:(Some "HEAD~1..HEAD") ~path:"src/app.src" ~lines:"6" ;
+          (* A flat arch-load database has no per-run provenance or coverage
+             rows.  Preserve that observed absence rather than inventing the
+             main-schema shape exercised by the dedicated test below. *)
+          (match Json.member "index_provenance" j with
+          | Some (`Assoc provenance) ->
+              Batch.check b ~msg:"flat index provenance keeps producer absence explicit"
+                (List.assoc_opt "producers" provenance = Some (`List [])) ;
+              Batch.check b ~msg:"flat index provenance keeps coverage absence explicit"
+                (List.assoc_opt "analysis_coverage" provenance = Some (`List []))
+          | _ -> Batch.note b "flat impact JSON lacks index_provenance") ;
           Batch.eq_string b ~msg:"a hunk on line 6 must touch exactly 'helper'"
             (String.concat "," (List.sort compare (names_of j "touched" ~field:"name")))
             "helper" ;
@@ -508,4 +518,58 @@ let register_input_deletion () =
               | _ -> Batch.note b "deleted input must retain one changed file")
           | _ -> Batch.note b "deleted input lacks impact_input")
       | _ -> Batch.note b "impact deleted input must be a JSON object") ;
+  Lwt.return_unit
+
+let register_index_provenance () =
+  Test.register ~__FILE__ ~title:"impact: index provenance uses the shared report reader"
+    ~tags:["impact"; "provenance"]
+  @@ fun () ->
+  Fixture.git_project ~name:"impact_index_provenance" ~files:[("src/app.src", app_src)] @@ fun root ->
+  edit_line root "src/app.src" 6 "  compute_v2" ;
+  Fixture.git_commit ~cwd:root "change helper" ;
+  let db =
+    Fixture.main ~name:"impact_index_provenance" ~seed:{|
+INSERT INTO producer_runs(producer, producer_version, invocation_digest, soundness_class)
+  VALUES ('fixture-indexer', 'v1', 'path-dependent-digest', 'sound_with_top');
+INSERT INTO modules(path, lines, has_mli) VALUES ('src/app.src', 11, 0);
+INSERT INTO functions(module_id, name, line_start, line_end, exposed, producer_run_id) VALUES
+  ((SELECT id FROM modules WHERE path='src/app.src'), 'entry', 1, 3, 1,
+   (SELECT id FROM producer_runs WHERE producer='fixture-indexer')),
+  ((SELECT id FROM modules WHERE path='src/app.src'), 'helper', 5, 7, 0,
+   (SELECT id FROM producer_runs WHERE producer='fixture-indexer'));
+INSERT INTO calls(caller_id, callee_id, callee_name, call_site, kind, producer_run_id) VALUES
+  ((SELECT id FROM functions WHERE name='entry'), (SELECT id FROM functions WHERE name='helper'),
+   'helper', 'src/app.src:2', 'MUST', (SELECT id FROM producer_runs WHERE producer='fixture-indexer'));
+INSERT INTO analysis_coverage(language, analysis, status, detail) VALUES
+  ('ocaml', 'callgraph', 'covered', 'fixture coverage');
+|} ()
+  in
+  Batch.run (fun b ->
+      match impact_json b ~what:"impact index provenance"
+              [db; "--diff"; "HEAD~1..HEAD"; "--repo"; root; "--format"; "json"] with
+      | Some (`Assoc fields) ->
+          (match List.assoc_opt "index_provenance" fields with
+          | Some (`Assoc provenance) ->
+              Batch.check b ~msg:"index provenance is versioned"
+                (match List.assoc_opt "version" provenance with Some (`Int 1) -> true | _ -> false) ;
+              Batch.check b ~msg:"main schema without meta does not invent a schema version"
+                (match List.assoc_opt "schema_version" provenance with Some `Null -> true | _ -> false) ;
+              Batch.check b ~msg:"producer identity comes from producer_runs"
+                (match List.assoc_opt "producers" provenance with
+                | Some (`List [`Assoc producer]) ->
+                    List.assoc_opt "producer" producer = Some (`String "fixture-indexer")
+                    && List.assoc_opt "producer_version" producer = Some (`String "v1")
+                    && List.assoc_opt "soundness_class" producer = Some (`String "sound_with_top")
+                    && List.assoc_opt "invocation_digest" producer = Some (`String "path-dependent-digest")
+                | _ -> false) ;
+              Batch.check b ~msg:"coverage is preserved rather than inferred from graph results"
+                (match List.assoc_opt "analysis_coverage" provenance with
+                | Some (`List [`Assoc coverage]) ->
+                    List.assoc_opt "language" coverage = Some (`String "ocaml")
+                    && List.assoc_opt "analysis" coverage = Some (`String "callgraph")
+                    && List.assoc_opt "status" coverage = Some (`String "covered")
+                    && List.assoc_opt "detail" coverage = Some (`String "fixture coverage")
+                | _ -> false)
+          | _ -> Batch.note b "impact JSON lacks index_provenance")
+      | _ -> Batch.note b "impact index provenance must be a JSON object") ;
   Lwt.return_unit

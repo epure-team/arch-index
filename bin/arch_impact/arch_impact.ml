@@ -305,6 +305,11 @@ let main () =
              ("new_findings", `Int new_findings);
              ("db", `String db_path); ("sound_reachability", `Bool sound);
              ("impact_input", impact_input);
+             (* Keep index identity in lockstep with [arch-report]'s one shared
+                provenance reader.  A local SQLite pathname cannot establish
+                that two briefs were produced from comparable inputs. *)
+             ( "index_provenance",
+               Arch_report.index_provenance_json (Arch_report.collect_index_provenance t) );
              ("resolved_edge_kinds", `List [`String "MUST"; `String "MAY_ENUMERATED"]);
              ("resolved_cone", `String "possible_bounded");
              ("touched",
