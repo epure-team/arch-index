@@ -1,0 +1,1 @@
+{"task":"ffi-integration-qualification","round":1,"verdict":"GO","commands":[{"command":"node roster/ffi-integration-qualification/check-report.js /home/mathias/dev/tezos/tezos","result":"pass; 125 OCaml-C, 182 Rust endpoints, graph unchanged"},{"command":"git diff --check","result":"pass"}],"remaining":["hosted exact-head CI","guarded rebase merge"]}
