@@ -1,0 +1,14 @@
+{
+  "task": "ffi-ocaml-c-resolution",
+  "round": 1,
+  "implementation_head": "5f72011",
+  "verdict": "GO",
+  "commands": [
+    {"command":"node roster/ffi-ocaml-c-resolution/check-resolution.js /home/mathias/dev/tezos/tezos","result":"pass; 125 strict bindings, 1547 retained frontiers"},
+    {"command":"assertion/setup controls","result":"pass; expected exits 1/2"},
+    {"command":"opam exec -- dune exec --root . tezt/tests/main.exe -- --job-count 1","result":"local runner completed after entering the normal 354-test execution; its detached terminal did not retain a terminal count, so hosted CI remains the exact-head full-suite gate"},
+    {"command":"git diff --check","result":"pass"}
+  ],
+  "observation": {"record_digest":"62a63a4df65178e1acdc5d93fb8368d0565a4a81d1132bb35584121a759fa481","scope":"declared primitive binding evidence only; no graph edge inferred"},
+  "remaining": ["hosted exact-head CI","guarded rebase merge"]
+}

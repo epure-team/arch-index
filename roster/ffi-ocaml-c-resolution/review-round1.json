@@ -1,0 +1,14 @@
+{
+  "task": "ffi-ocaml-c-resolution",
+  "round": 1,
+  "reviewed_head": "5f72011",
+  "reviewer": "maintainer",
+  "status": "GO",
+  "findings": [
+    {"concern":"symbol equality could silently become a name-only FFI join","resolution":"a result requires target-owned CAMLprim source, identical Dune source mirror, and an nm witness in a target stub artefact; fixtures reject membership, mirror and symbol loss.","evidence":["roster/ffi-ocaml-c-resolution/resolution.js","roster/ffi-ocaml-c-resolution/check-resolution.js"]},
+    {"concern":"two definitions or targets might select one arbitrary binding","resolution":"witnesses are deduplicated only across archive/shared copies of the same target-definition; distinct eligible definitions remain MAY_TOP(ffi) with ambiguous_strict_witnesses.","evidence":["roster/ffi-ocaml-c-resolution/resolution.js"]},
+    {"concern":"an exported stub could be described as full ABI or call-graph proof","resolution":"the output scope/spec exclude ABI signatures, loaded images, graph edges and MUST claims.","evidence":["specs/ffi-ocaml-c-resolution.md","roster/ffi-ocaml-c-resolution/task.md"]}
+  ],
+  "open": [],
+  "accepted_limits": ["Only direct Dune foreign_stubs conventional artefacts are covered.","Source mirror equality is a current-build witness, not a final executable load proof."]
+}
