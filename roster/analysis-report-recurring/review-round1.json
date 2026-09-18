@@ -1,0 +1,21 @@
+{
+  "task": "analysis-report-recurring",
+  "round": 1,
+  "reviewer": "maintainer",
+  "status": "GO",
+  "findings": [
+    {
+      "concern": "Producer invocation digests vary because the indexer hashes its database path.",
+      "resolution": "Comparison uses producer name/version/soundness identity; full digest remains recorded in the copied report as provenance."
+    },
+    {
+      "concern": "Stage7 report JSON has no corpus fingerprint, so absence could otherwise be a reduced corpus.",
+      "resolution": "A mandatory version-1 scope manifest is stored and canonically hashed; any baseline mismatch refuses comparison."
+    },
+    {
+      "concern": "A line move could be represented as delete-plus-add.",
+      "resolution": "Only the published api_surface file:function identity participates in the diff; locations are retained in report evidence, not identity."
+    }
+  ],
+  "open": []
+}
