@@ -69,6 +69,28 @@ let cap ?(pre = "") n l =
 
 type touched = { name : string; file : string; exported : bool; how : string }
 
+(* The runner that compares two impact briefs needs the input that THIS briefing
+   actually consumed, not a reconstruction from Git prose. [Arch_diff] has
+   already parsed and normalized it; serialize that value once, in key order.
+   An empty list is meaningful (a deletion-only file), and differs from
+   ["whole"] (the caller explicitly selected a whole file). *)
+let impact_input_json ~mode ~range changed =
+  let lines = function
+    | Arch_diff.Whole -> `String "whole"
+    | Arch_diff.Lines h ->
+        Hashtbl.fold (fun line () acc -> line :: acc) h []
+        |> List.sort compare |> List.map (fun line -> `Int line) |> fun xs -> `List xs
+  in
+  let changed_files =
+    Arch_diff.SM.bindings changed
+    |> List.map (fun (path, changed_lines) ->
+           `Assoc [ ("path", `String path); ("lines", lines changed_lines) ])
+  in
+  `Assoc
+    [ ("version", `Int 1); ("mode", `String mode);
+      ("range", match range with Some value -> `String value | None -> `Null);
+      ("changed_files", `List changed_files) ]
+
 let analyse (t : Arch_db.t) (g : Arch_graph.t) changed repo =
   let nodes = Arch_graph.nodes g in
   let resolver =
@@ -201,12 +223,17 @@ let main () =
     with Arch_db.Refused m | Arch_db.Broken m -> die ("arch-impact: " ^ m)
   in
   let files = opt "--files" "" in
+  let range = opt "--diff" "HEAD~1..HEAD" in
   let changed =
     if files <> "" then Arch_diff.of_files (String.split_on_char ',' files)
     else
-      match Arch_diff.changed_lines ~repo ~range:(opt "--diff" "HEAD~1..HEAD") with
+      match Arch_diff.changed_lines ~repo ~range with
       | Ok c -> c
       | Error e -> die ("arch-impact: " ^ e)
+  in
+  let impact_input =
+    if files <> "" then impact_input_json ~mode:"files" ~range:None changed
+    else impact_input_json ~mode:"diff" ~range:(Some range) changed
   in
   if Arch_diff.SM.is_empty changed then
     prerr_endline "arch-impact: the diff is empty — nothing to brief" ;
@@ -277,6 +304,7 @@ let main () =
              ("verdict", `String (verdict_str verdict));
              ("new_findings", `Int new_findings);
              ("db", `String db_path); ("sound_reachability", `Bool sound);
+             ("impact_input", impact_input);
              ("resolved_edge_kinds", `List [`String "MUST"; `String "MAY_ENUMERATED"]);
              ("resolved_cone", `String "possible_bounded");
              ("touched",

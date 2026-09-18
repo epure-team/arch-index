@@ -1,0 +1,27 @@
+{
+  "task": "change-review-provenance",
+  "round": 1,
+  "reviewer": "maintainer",
+  "status": "GO",
+  "findings": [
+    {
+      "concern": "A future consumer could compare briefs whose input scopes are different.",
+      "resolution": "Expose the exact already-parsed mode, range and changed-file/line map as versioned JSON provenance."
+    },
+    {
+      "concern": "A deletion-only path has no surviving new-file line and could be confused with a whole-file selection.",
+      "resolution": "Serialize it as an explicit empty integer list; reserve the string whole for --files only."
+    },
+    {
+      "concern": "Path or line ordering could make reports noisy across equivalent invocations.",
+      "resolution": "Use the diff map's ordered bindings and sort line numbers before JSON serialization."
+    },
+    {
+      "concern": "Provenance might accidentally strengthen the existing reachability claim.",
+      "resolution": "Keep text/Markdown output and analysis semantics untouched; existing tests retain the possible_bounded/TOP controls."
+    }
+  ],
+  "open": [
+    "A later runner must validate an explicit scope manifest before comparing two impact briefs."
+  ]
+}
