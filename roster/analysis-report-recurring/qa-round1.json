@@ -1,0 +1,20 @@
+{
+  "task": "analysis-report-recurring",
+  "round": 1,
+  "verdict": "GO_PENDING_HOSTED_CI",
+  "commands": [
+    {
+      "command": "node scripts/analysis-report-consumer-check.js",
+      "result": "pass; first-run, semantic new/unchanged/absent, changed invocation digest, scope refusal, duplicate refusal"
+    },
+    {
+      "command": "node --check scripts/analysis-report-consumer.js && git diff --check",
+      "result": "pass"
+    },
+    {
+      "command": "opam exec --switch=/home/mathias/dev/arch-index -- dune build @runtest",
+      "result": "new Node runner check passed; Tezt 347/355 passed. The 8 failures are existing environment/setup failures outside this change: native fixture checkers load compiler-libs from /home/mathias/dev/epure/_opam against this OCaml-5.3 worktree, and two owned checks lack @install output. Hosted exact-head CI is required for the authoritative full-suite gate."
+    }
+  ],
+  "remaining": ["hosted exact-head CI", "guarded rebase merge"]
+}
