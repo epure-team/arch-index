@@ -34,6 +34,12 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.21'
+          # setup-go enables its module/build cache by default, but without this
+          # monorepo path list it looks only for ./go.sum, logs a warning, and
+          # caches nothing. Both Go modules are runtime test inputs.
+          cache-dependency-path: |
+            callgraph-go/go.sum
+            callgraph-go/effects/go.sum
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
