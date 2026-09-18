@@ -9,12 +9,12 @@ const {runConsumer} = require('./analysis-report-consumer.js');
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'analysis-report-consumer-'));
 const put = (name, value) => { const p = path.join(root, name); fs.writeFileSync(p, `${JSON.stringify(value, null, 2)}\n`); return p; };
-const report = rows => ({profile: 'api-review', schema_version: '1.12', producers: [{producer: 'arch-index', producer_version: '1', soundness_class: 'sound_with_top', invocation_digest: 'abc'}], analysis_coverage: [], sections: [{analysis: 'api_surface', status: 'covered', finding_count: rows.length, findings: rows.map(([file, name, line]) => ({id: `api_surface|${file}|${name}`, kind: 'api_surface', subject: name, location: `${file}:${line}`}))}]});
+const report = (rows, digest = 'abc') => ({profile: 'api-review', schema_version: '1.12', producers: [{producer: 'arch-index', producer_version: '1', soundness_class: 'sound_with_top', invocation_digest: digest}], analysis_coverage: [], sections: [{analysis: 'api_surface', status: 'covered', finding_count: rows.length, findings: rows.map(([file, name, line]) => ({id: `api_surface|${file}|${name}`, kind: 'api_surface', subject: name, location: `${file}:${line}`}))}]});
 const scope = put('scope.json', {version: 1, corpus: 'fixture-corpus@1', configuration: 'api-review'});
 const baseReport = put('base.json', report([['a.ml', 'f', 1], ['b.ml', 'g', 2]]));
 const base = runConsumer({report: baseReport, scope, out: path.join(root, 'base')});
 assert.equal(base.exit, 0, 'first run must succeed');
-const currentReport = put('current.json', report([['b.ml', 'g', 99], ['c.ml', 'h', 3]]));
+const currentReport = put('current.json', report([['b.ml', 'g', 99], ['c.ml', 'h', 3]], 'different-run-path-digest'));
 const compared = runConsumer({report: currentReport, scope, baseline: path.join(root, 'base', 'run.json'), out: path.join(root, 'current')});
 assert.equal(compared.exit, 0, 'comparison must succeed');
 const delta = JSON.parse(fs.readFileSync(path.join(root, 'current', 'delta.json')));
