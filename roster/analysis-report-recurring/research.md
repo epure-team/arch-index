@@ -21,8 +21,11 @@ bare report, and a differing scope manifest refuses the comparison.  This is
 explicit provenance rather than automatic corpus discovery.
 
 Compatibility is deliberately narrow: schema version, profile, producer
-identities, API section availability and the scope manifest must match after
-canonical JSON normalization.  This detects changed tool/corpus/contracts
+identity (name, version, soundness class), API section availability and the
+scope manifest must match after canonical JSON normalization. Invocation
+digests are retained in each package but are not compared: the current indexer
+digest contains its database path and therefore legitimately changes per run.
+This detects changed tool/corpus/contracts
 before any semantic rows are compared.  Duplicate keys are an invalid producer
 output rather than a first-wins choice.  A future `change-review` profile can
 provide a richer identity only through a separately versioned contract.

@@ -18,6 +18,10 @@ const encoded = value => JSON.stringify(canonical(value));
 const same = (a, b) => encoded(a) === encoded(b);
 const readJson = file => JSON.parse(fs.readFileSync(file, 'utf8'));
 const writeJson = (file, value) => fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`);
+const producerIdentity = producers => producers.map(p => {
+  if (!p || typeof p.producer !== 'string' || !p.producer || (p.producer_version !== null && typeof p.producer_version !== 'string') || typeof p.soundness_class !== 'string' || !p.soundness_class) fail('invalid producer provenance');
+  return {producer: p.producer, producer_version: p.producer_version, soundness_class: p.soundness_class};
+}).sort((a, b) => encoded(a).localeCompare(encoded(b)));
 
 function fail(message) { throw new Error(message); }
 
@@ -49,7 +53,7 @@ function reportContract(report) {
     rows.set(identity, {identity, location: finding.location === null ? null : finding.location, id: finding.id});
   }
   if (api[0].finding_count !== rows.size) fail('api_surface finding_count disagrees with findings');
-  return {schema_version: report.schema_version, profile: report.profile, producers: report.producers,
+  return {schema_version: report.schema_version, profile: report.profile, producers: report.producers, producer_identity: producerIdentity(report.producers),
     analysis_coverage: report.analysis_coverage, rows};
 }
 
@@ -73,7 +77,7 @@ function delta(base, current) {
 function compatible(base, current, baselineScope, scope) {
   if (base.schema_version !== current.schema_version) fail('baseline schema_version differs');
   if (base.profile !== current.profile) fail('baseline profile differs');
-  if (!same(base.producers, current.producers)) fail('baseline producer provenance differs');
+  if (!same(base.producer_identity, current.producer_identity)) fail('baseline producer identity differs');
   if (!same(base.analysis_coverage, current.analysis_coverage)) fail('baseline analysis coverage differs');
   if (baselineScope.sha256 !== scope.sha256) fail('baseline scope manifest differs');
 }
@@ -120,7 +124,7 @@ function runConsumer(options) {
     writeJson(path.join(out, 'scope.json'), canonical(scopeValue));
     writeJson(path.join(out, 'delta.json'), comparison);
     outcome = {version: 1, complete: true, status: options.baseline ? 'compared' : 'first-run',
-      report: {profile: current.profile, schema_version: current.schema_version}, scope: {sha256: scope.sha256},
+      report: {profile: current.profile, schema_version: current.schema_version, producers: current.producers}, scope: {sha256: scope.sha256},
       comparison: comparison.summary, artifacts: {}};
     fs.writeFileSync(path.join(out, 'diagnostics.txt'), diagnostics);
     for (const name of ['report.json', 'scope.json', 'delta.json', 'diagnostics.txt']) outcome.artifacts[name] = sha256(fs.readFileSync(path.join(out, name)));

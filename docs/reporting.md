@@ -62,7 +62,9 @@ frontiers.
 
 The runner exits 2 rather than compares if either report is incomplete, the API
 section is unavailable, an identity is duplicated, or the schema/profile,
-producer provenance, analysis coverage, or scope manifest differ. Stage7
+producer identity, analysis coverage, or scope manifest differ. Invocation
+digests are retained as provenance but may change with an index database path,
+so they do not themselves make a recurring comparison incompatible. Stage7
 reports do not contain a corpus fingerprint, which is why the scope manifest is
 mandatory and compared exactly. This refusal is intentional: a changed corpus
 must not be represented as an API change.
