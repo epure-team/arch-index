@@ -79,6 +79,31 @@ let int_field b j key expected =
   | Ok n -> Batch.eq_int b ~msg:("impact." ^ key) n expected
   | Error e -> Batch.note b "%s" e
 
+let impact_input b j ~mode ~range ~path ~lines =
+  match Json.member "impact_input" j with
+  | Some (`Assoc fields) ->
+      let find key = List.assoc_opt key fields in
+      Batch.eq_string_opt b ~msg:"impact_input.mode"
+        (match find "mode" with Some (`String x) -> Some x | _ -> None) (Some mode) ;
+      Batch.eq_string_opt b ~msg:"impact_input.range"
+        (match find "range" with Some (`String x) -> Some x | _ -> None) range ;
+      (match find "changed_files" with
+      | Some (`List [ `Assoc file ]) ->
+          Batch.eq_string_opt b ~msg:"impact_input.changed_files[0].path"
+            (match List.assoc_opt "path" file with Some (`String x) -> Some x | _ -> None)
+            (Some path) ;
+          Batch.eq_string_opt b ~msg:"impact_input.changed_files[0].lines"
+            (match List.assoc_opt "lines" file with
+            | Some (`String x) -> Some x
+            | Some (`List xs) ->
+                Some
+                  (String.concat ","
+                     (List.filter_map (function `Int n -> Some (string_of_int n) | _ -> None) xs))
+            | _ -> None)
+            (Some lines)
+      | _ -> Batch.note b "impact_input.changed_files must contain one canonical fixture path")
+  | _ -> Batch.note b "impact_input must be a JSON object"
+
 let register_granularity () =
   Test.register ~__FILE__ ~title:"impact: a hunk touches the span that contains it, and no other"
     ~tags:["impact"]
@@ -94,12 +119,13 @@ let register_granularity () =
       (* Edit ONLY line 6, inside helper. *)
       edit_line root "src/app.src" 6 "  compute_v2" ;
       Fixture.git_commit ~cwd:root "change helper" ;
-      match
+      (match
         impact_json b ~what:"impact"
           [db; "--diff"; "HEAD~1..HEAD"; "--repo"; root; "--format"; "json"]
       with
       | None -> ()
       | Some j ->
+          impact_input b j ~mode:"diff" ~range:(Some "HEAD~1..HEAD") ~path:"src/app.src" ~lines:"6" ;
           Batch.eq_string b ~msg:"a hunk on line 6 must touch exactly 'helper'"
             (String.concat "," (List.sort compare (names_of j "touched" ~field:"name")))
             "helper" ;
@@ -167,6 +193,10 @@ let register_granularity () =
           Batch.eq_string_opt b ~msg:"impact.verdict without --fail-on-new-findings"
             (match Json.member "verdict" j with Some (`String s) -> Some s | _ -> None)
             (Some "pass")) ;
+      match impact_json b ~what:"impact files"
+              [db; "--files"; "src/app.src"; "--repo"; root; "--format"; "json"] with
+      | Some j -> impact_input b j ~mode:"files" ~range:None ~path:"src/app.src" ~lines:"whole"
+      | None -> ()) ;
   Lwt.return_unit
 
 let register_contract () =
@@ -445,4 +475,37 @@ let register_diff_parsing () =
                 ~msg:"a diff CONTENT line must never become a file"
                 ~haystack:(String.concat "," invented) ghost)
             ["/dev/null"; "header comment"]) ;
+  Lwt.return_unit
+
+let register_input_deletion () =
+  Test.register ~__FILE__ ~title:"impact: input provenance keeps a deleted file distinct from a whole file"
+    ~tags:["impact"; "diff"]
+  @@ fun () ->
+  Fixture.git_project ~name:"impact_deleted_input"
+    ~files:[("deleted.src", "fn obsolete:\n  old\n  end\n")] @@ fun root ->
+  Sys.remove (Filename.concat root "deleted.src") ;
+  Fixture.git_commit ~cwd:root "delete input" ;
+  let db =
+    Fixture.flat ~name:"impact_deleted_input"
+      {|{"type":"function","name":"obsolete","file_path":"deleted.src","line_start":1,"line_end":3}
+{"type":"function","name":"entry","file_path":"live.src","line_start":1,"line_end":3}
+{"type":"call","caller_name":"entry","caller_file":"live.src","callee_name":"obsolete","callee_file":"deleted.src","call_site":"live.src:2","kind":"MUST"}
+|}
+  in
+  Batch.run (fun b ->
+      match impact_json b ~what:"impact deleted input"
+              [db; "--diff"; "HEAD~1..HEAD"; "--repo"; root; "--format"; "json"] with
+      | Some (`Assoc fields) ->
+          (match List.assoc_opt "impact_input" fields with
+          | Some (`Assoc input) ->
+              (match List.assoc_opt "changed_files" input with
+              | Some (`List [`Assoc file]) ->
+                  Batch.eq_string_opt b ~msg:"deleted input path"
+                    (match List.assoc_opt "path" file with Some (`String x) -> Some x | _ -> None)
+                    (Some "deleted.src") ;
+                  Batch.check b ~msg:"a deleted file has [], never whole"
+                    (match List.assoc_opt "lines" file with Some (`List []) -> true | _ -> false)
+              | _ -> Batch.note b "deleted input must retain one changed file")
+          | _ -> Batch.note b "deleted input lacks impact_input")
+      | _ -> Batch.note b "impact deleted input must be a JSON object") ;
   Lwt.return_unit

@@ -81,6 +81,7 @@ let () =
   Impact.register_findings_gate () ;
   Impact.register_half_span () ;
   Impact.register_diff_parsing () ;
+  Impact.register_input_deletion () ;
   Callgraph_ocaml.register_kinds () ;
   Callgraph_ocaml.register_soundness () ;
   Callgraph_ocaml.register_deferred_is_not_dead () ;
