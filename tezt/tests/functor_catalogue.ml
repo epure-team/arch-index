@@ -120,6 +120,16 @@ let register_query () =
     ~error_msg:"query summary contract absent: %L") ;
   Check.((Arch_tezt.contains ~needle:{|"total":1|} output = true) bool
     ~error_msg:"query total absent: %L") ;
+  let status_code, status = run_command ~env:[("ARCH_QUERY_FORMAT", "json")] (arch_query ())
+      [db; "analysis-status"] in
+  Check.((status_code = 0) int ~error_msg:"analysis-status exit expected %R, got %L") ;
+  Check.((Arch_tezt.contains
+            ~needle:{|"analysis":"functor_catalogue","availability":"COMPUTED","contract":"v1"|}
+            status = true) bool
+    ~error_msg:"analysis-status must distinguish collected catalogue evidence: %L") ;
+  let status_bad_code, _ = run_command (arch_query ()) [db; "analysis-status"; "unexpected"] in
+  Check.((status_bad_code = 2) int
+    ~error_msg:"analysis-status arguments must be refused with %R, got %L") ;
   let bad_code, _ = run_command (arch_query ()) ["/definitely/not/opened.db"; "functor-applications"; "0x10"] in
   Check.((bad_code = 2) int ~error_msg:"invalid limit must fail before DB open with %R, got %L") ;
   Lwt.return_unit
