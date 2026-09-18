@@ -104,6 +104,7 @@ Subcommands:
   unsafe-params    [unfixed|fixed|all]  string-typed params tracked for a proper type (default: unfixed)
   functor-applications [limit] selected-CMT syntactic applications (default limit: 50)
   functor-bindings [limit] selected-CMT local formal provenance (default limit: 50)
+  analysis-status             availability and contract markers for optional analyses
 
 A "MEASURE" command reports an exact number and sorts by it. It never fails the build and never
 takes a --fail-on-... threshold: "is this too big" is a human judgement, not something these
@@ -185,6 +186,52 @@ let () =
       let str2 = Arch_db.Ty.(t2 string string) in
       ignore str2 ;
       let need_contract () = Arch_db.require_contract t cmd in
+      let analysis_status () =
+        (* This is deliberately availability metadata rather than a claim that
+           a reader has returned an empty result.  A later optional-analysis
+           contract must not make an older DB look like it ran and found zero
+           rows. *)
+        let marker key expected = Arch_db.meta t key = Some expected in
+        let has table columns =
+          Arch_db.has_table t table && List.for_all (Arch_db.has_col t table) columns
+        in
+        let status name contract tables =
+          if t.Arch_db.schema = Arch_db.Flat then
+            [Arch_db.Text name; Arch_db.Text "UNSUPPORTED_SCHEMA"; Arch_db.Nul;
+             Arch_db.Text "flat schema"]
+          else if not (List.for_all (fun (table, columns) -> has table columns) tables) then
+            [Arch_db.Text name; Arch_db.Text "NOT_COMPUTED"; Arch_db.Nul;
+             Arch_db.Text "required tables or columns absent"]
+          else if not (marker (name ^ "_contract") contract) then
+            [Arch_db.Text name; Arch_db.Text "NOT_COMPUTED"; Arch_db.Nul;
+             Arch_db.Text "contract marker absent or incompatible"]
+          else
+            [Arch_db.Text name; Arch_db.Text "COMPUTED"; Arch_db.Text contract;
+             Arch_db.Text "producer-published contract"]
+        in
+        let callgraph =
+          match t.Arch_db.contract with
+          | Some contract -> [Arch_db.Text "callgraph"; Arch_db.Text "COMPUTED";
+                              Arch_db.Text contract; Arch_db.Text "producer-published contract"]
+          | None -> [Arch_db.Text "callgraph"; Arch_db.Text "NOT_COMPUTED"; Arch_db.Nul;
+                     Arch_db.Text "callgraph contract marker absent"]
+        in
+        let rows =
+          [callgraph;
+           status "functor_catalogue" "v1"
+             ["functor_catalogue_inputs", ["producer_run_id"; "artifact"; "outcome"];
+              "functor_applications", ["producer_run_id"; "artifact"; "ordinal"]];
+           status "functor_binding" "v1"
+             ["functor_binding_inputs", ["producer_run_id"; "artifact"; "outcome"];
+              "functor_bindings", ["producer_run_id"; "artifact"; "ordinal"; "status"]];
+           status "functor_target" "v2"
+             ["functor_target_inputs", ["producer_run_id"; "artifact"; "outcome"];
+              "functor_target_occurrences", ["producer_run_id"; "artifact"; "ordinal"];
+              "functor_target_candidates", ["producer_run_id"; "artifact"; "occurrence_ordinal"; "target_key"];
+              "functor_target_witnesses", ["producer_run_id"; "artifact"; "target_key"]]]
+        in
+        Arch_fmt.print fmt ["analysis"; "availability"; "contract"; "reason"] rows
+      in
       (* [error_contract = "v1:exception,result,option,…"] — the channel
          list [--channel all] iterates (specs/error-channels.md "Query
          vocabulary"). *)
@@ -258,6 +305,9 @@ let () =
       in
       try
         (match cmd with
+        | "analysis-status" ->
+            if rest <> [] then die 2 "arch-query: analysis-status accepts no arguments" ;
+            analysis_status ()
         | "functor-applications" ->
             let summary, applications =
               Arch_functor_catalogue.read t ~limit:(Option.get functor_limit)

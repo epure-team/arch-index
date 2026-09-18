@@ -44,3 +44,14 @@ physical site, zero limit, corruption, flat and markerless database. Assert no
 graph mutation with row-count snapshots. Run the target reader against the
 pinned Tezos corpus as an observation only; its result must not become a
 precision claim.
+
+## First implementation receipt
+
+`analysis-status` is implemented first because it makes later optional readers
+observable without conflating absent computation with an empty query. The
+targeted `functor_catalogue` native test passed on 2026-09-18, including the
+new status assertion. Its three pre-existing native-probe/checker setup
+failures were caused by deliberately scoped `dune build tezt/tests/main.exe`
+not building the catalogue probe executables; a full `dune runtest`/hosted CI
+is required for that separate setup contract. The temporary `_build` was
+removed immediately after the check.
