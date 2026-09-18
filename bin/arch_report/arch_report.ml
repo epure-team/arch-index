@@ -17,7 +17,7 @@ open Arch_tools
 let usage =
   {|arch-report — one report, three renderings, from a single query pass.
 
-Usage: arch-report <db> --out <dir> [--rules <rules-file>]
+Usage: arch-report <db> --out <dir> [--rules <rules-file>] [--profile api-review|architecture]
 
 Writes into <dir>:
   report.json   the machine contract
@@ -46,12 +46,27 @@ let write_file path contents =
 
 let () =
   try
-    let db_path, dir, rules_path =
+    let db_path, dir, rules_path, profile =
       match Array.to_list Sys.argv with
-      | [_; db_path; "--out"; dir] -> (db_path, dir, None)
-      | [_; db_path; "--out"; dir; "--rules"; rules] -> (db_path, dir, Some rules)
+      | _ :: db_path :: rest ->
+          let rec parse out rules profile = function
+            | [] -> (out, rules, profile)
+            | "--out" :: dir :: xs when out = None -> parse (Some dir) rules profile xs
+            | "--rules" :: path :: xs when rules = None -> parse out (Some path) profile xs
+            | "--profile" :: name :: xs when profile = None -> parse out rules (Some name) xs
+            | _ -> die 2 usage
+          in
+          let out, rules, profile = parse None None None rest in
+          (match out with
+          | Some dir -> (db_path, dir, rules, profile)
+          | None -> die 2 usage)
       | _ -> die 2 usage
     in
+      (match profile, rules_path with
+       | Some "architecture", None ->
+           die 2 "arch-report: --profile architecture requires --rules <rules-file>"
+       | Some ("api-review" | "architecture"), _ | None, _ -> ()
+       | Some name, _ -> die 2 ("arch-report: unknown --profile " ^ name)) ;
       if not (Sys.file_exists dir && Sys.is_directory dir) then
         die 2 (Printf.sprintf "arch-report: --out %s is not a directory" dir) ;
       let t =
@@ -72,7 +87,7 @@ let () =
             Some (path, contract_ok, results)
       in
       let r =
-        try Arch_report.collect ?rule_evaluation ~db_path t
+        try Arch_report.collect ?profile ?rule_evaluation ~db_path t
         with Arch_db.Refused m -> die 3 ("arch-report: " ^ m)
       in
       let json = Yojson.Safe.pretty_to_string (Arch_report.to_json r) ^ "\n" in

@@ -146,6 +146,7 @@ type section = {
 
 type t = {
   db_path : string;
+  profile : string option;
   schema_version : string option;
   producers : producer list;
   coverage : coverage list;
@@ -192,7 +193,10 @@ let opt = function "" -> None | s -> Some s
    visible finding rather than a silent `covered`. *)
 let known_analyses = [ ("dead_code", "dead_code_sites"); ("sarif_import", "imported_findings") ]
 
-let collect ?rule_evaluation ~db_path (t : Arch_db.t) : t =
+let collect ?profile ?rule_evaluation ~db_path (t : Arch_db.t) : t =
+  (match profile with
+  | None | Some "api-review" | Some "architecture" -> ()
+  | Some p -> invalid_arg ("unknown report profile: " ^ p));
   let schema_version =
     if Arch_db.has_table t "comment_db_meta" then
       match q1 t "SELECT value FROM comment_db_meta WHERE key='schema_version'" with
@@ -275,6 +279,24 @@ let collect ?rule_evaluation ~db_path (t : Arch_db.t) : t =
                    f_soundness_class = None;
                    f_verdict = None }
            | _ -> None)
+  in
+  let api_surface =
+    match profile with
+    | Some "api-review" when Arch_db.has_col t "functions" "exposed" ->
+        q t ~shape:Arch_db.Rows.t3' ~to_cells:Arch_db.Rows.c3
+          "SELECT f.name,COALESCE(m.path,''),COALESCE(CAST(f.line_start AS TEXT),'') \
+           FROM functions f JOIN modules m ON m.id=f.module_id WHERE f.exposed=1 \
+           ORDER BY m.path,f.name"
+        |> List.filter_map (function
+             | [ name; path; line ] ->
+                 Some { f_id = Printf.sprintf "api_surface|%s|%s" path name;
+                        f_kind = "api_surface";
+                        f_message = "published interface entry point (inventory, not an alert)";
+                        f_location = (match opt path, opt line with Some p, Some l -> Some (p ^ ":" ^ l) | Some p, None -> Some p | _ -> None);
+                        f_subject = opt name; f_level = Some "note"; f_producer = None;
+                        f_soundness_class = None; f_verdict = None }
+             | _ -> None)
+    | _ -> []
   in
   let status_of analysis table =
     (* FOUR states, and an earlier version of this function had three because it wrote "covered"
@@ -406,6 +428,12 @@ let collect ?rule_evaluation ~db_path (t : Arch_db.t) : t =
             | "sarif_import" -> imported
             | _ -> []) })
       known_analyses
+    @ (match profile with
+       | Some "api-review" ->
+           [ { s_analysis = "api_surface";
+               s_status = if Arch_db.has_col t "functions" "exposed" then "covered" else "not_analysed";
+               s_findings = api_surface } ]
+       | _ -> [])
     @
     (* Only when there is something to say: an empty section here would be noise on every
        well-behaved index, and FR-024's "labelled, never absent" is about analyses this tool
@@ -414,7 +442,7 @@ let collect ?rule_evaluation ~db_path (t : Arch_db.t) : t =
     else
       [ { s_analysis = "unknown_analysis"; s_status = "failed"; s_findings = unmatched_coverage } ]
   in
-  { db_path; schema_version; producers; coverage; top_frontier; verdicts; sections;
+  { db_path; profile; schema_version; producers; coverage; top_frontier; verdicts; sections;
     rules_path; rules_contract_ok; rule_results; rule_contexts }
 
 (* -------------------------------------------------------------------------- *)
@@ -439,7 +467,8 @@ let verdicts_json (r : t) =
     ("verdicts", `Assoc (List.map (fun (k, n) -> (k, `Int n)) r.verdicts)) ]
 
 let header_json (r : t) =
-  [ ("db_path", `String r.db_path);
+  [ ("profile", match r.profile with Some p -> `String p | None -> `Null);
+    ("db_path", `String r.db_path);
     ( "schema_version",
       match r.schema_version with Some v -> `String v | None -> `Null );
     ( "producers",
@@ -642,7 +671,8 @@ let to_sarif (r : t) : Yojson.Safe.t =
     (("properties",
       `Assoc
         (verdicts_json r
-        @ [("rule_ordering", ordering_json);
+        @ [("profile", match r.profile with Some p -> `String p | None -> `Null);
+           ("rule_ordering", ordering_json);
            ("index_producers",
             `List
               (List.map
@@ -682,6 +712,7 @@ let to_html (r : t) : string =
      .empty{color:#666;font-style:italic}.notrun{background:#fff3cd}\n\
      code{background:#f4f4f4;padding:0 .2rem}</style></head><body>\n";
   p "<h1>arch-report</h1><p><code>%s</code>" (esc r.db_path) ;
+  (match r.profile with Some profile -> p " &middot; profile <code>%s</code>" (esc profile) | None -> ()) ;
   (match r.schema_version with Some v -> p " &middot; schema %s" (esc v) | None -> ()) ;
   p "</p>\n<h2>Producers</h2>\n" ;
   if r.producers = [] then p "<p class=\"empty\">no producer_runs rows — provenance unknown</p>\n"

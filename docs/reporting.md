@@ -1,8 +1,28 @@
 # Unified architecture reports
 
-`arch-report INDEX.db --out DIR [--rules RULES]` writes `report.json`, SARIF 2.1.0
+`arch-report INDEX.db --out DIR [--rules RULES] [--profile api-review|architecture]` writes `report.json`, SARIF 2.1.0
 (`report.sarif`), and self-contained HTML (`report.html`) from one assembled report value.
 The database is read, not regenerated or copied.
+
+## Review profiles
+
+`--profile api-review` adds a labelled `api_surface` section. It inventories only
+functions whose producer-published `functions.exposed` fact is true; it never
+guesses exports from naming or reachability. Each inventory entry is a SARIF
+note, not a finding severity or risk score. The existing `top_frontier` count
+remains visible and means reachable uncertainty is possible; it does not turn
+the API inventory into an alert list.
+
+`--profile architecture` requires `--rules RULES`. It is an explicit named
+architecture review using the same evaluator and evidence as the optional
+rules section below. A profile name, when supplied, is recorded in JSON, SARIF
+properties and HTML so the three artifacts cannot be mistaken for a default
+report.
+
+`change-review` is deliberately not available yet. Comparing row IDs or raw
+Git text would confuse a changed corpus or unavailable analysis with a code
+finding. It will require a semantic baseline and input/tool/configuration
+fingerprints before it is offered.
 
 ## Optional rule evaluation
 
