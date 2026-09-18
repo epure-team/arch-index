@@ -449,6 +449,41 @@ module M = F(A)
     ~error_msg:("FUNCTOR_TARGET_QUERY_RED: callees query exit is %L, expected %R: " ^ stderr)) ;
   Check.((contains ~needle:"A.target" stdout = true) bool
     ~error_msg:"FUNCTOR_TARGET_QUERY_RED: concrete target absent from consumer output: %L") ;
+  let target_code, target_stdout, target_stderr =
+    run_command_split ~env:[("ARCH_QUERY_FORMAT", "json")] (arch_query ())
+      [db; "functor-targets"; "10"]
+  in
+  Check.((target_code = 0) int
+    ~error_msg:(("FUNCTOR_TARGET_EXPLAINED_QUERY: query exit is %L, expected %R: ") ^ target_stderr)) ;
+  Check.((contains ~needle:{|"target":"A.target"|} target_stdout = true) bool
+    ~error_msg:"FUNCTOR_TARGET_EXPLAINED_QUERY: concrete target absent: %L") ;
+  let target_has_frontier =
+    contains ~needle:{|"edge_kind":"MAY_ENUMERATED"|} target_stdout
+    && contains ~needle:{|"top_frontier":"MAY_TOP:module_param"|} target_stdout
+  in
+  Check.((target_has_frontier = true) bool
+    ~error_msg:("FUNCTOR_TARGET_EXPLAINED_QUERY: retained module-parameter frontier absent: %L; output=" ^ target_stdout)) ;
+  let zero_code, _zero_stdout, zero_stderr =
+    run_command_split ~env:[("ARCH_QUERY_FORMAT", "json")] (arch_query ())
+      [db; "functor-targets"; "0"]
+  in
+  Check.((zero_code = 0) int
+    ~error_msg:("FUNCTOR_TARGET_EXPLAINED_QUERY: zero limit must be computed, got %L: " ^ zero_stderr)) ;
+  let frontier_code, frontier_stdout, frontier_stderr =
+    run_command_split ~env:[("ARCH_QUERY_FORMAT", "json")] (arch_query ())
+      [db; "unknown-frontier"; "F.run"]
+  in
+  Check.((frontier_code = 0) int
+    ~error_msg:("FUNCTOR_TARGET_FRONTIER_QUERY: query exit is %L, expected %R: " ^ frontier_stderr)) ;
+  let frontier_has =
+    contains ~needle:{|"frontier_fn":"F.run"|} frontier_stdout
+    && contains ~needle:{|"edge_kind":"MAY_TOP"|} frontier_stdout
+  in
+  Check.((frontier_has = true) bool
+    ~error_msg:("FUNCTOR_TARGET_FRONTIER_QUERY: MAY_TOP frontier absent: %L" ^ frontier_stdout)) ;
+  let frontier_bad_code, _ = run_command (arch_query ()) [db; "unknown-frontier"] in
+  Check.((frontier_bad_code = 2) int
+    ~error_msg:"FUNCTOR_TARGET_FRONTIER_QUERY: missing root exit expected %R, got %L") ;
   Lwt.return_unit
 
 let register_flat_target_non_inference () =
@@ -472,7 +507,11 @@ module M = F(A)
       "SELECT count(*) FROM sqlite_master \
        WHERE type='table' AND name='functor_target_witnesses'" = 0) int
       ~error_msg:"FUNCTOR_TARGET_FLAT: persisted Stage 4 witness tables are %L, expected %R") ;
-    Lwt.return_unit)
+    Lwt.return_unit) >>= fun () ->
+  let code, _stdout, stderr = run_command_split (arch_query ()) [db; "functor-targets"] in
+  Check.((code = 3) int
+    ~error_msg:("FUNCTOR_TARGET_FLAT_QUERY: unsupported flat query exit is %L, expected %R: " ^ stderr)) ;
+  Lwt.return_unit
 
 let register_native_target_union_witnesses () =
   Test.register ~__FILE__

@@ -253,6 +253,7 @@ module Rows = struct
   let t5' = t5 s s s s s
   let t6' = t2 (t3 s s s) (t3 s s s)
   let t8' = t2 (t4 s s s s) (t4 s s s s)
+  let t12' = t2 (t2 (t4 s s s s) (t2 s s)) (t2 (t4 s s s s) (t2 s s))
   let s_i = t2 s i
   let s_s_i = t3 s s i
   let i_i_i = t3 i i i
@@ -286,6 +287,8 @@ module Rows = struct
   let c5 (a, b, c, d, e) = List.map text_cell [ a; b; c; d; e ]
   let c6 ((a, b, c), (d, e, g)) = List.map text_cell [ a; b; c; d; e; g ]
   let c8 ((a, b, c, d), (e, g, h, i)) = List.map text_cell [ a; b; c; d; e; g; h; i ]
+  let c12 (((a1, a2, a3, a4), (a5, a6)), ((b1, b2, b3, b4), (b5, b6))) =
+    List.map text_cell [a1; a2; a3; a4; a5; a6; b1; b2; b3; b4; b5; b6]
   let csi (a, b) = [ text_cell a; int_cell b ]
   let cssi (a, b, c) = [ text_cell a; text_cell b; int_cell c ]
   let ciii (a, b, c) = [ int_cell a; int_cell b; int_cell c ]
