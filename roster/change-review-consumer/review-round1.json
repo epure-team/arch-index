@@ -1,0 +1,27 @@
+{
+  "task": "change-review-consumer",
+  "round": 1,
+  "reviewer": "maintainer",
+  "status": "GO",
+  "findings": [
+    {
+      "concern": "A delta could silently compare unrelated changed-line scopes or index configurations.",
+      "resolution": "Compatibility precedes normalization: exact parsed impact_input, stable index provenance, bounded edge-kind contract and explicit scope manifest must agree."
+    },
+    {
+      "concern": "Invocation digests vary with a local DB path.",
+      "resolution": "They are copied in raw provenance but excluded from producer compatibility identity; the test proves a digest-only change compares."
+    },
+    {
+      "concern": "TOP frontier movement might be read as a list of hidden targets.",
+      "resolution": "Only observed frontier-holder/escape rows are normalized, and the emitted limitations explicitly deny hidden-target enumeration."
+    },
+    {
+      "concern": "A mutable or partial baseline could publish a false comparison.",
+      "resolution": "The baseline requires a complete run and verifies hashes for both impact and scope before normalization. Refusals write no delta."
+    }
+  ],
+  "open": [
+    "Add product-facing command documentation and run the complete Roster/CI gate before submitting the implementation PR."
+  ]
+}
