@@ -27,7 +27,7 @@ do not prove a codebase safe, complete, or free of defects.
 |---|---|
 | Review a PR or agent change | [Change impact](docs/change-impact.md) |
 | Enforce explicit layering/sink rules | [Fitness functions](docs/fitness-functions.md) |
-| Add structural checks to CI | [Reporting and recurring reviews](docs/reporting.md) |
+| Add structural checks to CI | [CI and agent guide](docs/ci-agent-guide.md) |
 | Investigate calls, exports or uncertainty | [Edge-kind contract](docs/edge-kind-contract.md) |
 | Index OCaml compiler artifacts | [OCaml functor catalogue](docs/functor-catalogue.md) |
 | Use an agent over MCP | [MCP server](docs/mcp-server.md) |
@@ -108,6 +108,7 @@ arch-index makes call-graph reachability answerable as a SQL query:
 - [Change impact for reviewers and agents](docs/change-impact.md)
 - [Architecture fitness functions](docs/fitness-functions.md)
 - [Unified architecture reports](docs/reporting.md)
+- [CI and agent guide](docs/ci-agent-guide.md)
 - [Recurring origin checks on arch-index itself](docs/origin-consumer.md)
 - [Error channels: how can this function fail?](docs/error-channels.md)
 - [Exception raise-sets](docs/exception-raise-sets.md)
