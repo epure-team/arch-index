@@ -19,10 +19,16 @@ rules section below. A profile name, when supplied, is recorded in JSON, SARIF
 properties and HTML so the three artifacts cannot be mistaken for a default
 report.
 
-`change-review` is deliberately not available yet. Comparing row IDs or raw
-Git text would confuse a changed corpus or unavailable analysis with a code
-finding. It will require a semantic baseline and input/tool/configuration
-fingerprints before it is offered.
+`change-review` is a separate sidecar, rather than an `arch-report` profile:
+it compares two `arch-impact --format json` briefings only after their exact
+parsed diff scope, bounded edge-kind contract, index provenance and an explicit
+corpus/configuration manifest agree. It writes a sealed review package with
+descriptive `new`/`unchanged`/`absent` rows for touched functions, bounded
+possible exports/tests, observed TOP-frontier holders and decision findings.
+It never builds an index, promotes a baseline, enumerates hidden TOP targets,
+or turns an absent row into a correctness, security or CI verdict. See
+`node scripts/change-review-consumer.js --impact CURRENT.json --scope SCOPE.json
+--out NEW_DIR [--baseline PREVIOUS/run.json]`.
 
 ## Recurring API-review packages
 
