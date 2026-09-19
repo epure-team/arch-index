@@ -24,3 +24,11 @@
   scripts/ffi-connector-registry.js
   scripts/ffi-connector-registry-check.js)
  (action (run node scripts/ffi-connector-registry-check.js)))
+
+(rule
+ (alias runtest)
+ (deps
+  scripts/ffi-connector-registry.js
+  scripts/ffi-connector-sidecars.js
+  scripts/ffi-connector-sidecars-check.js)
+ (action (run node scripts/ffi-connector-sidecars-check.js)))
