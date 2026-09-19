@@ -1,6 +1,36 @@
 # arch-index
 
-Builds a queryable **SQLite call-graph + symbol index** of any codebase a language server understands — OCaml, Go, Rust, TypeScript, Python. Turns manual code-reading into deterministic SQL queries, usable by both AI agents and human reviewers.
+**arch-index turns a codebase into a queryable architecture index.** It helps
+reviewers and agents answer questions such as “can this request path reach that
+sink?”, “what changes with this PR?”, and “where does the analysis stop
+knowing?” — while preserving the difference between a bounded answer and an
+unknown one.
+
+It works through language servers, native producers, or NDJSON input. The
+top-level workflow is language-agnostic; OCaml has an additional CMT path for a
+sound ⊤-marked call graph. See [installation and supported backends](docs/install.md).
+
+## Start here
+
+1. **Index a project** with the LSP path: `./arch-index REPO INDEX.db LANGUAGE`.
+2. **Ask one question**: `./arch-query INDEX.db reaches SOURCE SINK`.
+3. **Review a change**: `./arch-impact INDEX.db --diff main...HEAD --repo REPO`.
+
+Use `arch-query` for graph questions, `arch-impact` for PR scope, and
+`arch-rules` for explicit architecture policies. A `MAY` or `⊤` result is not a
+pass: it names bounded possibility or a frontier that needs review. The tools
+do not prove a codebase safe, complete, or free of defects.
+
+## Choose a path
+
+| Need | Start with |
+|---|---|
+| Review a PR or agent change | [Change impact](docs/change-impact.md) |
+| Enforce explicit layering/sink rules | [Fitness functions](docs/fitness-functions.md) |
+| Add structural checks to CI | [Reporting and recurring reviews](docs/reporting.md) |
+| Investigate calls, exports or uncertainty | [Edge-kind contract](docs/edge-kind-contract.md) |
+| Index OCaml compiler artifacts | [OCaml functor catalogue](docs/functor-catalogue.md) |
+| Use an agent over MCP | [MCP server](docs/mcp-server.md) |
 
 ## Pipelines
 
@@ -33,12 +63,7 @@ graph LR
   D --> E[arch-query]
 ```
 
-## Quick start
-
-Experimental companion: [arch-guard](docs/arch-guard.md) reports conditional divisor
-facts from explicit OCaml CMT artifacts. It is separate from the call graph and
-existing rule verdicts; it does not establish whole-program safety.
-V1 exposes the command-line tool only; its implementation library is private.
+## Examples
 
 ```sh
 # Index a Go repo (point at the module root — the dir with go.mod)
@@ -54,16 +79,7 @@ opam exec -- dune build
   --db-path=/tmp/self.db --schema-path=architecture-schema.sql
 sqlite3 /tmp/self.db "SELECT count(*) FROM functions;"  # verify: should be ≥ 100
 
-# Inspect same-CMT local functor formal-to-actual provenance (default limit: 50)
-./arch-query /tmp/self.db functor-bindings
-./arch-query /tmp/self.db functor-bindings 100
 ```
-
-`functor-bindings` reports artifact-scoped compiler identities for supported local
-named functors. Actual operands remain symbolic: the report does not substitute
-module contents, resolve call targets, establish a closed world, or replace ⊤ edges.
-It requires a new main-schema CMT index carrying the binding-v1 contract; old,
-flat, and markerless databases are refused with exit 3 rather than shown as empty.
 
 ## Use cases for agents and reviewers
 
