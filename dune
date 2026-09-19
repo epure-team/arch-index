@@ -8,5 +8,12 @@
  (alias runtest)
  (deps
   scripts/analysis-report-consumer.js
-  scripts/analysis-report-consumer-check.js)
+ scripts/analysis-report-consumer-check.js)
  (action (run node scripts/analysis-report-consumer-check.js)))
+
+(rule
+ (alias runtest)
+ (deps
+  scripts/change-review-consumer.js
+  scripts/change-review-consumer-check.js)
+ (action (run node scripts/change-review-consumer-check.js)))
