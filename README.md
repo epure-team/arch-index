@@ -8,7 +8,8 @@ unknown one.
 
 It works through language servers, native producers, or NDJSON input. The
 top-level workflow is language-agnostic; OCaml has an additional CMT path for a
-sound ⊤-marked call graph. See [installation and supported backends](docs/install.md).
+sound ⊤-marked call graph. See [installation](docs/install.md) and
+[languages and capabilities](docs/language-capabilities.md).
 
 ## Start here
 
@@ -101,6 +102,7 @@ arch-index makes call-graph reachability answerable as a SQL query:
 ## Documentation
 
 - [Install & LSP backends](docs/install.md)
+- [Languages and capabilities](docs/language-capabilities.md)
 - [Mutation testing, targeted by the call graph](docs/mutation-testing.md)
 - [Reachability-weighted coverage](docs/coverage.md)
 - [MCP server for agents](docs/mcp-server.md)
