@@ -17,3 +17,10 @@
   scripts/change-review-consumer.js
   scripts/change-review-consumer-check.js)
  (action (run node scripts/change-review-consumer-check.js)))
+
+(rule
+ (alias runtest)
+ (deps
+  scripts/ffi-connector-registry.js
+  scripts/ffi-connector-registry-check.js)
+ (action (run node scripts/ffi-connector-registry-check.js)))
