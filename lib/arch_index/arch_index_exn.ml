@@ -27,6 +27,7 @@ type form =
   | Failwith
   | Invalid_arg
   | Assert
+  | Assert_false
   | Partial_match
   | Compare
   | Division
@@ -39,6 +40,7 @@ let form_to_string = function
   | Failwith -> "failwith"
   | Invalid_arg -> "invalid_arg"
   | Assert -> "assert"
+  | Assert_false -> "assert_false"
   | Partial_match -> "partial_match"
   | Compare -> "compare"
   | Division -> "division"
@@ -483,32 +485,34 @@ let record_prim_head acc ~(fn : Typedtree.expression) ~args ~(loc : Location.t) 
             | "%nativeint_div" | "%nativeint_mod" -> "nativeint"
             | _ -> "int"
           in
-          let category, representation, unavailable_reason =
+          let category, representation, unavailable_reason, literal_nonzero =
             match second_original_slot (List.map snd args) with
-            | None -> ("missing", None, Some "original argument slot 2 is absent")
+            | None -> ("missing", None, Some "original argument slot 2 is absent", false)
             | Some arg -> (
                 match arg.exp_desc with
                 | Texp_constant c -> (
                     match c with
-                    | Asttypes.Const_int n -> ("integer_literal", Some (string_of_int n), None)
-                    | Const_int32 n -> ("integer_literal", Some (Int32.to_string n), None)
-                    | Const_int64 n -> ("integer_literal", Some (Int64.to_string n), None)
-                    | Const_nativeint n -> ("integer_literal", Some (Nativeint.to_string n), None)
-                    | _ -> ("other", None, Some "slot 2 is not an integer literal or identifier"))
+                    | Asttypes.Const_int n -> ("integer_literal", Some (string_of_int n), None, n <> 0)
+                    | Const_int32 n -> ("integer_literal", Some (Int32.to_string n), None, n <> 0l)
+                    | Const_int64 n -> ("integer_literal", Some (Int64.to_string n), None, n <> 0L)
+                    | Const_nativeint n -> ("integer_literal", Some (Nativeint.to_string n), None, n <> 0n)
+                    | _ -> ("other", None, Some "slot 2 is not an integer literal or identifier", false))
                 | Texp_ident (_, lid, _) ->
                     let s = Longident.last lid.txt in
-                    if String.length s <= 256 then ("identifier", Some s, None)
-                    else ("identifier", None, Some "representation exceeds 256 UTF-8 bytes")
-                | _ -> ("other", None, Some "slot 2 is not an integer literal or identifier"))
+                    if String.length s <= 256 then ("identifier", Some s, None, false)
+                    else ("identifier", None, Some "representation exceeds 256 UTF-8 bytes", false)
+                | _ -> ("other", None, Some "slot 2 is not an integer literal or identifier", false))
           in
-          add ~operand:{primitive = prim_name; slot = 2; category; representation; integer_kind;
-                        unavailable_reason}
-            acc Division (Some "Division_by_zero") (current_scope acc) loc
+          if not literal_nonzero then
+            add ~operand:{primitive = prim_name; slot = 2; category; representation; integer_kind;
+                          unavailable_reason}
+              acc Division (Some "Division_by_zero") (current_scope acc) loc
       | Some P_index -> add acc Index (Some "Invalid_argument") (current_scope acc) loc
       | None -> ())
   | _ -> ()
 
-let record_assert acc ~loc = add acc Assert (Some "Assert_failure") (current_scope acc) loc
+let record_assert acc ~is_false ~loc =
+  add acc (if is_false then Assert_false else Assert) (Some "Assert_failure") (current_scope acc) loc
 
 let record_partial acc ~loc =
   add acc Partial_match (Some "Match_failure") (current_scope acc) loc

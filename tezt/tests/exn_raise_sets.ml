@@ -63,6 +63,8 @@ let assert_fn x =
   assert (x > 0) ;
   match x with 1 -> () | 2 -> ()
 
+let impossible () = assert false
+
 let p = function 1 -> ()
 
 (* US-1.8 : local exception and rebinding *)
@@ -254,6 +256,9 @@ let register () =
           Batch.eq_string b ~msg:"US-1.7 assert then partial match"
             (String.concat "," (origins conn "assert_fn"))
             "assert:Assert_failure:1,partial_match:Match_failure:1" ;
+          Batch.eq_string b ~msg:"assert false has its own origin form"
+            (String.concat "," (origins conn "impossible"))
+            "assert_false:Assert_failure:1" ;
           Batch.eq_string b ~msg:"US-1.7 root function partial match belongs to p"
             (String.concat "," (origins conn "p")) "partial_match:Match_failure:1" ;
           (* US-1.8 *)
@@ -297,10 +302,10 @@ let register () =
             (Db.string_opt conn
                "SELECT operand_category || ':' || operand_repr || ':' || operand_slot || ':' || operand_integer_kind FROM exn_origins o JOIN functions f ON f.id=o.function_id WHERE f.name='div'")
             (Some "identifier:y:2:int") ;
-          Batch.eq_string_opt b ~msg:"division literal records compiler text without evaluating it"
+          Batch.eq_string_opt b ~msg:"non-zero literal division records no impossible origin"
             (Db.string_opt conn
                "SELECT operand_category || ':' || operand_repr FROM exn_origins o JOIN functions f ON f.id=o.function_id WHERE f.name='div_literal'")
-            (Some "integer_literal:42") ;
+            None ;
           Batch.eq_string_opt b ~msg:"complex divisor is explicit other with no fabricated text"
             (Db.string_opt conn
                "SELECT operand_category || ':' || COALESCE(operand_repr,'NULL') FROM exn_origins o JOIN functions f ON f.id=o.function_id WHERE f.name='div_expr'")
