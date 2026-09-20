@@ -103,6 +103,7 @@ arch-index makes call-graph reachability answerable as a SQL query:
 
 - [Install & LSP backends](docs/install.md)
 - [Languages and capabilities](docs/language-capabilities.md)
+- [FFI connectors](docs/ffi-connectors.md)
 - [Mutation testing, targeted by the call graph](docs/mutation-testing.md)
 - [Reachability-weighted coverage](docs/coverage.md)
 - [MCP server for agents](docs/mcp-server.md)
