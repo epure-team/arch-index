@@ -18,6 +18,7 @@ type form =
   | Failwith
   | Invalid_arg
   | Assert
+  | Assert_false
   | Partial_match
   | Compare  (** polymorphic comparison at a type that may hold a closure → [Invalid_argument] *)
   | Division  (** integer [/] / [mod] primitives → [Division_by_zero] *)
@@ -161,7 +162,7 @@ val record_prim_head :
   loc:Location.t ->
   unit
 
-val record_assert : acc -> loc:Location.t -> unit
+val record_assert : acc -> is_false:bool -> loc:Location.t -> unit
 
 val record_partial : acc -> loc:Location.t -> unit
 

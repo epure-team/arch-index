@@ -304,7 +304,7 @@ let origin_sel_allow = Arch_sel.[ File; Fn ]
    column is what it HAS, and {b a vocabulary is what the schema DECLARES} — never what a consumer
    remembers. [origin_forms_fallback] is used only when the DDL cannot be read at all. *)
 let origin_forms_fallback =
-  [ "raise"; "reraise"; "unknown"; "failwith"; "invalid_arg"; "assert"; "partial_match";
+  [ "raise"; "reraise"; "unknown"; "failwith"; "invalid_arg"; "assert"; "assert_false"; "partial_match";
     "compare"; "division"; "index"; "inferred_bind" ]
 
 let origin_forms_of_db t =

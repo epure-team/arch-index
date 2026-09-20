@@ -2542,13 +2542,14 @@ let collect_calls_from_expr_with_open_bodies ?(canon_exn = fun p -> Path.name p)
               edge (blk ()) head ;
               set_blk after
           | Texp_assert (e, _) -> (
-              Arch_index_exn.record_assert (!cur).lexn ~loc:expr.exp_loc ;
               match e.exp_desc with
               | Texp_construct (_, {cstr_name = "false"; _}, _) ->
+                  Arch_index_exn.record_assert (!cur).lexn ~is_false:true ~loc:expr.exp_loc ;
                   (* [assert false] is NEVER elided by -noassert (compiler
                      special case) and always diverges → block terminator. *)
                   diverge ()
               | _ ->
+                  Arch_index_exn.record_assert (!cur).lexn ~is_false:false ~loc:expr.exp_loc ;
                   (* Ordinary assertion: condition elided under -noassert →
                      conditional; fall-through only (may-raise is the accepted
                      exception-insensitivity residual). *)

@@ -695,7 +695,7 @@ let () =
             (* Fatal forms: the ones that abort rather than produce a value. The
                set is a WHITELIST, not caller text spliced into SQL. *)
             let known_forms =
-              ["assert"; "division"; "index"; "partial_match"; "failwith"; "invalid_arg";
+              ["assert"; "assert_false"; "division"; "index"; "partial_match"; "failwith"; "invalid_arg";
                "raise"; "reraise"; "compare"; "unknown"]
             in
             let forms =
