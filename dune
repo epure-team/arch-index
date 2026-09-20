@@ -39,3 +39,10 @@
   scripts/ffi-registry-report.js
   scripts/ffi-registry-report-check.js)
  (action (run node scripts/ffi-registry-report-check.js)))
+
+(rule
+ (alias runtest)
+ (deps
+  scripts/ffi-registry-consumer.js
+  scripts/ffi-registry-consumer-check.js)
+ (action (run node scripts/ffi-registry-consumer-check.js)))
