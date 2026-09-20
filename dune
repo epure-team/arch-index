@@ -32,3 +32,10 @@
   scripts/ffi-connector-sidecars.js
   scripts/ffi-connector-sidecars-check.js)
  (action (run node scripts/ffi-connector-sidecars-check.js)))
+
+(rule
+ (alias runtest)
+ (deps
+  scripts/ffi-registry-report.js
+  scripts/ffi-registry-report-check.js)
+ (action (run node scripts/ffi-registry-report-check.js)))
