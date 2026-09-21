@@ -14,7 +14,7 @@ never an omission.
 
 | Table | One row per | Notes |
 |---|---|---|
-| `exn_origins` | raise site | `form ∈ {raise, reraise, unknown, failwith, invalid_arg, assert, partial_match, compare, division, index}`, canonical `exn_path` (NULL for `reraise`/`unknown`), innermost `scope_id`, `escapes` |
+| `exn_origins` | raise site | `form ∈ {raise, reraise, unknown, failwith, invalid_arg, assert, assert_false, partial_match, compare, division, index}`, canonical `exn_path` (NULL for `reraise`/`unknown`), innermost `scope_id`, `escapes` |
 | `exn_scopes` | `try` body / `match … with exception` scrutinee | `parent_id` = enclosing scope of the same node, `catch_all` |
 | `exn_scope_catches` | (scope, caught path) | from *closing* arms only |
 | `call_exn_scopes` | call inside a scope | innermost scope enclosing the call site |
@@ -27,7 +27,8 @@ module. A literal `raise (E …)` records `E`'s canonical path; `raise e` where 
 handler arm of the same node is `reraise` (informational); any other argument is `unknown` — ⊤
 with reason `unknown_exn_value`. `Stdlib.failwith` / `Stdlib.invalid_arg` (persistent `Stdlib`
 root only — the protocol's `failwith` is the error-monad one and is *not* an origin) →
-`Failure` / `Invalid_argument`. `assert e` → `Assert_failure`. A `Partial` `match`, `function`
+`Failure` / `Invalid_argument`. `assert false` → `Assert_failure` with form `assert_false`; other
+`assert e` nodes use form `assert`. A `Partial` `match`, `function`
 or parameter pattern → `Match_failure`. Raising primitives: polymorphic comparison at a type that
 may hold a closure → `Invalid_argument` (at `int`/`string`/… it cannot raise and nothing is
 recorded), integer `/`/`mod` → `Division_by_zero`, bounds-checked `.()`/`.[]`/`Bytes.get` →
