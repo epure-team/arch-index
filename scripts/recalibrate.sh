@@ -1253,7 +1253,11 @@ DUNE="dune"
 # status, once by `>/dev/null` at the call site.
 build_tree() {
   local tree="$1" log="$2"
-  ( cd "$tree" && $DUNE build --root . ) >"$log" 2>&1
+  # A Git worktree shares Dune's cache, which can retain native Tezt objects
+  # compiled against an older interface while the producer itself rebuilds.
+  # These trees are disposable measurement inputs, so start each build clean:
+  # otherwise the gate can refuse its own head after an interface change.
+  ( cd "$tree" && $DUNE clean --root . && $DUNE build --root . ) >"$log" 2>&1
 }
 build_or_die() {
   local tree="$1" log="$2" what="$3"
