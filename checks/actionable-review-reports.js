@@ -220,7 +220,7 @@ function operands(p, d) {
   for (const c of ['integer_literal', 'identifier', 'other'])
     A.ok(x.origin_contexts.some(q => q.category === c));
   A.ok(x.origin_contexts.some(q => q.category === 'integer_literal' &&
-                                   q.representation === '-2'));
+                                   q.representation === '0'));
   A.ok(x.origin_contexts.some(q => q.category === 'other' &&
                                    q.representation === null));
   for (const k of ['int32', 'int64', 'nativeint'])

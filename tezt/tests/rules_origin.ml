@@ -508,7 +508,7 @@ let register_refusals () =
             [
               "CREATE TABLE eo_wide (id INTEGER PRIMARY KEY AUTOINCREMENT, function_id INTEGER \
                NOT NULL, scope_id INTEGER, form TEXT NOT NULL CHECK(form IN \
-               ('raise','reraise','unknown','failwith','invalid_arg','assert','partial_match',\
+               ('raise','reraise','unknown','failwith','invalid_arg','assert','assert_false','partial_match',\
                'compare','division','index','inferred_bind','freshly_declared')), exn_path TEXT, \
                escapes BOOLEAN NOT NULL DEFAULT 1, line INTEGER NOT NULL, col INTEGER NOT NULL, \
                channel TEXT NOT NULL DEFAULT 'exception')";
