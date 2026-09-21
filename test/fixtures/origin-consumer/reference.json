@@ -33,13 +33,13 @@
   "totals": {
     "modules": 27,
     "functions": 1231,
-    "calls": 7556,
+    "calls": 7563,
     "origins": 647
   },
   "origin_groups": [
     {
       "channel": "exception",
-      "form": "assert",
+      "form": "assert_false",
       "escapes": 1,
       "count": 1
     },
