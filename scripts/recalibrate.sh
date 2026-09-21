@@ -1257,7 +1257,11 @@ build_tree() {
   # compiled against an older interface while the producer itself rebuilds.
   # These trees are disposable measurement inputs, so start each build clean:
   # otherwise the gate can refuse its own head after an interface change.
-  ( cd "$tree" && $DUNE clean --root . && $DUNE build --root . ) >"$log" 2>&1
+  # Do not import a cached object from the other measurement tree either: the
+  # cache is global while the two trees deliberately carry different interface
+  # digests.  A measurement must favour isolation over build speed.
+  ( cd "$tree" && DUNE_CACHE=disabled $DUNE clean --root . && \
+    DUNE_CACHE=disabled $DUNE build --root . ) >"$log" 2>&1
 }
 build_or_die() {
   local tree="$1" log="$2" what="$3"
