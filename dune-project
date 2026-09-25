@@ -4,6 +4,7 @@
 
 (package
  (name arch-index)
+ (license MIT)
  (synopsis "Standalone architecture indexer — LSP + CMT + call-graph extraction")
  (description "Extracts function definitions, doc comments, and call graphs from OCaml, TypeScript, Go, Rust, and Python projects via LSP and CMT analysis.")
  (depends

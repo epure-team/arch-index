@@ -121,3 +121,10 @@ arch-index makes call-graph reachability answerable as a SQL query:
 - [OCaml functor application catalogue](docs/functor-catalogue.md)
 - [Curation workflow: measure → decide → ledger](docs/curation-workflow.md)
 - [Formal soundness spec](SPEC-sound-callgraph.md)
+
+## License
+
+arch-index is licensed under the [MIT License](LICENSE). Bundled third-party
+files retain their own terms: [D3](bin/arch_serve/static/d3.LICENSE) is ISC
+licensed, and the [SARIF schema](vendor/sarif/README.md) is governed by the
+OASIS terms described in its provenance note.
